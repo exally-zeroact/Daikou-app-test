@@ -1836,6 +1836,15 @@ function onMenuClick(){
     showToast('走行中はMenuを開けません');
     return;
   }
+  // 2026/05/04 夜・追加：設定画面遷移前に Business 状態を強制保存
+  // 司さん指摘「設定行ったら総走行距離0に戻る」
+  // 5秒throttle で save が間に合わない場合の対策
+  if(typeof Business !== 'undefined' && typeof Business.save === 'function'){
+    try {
+      Business.save();
+      if(typeof dlog === 'function') dlog('[Business] menu遷移前save');
+    } catch(e){ console.error('[Business] menu遷移前save エラー:', e); }
+  }
   location.href = 'settings.html';
 }
 
