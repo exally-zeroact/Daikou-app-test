@@ -962,6 +962,9 @@ function onSensorRestoreTap(){
         if(typeof GPS !== 'undefined' && typeof GPS.startCompass === 'function'){
           GPS.startCompass();
         }
+        // 2026/05/04 夜・追加：許可完了後にバナー強制非表示（ダイアログ中の再表示対策）
+        const banner = document.getElementById('sensorRestoreBanner');
+        if(banner) banner.style.display = 'none';
       }
     }).catch(e => {
       if(typeof dlog === 'function') dlog('[復元] コンパス許可エラー: ' + e.message);
@@ -982,6 +985,9 @@ function onSensorRestoreTap(){
         if(typeof GPS !== 'undefined' && typeof GPS.startMotion === 'function'){
           GPS.startMotion();
         }
+        // 2026/05/04 夜・追加：許可完了後にバナー強制非表示（ダイアログ中の再表示対策）
+        const banner = document.getElementById('sensorRestoreBanner');
+        if(banner) banner.style.display = 'none';
       }
     }).catch(e => {
       if(typeof dlog === 'function') dlog('[復元] 加速度許可エラー: ' + e.message);
