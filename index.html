@@ -2059,6 +2059,7 @@ try {
     if(bs.active){
       // 既に業務中・既存の appState ロジックに委ねる（idle / driving / fare の復元処理が後続にある）
       updateBusinessDashboard();
+      startGPS(); // タスクキル後GPS再起動（許可は切れないがwatchPositionは再起動必要）
     } else if(bs.ended && Business.canResume()){
       // 業務終了済みかつ3時間以内 → 日報画面表示
       appState = 'businessReport';
