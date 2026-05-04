@@ -198,6 +198,7 @@ return true;
 // 2026/05/04 夜・更新：throttle 5秒→1秒（司さん指摘・設定遷移時の損失防止）
 let _lastGpsSaveAt = 0;
 const GPS_SAVE_INTERVAL_MS = 1000;  // 1秒に1回 save
+let _lastDebugLogAt = 0;  // 加算ログのthrottle
 
 function onGps(gpsResult){
 if(!state.active) return;
@@ -217,18 +218,35 @@ if(state.last_gps){
     return;
   }
 
-  // GPS差分計算（GPS グローバル関数を流用）
+  // GPS差分計算（Haversine 公式・自前実装で外部依存ゼロ）
+  // 2026/05/04 夜・修正：GPS.calcDistance が公開されてない可能性に対応
+  // → business.js 内で完結する距離計算に変更
   let d = 0;
-  if(typeof GPS !== 'undefined' && typeof GPS.calcDistance === 'function'){
-    d = GPS.calcDistance(
-      state.last_gps.lat, state.last_gps.lng,
-      gpsResult.lat, gpsResult.lng
-    );
+  try {
+    const R = 6371000; // 地球半径（メートル）
+    const lat1 = state.last_gps.lat * Math.PI / 180;
+    const lat2 = gpsResult.lat * Math.PI / 180;
+    const dLat = (gpsResult.lat - state.last_gps.lat) * Math.PI / 180;
+    const dLng = (gpsResult.lng - state.last_gps.lng) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1) * Math.cos(lat2) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    d = R * c;
+  } catch(e){
+    if(typeof dlog === 'function') dlog('[Business] 距離計算エラー: ' + e.message);
+    d = 0;
   }
 
   // 異常値スキップ（1更新で1km超えはGPSジャンプ）
   if(d >= 0 && d <= MAX_SEGMENT_DIST_M){
     state.total_distance_m += d;
+    // 5秒に1回ログ（スパム防止・動作確認用）
+    const _now = Date.now();
+    if(!_lastDebugLogAt || _now - _lastDebugLogAt > 5000){
+      _lastDebugLogAt = _now;
+      if(typeof dlog === 'function') dlog('[Business] 加算: +' + d.toFixed(1) + 'm 累計=' + (state.total_distance_m/1000).toFixed(2) + 'km');
+    }
   } else {
     if(typeof dlog === 'function') dlog('[Business] skip 異常距離: ' + d.toFixed(0) + 'm');
   }
