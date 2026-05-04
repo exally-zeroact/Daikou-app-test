@@ -1200,6 +1200,13 @@ function startGPS(){
         // 代行開始前でもlastWarmupGpsを保持・押した瞬間に即時計測開始
         if(typeof Meter.updateGpsOnly === 'function') Meter.updateGpsOnly(g);
         if(appState==='driving' || appState==='fare') Meter.update(g);
+        // 業務中の総走行距離計測（2026/05/04 夜・修正）
+        // business.js は onGps を公開しており state.active 中なら total_distance_m に加算する
+        // 実車中・空車中問わず業務全体の距離を計測する設計
+        // → これを呼んでなかったため「総走行距離」が永遠に 0.0km だった
+        if(typeof Business !== 'undefined' && typeof Business.onGps === 'function'){
+          Business.onGps(g);
+        }
         // 復元後の補完検知：距離・料金が変わったらバナーを更新
         if(window._restoreDistanceM != null){
           const cur = Meter.getState();
@@ -1306,6 +1313,14 @@ function blockIfSensorNotGranted(){
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   if(!isIOS) return false;
   if(window.navigator.standalone !== true) return false;
+  // 2026/05/04 夜・修正：sessionStorage で同 session 内の permission 維持を判定
+  //   sensor_permission_active='1' があれば同 session 内 → permission 維持
+  //   起動時初期化の IIFE より早く呼ばれる可能性に対応
+  if(sessionStorage.getItem('sensor_permission_active') === '1'){
+    window._compassGranted = true;
+    window._motionGranted = true;
+    return false;
+  }
   // 許可済みなら通過
   if(window._compassGranted && window._motionGranted) return false;
 
@@ -1334,6 +1349,21 @@ function showSensorBannerIfNeeded(){
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   if(!isIOS) return;
   if(window.navigator.standalone !== true) return;
+  // 2026/05/04 夜・修正：sessionStorage で同 session 内の permission 維持を判定
+  //   sensor_permission_active='1' があれば同 session 内 → permission 維持されてる
+  //   起動時初期化の IIFE より showSensorBannerIfNeeded が先に呼ばれる場合があるため
+  //   ここでも判定してバナー出さない（フラグも同期セット）
+  if(sessionStorage.getItem('sensor_permission_active') === '1'){
+    // 同 session 内（設定画面遷移後など）：permission 維持
+    window._compassGranted = true;
+    window._motionGranted = true;
+    const banner = document.getElementById('sensorRestoreBanner');
+    if(banner && banner.style.display !== 'none'){
+      banner.style.display = 'none';
+      if(typeof dlog === 'function') dlog('[Sensor] 同session内: バナー非表示');
+    }
+    return;
+  }
   // 許可済みなら：既にバナー出てたら消す（2026/05/02追加・許可後の残留バナー対策）
   if(window._compassGranted && window._motionGranted){
     const banner = document.getElementById('sensorRestoreBanner');
