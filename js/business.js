@@ -195,8 +195,9 @@ return true;
 //     実車距離は Meter.getState().distance_m で別管理
 // GPS save throttle（onGps 毎回 save するとパフォーマンス問題のため）
 // 2026/05/04 夜・追加：タスクキル時の total_distance_m 消失防止
+// 2026/05/04 夜・更新：throttle 5秒→1秒（司さん指摘・設定遷移時の損失防止）
 let _lastGpsSaveAt = 0;
-const GPS_SAVE_INTERVAL_MS = 5000;  // 5秒に1回 save
+const GPS_SAVE_INTERVAL_MS = 1000;  // 1秒に1回 save
 
 function onGps(gpsResult){
 if(!state.active) return;
