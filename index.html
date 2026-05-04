@@ -42,7 +42,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 .dl-progress-fill{height:100%;background:#fff;border-radius:5px;transition:width 0.3s ease;}
 .dl-progress-text{color:#fff;font-size:13px;font-weight:600;margin-top:8px;text-align:center;}
 .dl-hint{color:rgba(255,255,255,0.75);font-size:12px;margin-top:14px;text-align:center;}
-.dl-btn{width:100%;max-width:360px;padding:16px;background:#fff;color:#007AFF;border:none;border-radius:14px;font-size:17px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:20px;}
+.dl-btn{width:100%;max-width:360px;padding:16px;background:#fff;color:#007AFF;border:none;border-radius:14px;font-size:17px;font-weight:700;cursor:pointer;font-family:‘Noto Sans JP’,sans-serif;margin-top:20px;}
 .dl-btn:active{opacity:0.85;}
 .dl-state-loading{display:none;}
 .dl-state-loading.show{display:block;}
@@ -110,64 +110,64 @@ text-decoration:none !important;
 .stats-dashboard{display:flex;flex-direction:column;}
 /* 履歴ボタン（2026/05/01追加） */
 .btn-history{
-  width:100%;padding:14px;margin-top:6px;
-  background:#fff;border:1.5px solid #007AFF;
-  border-radius:12px;color:#007AFF;
-  font-size:15px;font-weight:700;cursor:pointer;
-  font-family:'Noto Sans JP',sans-serif;
-  -webkit-tap-highlight-color:transparent;
+width:100%;padding:14px;margin-top:6px;
+background:#fff;border:1.5px solid #007AFF;
+border-radius:12px;color:#007AFF;
+font-size:15px;font-weight:700;cursor:pointer;
+font-family:‘Noto Sans JP’,sans-serif;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-history:active{background:#E8F4FD;transform:scale(0.98);}
 
 /* 業務管理ボタン群（2026/05/01追加） */
 /* 業務終了ボタン（待機画面の履歴の下） */
 .btn-business-end{
-  width:100%;padding:14px;margin-top:6px;
-  background:#fff;border:1.5px solid #FF3B30;
-  border-radius:12px;color:#FF3B30;
-  font-size:15px;font-weight:700;cursor:pointer;
-  font-family:'Noto Sans JP',sans-serif;
-  -webkit-tap-highlight-color:transparent;
+width:100%;padding:14px;margin-top:6px;
+background:#fff;border:1.5px solid #FF3B30;
+border-radius:12px;color:#FF3B30;
+font-size:15px;font-weight:700;cursor:pointer;
+font-family:‘Noto Sans JP’,sans-serif;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-business-end:active{background:#FFF0F0;transform:scale(0.98);}
 
 /* 業務開始ボタン（業務未開始画面・中央配置） */
 /* 2026/05/01：[続きから再開]と同サイズに統一（司さん指示） */
 .btn-business-start{
-  width:80%;max-width:300px;padding:14px;
-  background:#007AFF;border:none;
-  border-radius:12px;color:#fff;
-  font-size:15px;font-weight:700;letter-spacing:2px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
+width:80%;max-width:300px;padding:14px;
+background:#007AFF;border:none;
+border-radius:12px;color:#fff;
+font-size:15px;font-weight:700;letter-spacing:2px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-business-start:active{transform:scale(0.98);filter:brightness(0.9);}
 
 /* 続きから再開ボタン（業務開始画面・[業務開始]の下） */
 .btn-business-resume-start{
-  width:80%;max-width:300px;padding:14px;
-  background:#fff;border:1.5px solid #007AFF;
-  border-radius:12px;color:#007AFF;
-  font-size:15px;font-weight:700;letter-spacing:2px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
+width:80%;max-width:300px;padding:14px;
+background:#fff;border:1.5px solid #007AFF;
+border-radius:12px;color:#007AFF;
+font-size:15px;font-weight:700;letter-spacing:2px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-business-resume-start:active{background:#E8F4FD;transform:scale(0.98);}
 .resume-note{
-  text-align:center;font-size:11px;color:#999;
-  padding:0 16px;
-  max-width:80%;
+text-align:center;font-size:11px;color:#999;
+padding:0 16px;
+max-width:80%;
 }
 
 /* 業務終了画面（日報） */
 .report-title{
-  text-align:center;font-size:20px;font-weight:900;
-  color:#111;padding:14px 0 8px;
+text-align:center;font-size:20px;font-weight:900;
+color:#111;padding:14px 0 8px;
 }
 .report-card{
-  background:#f5f5f5;border-radius:12px;padding:16px;
-  margin:0 16px 12px;
-  display:flex;flex-direction:column;gap:8px;
+background:#f5f5f5;border-radius:12px;padding:16px;
+margin:0 16px 12px;
+display:flex;flex-direction:column;gap:8px;
 }
 .report-row{display:flex;justify-content:space-between;align-items:center;}
 .report-row .lbl{font-size:13px;color:#aaa;}
@@ -176,22 +176,22 @@ text-decoration:none !important;
 .report-divider{border:none;border-top:0.5px solid #e5e5e5;margin:4px 0;}
 /* [続ける]/[終了] ボタン：他画面のボタンとサイズ統一（btn-main / btn-business-start と同等） */
 .btn-business-resume{
-  width:calc(100% - 32px);margin:8px 16px 4px;padding:18px;
-  background:#007AFF;border:none;border-radius:12px;
-  color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+width:calc(100% - 32px);margin:8px 16px 4px;padding:18px;
+background:#007AFF;border:none;border-radius:12px;
+color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
 }
 .btn-business-resume:active{transform:scale(0.97);filter:brightness(0.85);}
 .btn-business-confirm{
-  width:calc(100% - 32px);margin:4px 16px 8px;padding:18px;
-  background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
-  color:#FF3B30;font-size:18px;font-weight:700;letter-spacing:3px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+width:calc(100% - 32px);margin:4px 16px 8px;padding:18px;
+background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
+color:#FF3B30;font-size:18px;font-weight:700;letter-spacing:3px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
 }
 .btn-business-confirm:active{background:#FFF0F0;transform:scale(0.97);}
 .report-note{
-  text-align:center;font-size:11px;color:#999;
-  padding:4px 16px 16px;
+text-align:center;font-size:11px;color:#999;
+padding:4px 16px 16px;
 }
 
 /* DRIVING */
@@ -253,27 +253,27 @@ text-overflow:ellipsis;
 .btn-area{padding:10px 16px 40px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;border-top:0.5px solid #f0f0f0;}
 
 /* メインボタン（idle:代行開始 / fare:精算終了） */
-.btn-main{display:none;width:100%;padding:18px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;font-family:'Noto Sans JP',sans-serif;cursor:pointer;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
+.btn-main{display:none;width:100%;padding:18px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
 .btn-main.show{display:block;}
 .btn-main:active{-webkit-transform:scale(0.97);transform:scale(0.97);-webkit-filter:brightness(0.85);filter:brightness(0.85);}
 
 /* 2列ボタン（driving のみ表示） */
 .btn-row{display:none;grid-template-columns:1fr 1fr;gap:16px;}
 .btn-row.show{display:grid;}
-.btn-sub{padding:12px 0;border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;letter-spacing:1px;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
+.btn-sub{padding:12px 0;border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;letter-spacing:1px;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
 .btn-sub:active{-webkit-transform:scale(0.95);transform:scale(0.95);-webkit-filter:brightness(0.8);filter:brightness(0.8);}
 .btn-extra{background:#FF9500;}
 .btn-confirm{background:#34C759;}
 
 /* 縦画面用 走行に戻るボタン（fare時のみ表示） */
 .btn-back-portrait{
-  display:none;
-  align-items:center;justify-content:center;gap:8px;
-  margin:14px auto 0;padding:8px 14px;
-  background:#fff;border:1.5px solid #FF3B30;border-radius:8px;
-  color:#FF3B30;font-size:13px;font-weight:700;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
+display:none;
+align-items:center;justify-content:center;gap:8px;
+margin:14px auto 0;padding:8px 14px;
+background:#fff;border:1.5px solid #FF3B30;border-radius:8px;
+color:#FF3B30;font-size:13px;font-weight:700;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-back-portrait.show{display:flex;}
 .btn-back-portrait:active{background:#FFF0F0;transform:scale(0.97);}
@@ -329,13 +329,13 @@ body{flex-direction:row;flex-wrap:wrap;}
 
 /* 3. 横画面用 走行に戻るボタン（fare 時のみ・改行禁止・コンパクト） */
 .btn-back-landscape.show{
-  display:block;
-  width:100%;padding:14px 8px;
-  background:#fff;border:2px solid #FF3B30;border-radius:12px;
-  color:#FF3B30;font-size:14px;font-weight:900;letter-spacing:1px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+display:block;
+width:100%;padding:14px 8px;
+background:#fff;border:2px solid #FF3B30;border-radius:12px;
+color:#FF3B30;font-size:14px;font-weight:900;letter-spacing:1px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+-webkit-tap-highlight-color:transparent;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .btn-back-landscape:active{background:#FFF0F0;transform:scale(0.97);}
 
@@ -348,21 +348,21 @@ body{flex-direction:row;flex-wrap:wrap;}
 #screenBusinessReport .btn-business-confirm{display:none !important;}
 #screenBusinessReport .report-note{display:none !important;}
 .btn-resume-landscape.show{
-  display:block;
-  width:100%;padding:14px 8px;
-  background:#007AFF;border:none;border-radius:12px;
-  color:#fff;font-size:15px;font-weight:900;letter-spacing:2px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
+display:block;
+width:100%;padding:14px 8px;
+background:#007AFF;border:none;border-radius:12px;
+color:#fff;font-size:15px;font-weight:900;letter-spacing:2px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-resume-landscape:active{transform:scale(0.97);filter:brightness(0.85);}
 .btn-confirm-landscape.show{
-  display:block;
-  width:100%;padding:14px 8px;
-  background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
-  color:#FF3B30;font-size:15px;font-weight:700;letter-spacing:2px;
-  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
+display:block;
+width:100%;padding:14px 8px;
+background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
+color:#FF3B30;font-size:15px;font-weight:700;letter-spacing:2px;
+font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+-webkit-tap-highlight-color:transparent;
 }
 .btn-confirm-landscape:active{background:#FFF0F0;transform:scale(0.97);}
 /* [続ける]と[終了]を離す（誤タップ防止・走行に戻ると同様） */
@@ -511,8 +511,11 @@ justify-content:center;
 </div>
 
 <!-- センサー再起動バナー（全画面共通・appbar直下・2026/05/03 統一） -->
+
 <!-- iOS PWA で DeviceMotion/Orientation が session 毎に失効するため -->
+
 <!-- ボタン押下で user gesture 内で同期発火：許可ダイアログ → リスナー再登録 → NoSleep起動 -->
+
 <div id="sensorRestoreBanner" style="display:none;background:#FF9800;border-radius:12px;padding:14px;margin:8px 12px;text-align:center;">
   <div style="color:#fff;font-size:14px;line-height:1.5;margin-bottom:10px;">
     <strong style="font-size:15px;">📡 センサー再起動が必要です</strong><br>
@@ -524,13 +527,19 @@ justify-content:center;
 <!-- PWAインストール促進バナー（iOS・未インストール時のみ表示） -->
 
 <!-- ─── 月次更新トースト（Phase 0a-3・2026/05/04追加） ─────────── -->
+
 <!-- バックグラウンドDL完了時に2-3秒表示・タップで即消去 -->
+
 <!-- Q4:案2確定文言 -->
+
 <div class="dl-update-toast" id="dlUpdateToast" onclick="onDlToastTap()">✅ 最新の地図データに更新しました</div>
 
 <!-- ─── 初回DL UI（Phase 0a-1・2026/05/04追加） ─────────── -->
+
 <!-- 47県データのDL中・完了バナー -->
+
 <!-- IndexedDBの dl_completed=true で2回目以降は表示しない -->
+
 <div class="dl-overlay" id="dlOverlay">
   <!-- 状態1：DL中 -->
   <div class="dl-state-loading show" id="dlStateLoading">
@@ -549,6 +558,7 @@ justify-content:center;
   </div>
 
   <!-- 状態2：完了（Q1案1確定文言） -->
+
   <div class="dl-state-complete" id="dlStateComplete">
     <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
       <div class="dl-icon">✅</div>
@@ -583,6 +593,7 @@ justify-content:center;
   </div>
 
   <!-- ページ2：センサー許可 -->
+
   <div class="tutorial-page" id="tPage1">
     <div class="tutorial-icon">📡</div>
     <div class="tutorial-title">精度向上のため<br>センサーを許可します</div>
@@ -618,7 +629,6 @@ justify-content:center;
     <button class="tutorial-btn" onclick="tutorialNext()">次へ</button>
   </div>
 </div>
-
 
 <div class="pwa-banner" id="pwaBanner">
   <div class="pwa-banner-text">
@@ -666,6 +676,7 @@ justify-content:center;
   <!-- BUSINESS START（業務未開始時の専用画面・2026/05/01追加） -->
 
   <!-- 2026/05/01：画面のどこタップしても許可ダイアログ発火（未許可時）・onClick で blockIfSensorNotGranted を呼ぶ -->
+
   <div id="screenBusinessStart" onclick="blockIfSensorNotGranted()" style="display:none;flex-direction:column;flex:1;min-height:0;justify-content:center;align-items:center;gap:24px;">
     <!-- 日時（全画面共通） -->
     <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
@@ -980,6 +991,14 @@ function onSensorRestoreTap(){
   // バナー非表示
   const banner = document.getElementById('sensorRestoreBanner');
   if(banner) banner.style.display = 'none';
+
+  // GPS も同時に起動（2026/05/04 夜・追加）
+  // 司さん指示：「GPSは許可はずれんって分かったんやけんコードで常に作動するようにしろや」
+  // センサー許可した瞬間から GPS も動く（業務全体で総走行距離計測のため）
+  try {
+    startGPS();
+    if(typeof dlog === 'function') dlog('[復元] GPS 起動');
+  } catch(e){ console.error('[復元] GPS起動エラー:', e); }
 }
 
 // ─── 設定読み込み ───
@@ -2094,6 +2113,17 @@ try {
     if(bs.active){
       // 既に業務中・既存の appState ロジックに委ねる（idle / driving / fare の復元処理が後続にある）
       updateBusinessDashboard();
+      // 2026/05/04 夜・修正：業務復元時に GPS を再起動する
+      //   司さんの問題：設定画面 → 戻ると「GPS待機」のまま total_distance_m 増えない
+      //   原因：location.href='index.html' リロードで gpsStarted=false に戻る
+      //         Business.load() で active 状態は復元されるが startGPS() は呼ばれない
+      //   修正：active な業務を復元した直後に startGPS() を呼んで GPS を再起動
+      //         センサー未許可なら blockIfSensorNotGranted で弾かれるが、
+      //         業務中=既に許可済みのはず（業務開始時に許可してる）
+      try {
+        startGPS();
+        if(typeof dlog === 'function') dlog('[Business] active復元: startGPS呼出');
+      } catch(e){ console.error('[Business] active復元時のstartGPS失敗:', e); }
     } else if(bs.ended && Business.canResume()){
       // 業務終了済みかつ3時間以内 → 日報画面表示
       appState = 'businessReport';
@@ -2118,6 +2148,24 @@ try {
 // 起動時の業務管理初期化外でも、許可済みかチェックしてバナー表示
 // （Business 未定義の場合や、active 業務中でも未許可ならバナー出す）
 try { showSensorBannerIfNeeded(); } catch(e){ console.error('[Sensor] init banner error:', e); }
+
+// ─── 起動時 GPS 自動起動（2026/05/04 夜・追加） ───
+// 司さん指示：「GPSは許可はずれんって分かったんやけんコードで常に作動するようにしろや」
+// 仕様：
+//   - 業務開始から業務終了まで GPS 常時起動
+//   - 空車中も実車中も同じ GPS callback で動作
+//   - Business.onGps が state.active=true 時のみ total_distance_m に加算
+// 実装：
+//   - sessionStorage に sensor_permission_active='1' があれば（同session内・許可済み）
+//     起動時に即 startGPS() を呼ぶ
+//   - これでタスクキル後の再起動でも、設定画面遷移後でも、自動で GPS 動く
+//   - 未許可時はバナーが出てユーザー操作で許可 → onSensorRestoreTap 内で startGPS
+try {
+  if(sessionStorage.getItem('sensor_permission_active') === '1'){
+    startGPS();
+    if(typeof dlog === 'function') dlog('[GPS] 起動時自動起動（許可済み）');
+  }
+} catch(e){ console.error('[GPS] 起動時自動起動エラー:', e); }
 
 // ─── PWAバナー（ホーム画面追加促進） ───
 (function(){
@@ -2629,6 +2677,13 @@ function requestSensorPermission(){
       }
       const overlay = document.getElementById('tutorialOverlay');
       if(overlay && overlay.classList.contains('show')) tutorialNext();
+
+      // GPS も同時起動（2026/05/04 夜・追加）
+      // 司さん指示「GPSは許可はずれんって分かったんやけんコードで常に作動するようにしろや」
+      try {
+        startGPS();
+        if(typeof dlog === 'function') dlog('[GPS] requestSensorPermission後に起動');
+      } catch(e){ console.error('[GPS] 起動エラー:', e); }
 
     } else {
       // 許可失敗（iOSキャンセル）：バナーをそのまま表示（手順1+手順2の案内）
