@@ -945,6 +945,8 @@ function onSensorRestoreTap(){
       if(state === 'granted'){
         window._compassGranted = true;
         localStorage.setItem('compass_granted','1');
+        // 2026/05/04 追加：同 session 内のページ遷移で permission 維持を判定するため
+        if(window._motionGranted) sessionStorage.setItem('sensor_permission_active','1');
         // リスナー再登録
         if(typeof GPS !== 'undefined' && typeof GPS.startCompass === 'function'){
           GPS.startCompass();
@@ -963,6 +965,8 @@ function onSensorRestoreTap(){
       if(state === 'granted'){
         window._motionGranted = true;
         localStorage.setItem('motion_granted','1');
+        // 2026/05/04 追加：同 session 内のページ遷移で permission 維持を判定するため
+        if(window._compassGranted) sessionStorage.setItem('sensor_permission_active','1');
         // リスナー再登録
         if(typeof GPS !== 'undefined' && typeof GPS.startMotion === 'function'){
           GPS.startMotion();
@@ -2585,6 +2589,8 @@ function requestSensorPermission(){
       window._motionGranted = true;
       localStorage.setItem('compass_granted','1');
       localStorage.setItem('motion_granted','1');
+      // 2026/05/04 追加：同 session 内のページ遷移で permission 維持を判定するため
+      sessionStorage.setItem('sensor_permission_active','1');
 
       // 2026/05/02：バナーから許可ボタン削除済み・即座に非表示
       const banner = document.getElementById('sensorRestoreBanner');
@@ -2687,6 +2693,14 @@ const _isAndroid = /Android/.test(navigator.userAgent);
     //         ユーザーが「センサーを再起動する」ボタンで実 permission を再取得
     //         実際に許可済み（session 内）なら requestSensorPermission の
     //         Promise.allSettled で granted 判定 → フラグ true → バナー消える
+    // 2026/05/04 夜・追加修正：sessionStorage で同 session 内のページ遷移を判定
+    //   - sessionStorage は タスクキルで消える・ページ遷移で残る性質
+    //   - sensor_permission_active='1' があれば同 session 内 → permission 維持
+    //   - なければ新 session（タスクキル後）→ バナー表示
+    if(sessionStorage.getItem('sensor_permission_active') === '1'){
+      // 同 session 内（設定画面遷移後など）：バナー出さない
+      return;
+    }
     document.getElementById('sensorRestoreBanner').style.display = 'block';
     return;
   }
@@ -2703,13 +2717,30 @@ const _isAndroid = /Android/.test(navigator.userAgent);
 //   新コード：iOS PWA は起動時必ず未許可扱いから始めて、user gesture
 //             （バナーの「センサーを再起動する」ボタン）で実 permission を再取得する
 //             Android は自動許可なので localStorage 復元のままでOK
+// ─── 起動時の許可フラグ初期化（2026/05/04 夜・修正） ───
+// 5/3 修正：「iOS PWA は起動時必ず未許可扱い」（タスクキル後の問題対策）
+// 5/4 夜の問題：設定画面 → 戻るたびにバナー表示
+//   - settings.html → save → location.href='index.html' は同 session 内のページ遷移
+//   - DeviceMotion permission は同 session 内では維持されている
+//   - なのに無条件 false にしてバナー出てた（過剰反応）
+// 修正方針：sessionStorage を活用
+//   - sessionStorage はタスクキルで消える・ページ遷移で残る性質
+//   - 同 session 内で一度許可済みなら維持
+//   - タスクキル後の新規 session なら未許可扱い（5/3 の意図維持）
 (function(){
   if(window.navigator.standalone !== true) return;
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   if(isIOS){
-    // iOS PWA：起動時は必ず未許可扱い（実 permission は session 毎失効）
-    window._compassGranted = false;
-    window._motionGranted = false;
+    // 同 session 内なら sessionStorage に許可マークが残ってる
+    if(sessionStorage.getItem('sensor_permission_active') === '1'){
+      // ページ遷移後の復帰：permission は維持されてる
+      window._compassGranted = true;
+      window._motionGranted = true;
+    } else {
+      // 新規 session（タスクキル後・初回起動）：未許可扱い
+      window._compassGranted = false;
+      window._motionGranted = false;
+    }
     return;
   }
   // Android：自動許可なので localStorage から復元してOK
