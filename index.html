@@ -652,11 +652,11 @@ justify-content:center;
     <div class="stats-dashboard">
       <div class="stat-card-large">
         <span class="stat-label">総走行距離</span>
-        <span class="stat-value"><span id="totalDist">0.0</span><span class="stat-unit">km</span></span>
+        <span class="stat-value"><span id="totalDist">0.00</span><span class="stat-unit">km</span></span>
       </div>
       <div class="stat-card-large">
         <span class="stat-label">実車総距離</span>
-        <span class="stat-value"><span id="todayDist">0.0</span><span class="stat-unit">km</span></span>
+        <span class="stat-value"><span id="todayDist">0.00</span><span class="stat-unit">km</span></span>
       </div>
       <div class="stat-card-large">
         <span class="stat-label">営業回数</span>
@@ -1051,7 +1051,7 @@ function loadSettings(){
     }
   }
   FB.setVehicleId(vehicleId);
-  document.getElementById('todayDist').textContent  = (todayDist/1000).toFixed(1);
+  document.getElementById('todayDist').textContent  = (todayDist/1000).toFixed(2);
   document.getElementById('todayCount').textContent = todayCount;
   if(surchargeEnabled) document.getElementById('surchargeBadge').style.display='flex';
 
@@ -1818,7 +1818,7 @@ function onIdle(){
   } catch(e){ console.error('[Business] onTripEnd error:', e); }
 
   // 旧仕様の today 表示はBusiness連携後にダッシュボード更新で上書きされる
-  document.getElementById('todayDist').textContent  = (todayDist/1000).toFixed(1);
+  document.getElementById('todayDist').textContent  = (todayDist/1000).toFixed(2);
   document.getElementById('todayCount').textContent = todayCount;
   showScreen('idle');
   // 業務管理ダッシュボード即時更新（Step 5・2026/05/01追加）
