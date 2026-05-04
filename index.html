@@ -29,32 +29,6 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 
 /* チュートリアル */
 .tutorial-overlay{display:none;position:fixed;inset:0;background:#007AFF;z-index:1000;flex-direction:column;align-items:center;justify-content:flex-start;padding:clamp(20px,5vh,48px) 28px clamp(20px,4vh,40px);padding-top:max(env(safe-area-inset-top),clamp(20px,5vh,48px));overflow-y:auto;-webkit-overflow-scrolling:touch;}
-/* ─── 初回DL UI（Phase 0a-1・2026/05/04 追加） ─────────── */
-/* 47県データの初回ダウンロード進捗・完了バナー */
-/* tutorial-overlayより上層（z-index:1100）・初回DL完了まで全画面固定 */
-.dl-overlay{display:none;position:fixed;inset:0;background:#007AFF;z-index:1100;flex-direction:column;align-items:center;justify-content:center;padding:clamp(20px,5vh,48px) 28px clamp(20px,4vh,40px);padding-top:max(env(safe-area-inset-top),clamp(20px,5vh,48px));}
-.dl-overlay.show{display:flex;}
-.dl-icon{font-size:48px;margin-bottom:18px;}
-.dl-title{color:#fff;font-size:22px;font-weight:700;margin-bottom:10px;text-align:center;line-height:1.4;}
-.dl-desc{color:rgba(255,255,255,0.9);font-size:14px;line-height:1.6;text-align:center;margin-bottom:24px;max-width:400px;}
-.dl-progress-wrap{width:100%;max-width:360px;margin-bottom:14px;}
-.dl-progress-bar{width:100%;height:10px;background:rgba(255,255,255,0.2);border-radius:5px;overflow:hidden;}
-.dl-progress-fill{height:100%;background:#fff;border-radius:5px;transition:width 0.3s ease;}
-.dl-progress-text{color:#fff;font-size:13px;font-weight:600;margin-top:8px;text-align:center;}
-.dl-hint{color:rgba(255,255,255,0.75);font-size:12px;margin-top:14px;text-align:center;}
-.dl-btn{width:100%;max-width:360px;padding:16px;background:#fff;color:#007AFF;border:none;border-radius:14px;font-size:17px;font-weight:700;cursor:pointer;font-family:‘Noto Sans JP’,sans-serif;margin-top:20px;}
-.dl-btn:active{opacity:0.85;}
-.dl-state-loading{display:none;}
-.dl-state-loading.show{display:block;}
-.dl-state-complete{display:none;}
-.dl-state-complete.show{display:block;}
-/* ─── 月次更新トースト（Phase 0a-3・2026/05/04 追加） ─────────── */
-/* 5/3 final仕様：背景#F0FAF4・ボーダー#52B788・テキスト#1A4A2E */
-.dl-update-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#F0FAF4;border:1.5px solid #52B788;border-radius:10px;padding:10px 16px;font-size:13px;color:#1A4A2E;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;cursor:pointer;}
-.dl-update-toast.show{display:block;animation:dl-toast-in 0.3s ease-out;}
-.dl-update-toast.fade-out{animation:dl-toast-out 0.3s ease-in forwards;}
-@keyframes dl-toast-in{from{opacity:0;transform:translate(-50%,-10px);}to{opacity:1;transform:translate(-50%,0);}}
-@keyframes dl-toast-out{from{opacity:1;transform:translate(-50%,0);}to{opacity:0;transform:translate(-50%,-10px);}}
 .tutorial-overlay.show{display:flex;}
 .tutorial-dots{display:flex;gap:8px;margin-bottom:8px;flex-shrink:0;}
 .tutorial-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.4);}
@@ -110,64 +84,64 @@ text-decoration:none !important;
 .stats-dashboard{display:flex;flex-direction:column;}
 /* 履歴ボタン（2026/05/01追加） */
 .btn-history{
-width:100%;padding:14px;margin-top:6px;
-background:#fff;border:1.5px solid #007AFF;
-border-radius:12px;color:#007AFF;
-font-size:15px;font-weight:700;cursor:pointer;
-font-family:‘Noto Sans JP’,sans-serif;
--webkit-tap-highlight-color:transparent;
+  width:100%;padding:14px;margin-top:6px;
+  background:#fff;border:1.5px solid #007AFF;
+  border-radius:12px;color:#007AFF;
+  font-size:15px;font-weight:700;cursor:pointer;
+  font-family:'Noto Sans JP',sans-serif;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-history:active{background:#E8F4FD;transform:scale(0.98);}
 
 /* 業務管理ボタン群（2026/05/01追加） */
 /* 業務終了ボタン（待機画面の履歴の下） */
 .btn-business-end{
-width:100%;padding:14px;margin-top:6px;
-background:#fff;border:1.5px solid #FF3B30;
-border-radius:12px;color:#FF3B30;
-font-size:15px;font-weight:700;cursor:pointer;
-font-family:‘Noto Sans JP’,sans-serif;
--webkit-tap-highlight-color:transparent;
+  width:100%;padding:14px;margin-top:6px;
+  background:#fff;border:1.5px solid #FF3B30;
+  border-radius:12px;color:#FF3B30;
+  font-size:15px;font-weight:700;cursor:pointer;
+  font-family:'Noto Sans JP',sans-serif;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-business-end:active{background:#FFF0F0;transform:scale(0.98);}
 
 /* 業務開始ボタン（業務未開始画面・中央配置） */
 /* 2026/05/01：[続きから再開]と同サイズに統一（司さん指示） */
 .btn-business-start{
-width:80%;max-width:300px;padding:14px;
-background:#007AFF;border:none;
-border-radius:12px;color:#fff;
-font-size:15px;font-weight:700;letter-spacing:2px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
--webkit-tap-highlight-color:transparent;
+  width:80%;max-width:300px;padding:14px;
+  background:#007AFF;border:none;
+  border-radius:12px;color:#fff;
+  font-size:15px;font-weight:700;letter-spacing:2px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-business-start:active{transform:scale(0.98);filter:brightness(0.9);}
 
 /* 続きから再開ボタン（業務開始画面・[業務開始]の下） */
 .btn-business-resume-start{
-width:80%;max-width:300px;padding:14px;
-background:#fff;border:1.5px solid #007AFF;
-border-radius:12px;color:#007AFF;
-font-size:15px;font-weight:700;letter-spacing:2px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
--webkit-tap-highlight-color:transparent;
+  width:80%;max-width:300px;padding:14px;
+  background:#fff;border:1.5px solid #007AFF;
+  border-radius:12px;color:#007AFF;
+  font-size:15px;font-weight:700;letter-spacing:2px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-business-resume-start:active{background:#E8F4FD;transform:scale(0.98);}
 .resume-note{
-text-align:center;font-size:11px;color:#999;
-padding:0 16px;
-max-width:80%;
+  text-align:center;font-size:11px;color:#999;
+  padding:0 16px;
+  max-width:80%;
 }
 
 /* 業務終了画面（日報） */
 .report-title{
-text-align:center;font-size:20px;font-weight:900;
-color:#111;padding:14px 0 8px;
+  text-align:center;font-size:20px;font-weight:900;
+  color:#111;padding:14px 0 8px;
 }
 .report-card{
-background:#f5f5f5;border-radius:12px;padding:16px;
-margin:0 16px 12px;
-display:flex;flex-direction:column;gap:8px;
+  background:#f5f5f5;border-radius:12px;padding:16px;
+  margin:0 16px 12px;
+  display:flex;flex-direction:column;gap:8px;
 }
 .report-row{display:flex;justify-content:space-between;align-items:center;}
 .report-row .lbl{font-size:13px;color:#aaa;}
@@ -176,22 +150,22 @@ display:flex;flex-direction:column;gap:8px;
 .report-divider{border:none;border-top:0.5px solid #e5e5e5;margin:4px 0;}
 /* [続ける]/[終了] ボタン：他画面のボタンとサイズ統一（btn-main / btn-business-start と同等） */
 .btn-business-resume{
-width:calc(100% - 32px);margin:8px 16px 4px;padding:18px;
-background:#007AFF;border:none;border-radius:12px;
-color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+  width:calc(100% - 32px);margin:8px 16px 4px;padding:18px;
+  background:#007AFF;border:none;border-radius:12px;
+  color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
 }
 .btn-business-resume:active{transform:scale(0.97);filter:brightness(0.85);}
 .btn-business-confirm{
-width:calc(100% - 32px);margin:4px 16px 8px;padding:18px;
-background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
-color:#FF3B30;font-size:18px;font-weight:700;letter-spacing:3px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
+  width:calc(100% - 32px);margin:4px 16px 8px;padding:18px;
+  background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
+  color:#FF3B30;font-size:18px;font-weight:700;letter-spacing:3px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
 }
 .btn-business-confirm:active{background:#FFF0F0;transform:scale(0.97);}
 .report-note{
-text-align:center;font-size:11px;color:#999;
-padding:4px 16px 16px;
+  text-align:center;font-size:11px;color:#999;
+  padding:4px 16px 16px;
 }
 
 /* DRIVING */
@@ -253,27 +227,27 @@ text-overflow:ellipsis;
 .btn-area{padding:10px 16px 40px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;border-top:0.5px solid #f0f0f0;}
 
 /* メインボタン（idle:代行開始 / fare:精算終了） */
-.btn-main{display:none;width:100%;padding:18px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
+.btn-main{display:none;width:100%;padding:18px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:18px;font-weight:900;letter-spacing:3px;font-family:'Noto Sans JP',sans-serif;cursor:pointer;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
 .btn-main.show{display:block;}
 .btn-main:active{-webkit-transform:scale(0.97);transform:scale(0.97);-webkit-filter:brightness(0.85);filter:brightness(0.85);}
 
 /* 2列ボタン（driving のみ表示） */
 .btn-row{display:none;grid-template-columns:1fr 1fr;gap:16px;}
 .btn-row.show{display:grid;}
-.btn-sub{padding:12px 0;border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;letter-spacing:1px;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
+.btn-sub{padding:12px 0;border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;letter-spacing:1px;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;}
 .btn-sub:active{-webkit-transform:scale(0.95);transform:scale(0.95);-webkit-filter:brightness(0.8);filter:brightness(0.8);}
 .btn-extra{background:#FF9500;}
 .btn-confirm{background:#34C759;}
 
 /* 縦画面用 走行に戻るボタン（fare時のみ表示） */
 .btn-back-portrait{
-display:none;
-align-items:center;justify-content:center;gap:8px;
-margin:14px auto 0;padding:8px 14px;
-background:#fff;border:1.5px solid #FF3B30;border-radius:8px;
-color:#FF3B30;font-size:13px;font-weight:700;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
--webkit-tap-highlight-color:transparent;
+  display:none;
+  align-items:center;justify-content:center;gap:8px;
+  margin:14px auto 0;padding:8px 14px;
+  background:#fff;border:1.5px solid #FF3B30;border-radius:8px;
+  color:#FF3B30;font-size:13px;font-weight:700;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-back-portrait.show{display:flex;}
 .btn-back-portrait:active{background:#FFF0F0;transform:scale(0.97);}
@@ -329,13 +303,13 @@ body{flex-direction:row;flex-wrap:wrap;}
 
 /* 3. 横画面用 走行に戻るボタン（fare 時のみ・改行禁止・コンパクト） */
 .btn-back-landscape.show{
-display:block;
-width:100%;padding:14px 8px;
-background:#fff;border:2px solid #FF3B30;border-radius:12px;
-color:#FF3B30;font-size:14px;font-weight:900;letter-spacing:1px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
--webkit-tap-highlight-color:transparent;
-white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  display:block;
+  width:100%;padding:14px 8px;
+  background:#fff;border:2px solid #FF3B30;border-radius:12px;
+  color:#FF3B30;font-size:14px;font-weight:900;letter-spacing:1px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .btn-back-landscape:active{background:#FFF0F0;transform:scale(0.97);}
 
@@ -348,21 +322,21 @@ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 #screenBusinessReport .btn-business-confirm{display:none !important;}
 #screenBusinessReport .report-note{display:none !important;}
 .btn-resume-landscape.show{
-display:block;
-width:100%;padding:14px 8px;
-background:#007AFF;border:none;border-radius:12px;
-color:#fff;font-size:15px;font-weight:900;letter-spacing:2px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
--webkit-tap-highlight-color:transparent;
+  display:block;
+  width:100%;padding:14px 8px;
+  background:#007AFF;border:none;border-radius:12px;
+  color:#fff;font-size:15px;font-weight:900;letter-spacing:2px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-resume-landscape:active{transform:scale(0.97);filter:brightness(0.85);}
 .btn-confirm-landscape.show{
-display:block;
-width:100%;padding:14px 8px;
-background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
-color:#FF3B30;font-size:15px;font-weight:700;letter-spacing:2px;
-font-family:‘Noto Sans JP’,sans-serif;cursor:pointer;
--webkit-tap-highlight-color:transparent;
+  display:block;
+  width:100%;padding:14px 8px;
+  background:#fff;border:1.5px solid #FF3B30;border-radius:12px;
+  color:#FF3B30;font-size:15px;font-weight:700;letter-spacing:2px;
+  font-family:'Noto Sans JP',sans-serif;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
 }
 .btn-confirm-landscape:active{background:#FFF0F0;transform:scale(0.97);}
 /* [続ける]と[終了]を離す（誤タップ防止・走行に戻ると同様） */
@@ -511,11 +485,8 @@ justify-content:center;
 </div>
 
 <!-- センサー再起動バナー（全画面共通・appbar直下・2026/05/03 統一） -->
-
 <!-- iOS PWA で DeviceMotion/Orientation が session 毎に失効するため -->
-
 <!-- ボタン押下で user gesture 内で同期発火：許可ダイアログ → リスナー再登録 → NoSleep起動 -->
-
 <div id="sensorRestoreBanner" style="display:none;background:#FF9800;border-radius:12px;padding:14px;margin:8px 12px;text-align:center;">
   <div style="color:#fff;font-size:14px;line-height:1.5;margin-bottom:10px;">
     <strong style="font-size:15px;">📡 センサー再起動が必要です</strong><br>
@@ -525,49 +496,6 @@ justify-content:center;
 </div>
 
 <!-- PWAインストール促進バナー（iOS・未インストール時のみ表示） -->
-
-<!-- ─── 月次更新トースト（Phase 0a-3・2026/05/04追加） ─────────── -->
-
-<!-- バックグラウンドDL完了時に2-3秒表示・タップで即消去 -->
-
-<!-- Q4:案2確定文言 -->
-
-<div class="dl-update-toast" id="dlUpdateToast" onclick="onDlToastTap()">✅ 最新の地図データに更新しました</div>
-
-<!-- ─── 初回DL UI（Phase 0a-1・2026/05/04追加） ─────────── -->
-
-<!-- 47県データのDL中・完了バナー -->
-
-<!-- IndexedDBの dl_completed=true で2回目以降は表示しない -->
-
-<div class="dl-overlay" id="dlOverlay">
-  <!-- 状態1：DL中 -->
-  <div class="dl-state-loading show" id="dlStateLoading">
-    <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
-      <div class="dl-icon">⚡</div>
-      <div class="dl-title">ダイコメへようこそ</div>
-      <div class="dl-desc">全国地図データをダウンロード中<br>圏外でも使えるように準備しています</div>
-      <div class="dl-progress-wrap">
-        <div class="dl-progress-bar">
-          <div class="dl-progress-fill" id="dlProgressFill" style="width:10%;"></div>
-        </div>
-        <div class="dl-progress-text" id="dlProgressText">準備中...</div>
-      </div>
-      <div class="dl-hint">📶 Wi-Fi推奨（4G可）</div>
-    </div>
-  </div>
-
-  <!-- 状態2：完了（Q1案1確定文言） -->
-
-  <div class="dl-state-complete" id="dlStateComplete">
-    <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
-      <div class="dl-icon">✅</div>
-      <div class="dl-title">ダウンロード完了</div>
-      <div class="dl-desc">全国どこでもオフラインで使えます</div>
-      <button class="dl-btn" onclick="onDlCompleteTap()">業務開始</button>
-    </div>
-  </div>
-</div>
 
 <!-- チュートリアル（初回URL訪問時のみ） -->
 
@@ -593,7 +521,6 @@ justify-content:center;
   </div>
 
   <!-- ページ2：センサー許可 -->
-
   <div class="tutorial-page" id="tPage1">
     <div class="tutorial-icon">📡</div>
     <div class="tutorial-title">精度向上のため<br>センサーを許可します</div>
@@ -629,6 +556,7 @@ justify-content:center;
     <button class="tutorial-btn" onclick="tutorialNext()">次へ</button>
   </div>
 </div>
+
 
 <div class="pwa-banner" id="pwaBanner">
   <div class="pwa-banner-text">
@@ -676,7 +604,6 @@ justify-content:center;
   <!-- BUSINESS START（業務未開始時の専用画面・2026/05/01追加） -->
 
   <!-- 2026/05/01：画面のどこタップしても許可ダイアログ発火（未許可時）・onClick で blockIfSensorNotGranted を呼ぶ -->
-
   <div id="screenBusinessStart" onclick="blockIfSensorNotGranted()" style="display:none;flex-direction:column;flex:1;min-height:0;justify-content:center;align-items:center;gap:24px;">
     <!-- 日時（全画面共通） -->
     <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
@@ -956,7 +883,7 @@ function onSensorRestoreTap(){
       if(state === 'granted'){
         window._compassGranted = true;
         localStorage.setItem('compass_granted','1');
-        // 2026/05/04 追加：同 session 内のページ遷移で permission 維持を判定するため
+        // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
         if(window._motionGranted) sessionStorage.setItem('sensor_permission_active','1');
         // リスナー再登録
         if(typeof GPS !== 'undefined' && typeof GPS.startCompass === 'function'){
@@ -979,7 +906,7 @@ function onSensorRestoreTap(){
       if(state === 'granted'){
         window._motionGranted = true;
         localStorage.setItem('motion_granted','1');
-        // 2026/05/04 追加：同 session 内のページ遷移で permission 維持を判定するため
+        // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
         if(window._compassGranted) sessionStorage.setItem('sensor_permission_active','1');
         // リスナー再登録
         if(typeof GPS !== 'undefined' && typeof GPS.startMotion === 'function'){
@@ -1228,7 +1155,6 @@ function startGPS(){
         // 業務中の総走行距離計測（2026/05/04 夜・修正）
         // business.js は onGps を公開しており state.active 中なら total_distance_m に加算する
         // 実車中・空車中問わず業務全体の距離を計測する設計
-        // → これを呼んでなかったため「総走行距離」が永遠に 0.0km だった
         if(typeof Business !== 'undefined' && typeof Business.onGps === 'function'){
           Business.onGps(g);
         }
@@ -1340,7 +1266,6 @@ function blockIfSensorNotGranted(){
   if(window.navigator.standalone !== true) return false;
   // 2026/05/04 夜・修正：sessionStorage で同 session 内の permission 維持を判定
   //   sensor_permission_active='1' があれば同 session 内 → permission 維持
-  //   起動時初期化の IIFE より早く呼ばれる可能性に対応
   if(sessionStorage.getItem('sensor_permission_active') === '1'){
     window._compassGranted = true;
     window._motionGranted = true;
@@ -1376,10 +1301,7 @@ function showSensorBannerIfNeeded(){
   if(window.navigator.standalone !== true) return;
   // 2026/05/04 夜・修正：sessionStorage で同 session 内の permission 維持を判定
   //   sensor_permission_active='1' があれば同 session 内 → permission 維持されてる
-  //   起動時初期化の IIFE より showSensorBannerIfNeeded が先に呼ばれる場合があるため
-  //   ここでも判定してバナー出さない（フラグも同期セット）
   if(sessionStorage.getItem('sensor_permission_active') === '1'){
-    // 同 session 内（設定画面遷移後など）：permission 維持
     window._compassGranted = true;
     window._motionGranted = true;
     const banner = document.getElementById('sensorRestoreBanner');
@@ -1844,7 +1766,7 @@ function onMenuClick(){
   }
   // 2026/05/04 夜・追加：設定画面遷移前に Business 状態を強制保存
   // 司さん指摘「設定行ったら総走行距離0に戻る」
-  // 5秒throttle で save が間に合わない場合の対策
+  // 1秒throttle で save が間に合わない場合の対策
   if(typeof Business !== 'undefined' && typeof Business.save === 'function'){
     try {
       Business.save();
@@ -2101,7 +2023,7 @@ document.addEventListener('visibilitychange', function(){
   }
   // 業務状態を保存（裏回し時・タスクキル前の最後のチャンス）
   // 2026/05/04 夜・追加：司さん指摘「タスクキルしたら総走行距離が0に戻る」
-  // 5秒throttle save（onGps内）の取りこぼし対策・確実に永続化する
+  // 1秒throttle save（onGps内）の取りこぼし対策・確実に永続化する
   if(document.hidden && typeof Business !== 'undefined' && typeof Business.save === 'function'){
     try {
       Business.save();
@@ -2137,17 +2059,6 @@ try {
     if(bs.active){
       // 既に業務中・既存の appState ロジックに委ねる（idle / driving / fare の復元処理が後続にある）
       updateBusinessDashboard();
-      // 2026/05/04 夜・修正：業務復元時に GPS を再起動する
-      //   司さんの問題：設定画面 → 戻ると「GPS待機」のまま total_distance_m 増えない
-      //   原因：location.href='index.html' リロードで gpsStarted=false に戻る
-      //         Business.load() で active 状態は復元されるが startGPS() は呼ばれない
-      //   修正：active な業務を復元した直後に startGPS() を呼んで GPS を再起動
-      //         センサー未許可なら blockIfSensorNotGranted で弾かれるが、
-      //         業務中=既に許可済みのはず（業務開始時に許可してる）
-      try {
-        startGPS();
-        if(typeof dlog === 'function') dlog('[Business] active復元: startGPS呼出');
-      } catch(e){ console.error('[Business] active復元時のstartGPS失敗:', e); }
     } else if(bs.ended && Business.canResume()){
       // 業務終了済みかつ3時間以内 → 日報画面表示
       appState = 'businessReport';
@@ -2175,15 +2086,8 @@ try { showSensorBannerIfNeeded(); } catch(e){ console.error('[Sensor] init banne
 
 // ─── 起動時 GPS 自動起動（2026/05/04 夜・追加） ───
 // 司さん指示：「GPSは許可はずれんって分かったんやけんコードで常に作動するようにしろや」
-// 仕様：
-//   - 業務開始から業務終了まで GPS 常時起動
-//   - 空車中も実車中も同じ GPS callback で動作
-//   - Business.onGps が state.active=true 時のみ total_distance_m に加算
-// 実装：
-//   - sessionStorage に sensor_permission_active='1' があれば（同session内・許可済み）
-//     起動時に即 startGPS() を呼ぶ
-//   - これでタスクキル後の再起動でも、設定画面遷移後でも、自動で GPS 動く
-//   - 未許可時はバナーが出てユーザー操作で許可 → onSensorRestoreTap 内で startGPS
+// sessionStorage='1' があれば（同session内・許可済み）起動時に即 startGPS()
+// → タスクキル後の再起動でも、設定画面遷移後でも、自動で GPS 動く
 try {
   if(sessionStorage.getItem('sensor_permission_active') === '1'){
     startGPS();
@@ -2209,408 +2113,6 @@ function closePwaBanner(){
 function showPwaInstructions(){
   alert('① 画面下の「共有」ボタン（□↑）をタップ\n② 「ホーム画面に追加」を選択\n③「追加」をタップ\n\nホーム画面のアイコンから起動するとコンパス・ジャイロが使えます！');
 }
-
-// ─── 初回DL UI 制御（Phase 0a-2・2026/05/04 更新） ───
-// 47県データの初回DL：fetch + Cache Storage + IndexedDB県別進捗
-// 並列4・タイムアウト30秒・失敗時3回リトライ
-// Q3:F案確定 → 部分DL保持・続きから再開
-const DakomeDL = (function(){
-  const DB_NAME = 'daikome';
-  const DB_VERSION = 2;  // 0a-2でprefecturesストア追加のためv2へ
-  const STORE_APP = 'app_state';
-  const STORE_PREF = 'prefectures';
-  const KEY_DL_COMPLETED = 'dl_completed';
-
-  // 47都道府県（build-roads.js v5 と同じ順序）
-  const PREFECTURES = [
-    'hokkaido',
-    'aomori','iwate','miyagi','akita','yamagata','fukushima',
-    'ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa',
-    'niigata','toyama','ishikawa','fukui','yamanashi','nagano','gifu','shizuoka','aichi',
-    'mie','shiga','kyoto','osaka','hyogo','nara','wakayama',
-    'tottori','shimane','okayama','hiroshima','yamaguchi',
-    'tokushima','kagawa','ehime','kochi',
-    'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa',
-  ];
-
-  // DL設定
-  const PARALLEL = 4;            // 並列DL数（4G LTEでも詰まらない安全値）
-  const TIMEOUT_MS = 30000;      // 1県あたりタイムアウト30秒
-  const MAX_RETRY = 3;           // 失敗時の最大リトライ回数
-
-  // ── IndexedDB ──
-  function openDb(){
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
-      req.onupgradeneeded = (e) => {
-        const db = e.target.result;
-        if(!db.objectStoreNames.contains(STORE_APP)){
-          db.createObjectStore(STORE_APP);
-        }
-        if(!db.objectStoreNames.contains(STORE_PREF)){
-          db.createObjectStore(STORE_PREF);
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function getDlCompleted(){
-    return openDb().then(db => new Promise((resolve) => {
-      const tx = db.transaction(STORE_APP, 'readonly');
-      const req = tx.objectStore(STORE_APP).get(KEY_DL_COMPLETED);
-      req.onsuccess = () => resolve(req.result === true);
-      req.onerror = () => resolve(false);
-    })).catch(() => false);
-  }
-
-  function setDlCompleted(){
-    return openDb().then(db => new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_APP, 'readwrite');
-      const req = tx.objectStore(STORE_APP).put(true, KEY_DL_COMPLETED);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    }));
-  }
-
-  // 県別の完了状態を取得（全47県分・未完了は欠落）
-  function getPrefStatus(){
-    return openDb().then(db => new Promise((resolve) => {
-      const tx = db.transaction(STORE_PREF, 'readonly');
-      const store = tx.objectStore(STORE_PREF);
-      const req = store.getAllKeys();
-      req.onsuccess = () => resolve(new Set(req.result || []));
-      req.onerror = () => resolve(new Set());
-    })).catch(() => new Set());
-  }
-
-  // 県の完了をマーク
-  function markPrefDone(pref, sizeBytes){
-    return openDb().then(db => new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_PREF, 'readwrite');
-      const req = tx.objectStore(STORE_PREF).put({
-        downloaded: true,
-        size: sizeBytes,
-        timestamp: Date.now(),
-      }, pref);
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    }));
-  }
-
-  // ── UI制御 ──
-  function showOverlay(){
-    const o = document.getElementById('dlOverlay');
-    if(o) o.classList.add('show');
-  }
-  function hideOverlay(){
-    const o = document.getElementById('dlOverlay');
-    if(o) o.classList.remove('show');
-  }
-  function showCompleteBanner(){
-    const loading = document.getElementById('dlStateLoading');
-    const complete = document.getElementById('dlStateComplete');
-    if(loading) loading.classList.remove('show');
-    if(complete) complete.classList.add('show');
-  }
-  function updateProgress(done, total){
-    const fill = document.getElementById('dlProgressFill');
-    const text = document.getElementById('dlProgressText');
-    const pct = Math.round((done / total) * 100);
-    if(fill) fill.style.width = Math.max(5, pct) + '%';
-    if(text) text.textContent = done + '/' + total + '県 完了';
-  }
-  function showRetryHint(failedCount){
-    const text = document.getElementById('dlProgressText');
-    if(text){
-      text.textContent = (PREFECTURES.length - failedCount) + '/' + PREFECTURES.length
-        + '県 完了（' + failedCount + '県失敗・自動リトライ中…）';
-    }
-  }
-
-  // ── 1県をfetch（タイムアウト付き） ──
-  function fetchPrefecture(pref){
-    const url = 'data/roads-' + pref + '.js';
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-    return fetch(url, { signal: ctrl.signal, cache: 'reload' })
-      .then(res => {
-        clearTimeout(timer);
-        if(!res.ok) throw new Error('HTTP ' + res.status);
-        // bodyを消費してCache Storage（SW）にキャッシュさせる
-        return res.blob().then(blob => ({ size: blob.size }));
-      })
-      .catch(e => {
-        clearTimeout(timer);
-        throw e;
-      });
-  }
-
-  // ── 1県をリトライ込みでDL ──
-  function downloadWithRetry(pref){
-    let attempt = 0;
-    function tryOnce(){
-      attempt++;
-      return fetchPrefecture(pref).catch(e => {
-        if(attempt < MAX_RETRY){
-          // 指数バックオフ：1秒・2秒・4秒
-          const wait = 1000 * Math.pow(2, attempt - 1);
-          return new Promise(r => setTimeout(r, wait)).then(tryOnce);
-        }
-        throw e;
-      });
-    }
-    return tryOnce();
-  }
-
-  // ── 47県を並列4で順次DL ──
-  function downloadAll(targetPrefs){
-    let done = 0;
-    let failed = [];
-    const total = targetPrefs.length;
-    updateProgress(done, PREFECTURES.length);
-
-    // ワーカー方式：並列数分のループを回す
-    return new Promise((resolveAll) => {
-      let queue = targetPrefs.slice();
-
-      function worker(){
-        if(queue.length === 0) return Promise.resolve();
-        const pref = queue.shift();
-        return downloadWithRetry(pref)
-          .then(result => {
-            return markPrefDone(pref, result.size).then(() => {
-              done++;
-              updateProgress(done + (PREFECTURES.length - total), PREFECTURES.length);
-              if(typeof dlog === 'function') dlog('[DL] ' + pref + ' OK (' + result.size + 'B)');
-            });
-          })
-          .catch(e => {
-            failed.push(pref);
-            console.warn('[DL] ' + pref + ' 失敗:', e.message);
-          })
-          .then(worker);  // 次のキューへ
-      }
-
-      // 並列4起動
-      const workers = [];
-      for(let i = 0; i < PARALLEL; i++) workers.push(worker());
-      Promise.all(workers).then(() => resolveAll({ done, failed, total }));
-    });
-  }
-
-  // ── DLメインフロー ──
-  function startDownload(){
-    return getPrefStatus().then(doneSet => {
-      // 未完了の県だけ DL 対象（Q3:F案・続きから再開）
-      const todo = PREFECTURES.filter(p => !doneSet.has(p));
-      const alreadyDone = PREFECTURES.length - todo.length;
-
-      if(todo.length === 0){
-        // 全部完了済み → そのまま完了処理
-        if(typeof dlog === 'function') dlog('[DL] 既に47県完了済');
-        updateProgress(PREFECTURES.length, PREFECTURES.length);
-        return Promise.resolve({ done: 0, failed: [], total: 0 });
-      }
-
-      if(typeof dlog === 'function'){
-        dlog('[DL] 開始：' + todo.length + '県（既存:' + alreadyDone + '/' + PREFECTURES.length + '）');
-      }
-      // 既存完了分を加味してプログレスバー初期表示
-      updateProgress(alreadyDone, PREFECTURES.length);
-      return downloadAll(todo);
-    });
-  }
-
-  // ── 起動時実行 ──
-  function init(){
-    getDlCompleted().then(completed => {
-      if(completed){
-        // 既存ユーザー：通常起動だが、未DL県があればバックグラウンドで差分DL
-        // Phase 0a-3：hokkaido バグ修正後の配布などに対応
-        if(typeof dlog === 'function') dlog('[DL] 初回DL済み・差分DL チェック');
-        checkAndUpdateExisting();
-        return;
-      }
-      if(typeof dlog === 'function') dlog('[DL] 初回起動・47県DL開始');
-      showOverlay();
-      startDownload().then(result => {
-        if(result.failed.length === 0){
-          // 全成功 → 完了バナーへ
-          updateProgress(PREFECTURES.length, PREFECTURES.length);
-          setTimeout(showCompleteBanner, 400);
-        } else {
-          // 一部失敗 → 失敗ヒント表示・自動リトライ
-          showRetryHint(result.failed.length);
-          if(typeof dlog === 'function') dlog('[DL] ' + result.failed.length + '県失敗・3秒後再試行');
-          // 3秒後に未完了県だけ再DL
-          setTimeout(() => {
-            startDownload().then(r2 => {
-              if(r2.failed.length === 0){
-                updateProgress(PREFECTURES.length, PREFECTURES.length);
-                setTimeout(showCompleteBanner, 400);
-              } else {
-                // 2回目も失敗 → 完了扱いにせず、ボタンで業務開始可能に（Q3:F案）
-                // 通信戻ったら次回起動時に未完了県だけ再開
-                showRetryHint(r2.failed.length);
-                if(typeof dlog === 'function') dlog('[DL] 再試行も失敗・次回起動で再開');
-                // 失敗してもバナーは出して業務継続可能にする
-                setTimeout(showCompleteBanner, 1000);
-              }
-            });
-          }, 3000);
-        }
-      });
-    });
-  }
-
-  // 既存ユーザー向け差分DL（Phase 0a-3・2026/05/04 追加）
-  // dl_completed=true だが prefectures ストアに無い県がある場合、
-  // バックグラウンドDLしてトースト通知だけ出す
-  // 業務妨げないため：
-  //   - DLバナー出さない
-  //   - メーター画面・appbar はそのまま
-  //   - 完了時にだけトーストで「✅ 最新の地図データに更新しました」
-  function checkAndUpdateExisting(){
-    getPrefStatus().then(doneSet => {
-      const todo = PREFECTURES.filter(p => !doneSet.has(p));
-      if(todo.length === 0){
-        if(typeof dlog === 'function') dlog('[DL] 差分DL：未DL県なし');
-        return;
-      }
-      if(typeof dlog === 'function') dlog('[DL] 差分DL：' + todo.length + '県を追加DL');
-      // バックグラウンドDL（バナー出さない・既存メーター画面はそのまま）
-      // 並列2に絞って業務通信を妨げないようにする
-      let done = 0;
-      let failed = [];
-      const queue = todo.slice();
-      const PARALLEL_BG = 2;  // バックグラウンドは並列2（業務通信優先）
-
-      function worker(){
-        if(queue.length === 0) return Promise.resolve();
-        const pref = queue.shift();
-        return downloadWithRetry(pref)
-          .then(result => {
-            return markPrefDone(pref, result.size).then(() => {
-              done++;
-              if(typeof dlog === 'function') dlog('[DL] 差分:' + pref + ' OK (' + result.size + 'B)');
-            });
-          })
-          .catch(e => {
-            failed.push(pref);
-            console.warn('[DL] 差分:' + pref + ' 失敗:', e.message);
-          })
-          .then(worker);
-      }
-
-      const workers = [];
-      for(let i = 0; i < PARALLEL_BG; i++) workers.push(worker());
-      Promise.all(workers).then(() => {
-        if(done > 0){
-          // 1県でも成功したらトースト表示
-          if(typeof DakomeUpdateToast !== 'undefined' && DakomeUpdateToast.show){
-            DakomeUpdateToast.show();
-          }
-          if(typeof dlog === 'function'){
-            dlog('[DL] 差分DL完了：' + done + '県成功・' + failed.length + '県失敗');
-          }
-          // 失敗あれば次回起動でリトライ（IndexedDBに保存されてないので自然にリトライ対象）
-        } else {
-          // 全失敗 → トースト出さない・次回起動で再試行
-          if(typeof dlog === 'function') dlog('[DL] 差分DL全失敗・次回再試行');
-        }
-      });
-    });
-  }
-
-  return { init, setDlCompleted, hideOverlay, getPrefStatus, checkAndUpdateExisting };
-})();
-
-// ─── 月次更新トースト UI 制御（Phase 0a-3・2026/05/04 追加） ───
-// バックグラウンドDL完了時に表示・2.5秒で自動消滅・タップで即消去
-const DakomeUpdateToast = (function(){
-  const TOAST_DURATION_MS = 2500;
-  let hideTimer = null;
-
-  function show(){
-    const t = document.getElementById('dlUpdateToast');
-    if(!t) return;
-    // 既に表示中なら再アニメさせない（タイマーだけリセット）
-    if(!t.classList.contains('show')){
-      t.classList.remove('fade-out');
-      t.classList.add('show');
-    }
-    if(hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(hide, TOAST_DURATION_MS);
-  }
-
-  function hide(){
-    const t = document.getElementById('dlUpdateToast');
-    if(!t) return;
-    t.classList.add('fade-out');
-    setTimeout(() => {
-      t.classList.remove('show');
-      t.classList.remove('fade-out');
-    }, 300);
-    if(hideTimer){ clearTimeout(hideTimer); hideTimer = null; }
-  }
-
-  return { show, hide };
-})();
-
-// トーストタップで即消去
-function onDlToastTap(){
-  DakomeUpdateToast.hide();
-}
-
-// ─── 月次更新ロジック（Phase 0a-3・2026/05/04 追加） ───
-// 既存ユーザー（dl_completed=true）に未DL県を配布する
-// hokkaido バグ修正後の追加配布など
-// バックグラウンドDL・バナー出さない・完了時トーストのみ
-const DakomeUpdate = (function(){
-  // DakomeDL から PREFECTURES と関数を再利用するため・直接アクセスせず
-  // DakomeDL の新規エクスポート関数経由で実行する
-  // （DakomeDL.checkAndUpdateExisting を呼ぶ）
-  function check(){
-    if(typeof DakomeDL.checkAndUpdateExisting === 'function'){
-      DakomeDL.checkAndUpdateExisting();
-    }
-  }
-  return { check };
-})();
-
-// [業務開始] ボタン押下：IndexedDB保存→オーバーレイ消去
-// Q2:G案確定 → メーター画面に直行（=既存画面そのまま表示するだけ）
-function onDlCompleteTap(){
-  DakomeDL.setDlCompleted().then(() => {
-    DakomeDL.hideOverlay();
-    if(typeof dlog === 'function') dlog('[DL] 完了・dl_completed=true 保存');
-  }).catch(e => {
-    console.warn('[DL] dl_completed 保存失敗:', e.message);
-    // 保存失敗しても画面遷移はする（ユーザー体験優先・次回起動でリトライ）
-    DakomeDL.hideOverlay();
-  });
-}
-
-// 起動時実行
-// Phase 0a-2 修正（2026/05/04）：standalone（PWA・WebAPK）起動時のみDL実行
-// 理由：iOS Safari と PWA は IndexedDB が分離されているため
-//       Safari でDLしても PWA で再DLが必要になり二度DL
-//       Safari は50MB Cache Storage 制限のため47県データ保持不可
-//       → 必ずホーム画面追加後の standalone 起動時にのみDLする
-//       → Safari 単体では tutorialOverlay（ようこそ・センサー・ホーム画面追加）のみ表示
-(function(){
-  const isStandalone =
-    window.navigator.standalone === true ||                              // iOS
-    window.matchMedia('(display-mode: standalone)').matches;             // Android他
-  if(isStandalone){
-    DakomeDL.init();
-    if(typeof dlog === 'function') dlog('[DL] standalone起動・DL判定実行');
-  } else {
-    if(typeof dlog === 'function') dlog('[DL] ブラウザ起動・DLスキップ（ホーム画面追加待ち）');
-  }
-})();
 
 // ─── チュートリアル（初回URL訪問時のみ） ───
 (function(){
@@ -2691,7 +2193,7 @@ function requestSensorPermission(){
       window._motionGranted = true;
       localStorage.setItem('compass_granted','1');
       localStorage.setItem('motion_granted','1');
-      // 2026/05/04 追加：同 session 内のページ遷移で permission 維持を判定するため
+      // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
       sessionStorage.setItem('sensor_permission_active','1');
 
       // 2026/05/02：バナーから許可ボタン削除済み・即座に非表示
