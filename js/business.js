@@ -13,7 +13,7 @@ active: false,
 start_time: null,           // 業務開始時刻（unix ms）
 end_time: null,             // 業務終了時刻（end()押下時）
 
-```
+
 // 終了後の3時間再開機能（2026/05/01）
 ended: false,               // [終了]ボタン押下フラグ（abandon前の中間状態）
 ended_at: null,             // [終了]押下時刻（3時間判定用）
@@ -32,7 +32,6 @@ trips: [],                  // [{distance_m, fare_yen, start_time, end_time}]
 
 // GPS連続性
 last_gps: null,             // {lat, lng, timestamp}
-```
 
 };
 
@@ -211,7 +210,7 @@ if(!gpsResult) return;
 //         異常値（1km超え）は MAX_SEGMENT_DIST_M でスキップする保険は維持
 if(typeof gpsResult.lat !== ‘number’ || typeof gpsResult.lng !== ‘number’) return;
 
-```
+
 const now = gpsResult.timestamp || Date.now();
 
 if(state.last_gps){
@@ -265,7 +264,6 @@ if(nowMs - _lastGpsSaveAt >= GPS_SAVE_INTERVAL_MS){
   _lastGpsSaveAt = nowMs;
   save();
 }
-```
 
 }
 
@@ -282,7 +280,7 @@ return false;
 if(typeof distanceM !== ‘number’ || distanceM < 0) return false;
 if(typeof fareYen !== ‘number’ || fareYen < 0) return false;
 
-```
+
 state.actual_total_m += distanceM;
 state.fare_total_yen += fareYen;
 state.trip_count += 1;
@@ -297,14 +295,13 @@ if(typeof dlog === 'function') {
   dlog('[Business] trip end: ' + Math.round(distanceM) + 'm, ¥' + fareYen + ' (trip #' + state.trip_count + ')');
 }
 return true;
-```
 
 }
 
 // ─────────────────────────────────────────
 // 取得・集計
 // ─────────────────────────────────────────
-function getState(){ return { …state, trips: […state.trips] }; }
+function getState(){ return { ...state, trips: [...state.trips] }; }
 
 // 日報集計
 function getReport(){
@@ -316,7 +313,7 @@ const elapsedMs = state.end_time
 : (state.start_time ? (Date.now() - state.start_time) : 0);
 const elapsedH = elapsedMs / 3600000;
 
-```
+
 return {
   start_time: state.start_time,
   end_time: state.end_time,
@@ -336,7 +333,6 @@ return {
 
   trips: [...state.trips],
 };
-```
 
 }
 
@@ -352,7 +348,7 @@ const m = Math.floor((sec % 3600) / 60);
 return h + ‘時間’ + m + ‘分’;
 };
 
-```
+
 const lines = [
   'ダイコメ業務日報',
   '',
@@ -385,7 +381,6 @@ r.trips.forEach((t, i) => {
 });
 
 return lines.join('\n');
-```
 
 }
 
@@ -484,7 +479,7 @@ total_distance_m: history.total_distance_m || 0,
 actual_total_m: history.actual_total_m || 0,
 fare_total_yen: history.fare_total_yen || 0,
 trip_count: history.trip_count || 0,
-trips: Array.isArray(history.trips) ? […history.trips] : [],
+trips: Array.isArray(history.trips) ? [...history.trips] : [],
 last_gps: null,                            // GPS は再起動するためクリア
 };
 // 履歴から該当エントリを削除（重複防止）
