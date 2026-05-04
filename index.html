@@ -1172,8 +1172,8 @@ function updateBusinessDashboard(){
     const elActual = document.getElementById('todayDist');
     const elCount = document.getElementById('todayCount');
     const elFare = document.getElementById('fareTotalYen');
-    if(elTotal)  elTotal.textContent  = (r.total_distance_m / 1000).toFixed(1);
-    if(elActual) elActual.textContent = (r.actual_total_m / 1000).toFixed(1);
+    if(elTotal)  elTotal.textContent  = (r.total_distance_m / 1000).toFixed(2);
+    if(elActual) elActual.textContent = (r.actual_total_m / 1000).toFixed(2);
     if(elCount)  elCount.textContent  = r.trip_count;
     if(elFare)   elFare.textContent   = r.fare_total_yen.toLocaleString();
   } catch(e){
@@ -2083,6 +2083,15 @@ document.addEventListener('visibilitychange', function(){
       }));
       dlog('[復元] 裏に回った瞬間を保存');
     } catch(e){ console.error('[復元] visibilitychange保存エラー:', e); }
+  }
+  // 業務状態を保存（裏回し時・タスクキル前の最後のチャンス）
+  // 2026/05/04 夜・追加：司さん指摘「タスクキルしたら総走行距離が0に戻る」
+  // 5秒throttle save（onGps内）の取りこぼし対策・確実に永続化する
+  if(document.hidden && typeof Business !== 'undefined' && typeof Business.save === 'function'){
+    try {
+      Business.save();
+      if(typeof dlog === 'function') dlog('[Business] visibilitychange save');
+    } catch(e){ console.error('[Business] visibilitychange save エラー:', e); }
   }
 });
 
