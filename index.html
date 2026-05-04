@@ -29,6 +29,25 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 
 /* チュートリアル */
 .tutorial-overlay{display:none;position:fixed;inset:0;background:#007AFF;z-index:1000;flex-direction:column;align-items:center;justify-content:flex-start;padding:clamp(20px,5vh,48px) 28px clamp(20px,4vh,40px);padding-top:max(env(safe-area-inset-top),clamp(20px,5vh,48px));overflow-y:auto;-webkit-overflow-scrolling:touch;}
+/* ─── 初回DL UI（Phase 0a-1・2026/05/04 追加） ─────────── */
+/* 47県データの初回ダウンロード進捗・完了バナー */
+/* tutorial-overlayより上層（z-index:1100）・初回DL完了まで全画面固定 */
+.dl-overlay{display:none;position:fixed;inset:0;background:#007AFF;z-index:1100;flex-direction:column;align-items:center;justify-content:center;padding:clamp(20px,5vh,48px) 28px clamp(20px,4vh,40px);padding-top:max(env(safe-area-inset-top),clamp(20px,5vh,48px));}
+.dl-overlay.show{display:flex;}
+.dl-icon{font-size:48px;margin-bottom:18px;}
+.dl-title{color:#fff;font-size:22px;font-weight:700;margin-bottom:10px;text-align:center;line-height:1.4;}
+.dl-desc{color:rgba(255,255,255,0.9);font-size:14px;line-height:1.6;text-align:center;margin-bottom:24px;max-width:400px;}
+.dl-progress-wrap{width:100%;max-width:360px;margin-bottom:14px;}
+.dl-progress-bar{width:100%;height:10px;background:rgba(255,255,255,0.2);border-radius:5px;overflow:hidden;}
+.dl-progress-fill{height:100%;background:#fff;border-radius:5px;transition:width 0.3s ease;}
+.dl-progress-text{color:#fff;font-size:13px;font-weight:600;margin-top:8px;text-align:center;}
+.dl-hint{color:rgba(255,255,255,0.75);font-size:12px;margin-top:14px;text-align:center;}
+.dl-btn{width:100%;max-width:360px;padding:16px;background:#fff;color:#007AFF;border:none;border-radius:14px;font-size:17px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:20px;}
+.dl-btn:active{opacity:0.85;}
+.dl-state-loading{display:none;}
+.dl-state-loading.show{display:block;}
+.dl-state-complete{display:none;}
+.dl-state-complete.show{display:block;}
 .tutorial-overlay.show{display:flex;}
 .tutorial-dots{display:flex;gap:8px;margin-bottom:8px;flex-shrink:0;}
 .tutorial-dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.4);}
@@ -496,6 +515,37 @@ justify-content:center;
 </div>
 
 <!-- PWAインストール促進バナー（iOS・未インストール時のみ表示） -->
+
+<!-- ─── 初回DL UI（Phase 0a-1・2026/05/04追加） ─────────── -->
+<!-- 47県データのDL中・完了バナー -->
+<!-- IndexedDBの dl_completed=true で2回目以降は表示しない -->
+<div class="dl-overlay" id="dlOverlay">
+  <!-- 状態1：DL中 -->
+  <div class="dl-state-loading show" id="dlStateLoading">
+    <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
+      <div class="dl-icon">⚡</div>
+      <div class="dl-title">ダイコメへようこそ</div>
+      <div class="dl-desc">全国地図データをダウンロード中<br>圏外でも使えるように準備しています</div>
+      <div class="dl-progress-wrap">
+        <div class="dl-progress-bar">
+          <div class="dl-progress-fill" id="dlProgressFill" style="width:10%;"></div>
+        </div>
+        <div class="dl-progress-text" id="dlProgressText">準備中...</div>
+      </div>
+      <div class="dl-hint">📶 Wi-Fi推奨（4G可）</div>
+    </div>
+  </div>
+
+  <!-- 状態2：完了（Q1案1確定文言） -->
+  <div class="dl-state-complete" id="dlStateComplete">
+    <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
+      <div class="dl-icon">✅</div>
+      <div class="dl-title">ダウンロード完了</div>
+      <div class="dl-desc">全国どこでもオフラインで使えます</div>
+      <button class="dl-btn" onclick="onDlCompleteTap()">業務開始</button>
+    </div>
+  </div>
+</div>
 
 <!-- チュートリアル（初回URL訪問時のみ） -->
 
@@ -2041,6 +2091,116 @@ function closePwaBanner(){
 function showPwaInstructions(){
   alert('① 画面下の「共有」ボタン（□↑）をタップ\n② 「ホーム画面に追加」を選択\n③「追加」をタップ\n\nホーム画面のアイコンから起動するとコンパス・ジャイロが使えます！');
 }
+
+// ─── 初回DL UI 制御（Phase 0a-1・2026/05/04 追加） ───
+// 47県データの初回DLバナー・完了判定・IndexedDB保存
+// 最小骨組み：見た目とIndexedDB保存ロジックのみ
+// 実DLループ（47県順次fetch）は次ステップで実装
+const DakomeDL = (function(){
+  const DB_NAME = 'daikome';
+  const DB_VERSION = 1;
+  const STORE = 'app_state';
+  const KEY_DL_COMPLETED = 'dl_completed';
+
+  // IndexedDB を開く（初回は ObjectStore も作る）
+  function openDb(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains(STORE)){
+          db.createObjectStore(STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // dl_completed フラグを読む
+  function getDlCompleted(){
+    return openDb().then(db => new Promise((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const store = tx.objectStore(STORE);
+      const req = store.get(KEY_DL_COMPLETED);
+      req.onsuccess = () => resolve(req.result === true);
+      req.onerror = () => resolve(false);
+    })).catch(() => false);
+  }
+
+  // dl_completed=true を保存
+  function setDlCompleted(){
+    return openDb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const req = store.put(true, KEY_DL_COMPLETED);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
+  // バナーを「完了」状態に切り替え
+  function showCompleteBanner(){
+    const loading = document.getElementById('dlStateLoading');
+    const complete = document.getElementById('dlStateComplete');
+    if(loading) loading.classList.remove('show');
+    if(complete) complete.classList.add('show');
+  }
+
+  // バナーを表示
+  function showOverlay(){
+    const overlay = document.getElementById('dlOverlay');
+    if(overlay) overlay.classList.add('show');
+  }
+
+  // バナーを消す
+  function hideOverlay(){
+    const overlay = document.getElementById('dlOverlay');
+    if(overlay) overlay.classList.remove('show');
+  }
+
+  // 起動時に初回DL状態をチェック
+  function init(){
+    getDlCompleted().then(completed => {
+      if(completed){
+        // 2回目以降：何もしない・通常起動
+        if(typeof dlog === 'function') dlog('[DL] 初回DL済み・通常起動');
+        return;
+      }
+      // 初回：DLバナー表示
+      if(typeof dlog === 'function') dlog('[DL] 初回起動・DLバナー表示');
+      showOverlay();
+      // ── ダミー：2秒後に完了状態に切替 ──
+      // TODO（Phase 0a-2）：実際の47県順次DLループに置き換え
+      setTimeout(() => {
+        const fill = document.getElementById('dlProgressFill');
+        const text = document.getElementById('dlProgressText');
+        if(fill) fill.style.width = '100%';
+        if(text) text.textContent = '47/47県 完了';
+        // 0.4秒待ってから完了画面へ（プログレスバーが100%に達するアニメ見せる）
+        setTimeout(showCompleteBanner, 400);
+      }, 2000);
+    });
+  }
+
+  return { init, setDlCompleted, hideOverlay };
+})();
+
+// [業務開始] ボタン押下：IndexedDB保存→オーバーレイ消去
+// Q2:G案確定 → メーター画面に直行（=既存画面そのまま表示するだけ）
+function onDlCompleteTap(){
+  DakomeDL.setDlCompleted().then(() => {
+    DakomeDL.hideOverlay();
+    if(typeof dlog === 'function') dlog('[DL] 完了・dl_completed=true 保存');
+  }).catch(e => {
+    console.warn('[DL] dl_completed 保存失敗:', e.message);
+    // 保存失敗しても画面遷移はする（ユーザー体験優先・次回起動でリトライ）
+    DakomeDL.hideOverlay();
+  });
+}
+
+// 起動時実行
+DakomeDL.init();
 
 // ─── チュートリアル（初回URL訪問時のみ） ───
 (function(){
