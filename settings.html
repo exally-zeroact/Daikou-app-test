@@ -291,26 +291,43 @@ function openDakomeDL_DB(){
   });
 }
 
-// prefectures ストアの全レコード取得
+// prefectures ストアの全レコード取得（out-of-line key・index.html の DakomeDL に合わせる）
+// store.put({downloaded,size,timestamp}, pref) の形式で保存されている
+// 戻り値：[{pref, downloaded, size, timestamp}, ...]
 function getAllPrefectures(){
   return openDakomeDL_DB().then(db => {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(DL_STORE_PREF, 'readonly');
       const store = tx.objectStore(DL_STORE_PREF);
-      const req = store.getAll();
-      req.onsuccess = () => { db.close(); resolve(req.result || []); };
-      req.onerror = () => { db.close(); reject(req.error); };
+      const valuesReq = store.getAll();
+      const keysReq = store.getAllKeys();
+      let values = null, keys = null;
+      valuesReq.onsuccess = () => { values = valuesReq.result || []; checkDone(); };
+      keysReq.onsuccess = () => { keys = keysReq.result || []; checkDone(); };
+      valuesReq.onerror = () => { db.close(); reject(valuesReq.error); };
+      keysReq.onerror = () => { db.close(); reject(keysReq.error); };
+      function checkDone(){
+        if(values === null || keys === null) return;
+        // value と key を結合（同じインデックス）
+        const merged = values.map((v, i) => Object.assign({pref: keys[i]}, v));
+        db.close();
+        resolve(merged);
+      }
     });
   });
 }
 
-// prefectures ストアに完了記録を追加
+// prefectures ストアに完了記録を追加（out-of-line key・index.html の DakomeDL と同じ形式）
 function markPrefDoneInStore(pref, size){
   return openDakomeDL_DB().then(db => {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(DL_STORE_PREF, 'readwrite');
       const store = tx.objectStore(DL_STORE_PREF);
-      const req = store.put({ pref: pref, ts: Date.now(), size: size });
+      const req = store.put({
+        downloaded: true,
+        size: size,
+        timestamp: Date.now()
+      }, pref);
       req.onsuccess = () => { db.close(); resolve(); };
       req.onerror = () => { db.close(); reject(req.error); };
     });
@@ -329,8 +346,8 @@ async function loadDlStatus(){
       statusEl.textContent = '0県';
       return;
     }
-    // 最新更新日（max ts）
-    const maxTs = Math.max.apply(null, all.map(r => r.ts || 0));
+    // 最新更新日（max timestamp・index.html の DakomeDL と同じ field 名）
+    const maxTs = Math.max.apply(null, all.map(r => r.timestamp || 0));
     if(maxTs > 0){
       const d = new Date(maxTs);
       const dateStr = d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
