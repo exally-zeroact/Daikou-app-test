@@ -44,8 +44,8 @@ const GAP_RESET_SEC = 5;
 const RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
 
 // localStorage キー
-const STORAGE_KEY = ‘dakome_business_state’;
-const HISTORY_KEY = ‘dakome_business_history’;
+const STORAGE_KEY = 'dakome_business_state';
+const HISTORY_KEY = 'dakome_business_history';
 
 // 履歴保持期間（日数）
 const RETENTION_DAYS = 30;
@@ -58,7 +58,7 @@ const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
 // 業務開始
 function start(){
 if(state.active){
-if(typeof dlog === ‘function’) dlog(’[Business] already active’);
+if(typeof dlog === 'function') dlog('[Business] already active');
 return false;
 }
 // 既に終了済み（再開可能状態）の業務があれば自動 abandon
@@ -80,7 +80,7 @@ trips: [],
 last_gps: null,
 };
 save();
-if(typeof dlog === ‘function’) dlog(’[Business] start at ’ + new Date(now).toISOString());
+if(typeof dlog === 'function') dlog('[Business] start at ' + new Date(now).toISOString());
 return true;
 }
 
@@ -95,7 +95,7 @@ state.ended = true;
 state.ended_at = now;
 state.end_time = now;
 save();
-if(typeof dlog === ‘function’) dlog(’[Business] end (resumable for 3h)’);
+if(typeof dlog === 'function') dlog('[Business] end (resumable for 3h)');
 return getReport();
 }
 
@@ -108,7 +108,7 @@ if(state.ended && state.ended_at){
 const elapsed = Date.now() - state.ended_at;
 if(elapsed >= RESUME_GRACE_MS){
 // 3時間経過 → 再開不可
-if(typeof dlog === ‘function’) dlog(’[Business] resume denied (3h elapsed)’);
+if(typeof dlog === 'function') dlog('[Business] resume denied (3h elapsed)');
 return false;
 }
 }
@@ -118,7 +118,7 @@ state.ended_at = null;
 state.end_time = null;
 state.last_gps = null;  // GPS連続性リセット（再開時にジャンプ防止）
 save();
-if(typeof dlog === ‘function’) dlog(’[Business] resume’);
+if(typeof dlog === 'function') dlog('[Business] resume');
 return true;
 }
 
@@ -156,7 +156,7 @@ trips: [],
 last_gps: null,
 };
 save();
-if(typeof dlog === ‘function’) dlog(’[Business] auto-abandon (3h elapsed)’);
+if(typeof dlog === 'function') dlog('[Business] auto-abandon (3h elapsed)');
 return true;
 }
 
@@ -182,7 +182,7 @@ trips: [],
 last_gps: null,
 };
 save();
-if(typeof dlog === ‘function’) dlog(’[Business] abandon (history saved)’);
+if(typeof dlog === 'function') dlog('[Business] abandon (history saved)');
 return true;
 }
 
@@ -208,7 +208,7 @@ if(!gpsResult) return;
 //   修正：「タイムラインで増やせ」司さん指示に従い isStationary 判定削除
 //         GPS callback 来るたびに前回からの距離を加算する
 //         異常値（1km超え）は MAX_SEGMENT_DIST_M でスキップする保険は維持
-if(typeof gpsResult.lat !== ‘number’ || typeof gpsResult.lng !== ‘number’) return;
+if(typeof gpsResult.lat !== 'number' || typeof gpsResult.lng !== 'number') return;
 
 
 const now = gpsResult.timestamp || Date.now();
@@ -274,11 +274,11 @@ if(nowMs - _lastGpsSaveAt >= GPS_SAVE_INTERVAL_MS){
 // Meter.getState().distance_m と fare_yen を渡してくる
 function onTripEnd(distanceM, fareYen, tripStartTime){
 if(!state.active){
-if(typeof dlog === ‘function’) dlog(’[Business] onTripEnd ignored (not active)’);
+if(typeof dlog === 'function') dlog('[Business] onTripEnd ignored (not active)');
 return false;
 }
-if(typeof distanceM !== ‘number’ || distanceM < 0) return false;
-if(typeof fareYen !== ‘number’ || fareYen < 0) return false;
+if(typeof distanceM !== 'number' || distanceM < 0) return false;
+if(typeof fareYen !== 'number' || fareYen < 0) return false;
 
 
 state.actual_total_m += distanceM;
@@ -341,11 +341,11 @@ return {
 // ─────────────────────────────────────────
 function exportCSV(){
 const r = getReport();
-const fmtTime = t => t ? new Date(t).toLocaleString(‘ja-JP’) : ‘’;
+const fmtTime = t => t ? new Date(t).toLocaleString('ja-JP') : '';
 const fmtDur = sec => {
 const h = Math.floor(sec / 3600);
 const m = Math.floor((sec % 3600) / 60);
-return h + ‘時間’ + m + ‘分’;
+return h + '時間' + m + '分';
 };
 
 
@@ -391,7 +391,7 @@ function save(){
 try {
 localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 } catch(e) {
-if(typeof dlog === ‘function’) dlog(’[Business] save error: ’ + e.message);
+if(typeof dlog === 'function') dlog('[Business] save error: ' + e.message);
 }
 }
 
@@ -400,7 +400,7 @@ try {
 const raw = localStorage.getItem(STORAGE_KEY);
 if(!raw) return false;
 const parsed = JSON.parse(raw);
-if(!parsed || typeof parsed !== ‘object’) return false;
+if(!parsed || typeof parsed !== 'object') return false;
 // 必須プロパティ補完（バージョン差分対策）
 state = {
 active: !!parsed.active,
@@ -417,10 +417,10 @@ last_gps: parsed.last_gps || null,
 };
 // ロード後に3時間経過チェック（自動 abandon）
 checkAutoAbandon();
-if(typeof dlog === ‘function’) dlog(’[Business] loaded state’);
+if(typeof dlog === 'function') dlog('[Business] loaded state');
 return true;
 } catch(e) {
-if(typeof dlog === ‘function’) dlog(’[Business] load error: ’ + e.message);
+if(typeof dlog === 'function') dlog('[Business] load error: ' + e.message);
 return false;
 }
 }
@@ -440,11 +440,11 @@ if(t === null) return true;  // 時刻不明は残す（保険）
 return t >= cutoff;
 });
 localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
-if(typeof dlog === ‘function’) {
-dlog(’[Business] history saved (’ + trimmed.length + ’ items, ’ + RETENTION_DAYS + ‘days retention)’);
+if(typeof dlog === 'function') {
+dlog('[Business] history saved (' + trimmed.length + ' items, ' + RETENTION_DAYS + 'days retention)');
 }
 } catch(e) {
-if(typeof dlog === ‘function’) dlog(’[Business] history save error: ’ + e.message);
+if(typeof dlog === 'function') dlog('[Business] history save error: ' + e.message);
 }
 }
 
@@ -467,7 +467,7 @@ try { localStorage.removeItem(HISTORY_KEY); } catch(e){}
 // history: getLastEndedBusiness() で取得した履歴オブジェクト
 function restoreFromHistory(history){
 if(!history) return false;
-if(typeof history.start_time !== ‘number’) return false;
+if(typeof history.start_time !== 'number') return false;
 // 履歴を state に書き戻す
 state = {
 active: true,                              // 再開なので active に戻す
@@ -492,7 +492,7 @@ localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
 }
 } catch(e){}
 save();
-if(typeof dlog === ‘function’) dlog(’[Business] restored from history (resumed)’);
+if(typeof dlog === 'function') dlog('[Business] restored from history (resumed)');
 return true;
 }
 
