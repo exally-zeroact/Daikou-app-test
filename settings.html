@@ -220,9 +220,11 @@ const PREFECTURES_DL = [
   'tokushima','kagawa','ehime','kochi',
   'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa'
 ];
-// IndexedDB 定数（index.html の DakomeDL と同じ・参照のみ）
+// IndexedDB 定数（index.html の旧 DakomeDL と同じ daikome DB）
+// v3 (2026-05-05)：v2 の prefectures ストアが keyPath: 'pref' で作られて
+// store.put(value, key) が DataError を投げる問題を修正するため migration
 const DL_DB_NAME = 'daikome';
-const DL_DB_VERSION = 2;
+const DL_DB_VERSION = 3;
 const DL_STORE_PREF = 'prefectures';
 
 function load(){
@@ -271,21 +273,33 @@ function load(){
 //    regionAuto / regionClear / toggleAutoRegion / updateAutoRegionUI /
 //    nearestPrefecture / PREFECTURES_CENTER は全て削除済み
 
-// IndexedDB を開く（index.html の DakomeDL と同じ daikome v2）
+// IndexedDB を開く（index.html の旧 DakomeDL と同じ daikome DB）
+// onupgradeneeded：
+//   - prefectures ストアが無ければ out-of-line key で作成
+//     （store.put({downloaded,size,timestamp}, pref) と整合）
+//   - v2 で誤って keyPath: 'pref' で作られていたら作り直す
+//     （keyPath が設定されている in-line ストアに out-of-line put すると DataError）
+//     keyPath 違反の旧ストアにレコードは保存できなかったため削除しても損失ゼロ
 function openDakomeDL_DB(){
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DL_DB_NAME, DL_DB_VERSION);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-    // 設定画面ではアップグレード走らせない（index.html 側で実行済み前提）
-    // もし v1 だった場合のみ onupgradeneeded で prefectures ストア追加
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
+      const tx = e.target.transaction;
       if(!db.objectStoreNames.contains('app_state')){
         db.createObjectStore('app_state', { keyPath: 'key' });
       }
       if(!db.objectStoreNames.contains(DL_STORE_PREF)){
-        db.createObjectStore(DL_STORE_PREF, { keyPath: 'pref' });
+        db.createObjectStore(DL_STORE_PREF);
+      } else {
+        // 壊れた v2 schema 救済：keyPath が設定されてたら作り直す
+        const existing = tx.objectStore(DL_STORE_PREF);
+        if(existing.keyPath !== null){
+          db.deleteObjectStore(DL_STORE_PREF);
+          db.createObjectStore(DL_STORE_PREF);
+        }
       }
     };
   });
