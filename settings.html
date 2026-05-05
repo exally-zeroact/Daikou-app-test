@@ -409,19 +409,34 @@ async function onCheckUpdate(){
     const queue = todo.slice();
     const PARALLEL = 2;
 
+    // 1県あたり最大3回リトライ（指数バックオフ 1s / 2s）
+    // 初回起動直後の IndexedDB v3 migration や SW 起動初期の race を救済
+    const MAX_RETRY = 3;
     async function worker(){
       while(queue.length > 0){
         const pref = queue.shift();
-        try {
-          const url = '/data/roads-' + pref + '.js';
-          const res = await fetch(url, { cache: 'reload' });
-          if(!res.ok) throw new Error('HTTP ' + res.status);
-          const blob = await res.blob();
-          await markPrefDoneInStore(pref, blob.size);
+        let success = false;
+        let lastErr = null;
+        for(let attempt = 1; attempt <= MAX_RETRY && !success; attempt++){
+          try {
+            const url = '/data/roads-' + pref + '.js';
+            const res = await fetch(url, { cache: 'reload' });
+            if(!res.ok) throw new Error('HTTP ' + res.status);
+            const blob = await res.blob();
+            await markPrefDoneInStore(pref, blob.size);
+            success = true;
+          } catch(e){
+            lastErr = e;
+            if(attempt < MAX_RETRY){
+              await new Promise(r => setTimeout(r, 1000 * attempt));
+            }
+          }
+        }
+        if(success){
           ok++;
-        } catch(e){
-          console.error('DL失敗:', pref, e);
+        } else {
           failed++;
+          console.warn('DL失敗:', pref, lastErr);
         }
         processed++;
         btn.textContent = '⏳ ' + processed + '/' + todo.length + '県処理中...';
