@@ -38,13 +38,13 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 .tutorial-icon{font-size:clamp(40px,8vh,72px);line-height:1;}
 .tutorial-title{font-size:clamp(18px,3vh,24px);font-weight:900;color:#fff;line-height:1.3;}
 .tutorial-desc{font-size:clamp(12px,2vh,15px);color:rgba(255,255,255,0.85);line-height:1.6;max-width:300px;}
-.tutorial-btn{width:100%;padding:clamp(12px,2.2vh,16px);background:#fff;color:#007AFF;border:none;border-radius:14px;font-size:clamp(15px,2.4vh,17px);font-weight:700;cursor:pointer;font-family:‘Noto Sans JP’,sans-serif;}
+.tutorial-btn{width:100%;padding:clamp(12px,2.2vh,16px);background:#fff;color:#007AFF;border:none;border-radius:14px;font-size:clamp(15px,2.4vh,17px);font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;}
 .tutorial-btn.secondary{background:rgba(255,255,255,0.2);color:#fff;margin-top:8px;}
 .tutorial-steps{background:rgba(255,255,255,0.15);border-radius:14px;padding:clamp(10px,1.8vh,16px) clamp(14px,2vh,20px);text-align:left;width:100%;}
 .tutorial-step{display:flex;align-items:center;gap:clamp(8px,1.4vh,12px);color:#fff;font-size:clamp(12px,1.8vh,14px);padding:clamp(3px,0.7vh,6px) 0;}
 .tutorial-step-num{width:clamp(20px,3.2vh,24px);height:clamp(20px,3.2vh,24px);border-radius:50%;background:#fff;color:#007AFF;font-weight:700;font-size:clamp(11px,1.7vh,13px);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .pwa-banner-text strong{display:block;font-size:13px;margin-bottom:2px;}
-.pwa-banner-btn{background:#007AFF;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:‘Noto Sans JP’,sans-serif;}
+.pwa-banner-btn{background:#007AFF;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:'Noto Sans JP',sans-serif;}
 .pwa-banner-close{background:none;border:none;color:#007AFF;font-size:18px;cursor:pointer;padding:0 4px;}
 .gps-acc{font-size:11px;color:#fff;opacity:0.8;}
 .surcharge-badge{background:#FF3B30;border-radius:8px;padding:4px 10px;cursor:pointer;}
@@ -52,7 +52,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 background:rgba(255,255,255,0.2);border:none;border-radius:8px;
 padding:4px 12px;cursor:pointer;
 color:#fff;font-size:20px;font-weight:700;
-font-family:‘Noto Sans JP’,sans-serif;
+font-family:'Noto Sans JP',sans-serif;
 -webkit-transition:transform 0.1s,-webkit-filter 0.1s;
 transition:transform 0.1s,filter 0.1s;
 -webkit-appearance:none;
@@ -286,8 +286,8 @@ pointer-events:none;white-space:nowrap;
 .modal-item-price{font-size:14px;color:#FF9500;font-weight:900;}
 .modal-custom{background:#fff8f0;border:0.5px solid #FFD6A5;border-radius:10px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
 .modal-custom span{font-size:14px;color:#FF9500;font-weight:700;white-space:nowrap;}
-.modal-custom input{flex:1;border:0.5px solid #ddd;border-radius:8px;padding:8px 12px;font-size:16px;text-align:right;font-family:‘Noto Sans JP’,sans-serif;}
-.modal-custom-btn{background:#FF9500;border:none;border-radius:8px;padding:8px 14px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:‘Noto Sans JP’,sans-serif;}
+.modal-custom input{flex:1;border:0.5px solid #ddd;border-radius:8px;padding:8px 12px;font-size:16px;text-align:right;font-family:'Noto Sans JP',sans-serif;}
+.modal-custom-btn{background:#FF9500;border:none;border-radius:8px;padding:8px 14px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;}
 
 /* 横画面対応 */
 @media (orientation:landscape){
@@ -417,7 +417,6 @@ justify-content:center;
 .idle-time{font-size:36px;}
 .stats-grid{grid-template-columns:1fr 1fr;gap:8px;max-width:50%;width:100%;margin-left:auto;margin-right:auto;box-sizing:border-box;}
 .stat-value{font-size:18px;}
-#inlineHistoryWrap{max-width:50%;width:100%;margin-left:auto;margin-right:auto;box-sizing:border-box;}
 
 /* 2026/05/01：全画面共通の日時・stats-dashboard・履歴ボタンを中央寄せ */
 .dateTimeLine{max-width:80%;width:100%;margin-left:auto;margin-right:auto;box-sizing:border-box;}
@@ -721,11 +720,11 @@ class NoSleep {
       try{
         this._wakeLock = await navigator.wakeLock.request('screen');
         this._enabled = true;
-        console.log('[NoSleep] WakeLock有効');
+        dlog('[NoSleep] WakeLock有効');
         // 画面表示時に再取得
         document.addEventListener('visibilitychange', this._relock.bind(this));
         return;
-      }catch(e){ console.log('[NoSleep] WakeLock失敗:', e.message); }
+      }catch(e){ dlog('[NoSleep] WakeLock失敗:', e.message); }
     }
     // ② AudioContextフォールバック（iOS 15以前）
     try{
@@ -739,11 +738,11 @@ class NoSleep {
         gain.connect(this._audioCtx.destination);
         osc.start();
         this._enabled = true;
-        console.log('[NoSleep] AudioContext有効');
+        dlog('[NoSleep] AudioContext有効');
         return;
       }
-    }catch(e){ console.log('[NoSleep] AudioContext失敗:', e.message); }
-    console.log('[NoSleep] 全フォールバック失敗');
+    }catch(e){ dlog('[NoSleep] AudioContext失敗:', e.message); }
+    dlog('[NoSleep] 全フォールバック失敗');
   }
   async _relock(){
     if(document.visibilityState === 'visible' && this._wakeLock){
@@ -756,7 +755,7 @@ class NoSleep {
     if(this._wakeLock){ try{ this._wakeLock.release(); }catch(e){} this._wakeLock = null; }
     if(this._audioCtx){ try{ this._audioCtx.close(); }catch(e){} this._audioCtx = null; }
     this._enabled = false;
-    console.log('[NoSleep] 解除');
+    dlog('[NoSleep] 解除');
   }
 }</script>
 
@@ -767,6 +766,32 @@ class NoSleep {
 <script src="js/debug-config.js"></script>
 
 <!-- ★debug-config.js：環境変数制御・本番自動OFF（2026/04/26追加） -->
+
+<!-- localStorage キー migration: dakome_* -> daikou_* (2026-05-05) -->
+<script>
+(function migrateDakomeKeys(){
+  try {
+    var keys = Object.keys(localStorage);
+    var migrated = 0;
+    for (var i = 0; i < keys.length; i++) {
+      var oldKey = keys[i];
+      if (oldKey.indexOf('dakome_') === 0) {
+        var newKey = 'daikou_' + oldKey.substring(7);
+        if (localStorage.getItem(newKey) === null) {
+          localStorage.setItem(newKey, localStorage.getItem(oldKey));
+        }
+        localStorage.removeItem(oldKey);
+        migrated++;
+      }
+    }
+    if (migrated > 0 && typeof dlog === 'function') {
+      dlog('[migrate] dakome to daikou: ' + migrated + ' keys');
+    }
+  } catch (e) {
+    if (typeof dlog === 'function') dlog('[migrate] error', e);
+  }
+})();
+</script>
 
 <script src="js/compat.js"></script>
 
@@ -844,7 +869,7 @@ function checkDrivingRestore(){
     startUiTimer();
     // 緑バナー表示（復元できたことを通知するだけ）
     document.getElementById('restoreBanner').classList.add('show');
-    console.log('[復元] 走行を再開しました');
+    dlog('[復元] 走行を再開しました');
     // 2026/05/02：iOS PWA なら「センサー再起動」バナー表示
     //   タスクキルで DeviceMotion/Orientation リスナーが消失してるため
     //   司さんがボタン押下時に user gesture で全部復活させる
@@ -1085,11 +1110,6 @@ function updateClock(){
   const text = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日（' + days[now.getDay()] + '） ' + h + ':' + m;
   // 全画面の dateTimeLine クラスを一括更新（screenIdle/screenDriving/screenFare）
   document.querySelectorAll('.dateTimeLine').forEach(el => { el.textContent = text; });
-  // 旧仕様 ID も保険で更新（他箇所参照対応）
-  const elTime = document.getElementById('clockTime');
-  if(elTime) elTime.textContent = h + ':' + m;
-  const elDate = document.getElementById('clockDate');
-  if(elDate) elDate.textContent = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日（' + days[now.getDay()] + '）';
 }
 setInterval(updateClock, 1000);
 updateClock();
@@ -1351,7 +1371,7 @@ function onMainBtn(){
     localStorage.setItem('daikou_last_start', Date.now().toString());
     // NoSleep起動（画面消灯防止）
     if(!noSleep){ noSleep = new NoSleep(); }
-    noSleep.enable().catch(e=>console.log("NoSleep error:",e));
+    noSleep.enable().catch(e=>dlog("NoSleep error:",e));
     // 暗転タイマーをクリア・画面を戻す
     if(dimTimer){ clearTimeout(dimTimer); dimTimer = null; }
     document.documentElement.style.filter = '';
@@ -1393,7 +1413,7 @@ function onBusinessStart(){
     Business.start();
     // NoSleep 起動（画面消灯防止）
     if(!noSleep){ noSleep = new NoSleep(); }
-    noSleep.enable().catch(e=>console.log('NoSleep error:', e));
+    noSleep.enable().catch(e=>dlog('NoSleep error:', e));
     // 暗転タイマーリセット
     if(dimTimer){ clearTimeout(dimTimer); dimTimer = null; }
     document.documentElement.style.filter = '';
@@ -1485,7 +1505,7 @@ function onResumeFromStart(){
       refreshSensorPermission();
     }
     if(!noSleep){ noSleep = new NoSleep(); }
-    noSleep.enable().catch(e=>console.log('NoSleep error:', e));
+    noSleep.enable().catch(e=>dlog('NoSleep error:', e));
     if(dimTimer){ clearTimeout(dimTimer); dimTimer = null; }
     document.documentElement.style.filter = '';
     startGPS();
@@ -1503,7 +1523,7 @@ function onResumeFromStart(){
 // 直前に終了した業務（履歴の最新）を取得
 function getLastEndedBusiness(){
   try {
-    const histRaw = localStorage.getItem('dakome_business_history');
+    const histRaw = localStorage.getItem('daikou_business_history');
     if(!histRaw) return null;
     const hist = JSON.parse(histRaw);
     if(!Array.isArray(hist) || hist.length === 0) return null;
@@ -1724,12 +1744,9 @@ function onIdle(){
 
   // ─── 業務管理連携（Step 5・2026/05/01追加）───
   // 実車終了を Business に通知して累計加算（実車距離・売上・営業回数）
-  // ⚠️ TODO（リリース前に必須対応）：
-  //   現在は屋内テストで距離0でも動作確認したいので tripDistanceM >= 0 で受け付ける
-  //   リリース前に tripDistanceM > 0 に変更すること（距離0は誤タップ扱い）
-  //   司さん指示 2026/05/01「今は屋内での確認のときもあるから０でもカウントして後に０距離はカウントしない」
+  // ✅ 修正済み 2026-05-05：tripDistanceM > 0（距離0は誤タップ扱い）
   try {
-    if(typeof Business !== 'undefined' && tripDistanceM >= 0 && appState === 'idle' /* fareから来た時のみ */){
+    if(typeof Business !== 'undefined' && tripDistanceM > 0 && appState === 'idle' /* fareから来た時のみ */){
       // appState は既に 'idle' に書き換わってるので、tripStartTime を使って fare から来たか判定
       // tripStartTime は fare 経由の時のみセットされる
       if(tripStartTime !== null){
@@ -1745,7 +1762,6 @@ function onIdle(){
   showScreen('idle');
   // 業務管理ダッシュボード即時更新（Step 5・2026/05/01追加）
   try { updateBusinessDashboard(); } catch(e){ console.error('[Dashboard] update error:', e); }
-  renderInlineHistory();
   document.getElementById('appbarTitle').textContent='空　車';
   document.getElementById('surchargeInfo').style.display='none';
   updateSurchargeBadge();
@@ -1912,32 +1928,6 @@ function addCustomExtra(){
   closeExtraModal();
 }
 
-// ─── 本日の履歴インライン表示 ───
-function renderInlineHistory(){
-  const today = new Date();
-  const key = 'daikou_history_' + today.toDateString();
-  const rides = JSON.parse(localStorage.getItem(key) || '[]');
-  const el = document.getElementById('inlineHistory');
-  const wrap = document.getElementById('inlineHistoryWrap');
-  if(!el || !wrap) return;
-  if(rides.length === 0){
-    el.innerHTML = '';
-    wrap.style.display = 'none';
-    return;
-  }
-  wrap.style.display = 'flex'; wrap.style.flexDirection = 'column';
-  el.innerHTML = rides.map((r,i)=>`
-    <div style="background:#f5f5f5;border-radius:10px;padding:10px 14px;
-      display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
-      <div>
-        <span style="font-size:11px;color:#aaa;">${i+1}回目　${r.time}</span><br>
-        <span style="font-size:13px;color:#555;">${(r.distance_m/1000).toFixed(2)}km</span>
-      </div>
-      <span style="font-size:16px;font-weight:900;color:#111;">¥${r.fare.toLocaleString()}</span>
-    </div>
-  `).join('');
-}
-
 // ─── 画面切替 ───
 // 2026/05/01 仕様：画面ごとに表示するボタンを show クラスで制御
 //   業務未開始(businessStart) : 専用画面・[業務開始] のみ
@@ -2037,7 +2027,6 @@ document.addEventListener('visibilitychange', function(){
 
 loadSettings();
 try { FB.setIdle(); } catch(e){ console.error('FB setIdle error:', e); }
-renderInlineHistory();
 
 // ─── 業務管理スーパー機能の初期化（2026/05/01追加） ───
 // 永続化された業務状態を復元 + 3時間経過チェック（自動 abandon）

@@ -44,8 +44,8 @@ const GAP_RESET_SEC = 5;
 const RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
 
 // localStorage キー
-const STORAGE_KEY = 'dakome_business_state';
-const HISTORY_KEY = 'dakome_business_history';
+const STORAGE_KEY = 'daikou_business_state';
+const HISTORY_KEY = 'daikou_business_history';
 
 // 履歴保持期間（日数）
 const RETENTION_DAYS = 30;
