@@ -45,7 +45,7 @@ jobs:
 
     steps:
       - name: リポジトリ取得
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # 自動コミット時の rebase に十分な履歴が必要
           fetch-depth: 0
@@ -57,9 +57,9 @@ jobs:
           osmium --version
 
       - name: Node.js セットアップ
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: 都道府県 .poly 生成（最新の meta.json から）
         run: node scripts/build-poly-files.js

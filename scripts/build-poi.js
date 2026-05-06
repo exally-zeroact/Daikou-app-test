@@ -44,8 +44,7 @@ const geo = JSON.parse(fs.readFileSync(INPUT, 'utf8'));
 if (!geo.features) throw new Error('Invalid GeoJSON');
 
 const bbox = [Infinity, Infinity, -Infinity, -Infinity];
-const pois = [];
-const grid = {};
+const rawPois = [];
 let droppedNoCategory = 0, droppedNoGeom = 0;
 
 // 任意ジオメトリから代表点 [lon, lat] を取得する（Point はそのまま、Way/Polygon は重心）
@@ -108,14 +107,46 @@ for (const f of geo.features) {
   } else if (resolvedAttrs) {
     poi.a = resolvedAttrs;
   }
-  const idx = pois.length;
-  pois.push(poi);
-  const key = Math.floor(latInt / GRID_INT) + '_' + Math.floor(lngInt / GRID_INT);
-  (grid[key] ||= []).push(idx);
+  rawPois.push(poi);
 }
 
 if (droppedNoCategory) console.log(`  ⚠️ カテゴリ不明: ${droppedNoCategory} 件をスキップ`);
-if (droppedNoGeom)     console.log(`  ⚠️ Point 以外: ${droppedNoGeom} 件をスキップ`);
+if (droppedNoGeom)     console.log(`  ⚠️ ジオメトリ無効: ${droppedNoGeom} 件をスキップ`);
+
+// ─── 重複除去 ─────────────────────────────────────────────────────
+// 同じ施設が OSM 上で node + way（建物）両方に POI タグ付与されているケースを統合。
+// バケット: (category, name|"", lat10m_grid, lng10m_grid)  ※10m は約 0.0001度
+// ※ name が異なる近接POIは別物として残す
+const DEDUP_GRID = 10; // 1e5 整数で 10 ＝ 約11m
+const dedupBucket = new Map();
+let merged = 0;
+for (const p of rawPois) {
+  const key = [
+    p.c,
+    p.n || '',
+    Math.floor(p.lat / DEDUP_GRID),
+    Math.floor(p.lng / DEDUP_GRID),
+  ].join('|');
+  if (dedupBucket.has(key)) {
+    // 既存にマージ：属性は既存優先、名前があるほうを優先
+    const existing = dedupBucket.get(key);
+    if (!existing.n && p.n) existing.n = p.n;
+    if (!existing.a && p.a) existing.a = p.a;
+    merged++;
+  } else {
+    dedupBucket.set(key, p);
+  }
+}
+const pois = Array.from(dedupBucket.values());
+if (merged) console.log(`  🔄 重複除去: ${merged} 件をマージ（同カテゴリ+同名+〜11m）`);
+
+// ─── グリッド構築（dedup後の POIs に対して）─────────────────────
+const grid = {};
+for (let i = 0; i < pois.length; i++) {
+  const p = pois[i];
+  const key = Math.floor(p.lat / GRID_INT) + '_' + Math.floor(p.lng / GRID_INT);
+  (grid[key] ||= []).push(i);
+}
 
 const out = {
   v: 2,

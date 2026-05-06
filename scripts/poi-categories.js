@@ -87,6 +87,11 @@ function classifyOsmTags(tags) {
   const cu = tags.cuisine || '';
   const name = tags.name || '';
 
+  // 名前先頭が "道の駅" であれば amenity/shop に関わらず michinoeki と判定
+  // （amenity=marketplace 以外にも tourism=information / shop=convenience 等で
+  //   タグ付けされている例がある）
+  if (/^\s*道の駅/.test(name)) return 'michinoeki';
+
   if (em === 'defibrillator') return 'aed';
   if (ay === 'aerodrome' || ay === 'terminal') return 'airport';
   if (hw === 'bus_stop')        return 'bus_stop';
@@ -94,7 +99,6 @@ function classifyOsmTags(tags) {
   if (am === 'taxi')            return 'taxi_stand';
   if (am === 'bicycle_parking') return 'bicycle_parking';
   if (hw === 'services')        return 'sapa';
-  if (am === 'marketplace' && /道の駅/.test(name)) return 'michinoeki';
   if (lz === 'golf_course')     return 'golf';
   if (am === 'cinema')          return 'cinema';
   if (lz === 'adult_gaming_centre') return 'pachinko';
