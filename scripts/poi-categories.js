@@ -62,6 +62,9 @@ const CATEGORIES = {
 
   // 防災系（追加 1）
   90: 'aed',
+
+  // 公衆電話（追加 1・2026/05）
+  91: 'public_phone',
 };
 
 // 名前→ID 逆引き（入力 GeoJSON が文字列カテゴリの場合に使用）
@@ -93,6 +96,7 @@ function classifyOsmTags(tags) {
   if (/^\s*道の駅/.test(name)) return 'michinoeki';
 
   if (em === 'defibrillator') return 'aed';
+  if (am === 'telephone')     return 'public_phone';
   if (ay === 'aerodrome' || ay === 'terminal') return 'airport';
   if (hw === 'bus_stop')        return 'bus_stop';
   if (rw === 'station')         return 'station';
