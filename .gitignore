@@ -19,5 +19,9 @@ input/*/raw/
 input/*/flood.geojson
 input/*/tsunami.geojson
 
+# CI が毎回 PBF から再生成する POI 中間 GeoJSON（最終 data/poi-*.js だけ追跡）
+# tokyo は 100MB 超のため git に乗せられない。デバッグ用に Actions artifact で保管。
+input/*/poi.geojson
+
 # Local logs
 *.log

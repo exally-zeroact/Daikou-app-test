@@ -88,6 +88,16 @@ jobs:
             node scripts/build-poi.js "$f" "$PREF"
           done
 
+      - name: 中間 POI GeoJSON を Actions Artifact に保管（デバッグ用・14日リテンション）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: input-poi-geojson-${{ github.run_id }}
+          path: input/*/poi.geojson
+          retention-days: 14
+          if-no-files-found: warn
+          compression-level: 9
+
       - name: サイズ・件数レポート
         run: |
           echo "=== 生成された data/poi-{pref}.js ==="
@@ -109,7 +119,8 @@ jobs:
       - name: 変更検出
         id: diff
         run: |
-          git add -A input/ data/
+          # input/ は .gitignore で除外済 → data/ のみ追跡
+          git add -A data/
           if [ -n "$(git diff --cached --name-only)" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "✅ 変更あり"
@@ -129,13 +140,27 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(poi): OSM自動更新 $(date -u +'%Y-%m') C案PBF [skip ci]"
 
-          # 並行ワークフロー（auto-version 等）の push と衝突した場合は rebase してリトライ
+          # 並行ワークフロー（auto-version 等）と衝突したときは
+          # 「rebase ではなく cherry-pick で main 先端の上に積み直す」方式を採用。
+          # （rebase は working tree が dirty だと失敗するため・cherry-pick の方が状態管理が単純）
+          MY_COMMIT=$(git rev-parse HEAD)
           push_ok=0
           for i in 1 2 3 4 5; do
             git push 2>&1 && { push_ok=1; echo "✅ push 成功 (試行 $i)"; break; }
-            echo "⚠️ push 拒否 (試行 $i) → fetch + rebase してリトライ"
+            echo "⚠️ push 拒否 (試行 $i) → main 先端にリベース"
+            # working tree を完全にクリーンにしてから fetch + 再構築
+            git reset --hard "$MY_COMMIT"
             git fetch origin main
-            git pull --rebase origin main || git rebase --abort || true
+            # main 先端を取り込み、その上に自分のコミットを cherry-pick で乗せる
+            git reset --hard origin/main
+            if git cherry-pick "$MY_COMMIT" 2>&1; then
+              MY_COMMIT=$(git rev-parse HEAD)
+              echo "  ✓ cherry-pick 成功 → $MY_COMMIT"
+            else
+              echo "  ⚠️ cherry-pick 衝突 → 中断"
+              git cherry-pick --abort 2>/dev/null || true
+              break
+            fi
             sleep $((i * 2))
           done
           if [ "$push_ok" != "1" ]; then
