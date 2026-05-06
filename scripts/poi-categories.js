@@ -79,4 +79,91 @@ for (const [id, name] of Object.entries(CATEGORIES)) CATEGORY_NAME_TO_ID[name] =
 //   er:1                 病院 救急
 //   kind:"elem"|"jhs"|"hs"|"univ"|"voc"  学校種別
 
-module.exports = { CATEGORIES, CATEGORY_NAME_TO_ID };
+// OSM tags → 内部カテゴリ名（osmium 由来の生 OSM タグから自動分類するときに使う）
+function classifyOsmTags(tags) {
+  if (!tags) return null;
+  const am = tags.amenity, sh = tags.shop, lz = tags.leisure, to = tags.tourism;
+  const rw = tags.railway, hw = tags.highway, ay = tags.aeroway, em = tags.emergency;
+  const cu = tags.cuisine || '';
+  const name = tags.name || '';
+
+  if (em === 'defibrillator') return 'aed';
+  if (ay === 'aerodrome' || ay === 'terminal') return 'airport';
+  if (hw === 'bus_stop')        return 'bus_stop';
+  if (rw === 'station')         return 'station';
+  if (am === 'taxi')            return 'taxi_stand';
+  if (am === 'bicycle_parking') return 'bicycle_parking';
+  if (hw === 'services')        return 'sapa';
+  if (am === 'marketplace' && /道の駅/.test(name)) return 'michinoeki';
+  if (lz === 'golf_course')     return 'golf';
+  if (am === 'cinema')          return 'cinema';
+  if (lz === 'adult_gaming_centre') return 'pachinko';
+  if (am === 'karaoke_box')     return 'karaoke';
+  if (am === 'public_bath' || lz === 'hot_spring') return 'onsen_sento';
+  if (am === 'atm')             return 'atm';
+  if (am === 'bank')            return 'bank';
+  if (am === 'library')         return 'library';
+  if (am === 'fire_station')    return 'fire_station';
+  if (am === 'police')          return 'police_koban';
+  if (am === 'post_office')     return 'post_office';
+  if (am === 'townhall')        return 'city_office';
+  if (sh === 'variety_store')   return 'hundred_yen';
+  if (sh === 'department_store' || sh === 'mall') return 'department_sc';
+  if (sh === 'doityourself' || sh === 'hardware') return 'home_center';
+  if (sh === 'supermarket')     return 'supermarket';
+  if (sh === 'chemist' || am === 'pharmacy') return 'pharmacy_drugstore';
+  if (am === 'dentist')         return 'dental';
+  if (am === 'clinic' || am === 'doctors') return 'clinic';
+  if (am === 'fast_food')       return 'fast_food';
+  if (am === 'cafe')            return 'cafe';
+  if (am === 'restaurant' || am === 'bar' || am === 'pub') {
+    if (cu === 'ramen')         return 'ramen';
+    if (cu === 'sushi')         return 'sushi';
+    if (cu === 'yakiniku' || cu === 'korean') return 'yakiniku';
+    if (cu === 'izakaya')       return 'izakaya';
+    return 'restaurant_bar';
+  }
+  if (to === 'hotel' || to === 'hostel' || to === 'guest_house' || to === 'motel') return 'hotel';
+  if (sh === 'convenience')     return 'convenience_store';
+  if (am === 'fuel')            return 'gas_station';
+  if (am === 'hospital')        return 'hospital';
+  if (am === 'school' || am === 'kindergarten' || am === 'college' || am === 'university') return 'school';
+  if (to === 'attraction' || to === 'museum' || to === 'viewpoint' || to === 'artwork') return 'sightseeing';
+  return null;
+}
+
+function extractAttrsFromOsmTags(tags, category) {
+  const a = {};
+  const oh = tags.opening_hours;
+  if (oh === '24/7') a.h24 = 1;
+  else if (oh && oh.length < 80) a.open = oh;
+  if (category === 'gas_station') {
+    if (tags.self_service === 'yes') a.self = 1;
+    if (tags.self_service === 'no')  a.full = 1;
+    if (tags['fuel:diesel'] === 'yes') a.diesel = 1;
+  }
+  if (category === 'hospital') {
+    if (tags.emergency === 'yes') a.er = 1;
+  }
+  if (category === 'school') {
+    const am = tags.amenity;
+    if (am === 'kindergarten')      a.kind = 'kg';
+    else if (am === 'college')      a.kind = 'voc';
+    else if (am === 'university')   a.kind = 'univ';
+    else if (am === 'school') {
+      const isced = tags['isced:level'] || '';
+      if (isced.includes('1'))      a.kind = 'elem';
+      else if (isced.includes('2')) a.kind = 'jhs';
+      else if (isced.includes('3')) a.kind = 'hs';
+      else if (/(高校|高等)/.test(tags.name || '')) a.kind = 'hs';
+      else if (/中学/.test(tags.name || ''))        a.kind = 'jhs';
+      else if (/小学/.test(tags.name || ''))        a.kind = 'elem';
+    }
+  }
+  return Object.keys(a).length ? a : null;
+}
+
+module.exports = {
+  CATEGORIES, CATEGORY_NAME_TO_ID,
+  classifyOsmTags, extractAttrsFromOsmTags,
+};

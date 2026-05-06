@@ -26,7 +26,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { CATEGORIES, CATEGORY_NAME_TO_ID } = require('./poi-categories.js');
+const { CATEGORIES, CATEGORY_NAME_TO_ID, classifyOsmTags, extractAttrsFromOsmTags } = require('./poi-categories.js');
 const { PRECISION, GRID_INT } = require('./encoding-utils.js');
 
 const [, , INPUT, PREF] = process.argv;
@@ -55,8 +55,19 @@ for (const f of geo.features) {
 
   // カテゴリ解決
   let catId = null;
+  let resolvedAttrs = null;
   if (typeof props.category === 'number') catId = props.category;
   else if (typeof props.category === 'string') catId = CATEGORY_NAME_TO_ID[props.category];
+
+  // フォールバック：properties に category が無い場合は OSM 生タグから自動分類
+  // （osmium export 直後の GeoJSON はこのケース）
+  if (catId === undefined || catId === null || !(catId in CATEGORIES)) {
+    const cat = classifyOsmTags(props);
+    if (cat) {
+      catId = CATEGORY_NAME_TO_ID[cat];
+      resolvedAttrs = extractAttrsFromOsmTags(props, cat);
+    }
+  }
   if (catId === undefined || catId === null || !(catId in CATEGORIES)) {
     droppedNoCategory++;
     continue;
@@ -74,6 +85,8 @@ for (const f of geo.features) {
   if (props.name) poi.n = String(props.name);
   if (props.attrs && typeof props.attrs === 'object') {
     poi.a = props.attrs;
+  } else if (resolvedAttrs) {
+    poi.a = resolvedAttrs;
   }
   const idx = pois.length;
   pois.push(poi);

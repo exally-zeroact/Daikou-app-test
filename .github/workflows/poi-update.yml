@@ -122,7 +122,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(poi): OSM自動更新 $(date -u +'%Y-%m') C案PBF [skip ci]"
-          git push
+          # 並行ワークフロー（auto-version 等）の push と衝突した場合は rebase してリトライ
+          for i in 1 2 3; do
+            if git push; then
+              echo "✅ push 成功 (試行 $i)"
+              break
+            fi
+            echo "⚠️ push 拒否 (試行 $i) → fetch + rebase してリトライ"
+            git fetch origin main
+            git pull --rebase origin main
+            sleep 2
+          done
 
       - name: 失敗時のサマリ
         if: failure()
