@@ -111,6 +111,10 @@ function classifyOsmTags(tags) {
   if (am === 'police')          return 'police_koban';
   if (am === 'post_office')     return 'post_office';
   if (am === 'townhall')        return 'city_office';
+  // 公共施設（市役所以外の community/civic/government 系）
+  if (am === 'community_centre' || am === 'public_building' || am === 'civic'
+      || am === 'social_facility' || am === 'courthouse' || am === 'embassy'
+      || tags.office === 'government') return 'public_facility';
   if (sh === 'variety_store')   return 'hundred_yen';
   if (sh === 'department_store' || sh === 'mall') return 'department_sc';
   if (sh === 'doityourself' || sh === 'hardware') return 'home_center';
