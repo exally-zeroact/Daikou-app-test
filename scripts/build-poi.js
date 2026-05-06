@@ -48,9 +48,29 @@ const pois = [];
 const grid = {};
 let droppedNoCategory = 0, droppedNoGeom = 0;
 
+// 任意ジオメトリから代表点 [lon, lat] を取得する（Point はそのまま、Way/Polygon は重心）
+function representativePoint(g) {
+  if (!g) return null;
+  if (g.type === 'Point' && Array.isArray(g.coordinates)) return g.coordinates;
+  // 任意の coordinates ツリーから経度/緯度の平均を取る（粗いが Point 出力には十分）
+  let sumLon = 0, sumLat = 0, n = 0;
+  function walk(node) {
+    if (!Array.isArray(node)) return;
+    if (typeof node[0] === 'number' && typeof node[1] === 'number') {
+      sumLon += node[0]; sumLat += node[1]; n++;
+      return;
+    }
+    for (const v of node) walk(v);
+  }
+  walk(g.coordinates);
+  if (n === 0) return null;
+  return [sumLon / n, sumLat / n];
+}
+
 for (const f of geo.features) {
   const g = f.geometry;
-  if (!g || g.type !== 'Point' || !Array.isArray(g.coordinates)) { droppedNoGeom++; continue; }
+  const coord = representativePoint(g);
+  if (!coord) { droppedNoGeom++; continue; }
   const props = f.properties || {};
 
   // カテゴリ解決
@@ -74,8 +94,8 @@ for (const f of geo.features) {
   }
 
   // GeoJSON は [lon, lat] 順
-  const latInt = Math.round(g.coordinates[1] * PRECISION);
-  const lngInt = Math.round(g.coordinates[0] * PRECISION);
+  const latInt = Math.round(coord[1] * PRECISION);
+  const lngInt = Math.round(coord[0] * PRECISION);
   if (latInt < bbox[0]) bbox[0] = latInt;
   if (lngInt < bbox[1]) bbox[1] = lngInt;
   if (latInt > bbox[2]) bbox[2] = latInt;

@@ -119,8 +119,12 @@ for REGION in $REGIONS; do
       -o "$PREF_PBF" --overwrite --strategy=smart
 
     echo "  [4/4] ${PREF}: osmium export → ${OUT_GEOJSON}"
-    osmium export "$PREF_PBF" -f geojson -o "$OUT_GEOJSON" --overwrite \
-      --geometry-types=point
+    # geometry-types を絞らずに全タイプ出力 → way/relation の中心点（多角形・線）も含む。
+    # build-poi.js は Point feature 以外を droppedNoGeom でスキップするので、後段で
+    # 中心点だけ拾う仕組みにしたい場合は --add-unique-id=type_id 等を将来検討。
+    # 現在は --add-locations-to-ways で way/relation の geometry を再構成し、
+    # build-poi.js 側で各 feature の重心点を計算するロジックを使う。
+    osmium export "$PREF_PBF" -f geojson -o "$OUT_GEOJSON" --overwrite
 
     SIZE=$(stat -c '%s' "$OUT_GEOJSON" 2>/dev/null || stat -f '%z' "$OUT_GEOJSON")
     COUNT=$(node -e "const fs=require('fs');const fc=JSON.parse(fs.readFileSync('$OUT_GEOJSON','utf8'));console.log(fc.features?fc.features.length:0);")
