@@ -89,7 +89,7 @@ for REGION in $REGIONS; do
   ls -lh "$PBF" | awk '{print "       size:",$5}'
 
   # 2. POI タグ抽出
-  echo "  [2/4] osmium tags-filter (POI tags)"
+  echo "  [2/3] osmium tags-filter (POI tags)"
   osmium tags-filter "$PBF" \
     n/amenity w/amenity nwr/amenity \
     n/shop w/shop nwr/shop \
@@ -102,39 +102,20 @@ for REGION in $REGIONS; do
     n/emergency=defibrillator \
     -o "$POI_PBF" --overwrite
 
-  # 3. 都道府県別 extract + GeoJSON 化
-  for PREF in $PREFS; do
-    POLY="scripts/poly/${PREF}.poly"
-    if [ ! -f "$POLY" ]; then
-      echo "  ⚠️  ${PREF}: ${POLY} 無し → スキップ" >&2
-      continue
-    fi
-    PREF_PBF="tmp/${PREF}-poi.osm.pbf"
-    OUT_DIR="input/${PREF}"
-    mkdir -p "$OUT_DIR"
-    OUT_GEOJSON="${OUT_DIR}/poi.geojson"
+  # 3. 地方単位で GeoJSON 化 → Node 側で県別分割
+  # （以前は osmium extract -p .poly で県別切出ししていたが、
+  #   北海道のような大きい PBF で「PBF error: blob contains no data or
+  #   unknown compression method」が出るため osm-update.yml と同じ
+  #   「regional GeoJSON → Node で重心最近傍振分け」方式に統一）
+  REGION_GEOJSON="tmp/${REGION}-poi.geojson"
+  echo "  [3/3] osmium export → ${REGION_GEOJSON}"
+  osmium export "$POI_PBF" -f geojson -o "$REGION_GEOJSON" --overwrite
 
-    echo "  [3/4] ${PREF}: osmium extract ($(basename "$POLY"))"
-    osmium extract -p "$POLY" "$POI_PBF" \
-      -o "$PREF_PBF" --overwrite --strategy=smart
-
-    echo "  [4/4] ${PREF}: osmium export → ${OUT_GEOJSON}"
-    # geometry-types を絞らずに全タイプ出力 → way/relation の中心点（多角形・線）も含む。
-    # build-poi.js は Point feature 以外を droppedNoGeom でスキップするので、後段で
-    # 中心点だけ拾う仕組みにしたい場合は --add-unique-id=type_id 等を将来検討。
-    # 現在は --add-locations-to-ways で way/relation の geometry を再構成し、
-    # build-poi.js 側で各 feature の重心点を計算するロジックを使う。
-    osmium export "$PREF_PBF" -f geojson -o "$OUT_GEOJSON" --overwrite
-
-    SIZE=$(stat -c '%s' "$OUT_GEOJSON" 2>/dev/null || stat -f '%z' "$OUT_GEOJSON")
-    COUNT=$(node -e "const fs=require('fs');const fc=JSON.parse(fs.readFileSync('$OUT_GEOJSON','utf8'));console.log(fc.features?fc.features.length:0);")
-    printf "       %-12s count=%-7s size=%6.1f KB\n" "$PREF" "$COUNT" "$(echo "scale=1; $SIZE/1024" | awk "BEGIN{print $SIZE/1024}")"
-
-    rm -f "$PREF_PBF"
-  done
+  echo "       split by prefecture (Node)"
+  node scripts/split-poi-by-region.js "$REGION_GEOJSON" "$REGION"
 
   echo "✅ ${REGION} 完了"
-  rm -f "$POI_PBF"
+  rm -f "$POI_PBF" "$REGION_GEOJSON"
   # 元PBFは他用途のために 24h 残す（次回のCIで再利用）
 done
 

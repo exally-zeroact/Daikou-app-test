@@ -91,8 +91,34 @@ function gridKey(latInt, lngInt) {
   return Math.floor(latInt / GRID_INT) + '_' + Math.floor(lngInt / GRID_INT);
 }
 
+// 地方 → 都道府県リスト（build-roads.js / fetch-poi-bulk.sh と同じ）
+const REGION_PREFS = {
+  hokkaido: ['hokkaido'],
+  tohoku:   ['aomori','iwate','miyagi','akita','yamagata','fukushima'],
+  kanto:    ['ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa'],
+  chubu:    ['niigata','toyama','ishikawa','fukui','yamanashi','nagano','gifu','shizuoka','aichi'],
+  kansai:   ['mie','shiga','kyoto','osaka','hyogo','nara','wakayama'],
+  chugoku:  ['tottori','shimane','okayama','hiroshima','yamaguchi'],
+  shikoku:  ['tokushima','kagawa','ehime','kochi'],
+  kyushu:   ['fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa'],
+};
+
+function nearestPrefecture(lat, lng, prefList) {
+  const list = prefList || Object.keys(PREFECTURES);
+  let best = null, bestDist = Infinity;
+  for (const pref of list) {
+    const [pLat, pLng] = PREFECTURES[pref];
+    const dLat = lat - pLat;
+    const dLng = lng - pLng;
+    const d = dLat * dLat + dLng * dLng;
+    if (d < bestDist) { bestDist = d; best = pref; }
+  }
+  return best;
+}
+
 module.exports = {
   zigzagEncode, writeVarint, writeSignedVarint,
   encodeIndexListB64, encodeLineB64, encodePolygonsBytes,
-  PREFECTURES, PRECISION, GRID_INT, gridKey,
+  PREFECTURES, REGION_PREFS, nearestPrefecture,
+  PRECISION, GRID_INT, gridKey,
 };
