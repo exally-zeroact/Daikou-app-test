@@ -1,0 +1,23 @@
+# Build/cache directories
+tmp/
+node_modules/
+.npm/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Large fetched intermediate data (regenerable via scripts/fetch-real-data.js)
+# 国土数値情報の生 ZIP・展開後 GML（数百MB）
+input/*/raw/
+
+# 大容量 GeoJSON 中間ファイル（KSJ から再取得可能）
+input/*/flood.geojson
+input/*/tsunami.geojson
+
+# Local logs
+*.log

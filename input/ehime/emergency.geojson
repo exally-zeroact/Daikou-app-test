@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "name": "ehime emergency routes (test fixture)",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "国道11号 緊急輸送", "roadIndices": [10, 250, 870, 1500, 5040, 12001, 23456, 45000, 78000, 99999] },
+      "geometry": { "type": "LineString", "coordinates": [[132.77, 33.84], [132.78, 33.85], [132.79, 33.86]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "松山自動車道 緊急輸送", "roadIndices": [100, 500, 1200, 2400, 7000, 15000, 33333, 60000, 100000] },
+      "geometry": { "type": "LineString", "coordinates": [[132.85, 33.78], [132.90, 33.80], [132.95, 33.82]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "西瀬戸自動車道 緊急輸送", "roadIndices": [50, 333, 999, 3700, 8800, 17500, 40000, 88000] },
+      "geometry": { "type": "LineString", "coordinates": [[132.97, 34.10], [132.99, 34.12], [133.01, 34.13]] }
+    }
+  ]
+}
