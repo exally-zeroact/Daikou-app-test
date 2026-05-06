@@ -46,6 +46,9 @@ jobs:
     steps:
       - name: リポジトリ取得
         uses: actions/checkout@v4
+        with:
+          # 自動コミット時の rebase に十分な履歴が必要
+          fetch-depth: 0
 
       - name: osmium-tool インストール
         run: |
