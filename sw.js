@@ -32,6 +32,20 @@ const PRECACHE_FILES = [
   '/icon-192.png',
   '/icon-512.png',
   '/manifest.json',
+  // ★ オフラインファースト必須バンドル（13種・全国共通データ）
+  '/data/coarse-jp.js',
+  '/data/pref-borders-jp.js',
+  '/data/shelters-jp.js',
+  '/data/emergency-medical-jp.js',
+  '/data/highways-jp.js',
+  '/data/stations-jp.js',
+  '/data/misc-jp.js',
+  '/data/faults-jp.js',
+  '/data/night-clinics-jp.js',
+  '/data/airports-jp.js',
+  '/data/michinoeki-jp.js',
+  '/data/coastline-jp.js',
+  '/data/ports-jp.js',
 ];
 
 self.addEventListener('install', function(e){
@@ -106,7 +120,24 @@ self.addEventListener('fetch', function(e){
     e.request.url.includes('/data/roads-') ||
     e.request.url.includes('/data/bridges') ||
     e.request.url.includes('/data/tunnels') ||
-    e.request.url.includes('/data/meta.json')
+    e.request.url.includes('/data/poi-') ||
+    e.request.url.includes('/data/hazard-') ||
+    e.request.url.includes('/data/road-attrs-') ||
+    e.request.url.includes('/data/meta.json') ||
+    // 全国共通バンドル（13種・初回 install で全 precache 済）
+    e.request.url.includes('/data/coarse-jp.js') ||
+    e.request.url.includes('/data/pref-borders-jp.js') ||
+    e.request.url.includes('/data/shelters-jp.js') ||
+    e.request.url.includes('/data/emergency-medical-jp.js') ||
+    e.request.url.includes('/data/highways-jp.js') ||
+    e.request.url.includes('/data/stations-jp.js') ||
+    e.request.url.includes('/data/misc-jp.js') ||
+    e.request.url.includes('/data/faults-jp.js') ||
+    e.request.url.includes('/data/night-clinics-jp.js') ||
+    e.request.url.includes('/data/airports-jp.js') ||
+    e.request.url.includes('/data/michinoeki-jp.js') ||
+    e.request.url.includes('/data/coastline-jp.js') ||
+    e.request.url.includes('/data/ports-jp.js')
   ){
     e.respondWith(staleWhileRevalidate(e.request));
     return;
