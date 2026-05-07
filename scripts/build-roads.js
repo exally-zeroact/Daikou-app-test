@@ -1,26 +1,29 @@
 #!/usr/bin/env node
 /**
- * GeoJSON道路データ → ダイコメ用 roads-<prefecture>.js 変換 v4
+ * GeoJSON道路データ → ダイコメ用 roads-<prefecture>.js 変換 v6
  *
- * v4で追加: 都道府県別分割
+ * v6 (2026-05-07): typeCode 1byte → 16bit bitmap 2byte
+ *   bit 0-3   typeCode (motorway-track, 0-12)
+ *   bit 4     oneway
+ *   bit 5-6   incline (00=なし, 01=登り急, 10=下り急, 11=方向不明)
+ *   bit 7-9   lanes   (0=不明, 1-6=本数, 7=7+)
+ *   bit 10-11 width   (00=不明, 01=≤2m, 10=2-5m, 11=>5m)
+ *   bit 12-13 layer   (00=平面, 01=高架, 10=地下, 11=その他)
+ *   bit 14-15 reserved
  *
- * 圧縮パイプライン（v3踏襲 + 都道府県振り分け）:
+ * v5: per-prefecture, 全通過グリッド登録 (継続)
+ * v4: per-prefecture
+ *
+ * 圧縮パイプライン:
  *   1. Douglas-Peucker 5m 簡略化
- *   2. 道路名削除
- *   3. 1e5精度整数化
- *   4. 都道府県振り分け（NEW）：重心からの最近傍
- *   5. デルタ圧縮
- *   6. Varint Zigzag エンコード
- *   7. Base64文字列化
+ *   2. 1e5精度整数化
+ *   3. 都道府県振り分け（重心 nearest）
+ *   4. デルタ + Varint Zigzag + Base64
  *
- * 入力: 一地方分のGeoJSON（例：shikoku-roads.geojson）
- * 出力: その地方に含まれる都道府県分の roads-<pref>.js + meta-<region>.json
+ * 入力 GeoJSON properties で参照する OSM タグ:
+ *   highway, oneway, incline, lanes, width, layer
  *
  * 使い方: node build-roads.js <input.geojson> <output_dir> <region>
- *   ex: node build-roads.js shikoku.geojson data/ shikoku
- *       → data/roads-ehime.js, data/roads-kagawa.js,
- *         data/roads-tokushima.js, data/roads-kochi.js,
- *         data/meta-shikoku.json
  */
 
 const fs = require('fs');
@@ -34,38 +37,29 @@ if (!INPUT || !OUTPUT_DIR || !REGION) {
 
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-// ─── 都道府県データ（重心 + 地方所属）─────────────────────────────
-// 各都道府県の重心 [lat, lon] と Geofabrik 地方区分
+// ─── 都道府県重心 ─────────────────────────────────────────────────
 const PREFECTURES = {
   hokkaido:  [43.3, 142.8],
-  // 東北6県
   aomori:    [40.8, 140.7], iwate:    [39.7, 141.2], miyagi:    [38.3, 140.9],
   akita:     [39.7, 140.4], yamagata: [38.2, 140.0], fukushima: [37.4, 140.2],
-  // 関東7都県
   ibaraki:   [36.4, 140.4], tochigi:  [36.7, 139.9], gunma:     [36.4, 139.0],
   saitama:   [35.9, 139.4], chiba:    [35.5, 140.2], tokyo:     [35.7, 139.7],
   kanagawa:  [35.4, 139.4],
-  // 中部9県
   niigata:   [37.5, 138.9], toyama:   [36.6, 137.2], ishikawa:  [36.6, 136.7],
   fukui:     [35.8, 136.2], yamanashi:[35.6, 138.6], nagano:    [36.2, 138.0],
   gifu:      [35.6, 137.0], shizuoka: [34.9, 138.4], aichi:     [35.1, 137.0],
-  // 関西7府県
   mie:       [34.6, 136.5], shiga:    [35.1, 136.1], kyoto:     [35.2, 135.7],
   osaka:     [34.6, 135.5], hyogo:    [35.0, 134.9], nara:      [34.4, 135.8],
   wakayama:  [33.8, 135.5],
-  // 中国5県
   tottori:   [35.4, 134.0], shimane:  [35.0, 132.8], okayama:   [34.9, 133.8],
   hiroshima: [34.5, 132.7], yamaguchi:[34.2, 131.6],
-  // 四国4県
   tokushima: [33.9, 134.4], kagawa:   [34.3, 134.0],
   ehime:     [33.7, 132.9], kochi:    [33.5, 133.5],
-  // 九州沖縄8県
   fukuoka:   [33.6, 130.7], saga:     [33.3, 130.1], nagasaki:  [32.9, 129.9],
   kumamoto:  [32.7, 130.7], oita:     [33.2, 131.4], miyazaki:  [32.0, 131.4],
   kagoshima: [31.4, 130.6], okinawa:  [26.5, 128.0],
 };
 
-// 地方 → 都道府県リスト
 const REGION_PREFECTURES = {
   hokkaido: ['hokkaido'],
   tohoku:   ['aomori','iwate','miyagi','akita','yamagata','fukushima'],
@@ -81,13 +75,110 @@ const targetPrefs = REGION_PREFECTURES[REGION];
 if (!targetPrefs) throw new Error(`未知の地方: ${REGION}`);
 console.log(`  → 地方: ${REGION} (${targetPrefs.length}県: ${targetPrefs.join(', ')})`);
 
-// ─── 道路種別コード ────────────────────────────────────────────────
+// ─── 道路種別コード (v6: track 追加) ───────────────────────────────
 const TYPE_CODES = {
   motorway: 0, trunk: 1, primary: 2, secondary: 3, tertiary: 4,
   unclassified: 5, residential: 6,
   motorway_link: 7, trunk_link: 8, primary_link: 9,
   secondary_link: 10, tertiary_link: 11,
+  track: 12,
 };
+
+// ─── v6 属性パーサ ─────────────────────────────────────────────────
+const INCLINE_THRESHOLD = 6; // 急勾配閾値 (%)
+
+// incline → 0=なし, 1=登り急, 2=下り急, 3=方向不明・急
+function parseIncline(raw) {
+  if (raw == null) return 0;
+  let v = String(raw).trim();
+  if (!v) return 0;
+  // 度表記 → % 変換
+  if (/°$/.test(v)) {
+    const deg = parseFloat(v);
+    if (isNaN(deg)) return 0;
+    const pct = Math.tan(deg * Math.PI / 180) * 100;
+    return classifyPct(pct);
+  }
+  // % または素の数値
+  if (/^[+-]?\d+(\.\d+)?\s*%?$/.test(v)) {
+    const pct = parseFloat(v);
+    if (isNaN(pct)) return 0;
+    return classifyPct(pct);
+  }
+  // 文字列マッピング
+  const lower = v.toLowerCase();
+  if (lower === 'up') return 1;
+  if (lower === 'down') return 2;
+  if (/^(yes|steep|very_steep|extreme|moderate)$/.test(lower)) return 3;
+  return 0;
+}
+function classifyPct(pct) {
+  if (Math.abs(pct) < INCLINE_THRESHOLD) return 0;
+  return pct >= INCLINE_THRESHOLD ? 1 : 2;
+}
+
+// oneway → 0/1
+function parseOneway(raw) {
+  if (raw == null) return 0;
+  const v = String(raw).trim().toLowerCase();
+  if (v === 'yes' || v === 'true' || v === '1' || v === '-1') return 1;
+  return 0;
+}
+
+// lanes → 0=不明, 1-6=本数, 7=7+
+function parseLanes(raw) {
+  if (raw == null) return 0;
+  const n = parseInt(String(raw), 10);
+  if (isNaN(n) || n <= 0) return 0;
+  if (n >= 7) return 7;
+  return n;
+}
+
+// width → 00=不明 / 01=狭(≤2m) / 10=中(2-5m) / 11=広(>5m)
+// 数値+単位（"3.5", "3.5 m", "10 ft" など）。数値のみは m と仮定
+function parseWidth(raw) {
+  if (raw == null) return 0;
+  const v = String(raw).trim();
+  if (!v) return 0;
+  const m = v.match(/^([+-]?\d+(?:\.\d+)?)\s*(m|ft|feet)?$/i);
+  if (!m) return 0;
+  let num = parseFloat(m[1]);
+  if (isNaN(num) || num <= 0) return 0;
+  const unit = (m[2] || 'm').toLowerCase();
+  if (unit === 'ft' || unit === 'feet') num *= 0.3048;
+  if (num <= 2) return 1;
+  if (num <= 5) return 2;
+  return 3;
+}
+
+// layer → 00=平面 / 01=高架 / 10=地下 / 11=その他
+function parseLayer(raw) {
+  if (raw == null) return 0;
+  const n = parseInt(String(raw), 10);
+  if (isNaN(n)) return 0;
+  if (n === 0) return 0;
+  if (n >= 1) return 1;
+  if (n <= -1) return 2;
+  return 3;
+}
+
+// 4ビット typeCode + 4ビット incline/oneway + 8ビット lanes/width/layer
+//   bit 0-3   typeCode
+//   bit 4     oneway
+//   bit 5-6   incline
+//   bit 7-9   lanes
+//   bit 10-11 width
+//   bit 12-13 layer
+//   bit 14-15 reserved
+function packAttrBitmap(typeCode, props) {
+  let bits = typeCode & 0x0F;
+  bits |= (parseOneway(props.oneway) & 0x01) << 4;
+  bits |= (parseIncline(props.incline) & 0x03) << 5;
+  bits |= (parseLanes(props.lanes) & 0x07) << 7;
+  bits |= (parseWidth(props.width) & 0x03) << 10;
+  bits |= (parseLayer(props.layer) & 0x03) << 12;
+  return bits & 0xFFFF;
+}
 
 // ─── Douglas-Peucker ──────────────────────────────────────────────
 const DP_TOLERANCE = 5;
@@ -119,7 +210,6 @@ function douglasPeucker(points, tolerance) {
 
 // ─── Varint + Zigzag ──────────────────────────────────────────────
 function zigzagEncode(n) { return (n << 1) ^ (n >> 31); }
-function zigzagDecode(n) { return (n >>> 1) ^ -(n & 1); }
 
 function writeVarint(buf, n) {
   while (n >= 0x80) { buf.push((n & 0x7f) | 0x80); n = n >>> 7; }
@@ -127,13 +217,11 @@ function writeVarint(buf, n) {
 }
 function writeSignedVarint(buf, n) { writeVarint(buf, zigzagEncode(n)); }
 
-// ─── 都道府県判定（重心からの最近傍）──────────────────────────────
-// 入力都道府県群の中から、点[lat,lon]に最も近い県を返す
+// ─── 都道府県判定 ────────────────────────────────────────────────
 function nearestPrefecture(lat, lon, prefList) {
   let best = null, bestDist = Infinity;
   for (const pref of prefList) {
     const [pLat, pLon] = PREFECTURES[pref];
-    // 緯度経度の二乗距離（球面距離は不要・順序判定だけ）
     const dLat = lat - pLat;
     const dLon = lon - pLon;
     const d = dLat * dLat + dLon * dLon;
@@ -142,7 +230,7 @@ function nearestPrefecture(lat, lon, prefList) {
   return best;
 }
 
-// ─── メイン処理 ─────────────────────────────────────────────────────
+// ─── メイン処理 ──────────────────────────────────────────────────
 console.log(`  → 入力: ${INPUT}`);
 const raw = fs.readFileSync(INPUT, 'utf8');
 const geo = JSON.parse(raw);
@@ -152,10 +240,13 @@ let totalRoads = 0;
 let totalPointsBefore = 0, totalPointsAfter = 0;
 let droppedUnknownType = 0;
 
-// 都道府県別バケット: { ehime: [[typeCode, simplifiedPoints], ...], kagawa: [...], ... }
 const buckets = {};
 const bboxByPref = {};
 for (const p of targetPrefs) { buckets[p] = []; bboxByPref[p] = [Infinity, Infinity, -Infinity, -Infinity]; }
+
+// 属性充足率カウンタ
+const attrCounters = {};
+for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, track: 0 };
 
 for (const f of geo.features) {
   if (!f.geometry) continue;
@@ -168,6 +259,8 @@ for (const f of geo.features) {
   const typeCode = TYPE_CODES[props.highway];
   if (typeCode === undefined) { droppedUnknownType++; continue; }
 
+  const bitmap = packAttrBitmap(typeCode, props);
+
   for (const coords of lines) {
     if (coords.length < 2) continue;
     const intPoints = coords.map(([lon, lat]) => [
@@ -178,13 +271,11 @@ for (const f of geo.features) {
     if (simplified.length < 2) continue;
     totalPointsAfter += simplified.length;
 
-    // 中点で都道府県判定
     const midIdx = Math.floor(simplified.length / 2);
     const [midLat, midLon] = simplified[midIdx];
     const pref = nearestPrefecture(midLat / 1e5, midLon / 1e5, targetPrefs);
-    if (!pref) continue; // 念のため
+    if (!pref) continue;
 
-    // bbox 更新（県別）
     const bb = bboxByPref[pref];
     for (const [lat, lon] of simplified) {
       if (lat < bb[0]) bb[0] = lat;
@@ -192,8 +283,17 @@ for (const f of geo.features) {
       if (lat > bb[2]) bb[2] = lat;
       if (lon > bb[3]) bb[3] = lon;
     }
-    buckets[pref].push([typeCode, simplified]);
+    buckets[pref].push([bitmap, simplified]);
     totalRoads++;
+
+    // 充足率カウント（県別）
+    const c = attrCounters[pref];
+    if ((bitmap >> 4) & 0x01) c.oneway++;
+    if ((bitmap >> 5) & 0x03) c.incline++;
+    if ((bitmap >> 7) & 0x07) c.lanes++;
+    if ((bitmap >> 10) & 0x03) c.width++;
+    if ((bitmap >> 12) & 0x03) c.layer++;
+    if (typeCode === 12) c.track++;
   }
 }
 
@@ -201,7 +301,6 @@ console.log(`  → 道路数: ${totalRoads}`);
 console.log(`  → 不明な道路種別スキップ: ${droppedUnknownType}`);
 console.log(`  → 簡略化前後の点数: ${totalPointsBefore} → ${totalPointsAfter} (${((1 - totalPointsAfter / totalPointsBefore) * 100).toFixed(1)}%削減)`);
 
-// ─── 各都道府県についてバイナリ→Base64→.js出力 ───────────────────
 const meta = { region: REGION, generated: new Date().toISOString(), prefectures: {} };
 
 for (const pref of targetPrefs) {
@@ -211,10 +310,11 @@ for (const pref of targetPrefs) {
     continue;
   }
 
-  // バイナリエンコード
+  // バイナリエンコード（v6: bitmap 2byte little-endian）
   const byteBuf = [];
-  for (const [typeCode, points] of entries) {
-    byteBuf.push(typeCode);
+  for (const [bitmap, points] of entries) {
+    byteBuf.push(bitmap & 0xFF);          // LSB
+    byteBuf.push((bitmap >> 8) & 0xFF);   // MSB
     writeVarint(byteBuf, points.length);
     writeSignedVarint(byteBuf, points[0][0]);
     writeSignedVarint(byteBuf, points[0][1]);
@@ -227,24 +327,17 @@ for (const pref of targetPrefs) {
   const buffer = Buffer.from(byteBuf);
   const roadsB64 = buffer.toString('base64');
 
-  // グリッドインデックス（v5: 全通過グリッド登録）
-  // 2026/04/30: v4 は道路の始点グリッドにのみ登録していたため、
-  //             長い道路の途中を走行中に snap が見つからない問題があった。
-  //             v5 では各セグメントの通過グリッド全てに登録することで
-  //             snap 成功率を大幅に向上（ファイルサイズは約1.5〜2倍に）。
+  // グリッドインデックス（v5 から踏襲：全通過グリッド登録）
   const GRID_INT = 1000;
   const grid = {};
 
-  // 線分 A→B の通過グリッドを cells (Set) に追加
-  // A, B = [lat_int, lng_int]（precision=1e5 で整数化済み）
   function addCellsAlongSegment(cells, A, B) {
     const dy = B[0] - A[0];
     const dx = B[1] - A[1];
     const dist = Math.sqrt(dy * dy + dx * dx);
-    // サンプリング間隔：グリッドサイズの 1/4（漏れなくカバーするため過剰に取る）
     const SAMPLE_INTERVAL = GRID_INT / 4;
     const numSamples = Math.ceil(dist / SAMPLE_INTERVAL);
-    if (numSamples <= 1) return; // 短い線分（同じ or 隣接グリッド内）はスキップ
+    if (numSamples <= 1) return;
     for (let s = 1; s < numSamples; s++) {
       const t = s / numSamples;
       const lat = A[0] + dy * t;
@@ -257,30 +350,29 @@ for (const pref of targetPrefs) {
 
   entries.forEach(([, points], idx) => {
     const cellsForRoad = new Set();
-    // 各節点のグリッドを登録
     for (let i = 0; i < points.length; i++) {
       const gy = Math.floor(points[i][0] / GRID_INT);
       const gx = Math.floor(points[i][1] / GRID_INT);
       cellsForRoad.add(gy + '_' + gx);
-      // 次の節点との間の通過グリッドも登録
       if (i < points.length - 1) {
         addCellsAlongSegment(cellsForRoad, points[i], points[i + 1]);
       }
     }
-    // 通過グリッド全てに idx を登録
     for (const key of cellsForRoad) {
       (grid[key] ||= []).push(idx);
     }
   });
 
   const PREF_UPPER = pref.toUpperCase().replace(/-/g, '_');
+  const c = attrCounters[pref];
   const out = `// Auto-generated by .github/workflows/osm-update.yml
 // Source: Geofabrik ${REGION}-latest.osm.pbf → ${pref}
 // Generated: ${new Date().toISOString()}
-// Format v5: per-prefecture, binary varint + base64 + 全通過グリッド登録
+// Format v6: per-prefecture, 16bit attr bitmap + varint + base64 + 全通過グリッド登録
+//   bitmap: typeCode(4) | oneway(1) | incline(2) | lanes(3) | width(2) | layer(2) | reserved(2)
 // © OpenStreetMap contributors (ODbL)
 window.ROADS_${PREF_UPPER} = ${JSON.stringify({
-    v: 5,
+    v: 6,
     region: REGION,
     prefecture: pref,
     generated: new Date().toISOString(),
@@ -289,6 +381,15 @@ window.ROADS_${PREF_UPPER} = ${JSON.stringify({
     gridSize: GRID_INT,
     numRoads: entries.length,
     types: Object.fromEntries(Object.entries(TYPE_CODES).map(([k, v]) => [v, k])),
+    attrLegend: {
+      typeCode: 'bit 0-3',
+      oneway:   'bit 4 (1=oneway)',
+      incline:  'bit 5-6 (0=none, 1=up≥6%, 2=down≥6%, 3=steep dir-unknown)',
+      lanes:    'bit 7-9 (0=unknown, 1-6=lanes, 7=7+)',
+      width:    'bit 10-11 (0=unknown, 1=≤2m, 2=2-5m, 3=>5m)',
+      layer:    'bit 12-13 (0=ground, 1=bridge+, 2=tunnel-, 3=other)',
+    },
+    attrCounts: c,
     grid,
     roadsB64,
   })};
@@ -297,16 +398,18 @@ window.ROADS_${PREF_UPPER} = ${JSON.stringify({
   const outPath = path.join(OUTPUT_DIR, `roads-${pref}.js`);
   fs.writeFileSync(outPath, out);
   const size = fs.statSync(outPath).size;
+  const pct = (n) => `${((n / entries.length) * 100).toFixed(1)}%`;
   console.log(`  → ${pref}: ${entries.length}本・${(size / 1024 / 1024).toFixed(2)} MB → ${outPath}`);
+  console.log(`     attr 充足: oneway ${pct(c.oneway)} / incline ${pct(c.incline)} / lanes ${pct(c.lanes)} / width ${pct(c.width)} / layer ${pct(c.layer)} / track ${pct(c.track)}`);
 
   meta.prefectures[pref] = {
     numRoads: entries.length,
     sizeBytes: size,
     bbox: bboxByPref[pref],
+    attrCounts: c,
   };
 }
 
-// ─── meta-{region}.json 出力 ──────────────────────────────────────
 const metaPath = path.join(OUTPUT_DIR, `meta-${REGION}.json`);
 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 console.log(`  → meta: ${metaPath}`);

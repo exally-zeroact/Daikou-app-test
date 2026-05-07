@@ -1,15 +1,27 @@
 // ============================================================
-// roads-decoder.js v1
-// 
+// roads-decoder.js v2
+//
 // roads-{prefecture}.js の道路データを部分デコードする軽量デコーダー
 // メモリ消費を抑えるため、オフセットテーブルだけ事前構築し、
 // 必要な道路だけオンデマンドデコードする。
-// 
-// 対応フォーマット：v4（build-roads.js の出力）
-// 
-// エンコード仕様：
+//
+// 対応フォーマット：v4 / v5 / v6 (build-roads.js)
+//
+// エンコード仕様 (v4/v5):
 //   各道路 = [typeCode 1byte][numPoints varint][lat0 svarint][lng0 svarint]
 //            [(dLat svarint)(dLng svarint) × (numPoints-1)]
+// エンコード仕様 (v6):
+//   各道路 = [bitmap 2byte LE][numPoints varint][lat0 svarint][lng0 svarint]
+//            [(dLat svarint)(dLng svarint) × (numPoints-1)]
+//   bitmap (16bit, little-endian):
+//     bit 0-3   typeCode (motorway-track, 0-12)
+//     bit 4     oneway   (1=一方通行)
+//     bit 5-6   incline  (00=なし, 01=登り急, 10=下り急, 11=方向不明・急)
+//     bit 7-9   lanes    (0=不明, 1-6=本数, 7=7+)
+//     bit 10-11 width    (00=不明, 01=≤2m, 10=2-5m, 11=>5m)
+//     bit 12-13 layer    (00=平面, 01=高架, 10=地下, 11=その他)
+//     bit 14-15 reserved
+//
 //   varint：LSB7bit + 継続フラグ（0x80）
 //   signed varint = zigzag varint
 // ============================================================
@@ -60,10 +72,23 @@
     return [zigzagDecode(r[0]), r[1]];
   }
   
+  // bitmap (v6, 16bit) → 属性オブジェクト
+  function unpackAttrBitmap(bits) {
+    return {
+      typeCode: bits & 0x0F,
+      oneway:  (bits >> 4) & 0x01,
+      incline: (bits >> 5) & 0x03,
+      lanes:   (bits >> 7) & 0x07,
+      width:   (bits >> 10) & 0x03,
+      layer:   (bits >> 12) & 0x03,
+    };
+  }
+
   // 1道路のバイト長を計算（デコードせず）
   // 戻り値：次の道路の開始オフセット
-  function skipRoad(bytes, offset) {
-    offset++; // typeCode 1byte
+  // headerSize: v4/v5=1, v6=2
+  function skipRoad(bytes, offset, headerSize) {
+    offset += headerSize; // typeCode (1byte) or bitmap (2byte)
     let numPoints;
     [numPoints, offset] = readVarint(bytes, offset);
     // 始点 lat, lng
@@ -76,11 +101,19 @@
     }
     return offset;
   }
-  
+
   // 1道路を部分デコード
-  // 戻り値：{ typeCode, points: [[lat*1e5, lng*1e5], ...] }
-  function decodeRoadAtOffset(bytes, offset) {
-    const typeCode = bytes[offset++];
+  // version 6: 戻り値に oneway/incline/lanes/width/layer 追加
+  // version 4/5: 戻り値は { typeCode, points }
+  function decodeRoadAtOffset(bytes, offset, version) {
+    let attrs;
+    if (version >= 6) {
+      const bits = bytes[offset] | (bytes[offset + 1] << 8);
+      offset += 2;
+      attrs = unpackAttrBitmap(bits);
+    } else {
+      attrs = { typeCode: bytes[offset++] };
+    }
     let numPoints;
     [numPoints, offset] = readVarint(bytes, offset);
     let lat, lng;
@@ -96,15 +129,18 @@
       lng += dLng;
       points[i] = [lat, lng];
     }
-    return { typeCode: typeCode, points: points };
+    attrs.points = points;
+    return attrs;
   }
   
   // ─── RoadDecoder クラス ────────────────────────────────────────
   function RoadDecoder(roadsData) {
-    if (!roadsData || (roadsData.v !== 4 && roadsData.v !== 5)) {
+    if (!roadsData || roadsData.v < 4 || roadsData.v > 6) {
       throw new Error('[RoadDecoder] 未対応フォーマット v=' + (roadsData && roadsData.v));
     }
     this.data = roadsData;
+    this.version = roadsData.v;
+    this.headerSize = (this.version >= 6) ? 2 : 1;
     this.bytes = base64ToBytes(roadsData.roadsB64);
     this.offsetTable = null;  // buildOffsetTable() で構築
     this.gridSize = roadsData.gridSize || 1000;
@@ -114,16 +150,17 @@
     this.numRoads = roadsData.numRoads || 0;
     this.prefecture = roadsData.prefecture || '';
   }
-  
+
   // オフセットテーブル構築（起動時1回・線形スキャン）
   RoadDecoder.prototype.buildOffsetTable = function() {
     const t0 = (typeof performance !== 'undefined') ? performance.now() : Date.now();
     const offsets = new Uint32Array(this.numRoads);
+    const headerSize = this.headerSize;
     let offset = 0;
     let i = 0;
     while (offset < this.bytes.length && i < this.numRoads) {
       offsets[i++] = offset;
-      offset = skipRoad(this.bytes, offset);
+      offset = skipRoad(this.bytes, offset, headerSize);
     }
     if (i !== this.numRoads) {
       throw new Error('[RoadDecoder] オフセット数不一致 expected=' + this.numRoads + ' got=' + i);
@@ -132,7 +169,7 @@
     const t1 = (typeof performance !== 'undefined') ? performance.now() : Date.now();
     return { ms: t1 - t0, count: i };
   };
-  
+
   // 1道路をインデックスでデコード
   RoadDecoder.prototype.decodeRoadAt = function(index) {
     if (!this.offsetTable) {
@@ -141,7 +178,7 @@
     if (index < 0 || index >= this.numRoads) {
       return null;
     }
-    return decodeRoadAtOffset(this.bytes, this.offsetTable[index]);
+    return decodeRoadAtOffset(this.bytes, this.offsetTable[index], this.version);
   };
   
   // グリッドキー内の全道路を取得
