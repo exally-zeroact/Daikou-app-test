@@ -107,8 +107,12 @@ function buildCoarse() {
   return { items, prefsProcessed };
 }
 
-// ─── 詳細: streets.csv → 代表点抽出 ──────────────────────────────
-// CSV 列: pref,city,oaza,koaza,blockCode,coordSys,X,Y,lat,lng,jushoFlag,daihyouFlag,...
+// ─── 詳細: streets.csv → 大字 (町丁目) 単位 代表点 ───────────────────
+// CSV 列: pref(0),city(1),oaza(2),koaza(3),blockCode(4),coordSys(5),
+//         X(6),Y(7),lat(8),lng(9),jushoFlag(10),daihyouFlag(11),...
+//
+// 全街区のうち 代表フラグ=1 で各 (city,oaza,koaza) ごとに 1 点だけ採用。
+// (街区レベルだと 17M 件で JSON 化不可・大字レベルで 約 30 万件に収まる)
 function buildFine() {
   const items = [];
   let prefsProcessed = 0;
@@ -120,6 +124,7 @@ function buildFine() {
     }
     const text = fs.readFileSync(fp, 'utf8');
     const lines = text.split(/\r?\n/);
+    const seen = new Set();
     let count = 0;
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
@@ -135,20 +140,25 @@ function buildFine() {
       }
       cols.push(cur);
       if (cols.length < 12) continue;
+      if (cols[11] !== '1') continue; // 代表フラグ=1 のみ
+      const city  = cols[1] || '';
+      const oaza  = cols[2] || '';
+      const koaza = cols[3] || '';
+      const key = city + '|' + oaza + '|' + koaza;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const lat = parseFloat(cols[8]);
       const lng = parseFloat(cols[9]);
       if (isNaN(lat) || isNaN(lng)) continue;
-      // 代表フラグ (cols[11]) === '1' のみ採用 (重複を避ける)
-      if (cols[11] !== '1') continue;
       items.push({
         lat, lng,
-        n: (cols[2] || '') + (cols[3] || '') + (cols[4] || ''),
-        c: cols[1] || '',
+        n: oaza + (koaza || ''),
+        c: city,
       });
       count++;
     }
     prefsProcessed++;
-    console.log(`  ${pref}: ${count} 街区代表点`);
+    console.log(`  ${pref}: ${count} 大字`);
   }
   return { items, prefsProcessed };
 }
