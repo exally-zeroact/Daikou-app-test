@@ -35,10 +35,12 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 const USE_DEM = args.includes('--dem');
+const onlyArg = args.find(a => a.startsWith('--only='));
+const ONLY_PREF = onlyArg ? onlyArg.slice(7) : null; // 単一県のみ書き出す
 const positional = args.filter(a => !a.startsWith('--'));
 const [INPUT, OUTPUT_DIR, REGION] = positional;
 if (!INPUT || !OUTPUT_DIR || !REGION) {
-  console.error('Usage: build-roads.js <input.geojson> <output_dir> <region> [--dem]');
+  console.error('Usage: build-roads.js <input.geojson> <output_dir> <region> [--dem] [--only=<pref>]');
   process.exit(1);
 }
 
@@ -396,6 +398,7 @@ console.log(`  → 簡略化前後の点数: ${totalPointsBefore} → ${totalPoi
 const meta = { region: REGION, generated: new Date().toISOString(), prefectures: {} };
 
 for (const pref of targetPrefs) {
+  if (ONLY_PREF && pref !== ONLY_PREF) continue; // 指定県のみ出力
   const entries = buckets[pref];
   if (entries.length === 0) {
     console.log(`  → ⚠️  ${pref}: 道路0件（スキップ）`);
