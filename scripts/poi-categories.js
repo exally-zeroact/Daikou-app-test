@@ -65,6 +65,13 @@ const CATEGORIES = {
 
   // 公衆電話（追加 1・2026/05）
   91: 'public_phone',
+
+  // 拡張 5（2026/05/B-2 追加）
+  92: 'traffic_signals',  // 信号機 (highway=traffic_signals)
+  93: 'level_crossing',   // 踏切   (railway=level_crossing|crossing)
+  94: 'peak',             // 山頂   (natural=peak|volcano)
+  95: 'parking',          // 駐車場 (amenity=parking)
+  96: 'toilets',          // 公衆トイレ (amenity=toilets)
 };
 
 // 名前→ID 逆引き（入力 GeoJSON が文字列カテゴリの場合に使用）
@@ -97,6 +104,12 @@ function classifyOsmTags(tags) {
 
   if (em === 'defibrillator') return 'aed';
   if (am === 'telephone')     return 'public_phone';
+  // 拡張 5 (B-2)
+  if (hw === 'traffic_signals') return 'traffic_signals';
+  if (rw === 'level_crossing' || rw === 'crossing') return 'level_crossing';
+  if (tags.natural === 'peak' || tags.natural === 'volcano') return 'peak';
+  if (am === 'parking')         return 'parking';
+  if (am === 'toilets')         return 'toilets';
   if (ay === 'aerodrome' || ay === 'terminal') return 'airport';
   if (hw === 'bus_stop')        return 'bus_stop';
   if (rw === 'station')         return 'station';
@@ -156,6 +169,30 @@ function extractAttrsFromOsmTags(tags, category) {
   }
   if (category === 'hospital') {
     if (tags.emergency === 'yes') a.er = 1;
+  }
+  if (category === 'parking') {
+    if (tags.fee && tags.fee !== 'no') a.fee = tags.fee === 'yes' ? 'yes' : tags.fee;
+    if (tags.maxheight) {
+      const m = String(tags.maxheight).match(/[\d.]+/);
+      if (m) a.height_m = parseFloat(m[0]);
+    }
+    if (tags.capacity) {
+      const c = parseInt(tags.capacity, 10);
+      if (!isNaN(c)) a.cap = c;
+    }
+    if (tags.parking === 'underground' || tags.parking === 'multi-storey') a.kind = tags.parking;
+  }
+  if (category === 'peak') {
+    if (tags.natural === 'volcano') a.kind = 'volcano';
+    const ele = parseFloat(tags.ele);
+    if (!isNaN(ele) && ele >= -500 && ele <= 4000) a.ele = Math.round(ele);
+  }
+  if (category === 'level_crossing') {
+    if (tags.crossing === 'unbarriered' || tags.crossing_barrier === 'no') a.kind = 'unbarriered';
+  }
+  if (category === 'toilets') {
+    if (tags.fee === 'yes') a.fee = 'yes';
+    if (tags.wheelchair === 'yes') a.wc = 1;
   }
   if (category === 'school') {
     const am = tags.amenity;
