@@ -77,7 +77,14 @@ async function fetchBuffer(url, timeoutMs = 240000) {
 
 function unzipTo(zipPath, dir) {
   fs.mkdirSync(dir, { recursive: true });
-  execSync(`unzip -o "${zipPath}" -d "${dir}"`, { stdio: 'pipe' });
+  // KSJ ZIP は Windows パス区切り (\) のため unzip が warn を出すが
+  // 抽出自体は成功する。exit code 1 (warning) は許容する。
+  try {
+    execSync(`unzip -o "${zipPath}" -d "${dir}"`, { stdio: 'pipe' });
+  } catch (err) {
+    // warning レベル (exit 1) は無視。それ以外 (>=2) は再 throw
+    if (err.status > 1) throw err;
+  }
 }
 
 function findFiles(dir, pattern) {
@@ -115,11 +122,141 @@ function rankToDepth(rank) {
   return 3;
 }
 
+// 1次メッシュ番号は 4 桁: 上 2 桁 = (lat * 1.5)、下 2 桁 = (lng - 100)
+// 都道府県別の 1次メッシュ一覧 (A31-22 メッシュ単位 ZIP 取得用)
+// 各 pref の bbox 内に含まれる 1次メッシュ・cls=10 (洪水予報河川) と
+// cls=20 (その他) を両方取得。実際のポリゴンは bbox check で県別フィルタ。
+const PREF_MESHES = {
+  aichi:  ['5236', '5237', '5337', '5338'],
+  kyoto:  ['5135', '5235', '5335'],
+  nara:   ['5135', '5235'],
+};
+const PREF_FLOOD_BBOX = {
+  aichi:  [34.55, 136.65, 35.45, 137.85],
+  kyoto:  [34.70, 134.85, 35.80, 136.05],
+  nara:   [33.85, 135.65, 34.80, 136.20],
+};
+
+// 大きな GML を SAX ストリーム解析 (Node の string limit 回避)
+function parseA31GmlStream(xmlPath, prefBbox, outAccumulator) {
+  const sax = requireGlobal('sax');
+  return new Promise((resolve, reject) => {
+    const parser = sax.createStream(true, { trim: true });
+    const curveById = {}; // cvId → posList string
+    const surfToCurve = {}; // sfId → cvId
+    let curveId = null;
+    let surfId = null;
+    let posListBuf = '';
+    let inPosList = false;
+    let surfHref = null;
+    let scaleSurfHref = null;
+    let scaleDepth = null;
+    let inWaterDepth = false;
+
+    parser.on('opentag', (node) => {
+      const name = node.name;
+      const attrs = node.attributes || {};
+      if (name === 'gml:Curve' && attrs['gml:id']) {
+        curveId = attrs['gml:id'];
+      } else if (name === 'gml:Surface' && attrs['gml:id']) {
+        surfId = attrs['gml:id'];
+      } else if (name === 'gml:posList') {
+        inPosList = true; posListBuf = '';
+      } else if (name === 'gml:curveMember' && surfId && attrs['xlink:href']) {
+        surfHref = attrs['xlink:href'].replace('#', '');
+        surfToCurve[surfId] = surfHref;
+      } else if (name === 'ksj:bounds' && attrs['xlink:href']) {
+        scaleSurfHref = attrs['xlink:href'].replace('#', '');
+      } else if (name === 'ksj:waterDepth') {
+        inWaterDepth = true;
+      }
+    });
+    parser.on('text', (t) => {
+      if (inPosList) posListBuf += t;
+      if (inWaterDepth) scaleDepth = (scaleDepth || '') + t;
+    });
+    parser.on('closetag', (name) => {
+      if (name === 'gml:posList') {
+        inPosList = false;
+        if (curveId) curveById[curveId] = posListBuf;
+        posListBuf = '';
+      } else if (name === 'gml:Curve') {
+        curveId = null;
+      } else if (name === 'gml:Surface') {
+        surfId = null; surfHref = null;
+      } else if (name === 'ksj:waterDepth') {
+        inWaterDepth = false;
+      } else if (name === 'ksj:MaximumScale' || name === 'ksj:PlannedScale') {
+        // フィーチャ完成
+        const sfId = scaleSurfHref;
+        const rank = parseInt(scaleDepth, 10);
+        scaleSurfHref = null; scaleDepth = null;
+        if (!sfId || isNaN(rank)) return;
+        const cvId = surfToCurve[sfId];
+        if (!cvId) return;
+        const posList = curveById[cvId];
+        if (!posList) return;
+        const nums = posList.trim().split(/\s+/).map(parseFloat);
+        if (nums.length < 6) return;
+        const coords = [];
+        let cLat = 0, cLng = 0, cnt = 0;
+        for (let i = 0; i + 1 < nums.length; i += 2) {
+          const lat = nums[i], lng = nums[i + 1];
+          coords.push([lng, lat]);
+          cLat += lat; cLng += lng; cnt++;
+        }
+        if (cnt < 3) return;
+        const cx = cLng / cnt, cy = cLat / cnt;
+        if (cy < prefBbox[0] || cy > prefBbox[2] || cx < prefBbox[1] || cx > prefBbox[3]) return;
+        if (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1]) {
+          coords.push(coords[0]);
+        }
+        const depth = rankToDepth(rank);
+        outAccumulator.counts[depth]++;
+        outAccumulator.features.push({
+          type: 'Feature',
+          properties: { depth, rank, _raw: { waterDepth: rank }, _src: 'A31-22' },
+          geometry: { type: 'Polygon', coordinates: [coords] },
+        });
+      }
+    });
+    parser.on('error', (err) => reject(err));
+    parser.on('end', () => resolve());
+    fs.createReadStream(xmlPath).pipe(parser);
+  });
+}
+
+// A31-22 メッシュ ZIP 内の GML を解析して
+// 都道府県 bbox 内の想定最大規模ポリゴンを抽出 (ストリーム解析)
+async function fetchA31FromMeshes(meshes, prefBbox) {
+  const acc = { features: [], counts: { 0: 0, 1: 0, 2: 0, 3: 0 } };
+  for (const mesh of meshes) {
+    for (const cls of ['20', '10']) {
+      const url = `https://nlftp.mlit.go.jp/ksj/gml/data/A31/A31-22/A31-22_${cls}_${mesh}_GML.zip`;
+      const fname = `A31-22_${cls}_${mesh}_GML.zip`;
+      let zipPath;
+      try { zipPath = await downloadZipIfNeeded(url, fname); }
+      catch (e) { console.log(`    mesh=${mesh} cls=${cls} 取得失敗 (OK)`); continue; }
+      const extractDir = path.join(RAW_DIR, `A31-22_${cls}_${mesh}_GML`);
+      unzipTo(zipPath, extractDir);
+      // 想定最大規模 (20_*A31-20-22*.xml) のみ
+      const xmls = findFiles(extractDir, /^A31-20-22_.*\.xml$/i);
+      for (const xp of xmls) {
+        const before = acc.features.length;
+        await parseA31GmlStream(xp, prefBbox, acc);
+        console.log(`    parsed ${path.basename(xp)} → +${acc.features.length - before} feats`);
+      }
+    }
+  }
+  return acc;
+}
+
 async function fetchA31() {
-  // KSJ A31 浸水想定区域 ダウンロード戦略:
-  //   1. A31-21 (2021版) を試す → 多くの県で取得可能
-  //   2. 失敗 (404) なら A31-20 (2020版) フォールバック → 鳥取(31)
-  //   ※ A31-12 (2012) は H29水防法改正前のため命に関わる用途では使わない
+  // KSJ A31 浸水想定区域 ダウンロード戦略 (本番運用・命に関わる情報):
+  //   1. A31-21 (2021版・県別 ZIP) を試す → 多くの県
+  //   2. 失敗 (404) なら A31-20 (2020版・県別 ZIP) → 鳥取
+  //   3. 失敗 (404) なら A31-22 (2022版・1次メッシュ単位) → 愛知/京都/奈良
+  //   ※ A31-12 (2012) は H29水防法改正前のため使わない
   const candidates = [
     { ver: 'A31-21', url: `https://nlftp.mlit.go.jp/ksj/gml/data/A31/A31-21/A31-21_${PCODE}_GML.zip` },
     { ver: 'A31-20', url: `https://nlftp.mlit.go.jp/ksj/gml/data/A31/A31-20/A31-20_${PCODE}_GML.zip` },
@@ -134,7 +271,21 @@ async function fetchA31() {
       console.log(`  A31 ${c.ver} 失敗: ${err.message}`);
     }
   }
-  if (!zipPath) throw new Error('A31-21 / A31-20 とも 404');
+  // A31-22 メッシュベースフォールバック (4.0版 最新・想定最大規模)
+  if (!zipPath && PREF_MESHES[PREF]) {
+    console.log(`  A31-22 メッシュフォールバック: ${PREF_MESHES[PREF].join(',')}`);
+    const { features, counts } = await fetchA31FromMeshes(PREF_MESHES[PREF], PREF_FLOOD_BBOX[PREF]);
+    fs.writeFileSync(path.join(OUT_DIR, 'flood.geojson'),
+      JSON.stringify({ type: 'FeatureCollection', features }));
+    console.log(`  A31-22 → flood.geojson: ${features.length} feats / depth 0:${counts[0]} 1:${counts[1]} 2:${counts[2]} 3:${counts[3]}`);
+    return features.length;
+  }
+  if (!zipPath) {
+    console.log(`  A31 取得不可・空 flood.geojson 出力`);
+    fs.writeFileSync(path.join(OUT_DIR, 'flood.geojson'),
+      JSON.stringify({ type: 'FeatureCollection', features: [] }));
+    return 0;
+  }
   console.log(`  A31 採用版: ${usedVer}`);
   const extractDir = path.join(RAW_DIR, `${usedVer}_${PCODE}_GML`);
   unzipTo(zipPath, extractDir);
