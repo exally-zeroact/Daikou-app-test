@@ -116,9 +116,27 @@ function rankToDepth(rank) {
 }
 
 async function fetchA31() {
-  const url = `https://nlftp.mlit.go.jp/ksj/gml/data/A31/A31-21/A31-21_${PCODE}_GML.zip`;
-  const zipPath = await downloadZipIfNeeded(url, `A31-21_${PCODE}_GML.zip`);
-  const extractDir = path.join(RAW_DIR, `A31-21_${PCODE}_GML`);
+  // KSJ A31 浸水想定区域 ダウンロード戦略:
+  //   1. A31-21 (2021版) を試す → 多くの県で取得可能
+  //   2. 失敗 (404) なら A31-20 (2020版) フォールバック → 鳥取(31)
+  //   ※ A31-12 (2012) は H29水防法改正前のため命に関わる用途では使わない
+  const candidates = [
+    { ver: 'A31-21', url: `https://nlftp.mlit.go.jp/ksj/gml/data/A31/A31-21/A31-21_${PCODE}_GML.zip` },
+    { ver: 'A31-20', url: `https://nlftp.mlit.go.jp/ksj/gml/data/A31/A31-20/A31-20_${PCODE}_GML.zip` },
+  ];
+  let zipPath = null, usedVer = null;
+  for (const c of candidates) {
+    try {
+      zipPath = await downloadZipIfNeeded(c.url, `${c.ver}_${PCODE}_GML.zip`);
+      usedVer = c.ver;
+      break;
+    } catch (err) {
+      console.log(`  A31 ${c.ver} 失敗: ${err.message}`);
+    }
+  }
+  if (!zipPath) throw new Error('A31-21 / A31-20 とも 404');
+  console.log(`  A31 採用版: ${usedVer}`);
+  const extractDir = path.join(RAW_DIR, `${usedVer}_${PCODE}_GML`);
   unzipTo(zipPath, extractDir);
   const geojsons = findFiles(extractDir, /^A31-.*\.geojson$/i);
   console.log(`  A31: ${geojsons.length} 河川別 GEOJSON 発見`);
@@ -132,17 +150,24 @@ async function fetchA31() {
     for (const f of (json.features || [])) {
       if (!f.geometry) continue;
       const props = f.properties || {};
-      const rank = parseInt(props.A31_105, 10);
+      // KSJ A31 各版で属性キーが異なる:
+      //   A31-21: A31_105 (計画規模) / A31_205 (想定最大規模)
+      //   A31-20: A31_405 (想定最大規模)
+      //   いずれも 5 番目フィールド = 浸水ランク (1-6)
+      const rankKey = Object.keys(props).find(k => /^A31_\d05$/.test(k));
+      if (!rankKey) continue;
+      const rank = parseInt(props[rankKey], 10);
       if (isNaN(rank)) continue;
       const depth = rankToDepth(rank);
       counts[depth]++;
+      const basinKey = rankKey.replace('5', '2');
       features.push({
         type: 'Feature',
         properties: {
           depth,
           rank,
-          basin: props.A31_102 || '',
-          _raw: { A31_105: rank },
+          basin: props[basinKey] || '',
+          _raw: { [rankKey]: rank },
         },
         geometry: f.geometry,
       });
