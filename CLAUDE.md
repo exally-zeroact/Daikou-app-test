@@ -114,3 +114,16 @@ Exallyのコードを触るときのみ適用。
 - visualViewportスロットル 100ms
 - render()はrAFでバッチ処理
 - getBoundingClientRectはキャッシュ
+
+-----
+
+## セッション開始時に必ず読むファイル
+
+このリポジトリは ダイコメ (daikome) プロジェクト。
+新しい Claude Code セッションを開始したら、以下を必ず読み込んで文脈を復元すること：
+
+- `C:\Users\zeroa\zeroact-memory\team\global-rules.md`
+- `C:\Users\zeroa\zeroact-memory\projects\daikome\memory.md`
+- `C:\Users\zeroa\zeroact-memory\projects\daikome\decisions.md`
+- `C:\Users\zeroa\zeroact-memory\projects\daikome\tasks.md`
+- `C:\Users\zeroa\zeroact-memory\projects\daikome\rules.md`
