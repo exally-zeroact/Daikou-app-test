@@ -2,9 +2,14 @@
 /**
  * build-bundle-coastline-jp.js
  *
- * OSM Geofabrik 8地方PBFから natural=coastline ways を抽出 → DP簡略化 → varint+base64
+ * 8地方ごとに natural=coastline ways を抽出 → DP簡略化 → varint+base64
  *
- * 出力: data/coastline-jp.js  ~200KB目標
+ * データ取得:
+ *   1. 地方PBF（Geofabrik / openstreetmap.fr ミラー）が tmp/ にあれば使用
+ *   2. 無い／壊れていれば Overpass API（overpass-api.de）で bbox クエリにフォールバック
+ *      Geofabrik は kanto/chubu/kansai/kyushu で頻繁にタイムアウトするため Overpass を併用。
+ *
+ * 出力: data/coastline-jp.js
  */
 
 const fs = require('fs');
@@ -12,7 +17,6 @@ const path = require('path');
 const { execSync } = require('child_process');
 const u = require('./bundle-utils.js');
 
-// グローバルインストールの osm-pbf-parser を使う
 function requireGlobal(name) {
   try { return require(name); } catch {}
   const root = execSync('npm root -g', { encoding: 'utf8' }).trim();
@@ -27,7 +31,28 @@ const OUT = path.join(PROJECT_ROOT, 'data', 'coastline-jp.js');
 
 const REGIONS = ['hokkaido','tohoku','kanto','chubu','kansai','chugoku','shikoku','kyushu'];
 
-// Douglas-Peucker
+// Overpass フォールバック用 bbox [south, west, north, east]
+// Geofabrik 地方区分を概ねカバー。重複は wayId で重複排除する。
+const REGION_BBOX = {
+  hokkaido: [41.30, 139.30, 45.70, 146.10],
+  tohoku:   [36.70, 138.70, 41.65, 142.20],
+  kanto:    [34.50, 138.40, 37.30, 141.10],
+  chubu:    [33.40, 135.50, 38.40, 140.00],
+  kansai:   [33.30, 133.90, 36.50, 136.80],
+  chugoku:  [33.60, 130.70, 36.00, 134.60],
+  shikoku:  [32.50, 131.90, 34.80, 134.90],
+  kyushu:   [24.00, 122.80, 34.90, 132.40], // 沖縄含む
+};
+
+const PBF_OK_BYTES = 50 * 1024 * 1024; // <50MB なら部分DLとみなしフォールバック
+
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
+// ---- Douglas-Peucker ----
 function pointLineDist(p, a, b) {
   const dx = b[0] - a[0], dy = b[1] - a[1];
   if (dx === 0 && dy === 0) return Math.hypot(p[0]-a[0], p[1]-a[1]);
@@ -49,77 +74,159 @@ function douglasPeucker(pts, tol) {
   return [a, b];
 }
 
-(async () => {
-  // 各地方PBF→ ノードIDからlat/lngを引く＋wayから coastline を抽出
-  // 2-pass parse: pass1 でwayのid→nodeRefs, pass2 でnodeのlat/lng
-  // メモリ: nodeIds は coastline way が参照する node のみに絞る → 数百万 (実用範囲)
+// ---- PBF 経由抽出 ----
+async function extractFromPbf(pbfPath) {
+  const ways = []; // { id, coords:[[lng,lat]...] }
 
-  const TOL_DEG = 0.0005; // 度（≈50m）程度の簡略
-  let allLines = []; // 全地方の line をマージ
+  // Pass 1: way (natural=coastline) を集めて nodeIds を記録
+  const coastlineWays = []; // [{ id, refs:[nodeId,...] }]
+  const neededNodes = new Set();
+  await new Promise((resolve, reject) => {
+    fs.createReadStream(pbfPath)
+      .pipe(parseOsmPbf())
+      .pipe(through.obj((items, _enc, next) => {
+        for (const item of items) {
+          if (item.type === 'way' && item.tags && item.tags.natural === 'coastline') {
+            coastlineWays.push({ id: item.id, refs: item.refs });
+            for (const id of item.refs) neededNodes.add(id);
+          }
+        }
+        next();
+      }, () => resolve()))
+      .on('error', reject);
+  });
+
+  if (coastlineWays.length === 0) return [];
+
+  // Pass 2: 必要な node の lat/lng
+  const nodeMap = new Map();
+  await new Promise((resolve, reject) => {
+    fs.createReadStream(pbfPath)
+      .pipe(parseOsmPbf())
+      .pipe(through.obj((items, _enc, next) => {
+        for (const item of items) {
+          if (item.type === 'node' && neededNodes.has(item.id)) {
+            nodeMap.set(item.id, [item.lon, item.lat]);
+          }
+        }
+        next();
+      }, () => resolve()))
+      .on('error', reject);
+  });
+
+  for (const w of coastlineWays) {
+    const coords = [];
+    for (const id of w.refs) {
+      const c = nodeMap.get(id);
+      if (c) coords.push(c);
+    }
+    if (coords.length >= 2) ways.push({ id: w.id, coords });
+  }
+  return ways;
+}
+
+// ---- Overpass API 経由抽出 ----
+async function fetchOverpass(bbox) {
+  const [s, w, n, e] = bbox;
+  const query =
+    `[out:json][timeout:600];` +
+    `(way["natural"="coastline"](${s},${w},${n},${e}););` +
+    `out geom;`;
+
+  let lastErr = null;
+  for (const ep of OVERPASS_ENDPOINTS) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 600000);
+      try {
+        const res = await fetch(ep, {
+          method: 'POST',
+          signal: ctrl.signal,
+          headers: { 'User-Agent': 'Daikou-app-test/0.1', 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        const json = await res.json();
+        return json;
+      } finally { clearTimeout(t); }
+    } catch (err) {
+      console.log(`    overpass ${ep} 失敗: ${err.message}, 次のミラーへ`);
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('all overpass endpoints failed');
+}
+
+async function extractFromOverpass(region, bbox) {
+  const cachePath = path.join(TMP, `coastline-overpass-${region}.json`);
+  let json;
+  if (fs.existsSync(cachePath) && (Date.now() - fs.statSync(cachePath).mtimeMs) < 7 * 86400000) {
+    console.log(`    overpass cache: ${path.basename(cachePath)}`);
+    json = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+  } else {
+    console.log(`    overpass query: bbox=[${bbox.join(',')}]`);
+    const t0 = Date.now();
+    json = await fetchOverpass(bbox);
+    console.log(`    overpass got ${(json.elements || []).length} elements / ${((Date.now()-t0)/1000).toFixed(1)}s`);
+    fs.mkdirSync(TMP, { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify(json));
+  }
+  const ways = [];
+  for (const el of (json.elements || [])) {
+    if (el.type !== 'way' || !el.geometry) continue;
+    const coords = el.geometry.map(g => [g.lon, g.lat]);
+    if (coords.length >= 2) ways.push({ id: el.id, coords });
+  }
+  return ways;
+}
+
+(async () => {
+  const TOL_DEG = 0.0005; // ≈50m
+  const seenWayIds = new Set();
+  const allLines = [];
 
   for (const region of REGIONS) {
+    console.log(`▼ ${region}`);
     const pbfPath = path.join(TMP, `${region}-latest.osm.pbf`);
-    if (!fs.existsSync(pbfPath)) {
-      console.log(`  skip ${region}: PBF not cached`);
-      continue;
-    }
-    console.log(`  ${region}: parsing PBF (${(fs.statSync(pbfPath).size/1024/1024).toFixed(1)} MB)`);
+    const hasPbf = fs.existsSync(pbfPath) && fs.statSync(pbfPath).size >= PBF_OK_BYTES;
 
-    // Pass 1: collect way nodeRefs for ways with natural=coastline
-    const coastlineWays = []; // [[nodeId, nodeId, ...], ...]
-    const neededNodes = new Set();
-    let pass1Time = Date.now();
-    await new Promise((resolve, reject) => {
-      fs.createReadStream(pbfPath)
-        .pipe(parseOsmPbf())
-        .pipe(through.obj((items, enc, next) => {
-          for (const item of items) {
-            if (item.type === 'way' && item.tags && item.tags.natural === 'coastline') {
-              coastlineWays.push(item.refs);
-              for (const id of item.refs) neededNodes.add(id);
-            }
-          }
-          next();
-        }, () => resolve()))
-        .on('error', reject);
-    });
-    console.log(`    pass1: ${coastlineWays.length} coastline ways / ${neededNodes.size} nodes / ${((Date.now()-pass1Time)/1000).toFixed(1)}s`);
-
-    // Pass 2: read needed nodes' lat/lng
-    const nodeMap = new Map();
-    let pass2Time = Date.now();
-    await new Promise((resolve, reject) => {
-      fs.createReadStream(pbfPath)
-        .pipe(parseOsmPbf())
-        .pipe(through.obj((items, enc, next) => {
-          for (const item of items) {
-            if (item.type === 'node' && neededNodes.has(item.id)) {
-              nodeMap.set(item.id, [item.lon, item.lat]);
-            }
-          }
-          next();
-        }, () => resolve()))
-        .on('error', reject);
-    });
-    console.log(`    pass2: ${nodeMap.size} nodes resolved / ${((Date.now()-pass2Time)/1000).toFixed(1)}s`);
-
-    // Way → coordinate sequence → DP simplify → integer
-    let totalBefore = 0, totalAfter = 0;
-    for (const refs of coastlineWays) {
-      const coords = [];
-      for (const id of refs) {
-        const c = nodeMap.get(id);
-        if (c) coords.push(c);
+    let ways = [];
+    if (hasPbf) {
+      try {
+        const t0 = Date.now();
+        console.log(`  PBF parse (${(fs.statSync(pbfPath).size/1024/1024).toFixed(1)} MB)`);
+        ways = await extractFromPbf(pbfPath);
+        console.log(`  PBF: ${ways.length} coastline ways / ${((Date.now()-t0)/1000).toFixed(1)}s`);
+      } catch (err) {
+        console.log(`  PBF parse 失敗: ${err.message}, Overpass フォールバック`);
+        ways = [];
       }
-      if (coords.length < 2) continue;
-      totalBefore += coords.length;
-      const simp = douglasPeucker(coords, TOL_DEG);
+    } else {
+      console.log(`  PBF 無い／部分DL → Overpass フォールバック`);
+    }
+
+    if (ways.length === 0 && REGION_BBOX[region]) {
+      try {
+        ways = await extractFromOverpass(region, REGION_BBOX[region]);
+        console.log(`  overpass: ${ways.length} coastline ways`);
+      } catch (err) {
+        console.log(`  ❌ overpass 失敗: ${err.message}`);
+      }
+    }
+
+    let totalBefore = 0, totalAfter = 0, dup = 0;
+    for (const w of ways) {
+      if (seenWayIds.has(w.id)) { dup++; continue; }
+      seenWayIds.add(w.id);
+      totalBefore += w.coords.length;
+      const simp = douglasPeucker(w.coords, TOL_DEG);
       totalAfter += simp.length;
-      // 1e5 整数化 [lat, lng]
       const intPts = simp.map(([lng, lat]) => [Math.round(lat*u.PRECISION), Math.round(lng*u.PRECISION)]);
       allLines.push(intPts);
     }
-    console.log(`    points: ${totalBefore.toLocaleString()} → ${totalAfter.toLocaleString()} (${(100-(100*totalAfter/totalBefore)).toFixed(1)}% 削減)`);
+    if (ways.length) {
+      console.log(`  pts: ${totalBefore.toLocaleString()} → ${totalAfter.toLocaleString()} (削減 ${(100-(100*totalAfter/Math.max(1,totalBefore))).toFixed(1)}% / 重複way ${dup})`);
+    }
   }
 
   console.log(`\n  total lines: ${allLines.length}`);
@@ -129,17 +236,14 @@ function douglasPeucker(pts, tol) {
     process.exit(1);
   }
 
-  // grid 索引（line ごとの代表点で粗く）
   const grid = {};
   const linesB64 = allLines.map((pts, idx) => {
-    // 代表点 = 線の中央
     const mid = pts[Math.floor(pts.length/2)];
     const k = u.gridKey(mid[0], mid[1]);
     (grid[k] ||= []).push(idx);
     return u.encodeLineB64(pts);
   });
 
-  // bbox 全体
   let bbox = [Infinity, Infinity, -Infinity, -Infinity];
   for (const pts of allLines) for (const [lat, lng] of pts) {
     if (lat<bbox[0]) bbox[0]=lat; if (lng<bbox[1]) bbox[1]=lng;
@@ -154,12 +258,12 @@ function douglasPeucker(pts, tol) {
     bbox,
     grid,
     lines: linesB64,
-    source: 'OSM Geofabrik (natural=coastline・DP 50m簡略)',
+    source: 'OSM (natural=coastline)・Geofabrik PBF + Overpass API・DP 50m簡略',
   };
 
   const size = u.writeBundleJs(OUT, 'COASTLINE_JP', data, [
     `// 出典: OpenStreetMap (ODbL)・natural=coastline ways`,
-    `// Geofabrik 8地方PBFから抽出・Douglas-Peucker 50m 簡略化`,
+    `// PBF（Geofabrik / openstreetmap.fr）＋ Overpass API・Douglas-Peucker 50m 簡略化`,
     `// 全国 ${allLines.length} ライン`,
   ]);
   console.log(`✅ ${OUT}  lines=${allLines.length} size=${(size/1024).toFixed(2)} KB`);
