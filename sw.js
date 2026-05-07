@@ -49,6 +49,7 @@ const PRECACHE_FILES = [
   '/data/peaks-jp.js',
   '/data/hiking-trails-jp.js',
   '/data/railways-jp.js',
+  '/data/waterways-jp.js',
 ];
 
 self.addEventListener('install', function(e){
@@ -143,7 +144,8 @@ self.addEventListener('fetch', function(e){
     e.request.url.includes('/data/ports-jp.js') ||
     e.request.url.includes('/data/peaks-jp.js') ||
     e.request.url.includes('/data/hiking-trails-jp.js') ||
-    e.request.url.includes('/data/railways-jp.js')
+    e.request.url.includes('/data/railways-jp.js') ||
+    e.request.url.includes('/data/waterways-jp.js')
   ){
     e.respondWith(staleWhileRevalidate(e.request));
     return;
