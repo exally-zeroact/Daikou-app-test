@@ -46,6 +46,21 @@ const ALL_PREFS = [
   'tokushima','kagawa','ehime','kochi',
   'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa',
 ];
+// JIS X 0401 都道府県コード (2 桁)
+const PREF_CODE = {
+  hokkaido: '01',
+  aomori: '02', iwate: '03', miyagi: '04', akita: '05', yamagata: '06', fukushima: '07',
+  ibaraki: '08', tochigi: '09', gunma: '10',
+  saitama: '11', chiba: '12', tokyo: '13', kanagawa: '14',
+  niigata: '15', toyama: '16', ishikawa: '17', fukui: '18',
+  yamanashi: '19', nagano: '20', gifu: '21', shizuoka: '22', aichi: '23',
+  mie: '24', shiga: '25', kyoto: '26', osaka: '27',
+  hyogo: '28', nara: '29', wakayama: '30',
+  tottori: '31', shimane: '32', okayama: '33', hiroshima: '34', yamaguchi: '35',
+  tokushima: '36', kagawa: '37', ehime: '38', kochi: '39',
+  fukuoka: '40', saga: '41', nagasaki: '42', kumamoto: '43',
+  oita: '44', miyazaki: '45', kagoshima: '46', okinawa: '47',
+};
 const targetPrefs = ONLY_PREF ? [ONLY_PREF] : ALL_PREFS;
 
 // ─── 任意ジオメトリから重心 [lat, lng] を計算 ────────────────────
@@ -122,6 +137,7 @@ function buildFine() {
       console.log(`  skip ${pref}: streets.csv 無し`);
       continue;
     }
+    const pcode = PREF_CODE[pref] || '';
     const text = fs.readFileSync(fp, 'utf8');
     const lines = text.split(/\r?\n/);
     const seen = new Set();
@@ -154,6 +170,7 @@ function buildFine() {
         lat, lng,
         n: oaza + (koaza || ''),
         c: city,
+        p: pcode,   // 都道府県コード (2 桁・JIS X 0401)
       });
       count++;
     }
@@ -187,13 +204,14 @@ function buildFine() {
   }
 
   if (MODE_FINE) {
-    console.log(`▼ build fine (詳細・街区代表点)`);
+    console.log(`▼ build fine (詳細・大字代表点)`);
     const { items, prefsProcessed } = buildFine();
     if (items.length === 0) { console.error('❌ no items'); process.exit(1); }
     const data = u.buildPointBundle(items, (it) => {
       const o = {};
       if (it.n) o.n = it.n;
       if (it.c) o.c = it.c;
+      if (it.p) o.p = it.p;
       return o;
     });
     data.source = '国交省 街区レベル位置参照情報・代表フラグ=1 のみ';
