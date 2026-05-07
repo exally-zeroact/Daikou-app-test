@@ -268,12 +268,85 @@ async function fetchA48() {
   return features.length;
 }
 
+// ─── 都道府県名 ja → Overpass area 用 ───────────────────────────
+const PREF_NAMES_JA = {
+  hokkaido:'北海道',aomori:'青森県',iwate:'岩手県',miyagi:'宮城県',akita:'秋田県',yamagata:'山形県',fukushima:'福島県',
+  ibaraki:'茨城県',tochigi:'栃木県',gunma:'群馬県',saitama:'埼玉県',chiba:'千葉県',tokyo:'東京都',kanagawa:'神奈川県',
+  niigata:'新潟県',toyama:'富山県',ishikawa:'石川県',fukui:'福井県',yamanashi:'山梨県',nagano:'長野県',
+  gifu:'岐阜県',shizuoka:'静岡県',aichi:'愛知県',mie:'三重県',shiga:'滋賀県',kyoto:'京都府',osaka:'大阪府',
+  hyogo:'兵庫県',nara:'奈良県',wakayama:'和歌山県',
+  tottori:'鳥取県',shimane:'島根県',okayama:'岡山県',hiroshima:'広島県',yamaguchi:'山口県',
+  tokushima:'徳島県',kagawa:'香川県',ehime:'愛媛県',kochi:'高知県',
+  fukuoka:'福岡県',saga:'佐賀県',nagasaki:'長崎県',kumamoto:'熊本県',oita:'大分県',miyazaki:'宮崎県',
+  kagoshima:'鹿児島県',okinawa:'沖縄県',
+};
+
+// ─── 活断層 (OSM Overpass) ─────────────────────────────────────
+async function fetchFault() {
+  const ja = PREF_NAMES_JA[PREF];
+  const q =
+    '[out:json][timeout:300];' +
+    `area["name"="${ja}"]->.ep;` +
+    '(' +
+      'way["geological"="fault"](area.ep);' +
+      'way["fault"="yes"](area.ep);' +
+    ');' +
+    'out tags geom;';
+  const ENDPOINTS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
+  ];
+  let json = null;
+  for (const ep of ENDPOINTS) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 300000);
+      try {
+        const res = await fetch(ep, {
+          method: 'POST', signal: ctrl.signal,
+          headers: { 'User-Agent': UA['User-Agent'], 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(q),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        json = await res.json();
+        break;
+      } finally { clearTimeout(t); }
+    } catch (err) { console.log(`  fault overpass ${ep} failed: ${err.message}`); }
+  }
+  const features = [];
+  if (json && json.elements) {
+    for (const e of json.elements) {
+      if (e.type !== 'way' || !e.geometry) continue;
+      const coords = e.geometry.map(p => [p.lon, p.lat]);
+      if (coords.length < 2) continue;
+      const name = (e.tags && (e.tags.name || e.tags['name:ja'])) || `fault_${e.id}`;
+      features.push({ type: 'Feature', properties: { name }, geometry: { type: 'LineString', coordinates: coords } });
+    }
+  }
+  fs.writeFileSync(path.join(OUT_DIR, 'fault.geojson'),
+    JSON.stringify({ type: 'FeatureCollection', features }));
+  console.log(`  fault → fault.geojson: ${features.length} ways`);
+  return features.length;
+}
+
+// ─── 液状化: 公開API無いので空ファイル (ehime テストフィクスチャは保持) ──
+function ensureLiquefaction() {
+  const fp = path.join(OUT_DIR, 'liquefaction.geojson');
+  if (fs.existsSync(fp)) return -1; // 既存テスト固定値があれば触らない
+  fs.writeFileSync(fp, JSON.stringify({ type: 'FeatureCollection', features: [] }));
+  console.log(`  liquefaction → 空ファイル (公開API無し)`);
+  return 0;
+}
+
 // ─── main ──────────────────────────────────────────────────────────
 (async () => {
   const t0 = Date.now();
-  let f31 = 0, f40 = 0, f48 = 0;
+  let f31 = 0, f40 = 0, f48 = 0, ff = 0, fl = 0;
   try { f31 = await fetchA31(); } catch (e) { console.log(`  A31 failed: ${e.message}`); }
   try { f40 = await fetchA40(); } catch (e) { console.log(`  A40 failed: ${e.message}`); }
   try { f48 = await fetchA48(); } catch (e) { console.log(`  A48 failed: ${e.message}`); }
-  console.log(`✅ ${PREF}: flood=${f31} tsunami=${f40} landslide=${f48} (${((Date.now()-t0)/1000).toFixed(1)}s)`);
+  try { ff = await fetchFault(); } catch (e) { console.log(`  fault failed: ${e.message}`); }
+  try { fl = ensureLiquefaction(); } catch (e) { console.log(`  liquefaction failed: ${e.message}`); }
+  console.log(`✅ ${PREF}: flood=${f31} tsunami=${f40} landslide=${f48} fault=${ff} liquefaction=${fl >= 0 ? fl : 'kept'} (${((Date.now()-t0)/1000).toFixed(1)}s)`);
 })().catch(e => { console.error('FATAL:', e); process.exit(1); });
