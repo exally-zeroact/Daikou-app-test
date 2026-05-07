@@ -23,15 +23,22 @@
  * 入力 GeoJSON properties で参照する OSM タグ:
  *   highway, oneway, incline, lanes, width, layer
  *
- * 使い方: node build-roads.js <input.geojson> <output_dir> <region>
+ * 使い方:
+ *   node build-roads.js <input.geojson> <output_dir> <region> [--dem]
+ *   --dem  : 国土地理院 標高タイル (tmp/tiles) で各道路の勾配を計算し
+ *            OSM incline タグが無い道路の incline bit を補完する。
+ *            事前に scripts/fetch-dem-tiles.js で県別に取得しておく。
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const [, , INPUT, OUTPUT_DIR, REGION] = process.argv;
+const args = process.argv.slice(2);
+const USE_DEM = args.includes('--dem');
+const positional = args.filter(a => !a.startsWith('--'));
+const [INPUT, OUTPUT_DIR, REGION] = positional;
 if (!INPUT || !OUTPUT_DIR || !REGION) {
-  console.error('Usage: build-roads.js <input.geojson> <output_dir> <region>');
+  console.error('Usage: build-roads.js <input.geojson> <output_dir> <region> [--dem]');
   process.exit(1);
 }
 
@@ -87,25 +94,22 @@ const TYPE_CODES = {
 // ─── v6 属性パーサ ─────────────────────────────────────────────────
 const INCLINE_THRESHOLD = 6; // 急勾配閾値 (%)
 
-// incline → 0=なし, 1=登り急, 2=下り急, 3=方向不明・急
-function parseIncline(raw) {
+// OSM raw incline タグ → 0=なし/不明, 1=登り急, 2=下り急, 3=方向不明・急
+// 戻り値は確定的（OSM タグから直接読み取れた）の場合のみ非ゼロ
+function parseInclineRaw(raw) {
   if (raw == null) return 0;
   let v = String(raw).trim();
   if (!v) return 0;
-  // 度表記 → % 変換
   if (/°$/.test(v)) {
     const deg = parseFloat(v);
     if (isNaN(deg)) return 0;
-    const pct = Math.tan(deg * Math.PI / 180) * 100;
-    return classifyPct(pct);
+    return classifyPct(Math.tan(deg * Math.PI / 180) * 100);
   }
-  // % または素の数値
   if (/^[+-]?\d+(\.\d+)?\s*%?$/.test(v)) {
     const pct = parseFloat(v);
     if (isNaN(pct)) return 0;
     return classifyPct(pct);
   }
-  // 文字列マッピング
   const lower = v.toLowerCase();
   if (lower === 'up') return 1;
   if (lower === 'down') return 2;
@@ -115,6 +119,16 @@ function parseIncline(raw) {
 function classifyPct(pct) {
   if (Math.abs(pct) < INCLINE_THRESHOLD) return 0;
   return pct >= INCLINE_THRESHOLD ? 1 : 2;
+}
+
+// DEM 計算結果と OSM raw を統合した最終 incline (0/1/2/3)
+//   優先順位: OSM raw が確定値 → それ
+//             それ以外 → DEM 計算結果
+//             どちらも不明 → 0
+function classifyInclineCombined(raw, computedInclineCode) {
+  const r = parseInclineRaw(raw);
+  if (r !== 0) return r;
+  return computedInclineCode || 0;
 }
 
 // oneway → 0/1
@@ -170,10 +184,10 @@ function parseLayer(raw) {
 //   bit 10-11 width
 //   bit 12-13 layer
 //   bit 14-15 reserved
-function packAttrBitmap(typeCode, props) {
+function packAttrBitmap(typeCode, props, inclineCode) {
   let bits = typeCode & 0x0F;
   bits |= (parseOneway(props.oneway) & 0x01) << 4;
-  bits |= (parseIncline(props.incline) & 0x03) << 5;
+  bits |= ((inclineCode != null ? inclineCode : parseInclineRaw(props.incline)) & 0x03) << 5;
   bits |= (parseLanes(props.lanes) & 0x07) << 7;
   bits |= (parseWidth(props.width) & 0x03) << 10;
   bits |= (parseLayer(props.layer) & 0x03) << 12;
@@ -230,6 +244,67 @@ function nearestPrefecture(lat, lon, prefList) {
   return best;
 }
 
+// ─── DEM (オプション) ─────────────────────────────────────────────
+let dem = null;
+if (USE_DEM) {
+  const createDem = require('./dem-lookup.js');
+  dem = createDem({ zoom: 14 });
+  console.log(`  → DEM 標高タイル lookup 有効 (z=14)`);
+}
+
+// ─── 道路セグメント勾配 → incline コード ────────────────────────
+// DP 簡略後の整数 lat/lng 列 → 各セグメント勾配 (%) → 道路全体の判定
+//   any segment >= +6% → 1 (登り急)
+//   any segment <= -6% → 2 (下り急)
+//   両方あり → 3 (混在・方向不明)
+//   どれも閾値未満 → 0 (なし)
+//   サンプル取得失敗多 → null (DEM 不明・OSM raw にフォールバック)
+const PRECISION_INV = 1 / 1e5;
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toRad;
+  const dLng = (lng2 - lng1) * toRad;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*toRad)*Math.cos(lat2*toRad)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function computeInclineFromDem(simplified) {
+  if (!dem) return null;
+  const n = simplified.length;
+  if (n < 2) return null;
+  // 各頂点で標高を取得
+  const elevs = new Array(n);
+  let okCount = 0;
+  for (let i = 0; i < n; i++) {
+    const lat = simplified[i][0] * PRECISION_INV;
+    const lng = simplified[i][1] * PRECISION_INV;
+    const h = dem.elev(lat, lng);
+    elevs[i] = h;
+    if (!isNaN(h)) okCount++;
+  }
+  if (okCount < 2) return null; // 全/ほぼ DEM 未取得
+  // 連続する有効頂点間の勾配を計算
+  let hasUp = false, hasDown = false, maxAbs = 0;
+  for (let i = 0; i < n - 1; i++) {
+    const ha = elevs[i], hb = elevs[i + 1];
+    if (isNaN(ha) || isNaN(hb)) continue;
+    const lat1 = simplified[i][0] * PRECISION_INV;
+    const lng1 = simplified[i][1] * PRECISION_INV;
+    const lat2 = simplified[i + 1][0] * PRECISION_INV;
+    const lng2 = simplified[i + 1][1] * PRECISION_INV;
+    const distM = haversineM(lat1, lng1, lat2, lng2);
+    if (distM < 5) continue; // 短すぎる線分はノイズ
+    const grad = (hb - ha) / distM * 100; // %
+    if (Math.abs(grad) > maxAbs) maxAbs = Math.abs(grad);
+    if (grad >= INCLINE_THRESHOLD) hasUp = true;
+    if (grad <= -INCLINE_THRESHOLD) hasDown = true;
+  }
+  if (hasUp && hasDown) return 3;
+  if (hasUp) return 1;
+  if (hasDown) return 2;
+  return 0;
+}
+
 // ─── メイン処理 ──────────────────────────────────────────────────
 console.log(`  → 入力: ${INPUT}`);
 const raw = fs.readFileSync(INPUT, 'utf8');
@@ -239,6 +314,7 @@ if (!geo.features) throw new Error('Invalid GeoJSON');
 let totalRoads = 0;
 let totalPointsBefore = 0, totalPointsAfter = 0;
 let droppedUnknownType = 0;
+let demCalcCount = 0, demFromOSM = 0, demFromDem = 0;
 
 const buckets = {};
 const bboxByPref = {};
@@ -246,7 +322,7 @@ for (const p of targetPrefs) { buckets[p] = []; bboxByPref[p] = [Infinity, Infin
 
 // 属性充足率カウンタ
 const attrCounters = {};
-for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, track: 0 };
+for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, track: 0, inclineFromOSM: 0, inclineFromDem: 0 };
 
 for (const f of geo.features) {
   if (!f.geometry) continue;
@@ -258,8 +334,6 @@ for (const f of geo.features) {
   const props = f.properties || {};
   const typeCode = TYPE_CODES[props.highway];
   if (typeCode === undefined) { droppedUnknownType++; continue; }
-
-  const bitmap = packAttrBitmap(typeCode, props);
 
   for (const coords of lines) {
     if (coords.length < 2) continue;
@@ -276,6 +350,23 @@ for (const f of geo.features) {
     const pref = nearestPrefecture(midLat / 1e5, midLon / 1e5, targetPrefs);
     if (!pref) continue;
 
+    // incline: OSM raw 優先、無ければ DEM 計算
+    const rawIncline = parseInclineRaw(props.incline);
+    let inclineCode = rawIncline;
+    let inclineSource = rawIncline ? 'osm' : null;
+    if (!rawIncline && dem) {
+      const computed = computeInclineFromDem(simplified);
+      demCalcCount++;
+      if (computed != null) {
+        inclineCode = computed;
+        if (computed) inclineSource = 'dem';
+      }
+    }
+    if (inclineSource === 'osm') demFromOSM++;
+    else if (inclineSource === 'dem') demFromDem++;
+
+    const bitmap = packAttrBitmap(typeCode, props, inclineCode);
+
     const bb = bboxByPref[pref];
     for (const [lat, lon] of simplified) {
       if (lat < bb[0]) bb[0] = lat;
@@ -286,7 +377,6 @@ for (const f of geo.features) {
     buckets[pref].push([bitmap, simplified]);
     totalRoads++;
 
-    // 充足率カウント（県別）
     const c = attrCounters[pref];
     if ((bitmap >> 4) & 0x01) c.oneway++;
     if ((bitmap >> 5) & 0x03) c.incline++;
@@ -294,6 +384,8 @@ for (const f of geo.features) {
     if ((bitmap >> 10) & 0x03) c.width++;
     if ((bitmap >> 12) & 0x03) c.layer++;
     if (typeCode === 12) c.track++;
+    if (inclineSource === 'osm') c.inclineFromOSM++;
+    if (inclineSource === 'dem') c.inclineFromDem++;
   }
 }
 
@@ -400,7 +492,7 @@ window.ROADS_${PREF_UPPER} = ${JSON.stringify({
   const size = fs.statSync(outPath).size;
   const pct = (n) => `${((n / entries.length) * 100).toFixed(1)}%`;
   console.log(`  → ${pref}: ${entries.length}本・${(size / 1024 / 1024).toFixed(2)} MB → ${outPath}`);
-  console.log(`     attr 充足: oneway ${pct(c.oneway)} / incline ${pct(c.incline)} / lanes ${pct(c.lanes)} / width ${pct(c.width)} / layer ${pct(c.layer)} / track ${pct(c.track)}`);
+  console.log(`     attr 充足: oneway ${pct(c.oneway)} / incline ${pct(c.incline)} (osm ${pct(c.inclineFromOSM)} + dem ${pct(c.inclineFromDem)}) / lanes ${pct(c.lanes)} / width ${pct(c.width)} / layer ${pct(c.layer)} / track ${pct(c.track)}`);
 
   meta.prefectures[pref] = {
     numRoads: entries.length,
@@ -413,4 +505,9 @@ window.ROADS_${PREF_UPPER} = ${JSON.stringify({
 const metaPath = path.join(OUTPUT_DIR, `meta-${REGION}.json`);
 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 console.log(`  → meta: ${metaPath}`);
+if (USE_DEM && dem) {
+  const s = dem.stats();
+  console.log(`  DEM lookup stats: hits=${s.hits} misses=${s.misses} naSamples=${s.naSamples} cacheTiles=${s.cacheTiles} (5m=${s.tiles5m}/10m=${s.tiles10m}/missing=${s.tilesMissing})`);
+  console.log(`  incline 出典: OSM=${demFromOSM} / DEM=${demFromDem} / 計算試行=${demCalcCount}`);
+}
 console.log(`✅ 全${targetPrefs.length}県の出力完了`);
