@@ -46,6 +46,7 @@ const PRECACHE_FILES = [
   '/data/michinoeki-jp.js',
   '/data/coastline-jp.js',
   '/data/ports-jp.js',
+  '/data/peaks-jp.js',
 ];
 
 self.addEventListener('install', function(e){
@@ -137,7 +138,8 @@ self.addEventListener('fetch', function(e){
     e.request.url.includes('/data/airports-jp.js') ||
     e.request.url.includes('/data/michinoeki-jp.js') ||
     e.request.url.includes('/data/coastline-jp.js') ||
-    e.request.url.includes('/data/ports-jp.js')
+    e.request.url.includes('/data/ports-jp.js') ||
+    e.request.url.includes('/data/peaks-jp.js')
   ){
     e.respondWith(staleWhileRevalidate(e.request));
     return;
