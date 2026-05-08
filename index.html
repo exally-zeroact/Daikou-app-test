@@ -76,6 +76,25 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 .pwa-banner-text strong{display:block;font-size:13px;margin-bottom:2px;}
 .pwa-banner-btn{background:#007AFF;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:'Noto Sans JP',sans-serif;}
 .pwa-banner-close{background:none;border:none;color:#007AFF;font-size:18px;cursor:pointer;padding:0 4px;}
+/* Android APK 配布バナー (Chrome WebAPK 不可端末向け) */
+.apk-banner{display:none;align-items:center;gap:10px;background:#FFF8E1;border-bottom:2px solid #F59E0B;padding:10px 14px;flex-shrink:0;}
+.apk-banner.show{display:flex;}
+.apk-banner-text{flex:1;font-size:12px;color:#7A4A00;line-height:1.5;}
+.apk-banner-text strong{display:block;font-size:13px;margin-bottom:2px;color:#7A4A00;}
+.apk-banner-btn{background:#F59E0B;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;font-family:'Noto Sans JP',sans-serif;text-decoration:none;display:inline-block;}
+.apk-banner-close{background:none;border:none;color:#7A4A00;font-size:18px;cursor:pointer;padding:0 4px;}
+/* APK インストール手順モーダル */
+.apk-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1200;align-items:center;justify-content:center;padding:20px;}
+.apk-modal.show{display:flex;}
+.apk-modal-box{background:#fff;border-radius:14px;max-width:420px;width:100%;max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:20px 22px;}
+.apk-modal-title{font-size:17px;font-weight:700;color:#111;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.apk-modal-step{display:flex;gap:10px;margin-bottom:12px;font-size:13px;color:#333;line-height:1.6;}
+.apk-modal-step-num{width:22px;height:22px;border-radius:50%;background:#F59E0B;color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
+.apk-modal-step b{color:#111;}
+.apk-modal-warn{background:#FFF8E1;border:1px solid #F59E0B;border-radius:8px;padding:10px 12px;font-size:12px;color:#7A4A00;line-height:1.5;margin:14px 0;}
+.apk-modal-actions{display:flex;gap:8px;margin-top:16px;}
+.apk-modal-dl{flex:1;background:#F59E0B;color:#fff;border:none;border-radius:10px;padding:13px;font-size:14px;font-weight:700;text-align:center;text-decoration:none;font-family:'Noto Sans JP',sans-serif;}
+.apk-modal-close{background:#eee;color:#555;border:none;border-radius:10px;padding:13px 18px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;}
 .gps-acc{font-size:11px;color:#fff;opacity:0.8;}
 .surcharge-badge{background:#FF3B30;border-radius:8px;padding:4px 10px;cursor:pointer;}
 .menu-btn{
@@ -624,6 +643,35 @@ justify-content:center;
   </div>
   <button class="pwa-banner-btn" onclick="showPwaInstructions()">追加方法</button>
   <button class="pwa-banner-close" onclick="closePwaBanner()">✕</button>
+</div>
+
+<!-- Android APK 配布バナー (WebAPK 生成不可端末向け・JS で Android Chrome のみ表示) -->
+<div class="apk-banner" id="apkBanner">
+  <div class="apk-banner-text">
+    <strong>📦 Androidアプリ版があります</strong>
+    APK ダウンロード → スタンドアロン起動・センサー利用可
+  </div>
+  <button class="apk-banner-btn" onclick="showApkInstall()">インストール</button>
+  <button class="apk-banner-close" onclick="closeApkBanner()">✕</button>
+</div>
+
+<!-- APK インストール手順モーダル -->
+<div class="apk-modal" id="apkModal" onclick="if(event.target.id==='apkModal')closeApkModal()">
+  <div class="apk-modal-box">
+    <div class="apk-modal-title">📦 Androidアプリ (APK) をインストール</div>
+    <div class="apk-modal-step"><div class="apk-modal-step-num">1</div><div>下の <b>「APK をダウンロード」</b> ボタンを押すと <code>daikome.apk</code> が端末に保存されます (約 数 MB)。</div></div>
+    <div class="apk-modal-step"><div class="apk-modal-step-num">2</div><div>ダウンロード完了通知をタップ → 「<b>このソースのアプリを許可</b>」のダイアログが出るので <b>許可</b> をタップ (端末によっては <b>設定 → アプリ → 提供元不明のアプリ → Chrome を許可</b>)。</div></div>
+    <div class="apk-modal-step"><div class="apk-modal-step-num">3</div><div>続けて <b>「インストール」</b> をタップ。完了後 <b>「開く」</b> でアプリ起動。</div></div>
+    <div class="apk-modal-step"><div class="apk-modal-step-num">4</div><div>初回起動時に <b>位置情報・センサー</b> の許可ダイアログが出るので全て許可。</div></div>
+    <div class="apk-modal-warn">
+      ⚠️ 「Play プロテクトでブロックされました」と表示された場合は <b>詳細 → このまま使用</b> または <b>気にせずインストール</b> をタップ。<br>
+      Google Play 公式配布ではないため警告が出ますが, 配布元は司さん本人なので安全です。
+    </div>
+    <div class="apk-modal-actions">
+      <a class="apk-modal-dl" href="/download/daikome.apk" download>APK をダウンロード</a>
+      <button class="apk-modal-close" onclick="closeApkModal()">閉じる</button>
+    </div>
+  </div>
 </div>
 
 <!-- コンテンツ -->
@@ -2189,6 +2237,33 @@ function closePwaBanner(){
 function showPwaInstructions(){
   alert('① 画面下の「共有」ボタン（□↑）をタップ\n② 「ホーム画面に追加」を選択\n③「追加」をタップ\n\nホーム画面のアイコンから起動するとコンパス・ジャイロが使えます！');
 }
+
+// ─── Android APK 配布バナー / モーダル 制御 ───
+function closeApkBanner(){
+  document.getElementById('apkBanner').classList.remove('show');
+  localStorage.setItem('apk_banner_dismissed', '1');
+}
+function showApkInstall(){
+  document.getElementById('apkModal').classList.add('show');
+}
+function closeApkModal(){
+  document.getElementById('apkModal').classList.remove('show');
+}
+// Android Chrome かつ standalone 起動でない場合に表示 (iOS / 既 PWA 化端末では出さない)
+(function(){
+  try {
+    const ua = navigator.userAgent || '';
+    const isAndroid = /Android/i.test(ua);
+    const isStandalone =
+      window.matchMedia && window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true;
+    const dismissed = localStorage.getItem('apk_banner_dismissed') === '1';
+    if (isAndroid && !isStandalone && !dismissed) {
+      const el = document.getElementById('apkBanner');
+      if (el) el.classList.add('show');
+    }
+  } catch (e) {}
+})();
 
 // ─── 初回DL UI 制御（Phase 0a-2） ───
 // 47県データの初回DL：fetch + Cache Storage + IndexedDB県別進捗
