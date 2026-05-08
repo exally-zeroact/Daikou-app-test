@@ -44,6 +44,13 @@ const loadedPrefs = new Set();
 // MM-4b: 県別 road-graph（CSR + CH ショートカット）
 const graphs = new Map();   // pref → decoded graph object
 
+// MM-5 (2026-05-08): DEM データ（高度データ）
+// 形式: { bbox:[minLat,minLng,maxLat,maxLng], gridSize, numLat, numLng, alt:Int16Array }
+// alt[y * numLng + x] = 該当グリッドの標高 (m, sea level 基準, Int16 範囲 -32768〜32767m)
+let _demData = null;
+const _LAYER_BOOST_FACTOR = 1.3;       // accel/cellular hint と layer 一致時のブースト
+const _LAYER_WRONG_PENALTY = 0.3;      // 高架/地下 で alt 矛盾時のペナルティ
+
 // MM-4b: Dijkstra タイムアウト・LRU キャッシュ
 const DIJKSTRA_TIMEOUT_MS = 3;
 const ROUTE_CACHE_SIZE    = 100;
@@ -192,7 +199,61 @@ function _mahalanobisEmission(snap, gpsLat, gpsLng, accuracy, headingDeg){
 
 // 候補配列に emission スコアを付与
 // 総合 emission = 距離 × heading × Mahalanobis × 道路種別
-function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeBucket){
+// MM-5: DEM lookup（O(1) 2D グリッド）
+// 高さ精度が DEM grid 解像度に依存。グリッド外は null。
+function _demLookup(lat, lng){
+  if(!_demData) return null;
+  const bbox = _demData.bbox;
+  if(lat < bbox[0] || lat > bbox[2] || lng < bbox[1] || lng > bbox[3]) return null;
+  const x = Math.floor((lng - bbox[1]) / _demData.gridSize);
+  const y = Math.floor((lat - bbox[0]) / _demData.gridSize);
+  if(x < 0 || x >= _demData.numLng || y < 0 || y >= _demData.numLat) return null;
+  return _demData.alt[y * _demData.numLng + x];
+}
+
+// MM-5: 候補の layer score を算出（v6 layer 属性 + DEM 高度差 + accel/cellular hint）
+//   c.layer: 0=平面 1=高架 2=地下 3=その他
+//   gpsAlt: GPS 高度 (m)・null なら DEM 比較スキップ
+//   accelLayerHint: 'bridge' | 'normal'
+//   cellularLayerHint: 'tunnel' | 'open'
+function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, accelLayerHint, cellularLayerHint){
+  let score = 1.0;
+
+  // DEM 高度差ベースのスコア（DEM ロード済かつ GPS alt あり）
+  if(gpsAlt != null && _demData){
+    const demAlt = _demLookup(gpsLat, gpsLng);
+    if(demAlt != null){
+      const altDiff = gpsAlt - demAlt;
+      if(c.layer === 1){
+        // 高架: alt 差 > 4m なら確信、小さいほどペナルティ、負方向は強ペナルティ
+        if(altDiff > 4) score *= 1.0;
+        else if(altDiff > 0) score *= Math.exp(-(4 - altDiff) / 3);
+        else score *= _LAYER_WRONG_PENALTY;
+      } else if(c.layer === 2){
+        // 地下: alt 差 < -2m なら確信、小さいほどペナルティ、正方向は強ペナルティ
+        if(altDiff < -2) score *= 1.0;
+        else if(altDiff < 0) score *= Math.exp(-(-altDiff - 2) / 3);
+        else score *= _LAYER_WRONG_PENALTY;
+      } else {
+        // 平面 / その他: |altDiff| が小さいほど確信
+        const ad = Math.abs(altDiff);
+        if(ad < 5) score *= 1.0;
+        else score *= Math.exp(-ad / 5);
+      }
+    }
+  }
+
+  // accel hint と layer 一致でブースト
+  if(accelLayerHint === 'bridge' && c.layer === 1) score *= _LAYER_BOOST_FACTOR;
+  // cellular hint と layer 一致でブースト
+  if(cellularLayerHint === 'tunnel' && c.layer === 2) score *= _LAYER_BOOST_FACTOR;
+
+  return score;
+}
+
+// MM-2/MM-5: emission scoring（候補絞り込み後に layer score を最後段で乗算）
+function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeBucket,
+                         gpsAlt, accelLayerHint, cellularLayerHint){
   const sigma = 4 + 0.5 * accuracy;
   for(let i = 0; i < cands.length; i++){
     const c = cands[i];
@@ -213,13 +274,17 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     // ④ 道路種別遷移
     const currBucket = _roadTypeBucket(c.typeCode);
     const typeScore = _typeTransitionScore(prevTypeBucket, currBucket);
+    // ⑤ MM-5: layer score（最後段・候補絞り込み後）
+    const layerScore = _computeLayerScore(c, gpsLat, gpsLng, gpsAlt,
+                                          accelLayerHint, cellularLayerHint);
     // 総合
     c._distScore = distScore;
     c._headScore = headScore;
     c._mahalScore = mahalScore;
     c._typeScore = typeScore;
+    c._layerScore = layerScore;
     c._typeBucket = currBucket;
-    c.emission = distScore * headScore * mahalScore * typeScore;
+    c.emission = distScore * headScore * mahalScore * typeScore * layerScore;
   }
   return cands;
 }
@@ -764,6 +829,30 @@ self.onmessage = function(e){
     return;
   }
 
+  // MM-5: DEM データ受け取り
+  // payload: { bbox:[minLat,minLng,maxLat,maxLng], gridSize, numLat, numLng, altB64 }
+  // alt は Int16Array を base64 化したもの（標高 m, sea level 基準）
+  if(msg.type === 'loadDem'){
+    try {
+      const altBuf = _b64ToArrayBuffer(msg.altB64);
+      _demData = {
+        bbox: msg.bbox,
+        gridSize: msg.gridSize,
+        numLat: msg.numLat,
+        numLng: msg.numLng,
+        alt: new Int16Array(altBuf),
+      };
+      self.postMessage({
+        type: 'demLoaded', ok: true,
+        cells: _demData.numLat * _demData.numLng,
+        sizeMB: (altBuf.byteLength / 1024 / 1024).toFixed(2),
+      });
+    } catch(err){
+      self.postMessage({ type: 'demLoaded', ok: false, error: err.message });
+    }
+    return;
+  }
+
   // MM-4b: road-graph 受け取り
   if(msg.type === 'loadGraph'){
     try {
@@ -889,7 +978,9 @@ self.onmessage = function(e){
         const prevBucket = (lastCommittedSnap && lastCommittedSnap._typeBucket)
           ? lastCommittedSnap._typeBucket
           : ((prevSnap && prevSnap._typeBucket) ? prevSnap._typeBucket : null);
-        _scoreCandidates(cands, msg.lat, msg.lng, msg.accuracy || 20, msg.headingDeg, prevBucket);
+        // MM-5: gps altitude / accelLayerHint / cellularLayerHint を layer scorer に渡す
+        _scoreCandidates(cands, msg.lat, msg.lng, msg.accuracy || 20, msg.headingDeg, prevBucket,
+                         msg.altitude, msg.accelLayerHint, msg.cellularLayerHint);
 
         // 出力用に「最高 emission の 1 件」を選んでおく（diagnostic / mmResult.snap 用）
         let bestEmit = cands[0];

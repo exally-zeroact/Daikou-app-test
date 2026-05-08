@@ -936,6 +936,9 @@ class NoSleep {
 <!-- ★road-graph-loader.js: MM-4b road-graph 遅延ロード -->
 <script src="js/road-graph-loader.js"></script>
 
+<!-- ★dem-loader.js: MM-5 DEM データ遅延ロード -->
+<script src="js/dem-loader.js"></script>
+
 <script src="js/gps.js"></script>
 
 <!-- OSRM削除済（2026/04/26）：公開API依存ゼロ化・スケール無制限化のため -->
@@ -981,6 +984,11 @@ try {
            (m.ok ? ' (nodes=' + m.numNodes + ' edges=' + m.numEdges +
                    ' shortcuts=' + m.numShortcuts +
                    (m.decodeMs ? ' decode=' + m.decodeMs.toFixed(0) + 'ms' : '') + ')'
+                 : ' err=' + m.error));
+    } else if(m.type === 'demLoaded'){
+      // MM-5: DEM 受信ログ
+      dlog('[MM] worker DEM ' + (m.ok ? 'loaded' : 'fail') +
+           (m.ok ? ' (cells=' + m.cells + ' size=' + m.sizeMB + 'MB)'
                  : ' err=' + m.error));
     }
   });
@@ -1057,6 +1065,35 @@ function _forwardRoadGraphToMmWorker(prefs){
       console.warn('[MM] forward road-graph ' + pref + ' err:', e.message);
     }
   }
+}
+
+// MM-5 (2026-05-08): DEM データを Worker B に転送する関数
+// data/dem-jp.js (window.DEM_JP) が未ビルドなら no-op（layer scorer は roads v6 + accel hint で稼働）
+function _forwardDemToMmWorker(){
+  if(!_mmWorker) return;
+  const data = window.DEM_JP;
+  if(!data || !data.altB64) return;
+  try {
+    _mmWorker.postMessage({
+      type: 'loadDem',
+      bbox: data.bbox,
+      gridSize: data.gridSize,
+      numLat: data.numLat,
+      numLng: data.numLng,
+      altB64: data.altB64,
+    });
+  } catch(e){
+    console.warn('[MM] forward dem err:', e.message);
+  }
+}
+
+// MM-5: 起動時に DEM を試行ロード（あれば Worker B に転送）
+if(typeof DemLoader !== 'undefined' && DemLoader.load){
+  DemLoader.load().then((data) => {
+    if(data) _forwardDemToMmWorker();
+  }).catch(e => {
+    console.warn('[DEM] load error:', e.message);
+  });
 }
 
 // ─── 状態 ───

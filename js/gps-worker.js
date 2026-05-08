@@ -266,6 +266,69 @@ function calcAccelVariance(accelSamples, now) {
   return variance;
 }
 
+// ─── MM-5 (2026-05-08): 加速度路面セマンティクス検出 ─────────
+// vibration_index = std(|a|) を 1Hz で算出し、橋進入時の急上下 G impulse を検出
+// accelLayerHint: 'bridge' | 'normal'
+//   - 'bridge': 直近 5 秒で max(|a|) - min(|a|) > 4 m/s² の impulse を観測
+//   - 'normal': デフォルト・上記閾値未満
+// トンネルは accel から検出困難なため normal のまま（cellular hint で補完）
+//
+// 戻り値: { hint, vibrationIndex, magRange, sampleCount } | null
+const ACCEL_LAYER_WINDOW_MS = 5000;
+const ACCEL_LAYER_MIN_SAMPLES = 8;
+const ACCEL_BRIDGE_RANGE_THRESHOLD = 4.0;     // m/s² 急上下 G の検出閾値
+const ACCEL_BRIDGE_VARIANCE_THRESHOLD = 0.8;  // 高 vibration の検出閾値
+
+function calcAccelLayerHint(accelSamples, now) {
+  if (!accelSamples || !Array.isArray(accelSamples)) return null;
+  if (accelSamples.length < ACCEL_LAYER_MIN_SAMPLES) return null;
+
+  const recent = accelSamples.filter(s =>
+    s && typeof s.t === 'number' && (now - s.t) < ACCEL_LAYER_WINDOW_MS
+  );
+  if (recent.length < ACCEL_LAYER_MIN_SAMPLES) return null;
+
+  // 各サンプルの |a| = √(x² + y² + z²) を算出
+  let maxMag = -Infinity, minMag = Infinity, sumMag = 0;
+  const mags = new Array(recent.length);
+  for (let i = 0; i < recent.length; i++) {
+    const s = recent[i];
+    const m = Math.sqrt(s.x * s.x + s.y * s.y + s.z * s.z);
+    mags[i] = m;
+    if (m > maxMag) maxMag = m;
+    if (m < minMag) minMag = m;
+    sumMag += m;
+  }
+  const mean = sumMag / recent.length;
+
+  // 標準偏差 (vibration_index)
+  let variance = 0;
+  for (let i = 0; i < mags.length; i++) {
+    const d = mags[i] - mean;
+    variance += d * d;
+  }
+  variance /= mags.length;
+  const vibrationIndex = Math.sqrt(variance);
+
+  // 急上下 G の range（最大 - 最小）
+  const magRange = maxMag - minMag;
+
+  let hint = 'normal';
+  // 橋進入: range が大きい（伸縮継ぎ目を踏んだ瞬間の vertical G impulse）
+  // または vibration_index が高い（橋面の不整・段差）
+  if (magRange > ACCEL_BRIDGE_RANGE_THRESHOLD ||
+      vibrationIndex > ACCEL_BRIDGE_VARIANCE_THRESHOLD) {
+    hint = 'bridge';
+  }
+
+  return {
+    hint: hint,
+    vibrationIndex: vibrationIndex,
+    magRange: magRange,
+    sampleCount: recent.length,
+  };
+}
+
 // ─── C-2：加速度合算ベクトル動き判定（2026/04/30追加） ───
 // 直近のサンプルから |a|=√(x²+y²+z²) の平均を計算し、9.8（重力）からの偏差を返す
 // 静止時：|平均|a|| ≈ 9.8 → 偏差 ≈ 0
@@ -462,6 +525,10 @@ function processPosition(data) {
   const _cellHint = _computeCellularHint(accuracy, now);
   _prevAccuracy = accuracy;
 
+  // MM-5 (2026-05-08): 加速度路面セマンティクス hint
+  // accelLayerHint = 'bridge' | 'normal' （tunnel は accel 検出困難）
+  const _accelHint = calcAccelLayerHint(accelSamples, now);
+
   return {
     lat: filtered.lat,
     lng: filtered.lng,
@@ -482,6 +549,10 @@ function processPosition(data) {
     cellularLayerHint: _cellHint.hint,           // 'tunnel' | 'open'
     cellularConfidence: _cellHint.confidence,    // 0〜0.95
     cellularEffectiveType: _cellularState.effectiveType,  // デバッグ用
+    // MM-5: 加速度由来の路面 hint（map-matcher.js の layer scorer が消費）
+    accelLayerHint: _accelHint ? _accelHint.hint : 'normal',  // 'bridge' | 'normal'
+    accelVibrationIndex: _accelHint ? _accelHint.vibrationIndex : 0,
+    accelMagRange: _accelHint ? _accelHint.magRange : 0,
   };
 }
 

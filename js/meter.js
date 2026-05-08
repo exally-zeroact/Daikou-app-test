@@ -379,6 +379,9 @@ const Meter = (() => {
           // 値がない（古い Worker A・非対応端末）場合は 'open' と 0 で安全側
           cellularLayerHint: gpsResult.cellularLayerHint || 'open',
           cellularConfidence: gpsResult.cellularConfidence || 0,
+          // MM-5: GPS altitude（DEM 比較用）と accel hint（layer 確信度向上用）を転送
+          altitude: (typeof gpsResult.altitude === 'number') ? gpsResult.altitude : null,
+          accelLayerHint: gpsResult.accelLayerHint || 'normal',
         });
       } catch(e) {
         // post 失敗時はメーター本体に影響を与えず inline fallback に進む
