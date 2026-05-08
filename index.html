@@ -1161,11 +1161,98 @@ document.addEventListener('visibilitychange', function(){
     const ac = s.avg_candidates.toFixed(1);
     const w = s.worker_active ? 'W' : 'I';  // W=worker / I=inline
     const mcm = (s.mcm_window_size && s.mcm_window_size > 0) ? (' N=' + s.mcm_window_size) : '';
+    // RAM 実測（performance.memory は Chromium 系のみ）
+    let ramStr = '';
+    if(performance && performance.memory){
+      const heapMB = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1);
+      const limitMB = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(0);
+      ramStr = ' main=' + heapMB + '/' + limitMB + 'MB';
+    }
     badge.textContent =
       '[' + w + '] snap=' + snapPct + '% skip=' + skipPct + '%' +
       ' mm=' + mmKm + 'km d=' + dKm + 'km' +
-      ' p99=' + p99 + 'ms cand=' + ac + mcm;
+      ' p99=' + p99 + 'ms cand=' + ac + mcm + ramStr;
   }, 2000);
+
+  // ─── 詳細 RAM パネル（DEBUG 限定・タップで開閉）────────────────
+  // Worker B / 各 graph / pheromone / grid / DEM の RAM 内訳を可視化
+  const ramPanel = document.createElement('div');
+  ramPanel.id = 'mmRamPanel';
+  ramPanel.style.cssText =
+    'position:fixed;left:8px;bottom:36px;z-index:9000;' +
+    'background:rgba(0,0,0,0.85);color:#fff;font-family:monospace;' +
+    'font-size:10px;padding:8px 10px;border-radius:6px;line-height:1.5;' +
+    'max-width:80vw;display:none;white-space:pre;letter-spacing:0.3px;';
+  document.body.appendChild(ramPanel);
+
+  // バッジタップで RAM パネル開閉
+  badge.style.pointerEvents = 'auto';
+  badge.style.cursor = 'pointer';
+  badge.addEventListener('click', function(){
+    ramPanel.style.display = ramPanel.style.display === 'none' ? 'block' : 'none';
+    if(ramPanel.style.display === 'block') _refreshRamPanel();
+  });
+
+  // RAM パネル更新（5 秒ごと + 開閉時に即更新）
+  const _ramSnapshot = {
+    workerMm7: null, workerOsrm: null, workerTile: null, mainHeap: null,
+  };
+  function _refreshRamPanel(){
+    if(!_mmWorker) return;
+    try { _mmWorker.postMessage({ type: 'getMm7Stats' }); } catch(e){}
+    try { _mmWorker.postMessage({ type: 'getOsrmStats' }); } catch(e){}
+    try { _mmWorker.postMessage({ type: 'getTileStats' }); } catch(e){}
+    setTimeout(_renderRamPanel, 200);
+  }
+  function _renderRamPanel(){
+    const lines = ['=== Worker B RAM 計測 ==='];
+    if(performance && performance.memory){
+      const heapMB = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1);
+      const limitMB = (performance.memory.jsHeapSizeLimit / 1024 / 1024).toFixed(0);
+      lines.push('main heap : ' + heapMB + ' / ' + limitMB + ' MB');
+    } else {
+      lines.push('main heap : N/A (Chromium 限定)');
+    }
+    if(_ramSnapshot.workerMm7){
+      const m = _ramSnapshot.workerMm7;
+      lines.push('MCM       : N=' + m.mcm_window_size + '/' + m.mcm_window_max +
+                 (m.mcm_shrunk ? ' [shrunk]' : ''));
+      lines.push('pheromone : ' + m.pheromone_roads_count + ' roads (' + m.pheromone_prefs + ' prefs)');
+      lines.push('grid bias : ' + m.grid_cells_count + ' / ' + m.grid_cells_max + ' cells');
+      lines.push('worker p99: ' + m.worker_p99_ms.toFixed(2) + ' ms');
+    }
+    if(_ramSnapshot.workerOsrm){
+      const m = _ramSnapshot.workerOsrm;
+      lines.push('OSRM      : ' + (m.enabled ? 'ON' : 'OFF') +
+                 ' batches=' + m.batches + ' fails=' + m.batchFails +
+                 ' onLine=' + m.onLine);
+    }
+    if(_ramSnapshot.workerTile){
+      const m = _ramSnapshot.workerTile;
+      lines.push('TileCache : ' + m.cacheSize + ' / ' + m.cacheMax +
+                 ' pinned=' + m.pinnedCount);
+      lines.push('Backbone  : ' + (m.backboneLoaded ? m.backboneNodes + ' nodes' : 'OFF'));
+    }
+    if(typeof RoadGraphLoader !== 'undefined'){
+      lines.push('graphs    : ' + RoadGraphLoader.getStats().loadedPrefectures.join(',') || '(none)');
+    }
+    lines.push('=== タップで閉じる ===');
+    ramPanel.textContent = lines.join('\n');
+  }
+
+  // mmStats / osrmStats / tileStats 受信時に snapshot 更新
+  _mmWorker && _mmWorker.addEventListener('message', function(e){
+    const m = e.data;
+    if(!m) return;
+    if(m.type === 'mm7Stats') _ramSnapshot.workerMm7 = m;
+    else if(m.type === 'osrmStats') _ramSnapshot.workerOsrm = m;
+    else if(m.type === 'tileStats') _ramSnapshot.workerTile = m;
+  });
+
+  // 5 秒ごとに自動更新（開いている時のみ）
+  setInterval(function(){
+    if(ramPanel.style.display === 'block') _refreshRamPanel();
+  }, 5000);
 })();
 
 // 既ロード済 roads-{pref}.js があれば Worker に転送する関数
