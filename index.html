@@ -936,6 +936,9 @@ class NoSleep {
 <!-- ★road-graph-loader.js: MM-4b road-graph 遅延ロード -->
 <script src="js/road-graph-loader.js"></script>
 
+<!-- ★road-graph-tile-loader.js: Phase B タイル road-graph 遅延ロード（main 側）-->
+<script src="js/road-graph-tile-loader.js"></script>
+
 <!-- ★dem-loader.js: MM-5 DEM データ遅延ロード -->
 <script src="js/dem-loader.js"></script>
 
@@ -1055,6 +1058,17 @@ function _mmWorkerOnMessage(e){
       dlog('[MM] worker DEM ' + (m.ok ? 'loaded' : 'fail') +
            (m.ok ? ' (cells=' + m.cells + ' size=' + m.sizeMB + 'MB)'
                  : ' err=' + m.error));
+    } else if(m.type === 'backboneLoaded'){
+      // Phase B: backbone graph 受信ログ
+      dlog('[MM] backbone ' + (m.ok ? 'loaded' : 'fail') +
+           (m.ok ? ' (nodes=' + m.numNodes + ' edges=' + m.numEdges + ')'
+                 : ' err=' + m.error));
+    } else if(m.type === 'tileLoaded'){
+      // Phase B: tile 受信ログ（頻発するため簡略）
+      if(!m.ok) dlog('[MM] tile fail: ' + m.error);
+    } else if(m.type === 'tileStats'){
+      dlog('[MM] tile cache ' + m.cacheSize + '/' + m.cacheMax +
+           ' pinned=' + m.pinnedCount + ' backbone=' + m.backboneLoaded);
     } else if(m.type === 'osrmConfigured'){
       // MM-6: OSRM 設定確認ログ
       dlog('[MM] OSRM ' + (m.ok ? ('configured: ' + (m.endpoint || '(none)') +
@@ -1215,6 +1229,33 @@ if(typeof DemLoader !== 'undefined' && DemLoader.load){
     console.warn('[DEM] load error:', e.message);
   });
 }
+
+// Phase B: 起動時にバックボーン graph を試行ロード（全国 motorway/trunk 常駐）
+function _forwardBackboneToMmWorker(){
+  if(!_mmWorker) return;
+  const data = window.ROAD_GRAPH_BACKBONE_JP;
+  if(!data) return;
+  try {
+    _mmWorker.postMessage({ type: 'loadBackbone', graphData: data });
+  } catch(e){
+    console.warn('[MM] forward backbone err:', e.message);
+  }
+}
+(function _loadBackbone(){
+  const script = document.createElement('script');
+  script.src = 'data/road-graph-backbone-jp.js';
+  script.async = true;
+  script.onload = function(){
+    if(typeof dlog === 'function' && window.ROAD_GRAPH_BACKBONE_JP){
+      dlog('[Backbone] loaded ' + window.ROAD_GRAPH_BACKBONE_JP.numNodes + ' nodes');
+    }
+    _forwardBackboneToMmWorker();
+  };
+  script.onerror = function(){
+    if(typeof dlog === 'function') dlog('[Backbone] not found（任意機能・無くても稼働）');
+  };
+  document.head.appendChild(script);
+})();
 
 // ─── 状態 ───
 let appState = 'idle'; // idle / driving / fare

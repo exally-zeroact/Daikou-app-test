@@ -94,6 +94,57 @@ const loadedPrefs = new Set();
 // MM-4b: 県別 road-graph（CSR + CH ショートカット）
 const graphs = new Map();   // pref → decoded graph object
 
+// ─── Phase B (2026-05-08): バックボーン graph + タイルキャッシュ ──────
+// 全国 motorway/trunk バックボーンは常時 RAM 常駐（県跨ぎ routing 用）
+let _backboneGraph = null;
+
+// TileCache: LRU 25 タイル + pin/unpin（in-flight tile 保護）
+const TILE_CACHE_MAX = 25;
+function TileCache(){
+  this.map = new Map();              // tileKey "pref/tx_ty" → tile data
+  this.pinned = new Set();           // 解放禁止キー
+  this.recencyOrder = [];            // LRU
+}
+TileCache.prototype.get = function(key){
+  const t = this.map.get(key);
+  if(!t) return null;
+  // recency 更新
+  const idx = this.recencyOrder.indexOf(key);
+  if(idx >= 0) this.recencyOrder.splice(idx, 1);
+  this.recencyOrder.push(key);
+  return t;
+};
+TileCache.prototype.set = function(key, tile){
+  if(this.map.has(key)){
+    this.map.set(key, tile);
+    return;
+  }
+  this.map.set(key, tile);
+  this.recencyOrder.push(key);
+  this._evict();
+};
+TileCache.prototype._evict = function(){
+  while(this.map.size > TILE_CACHE_MAX){
+    let removed = false;
+    for(let i = 0; i < this.recencyOrder.length; i++){
+      const k = this.recencyOrder[i];
+      if(!this.pinned.has(k)){
+        this.recencyOrder.splice(i, 1);
+        this.map.delete(k);
+        removed = true;
+        break;
+      }
+    }
+    if(!removed) break;   // 全 pin されてる場合は eviction 諦め（次回試行）
+  }
+};
+TileCache.prototype.pin = function(key){ this.pinned.add(key); };
+TileCache.prototype.unpin = function(key){ this.pinned.delete(key); };
+TileCache.prototype.has = function(key){ return this.map.has(key); };
+TileCache.prototype.size = function(){ return this.map.size; };
+
+const _tileCache = new TileCache();
+
 // MM-5 (2026-05-08): DEM データ（高度データ）
 // 形式: { bbox:[minLat,minLng,maxLat,maxLng], gridSize, numLat, numLng, alt:Int16Array }
 // alt[y * numLng + x] = 該当グリッドの標高 (m, sea level 基準, Int16 範囲 -32768〜32767m)
@@ -1330,6 +1381,55 @@ self.onmessage = function(e){
     } catch(err){
       self.postMessage({ type: 'osrmConfigured', ok: false, error: err.message });
     }
+    return;
+  }
+
+  // Phase B: バックボーン graph 受け取り（全国 motorway/trunk・常駐）
+  if(msg.type === 'loadBackbone'){
+    try {
+      const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      _backboneGraph = _decodeGraphData(msg.graphData);
+      // Pheromone 不要・shortcut 不要・縮小バックボーンとしてのみ使用
+      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      self.postMessage({
+        type: 'backboneLoaded', ok: true,
+        numNodes: _backboneGraph.numNodes,
+        numEdges: _backboneGraph.numEdges,
+        decodeMs: t1 - t0,
+      });
+    } catch(err){
+      self.postMessage({ type: 'backboneLoaded', ok: false, error: err.message });
+    }
+    return;
+  }
+
+  // Phase B: タイル受け取り（main 側 RoadGraphTileLoader 経由）
+  if(msg.type === 'loadTile'){
+    try {
+      // タイルデータは roads-decoder と同形式の subset（CSR）
+      // map-matcher 内 TileCache に格納し、_routeDistance がタイル境界を越える時に
+      // 隣接タイルを順次 load して Dijkstra 続行する設計（runtime 統合は次イテレーション）
+      const key = msg.pref + '/' + msg.tx + '_' + msg.ty;
+      _tileCache.set(key, msg.tileData);
+      self.postMessage({
+        type: 'tileLoaded', ok: true, key: key, cacheSize: _tileCache.size(),
+      });
+    } catch(err){
+      self.postMessage({ type: 'tileLoaded', ok: false, error: err.message });
+    }
+    return;
+  }
+
+  // Phase B: タイルキャッシュ統計取得
+  if(msg.type === 'getTileStats'){
+    self.postMessage({
+      type: 'tileStats',
+      cacheSize: _tileCache.size(),
+      cacheMax: TILE_CACHE_MAX,
+      pinnedCount: _tileCache.pinned.size,
+      backboneLoaded: !!_backboneGraph,
+      backboneNodes: _backboneGraph ? _backboneGraph.numNodes : 0,
+    });
     return;
   }
 
