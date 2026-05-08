@@ -82,91 +82,138 @@ self.addEventListener('activate', function(e){
 
 // SWR（Stale-While-Revalidate）共通関数
 // キャッシュから即時返しつつ、裏でネット取得＆キャッシュ更新
+// ★必ず Response を返す（undefined を返すと "null FetchEvent" エラーになる）
 function staleWhileRevalidate(request){
   return caches.open(CACHE_NAME).then(function(cache){
     return cache.match(request).then(function(cached){
       const fetchPromise = fetch(request).then(function(response){
-        // 正常なレスポンスのみキャッシュ更新（GET のみ）
         if(response && response.ok && request.method === 'GET'){
-          cache.put(request, response.clone());
+          // 同一オリジンの正常レスポンスのみキャッシュ（opaque は除外）
+          if(response.type === 'basic' || response.type === 'default'){
+            cache.put(request, response.clone()).catch(function(){});
+          }
         }
         return response;
       }).catch(function(){
-        // ネット失敗時もキャッシュがあればそれを返す。
-        // ない場合は最終手段として "/" のキャッシュ（SPA 起動点）にフォールバック。
-        return cached || caches.match('/');
+        // ネット失敗時：cached → "/" → 最終手段で network error Response
+        return cached || caches.match('/').then(function(r){
+          return r || Response.error();
+        });
       });
-      // キャッシュあればそれを即返す（裏で fetchPromise 動く）
-      // なければ fetchPromise を待つ
       return cached || fetchPromise;
     });
   });
 }
 
-self.addEventListener('fetch', function(e){
-  const url = new URL(e.request.url);
+// ナビゲーション専用ハンドラ：querystring 無視で precache を確実にヒット
+// /history.html?_v=xxx のようなパラメータ付きでも /history.html のキャッシュとマッチ
+function navigationHandler(request){
+  return caches.open(CACHE_NAME).then(function(cache){
+    return cache.match(request, { ignoreSearch: true }).then(function(cached){
+      const fetchPromise = fetch(request).then(function(response){
+        if(response && response.ok){
+          cache.put(request, response.clone()).catch(function(){});
+        }
+        return response;
+      }).catch(function(){
+        return cached || caches.match('/').then(function(r){
+          return r || Response.error();
+        });
+      });
+      return cached || fetchPromise;
+    });
+  });
+}
 
-  // 外部API：ネットワークのみ（キャッシュしない・SWR対象外）
-  if(
-    url.hostname.includes('firebase') ||
-    url.hostname.includes('googleapis') ||
-    url.hostname.includes('gstatic') ||
-    url.hostname.includes('fonts.g')
-  ){
-    e.respondWith(fetch(e.request));
+// /api/* 専用：ネットワーク優先・失敗時に HTML を返さず JSON エラーを返す
+// （history.html の /api/distance 呼び出しが HTML 化けして JSON.parse 失敗する事故を防ぐ）
+function networkOnlyJson(request){
+  return fetch(request).catch(function(){
+    return new Response(
+      JSON.stringify({ error: 'offline', source: 'sw' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
+  });
+}
+
+self.addEventListener('fetch', function(e){
+  const req = e.request;
+
+  // [修正1] 非 GET (POST/PUT/DELETE/OPTIONS) は SW 介入しない
+  //   → cache.match できず undefined を respondWith → "null FetchEvent" の主因
+  if(req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+
+  // [修正2] http(s) 以外（chrome-extension://, data:, blob:, devtools://）は SW 介入しない
+  //   → cache.put が "scheme not supported" 例外で reject → respondWith が undefined になる
+  if(url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
+  // [修正3] クロスオリジン（firebase / googleapis / gstatic / fonts.g 含む）は SW 介入しない
+  //   → ブラウザが直接処理。SW を経由しないことで opaque キャッシュ汚染も回避
+  if(url.origin !== self.location.origin) return;
+
+  // [修正4] /api/* は network-only。失敗時も HTML フォールバックせず JSON エラー返却
+  //   → 旧コードでは fetch 失敗時 caches.match('/') が HTML を返し、呼び出し側 JSON.parse が落ちていた
+  if(url.pathname.startsWith('/api/')){
+    e.respondWith(networkOnlyJson(req));
+    return;
+  }
+
+  // [修正5] ナビゲーションリクエスト（HTML ページ取得）は querystring 無視で precache マッチ
+  //   → /history.html?foo=bar でも /history.html のキャッシュにヒット
+  if(req.mode === 'navigate'){
+    e.respondWith(navigationHandler(req));
     return;
   }
 
   // 道路データ・地図関連：SWR（最重要・オフライン必須）
-  // 2026/04/30 修正：パス条件に /data/roads- を追加（バグ修正）
   if(
-    e.request.url.includes('/roads/') ||
-    e.request.url.includes('/road-data/') ||
-    e.request.url.includes('/data/roads-') ||
-    e.request.url.includes('/data/bridges') ||
-    e.request.url.includes('/data/tunnels') ||
-    e.request.url.includes('/data/poi-') ||
-    e.request.url.includes('/data/hazard-') ||
-    e.request.url.includes('/data/road-attrs-') ||
-    e.request.url.includes('/data/meta.json') ||
+    req.url.includes('/roads/') ||
+    req.url.includes('/road-data/') ||
+    req.url.includes('/data/roads-') ||
+    req.url.includes('/data/bridges') ||
+    req.url.includes('/data/tunnels') ||
+    req.url.includes('/data/poi-') ||
+    req.url.includes('/data/hazard-') ||
+    req.url.includes('/data/road-attrs-') ||
+    req.url.includes('/data/meta.json') ||
     // 全国共通バンドル（13種・初回 install で全 precache 済）
-    e.request.url.includes('/data/coarse-jp.js') ||
-    e.request.url.includes('/data/pref-borders-jp.js') ||
-    e.request.url.includes('/data/shelters-jp.js') ||
-    e.request.url.includes('/data/emergency-medical-jp.js') ||
-    e.request.url.includes('/data/highways-jp.js') ||
-    e.request.url.includes('/data/stations-jp.js') ||
-    e.request.url.includes('/data/misc-jp.js') ||
-    e.request.url.includes('/data/faults-jp.js') ||
-    e.request.url.includes('/data/night-clinics-jp.js') ||
-    e.request.url.includes('/data/airports-jp.js') ||
-    e.request.url.includes('/data/michinoeki-jp.js') ||
-    e.request.url.includes('/data/coastline-jp.js') ||
-    e.request.url.includes('/data/ports-jp.js') ||
-    e.request.url.includes('/data/peaks-jp.js') ||
-    e.request.url.includes('/data/hiking-trails-jp.js') ||
-    e.request.url.includes('/data/railways-jp.js') ||
-    e.request.url.includes('/data/waterways-jp.js') ||
-    e.request.url.includes('/data/hazard-cliff-jp.js')
+    req.url.includes('/data/coarse-jp.js') ||
+    req.url.includes('/data/pref-borders-jp.js') ||
+    req.url.includes('/data/shelters-jp.js') ||
+    req.url.includes('/data/emergency-medical-jp.js') ||
+    req.url.includes('/data/highways-jp.js') ||
+    req.url.includes('/data/stations-jp.js') ||
+    req.url.includes('/data/misc-jp.js') ||
+    req.url.includes('/data/faults-jp.js') ||
+    req.url.includes('/data/night-clinics-jp.js') ||
+    req.url.includes('/data/airports-jp.js') ||
+    req.url.includes('/data/michinoeki-jp.js') ||
+    req.url.includes('/data/coastline-jp.js') ||
+    req.url.includes('/data/ports-jp.js') ||
+    req.url.includes('/data/peaks-jp.js') ||
+    req.url.includes('/data/hiking-trails-jp.js') ||
+    req.url.includes('/data/railways-jp.js') ||
+    req.url.includes('/data/waterways-jp.js') ||
+    req.url.includes('/data/hazard-cliff-jp.js')
   ){
-    e.respondWith(staleWhileRevalidate(e.request));
+    e.respondWith(staleWhileRevalidate(req));
     return;
   }
 
-  // 静的アセット（icon・manifest）：キャッシュ優先（変わらないから）
-  if(e.request.url.includes('/icon-') || e.request.url.includes('/manifest.json')){
+  // 静的アセット（icon・manifest）：cache-first
+  if(req.url.includes('/icon-') || req.url.includes('/manifest.json')){
     e.respondWith(
-      caches.match(e.request).then(function(cached){
-        return cached || fetch(e.request);
+      caches.match(req).then(function(cached){
+        return cached || fetch(req).catch(function(){ return Response.error(); });
       })
     );
     return;
   }
 
-  // HTML・JS・CSS：SWR（速い起動＋自動更新）
-  // ネットあり → キャッシュ即返し＋裏で最新取得
-  // ネットなし → キャッシュから（オフライン対応）
-  e.respondWith(staleWhileRevalidate(e.request));
+  // その他（JS・CSS）：SWR
+  e.respondWith(staleWhileRevalidate(req));
 });
 
 // Background Sync（Firebase送信）
