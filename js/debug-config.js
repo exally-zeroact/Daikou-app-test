@@ -8,8 +8,16 @@ const DEBUG = (() => {
   const hostname = location.hostname;
   const search = location.search;
 
+  // 本番ドメイン allowlist（ここに載った hostname だけが prod 扱い）
+  // 本番Vercel URL（daikou-app.vercel.app）も独自ドメイン移行後の独自ドメインも、ここに追記すれば prod になる
+  const PRODUCTION_HOSTS = new Set([
+    'daikou-app.vercel.app',
+  ]);
+
   // 環境判定
-  const isVercelPreview = hostname.includes('vercel.app');
+  const isProductionHost = PRODUCTION_HOSTS.has(hostname);
+  // vercel.app サブドメインのうち、prod 以外（test 本URL / branch preview など）を preview 扱い
+  const isVercelPreview = hostname.endsWith('.vercel.app') && !isProductionHost;
   const isLocalhost = (
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
@@ -17,8 +25,8 @@ const DEBUG = (() => {
   );
   const hasDebugParam = search.includes('debug=1');
 
-  // 本番環境判定（独自ドメイン or それ以外）
-  const isProduction = !isVercelPreview && !isLocalhost;
+  // 本番環境判定（PRODUCTION_HOSTS に一致 or 独自ドメイン）
+  const isProduction = isProductionHost || (!isVercelPreview && !isLocalhost);
 
   return {
     // テスト環境（vercel.app or localhost）→ デバッグ機能ON
