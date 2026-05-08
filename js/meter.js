@@ -27,6 +27,33 @@ const Meter = (() => {
   //   null の場合は既存インラインロジックにフォールバック
   let mmWorker = null;
 
+  // MM-2 (2026-05-08): 評価インフラ
+  //   Worker B の各 GPS 更新あたり処理時間を循環バッファに記録し p99 を算出
+  //   Meter.getMMStats() で常時取得可能
+  const _MM_LATENCY_BUFFER_SIZE = 1000;
+  const _mmLatencyBuf = new Float32Array(_MM_LATENCY_BUFFER_SIZE);
+  let _mmLatencyIdx = 0;
+  let _mmLatencyCount = 0;
+  // 候補数の累積（多候補化の効果計測用）
+  let _mmCandCountSum = 0;
+  let _mmCandCountSamples = 0;
+
+  function _recordMmLatency(ms){
+    if(typeof ms !== 'number' || !isFinite(ms) || ms < 0) return;
+    _mmLatencyBuf[_mmLatencyIdx] = ms;
+    _mmLatencyIdx = (_mmLatencyIdx + 1) % _MM_LATENCY_BUFFER_SIZE;
+    if(_mmLatencyCount < _MM_LATENCY_BUFFER_SIZE) _mmLatencyCount++;
+  }
+
+  function _calcP99Latency(){
+    if(_mmLatencyCount === 0) return 0;
+    const arr = new Array(_mmLatencyCount);
+    for(let i = 0; i < _mmLatencyCount; i++) arr[i] = _mmLatencyBuf[i];
+    arr.sort(function(a, b){ return a - b; });
+    const idx = Math.floor(_mmLatencyCount * 0.99);
+    return arr[Math.min(idx, _mmLatencyCount - 1)];
+  }
+
   // 起動時warm up：代行開始前から GPS を保持しておく（2026/04/30追加）
   // 「代行開始」押した瞬間にすぐメーターが動くようにするため
   // ボタン追加せず、内部で常に GPS を受け取って lastWarmupGps に保存
@@ -83,6 +110,12 @@ const Meter = (() => {
       if(typeof dlog === 'function' && m._reason){
         dlog('[MM] skip: ' + m._reason);
       }
+    }
+    // MM-2: 遅延・候補数の評価指標を蓄積
+    if(typeof m.latencyMs === 'number') _recordMmLatency(m.latencyMs);
+    if(typeof m.candidatesCount === 'number'){
+      _mmCandCountSum += m.candidatesCount;
+      _mmCandCountSamples++;
     }
   }
 
@@ -337,6 +370,10 @@ const Meter = (() => {
           lat: gpsResult.lat,
           lng: gpsResult.lng,
           timestamp: gpsResult.timestamp,
+          // MM-2: emission scoring 用に accuracy / speedKmh / heading を転送
+          accuracy: gpsResult.accuracy,
+          speedKmh: gpsResult.speedKmh,
+          headingDeg: (gpsResult.compassHeading != null) ? gpsResult.compassHeading : null,
           // MM-1.5: cellular layer hint を Worker B に転送
           // gps-worker.js（Worker A）が付与した値をそのまま渡す。
           // 値がない（古い Worker A・非対応端末）場合は 'open' と 0 で安全側
@@ -405,6 +442,31 @@ const Meter = (() => {
 
   function getState(){ return { ...state }; }
 
+  // MM-2 (2026-05-08): 評価インフラ用 公開 API
+  //   いつでも呼び出せる現状の Map Matching 統計値スナップショット
+  function getMMStats(){
+    const total = state.mm_total_count;
+    const snap = state.mm_snap_count;
+    const skip = state.mm_skip_count;
+    return {
+      // 基本統計
+      total_count: total,
+      snap_count: snap,
+      skip_count: skip,
+      snap_rate: total > 0 ? snap / total : 0,
+      skip_rate: total > 0 ? skip / total : 0,
+      // 距離（参照用・state.distance_m と並べて整合確認できる）
+      mm_distance_m: state.mm_distance_m,
+      distance_m: state.distance_m,
+      // 性能・候補
+      p99_latency_ms: _calcP99Latency(),
+      latency_samples: _mmLatencyCount,
+      avg_candidates: _mmCandCountSamples > 0 ? _mmCandCountSum / _mmCandCountSamples : 0,
+      // Worker 経路 / fallback の判別
+      worker_active: !!mmWorker,
+    };
+  }
+
   function setDistance(distanceM){
     state.distance_m = distanceM;
     state.fare_yen = calcFare(distanceM);
@@ -441,5 +503,5 @@ const Meter = (() => {
     };
   }
 
-  return { start, stop, reset, resume, update, updateGpsOnly, getState, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher };
+  return { start, stop, reset, resume, update, updateGpsOnly, getState, getMMStats, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher };
 })();

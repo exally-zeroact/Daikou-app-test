@@ -982,6 +982,38 @@ try {
 }
 window._mmWorker = _mmWorker;  // デバッグ・別 script からの参照用
 
+// ─── MM-2 (2026-05-08): 実機評価インフラ ──────────────────────
+// DEBUG.enabled の時のみ画面右下に MM 統計バッジを常時表示
+// 2 秒ごとに Meter.getMMStats() を読み snap_rate / skip_rate /
+// mm_distance_m / p99_latency_ms を更新
+(function _initMmStatsBadge(){
+  if(typeof DEBUG === 'undefined' || !DEBUG.enabled) return;
+  const badge = document.createElement('div');
+  badge.id = 'mmStatsBadge';
+  badge.style.cssText =
+    'position:fixed;right:8px;bottom:8px;z-index:9000;' +
+    'background:rgba(0,0,0,0.72);color:#fff;font-family:monospace;' +
+    'font-size:10px;padding:6px 8px;border-radius:6px;line-height:1.4;' +
+    'pointer-events:none;white-space:nowrap;letter-spacing:0.3px;';
+  badge.textContent = 'MM init...';
+  document.body.appendChild(badge);
+  setInterval(function(){
+    if(typeof Meter === 'undefined' || !Meter.getMMStats) return;
+    const s = Meter.getMMStats();
+    const snapPct = (s.snap_rate * 100).toFixed(0);
+    const skipPct = (s.skip_rate * 100).toFixed(1);
+    const mmKm = (s.mm_distance_m / 1000).toFixed(2);
+    const dKm = (s.distance_m / 1000).toFixed(2);
+    const p99 = s.p99_latency_ms.toFixed(1);
+    const ac = s.avg_candidates.toFixed(1);
+    const w = s.worker_active ? 'W' : 'I';  // W=worker / I=inline
+    badge.textContent =
+      '[' + w + '] snap=' + snapPct + '% skip=' + skipPct + '%' +
+      ' mm=' + mmKm + 'km d=' + dKm + 'km' +
+      ' p99=' + p99 + 'ms cand=' + ac;
+  }, 2000);
+})();
+
 // 既ロード済 roads-{pref}.js があれば Worker に転送する関数
 // loadUserRegions / 設定画面からの追加ロード両方から呼べる共通化
 function _forwardRoadsToMmWorker(prefs){

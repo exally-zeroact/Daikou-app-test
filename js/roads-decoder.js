@@ -398,6 +398,118 @@
     };
   };
   
+  // ─── snapAllWithin (MM-2 多候補化) ───────────────────────────────
+  // GPS 周辺の上位 K 個（既定 8）の snap 候補を距離昇順で返す。
+  // emission スコアリング（距離 × heading × Mahalanobis × 道路種別）の入力
+  // となる。snapToNearestRoad は内部で snapAllWithin の先頭 1 件を返す形と等価。
+  // options:
+  //   maxDistM     : 最大許容距離（既定 50m）
+  //   K            : 返却候補上限（既定 8）
+  //   typeFilter   : 道路タイプ配列（既定なし）
+  //   radiusGrids  : 周辺グリッド検索範囲（既定: 5 → 9 でフォールバック）
+  RoadDecoder.prototype.snapAllWithin = function(lat, lng, options) {
+    options = options || {};
+    const K = options.K != null ? options.K : 8;
+    if (options.radiusGrids != null) {
+      return this._searchAllSnaps(lat, lng, options, options.radiusGrids, K);
+    }
+    let result = this._searchAllSnaps(lat, lng, options, 5, K);
+    if (result.length >= K) return result;
+    // フォールバック: より広い範囲で再検索（長い道路の始点が遠い場合）
+    return this._searchAllSnaps(lat, lng, options, 9, K);
+  };
+
+  // 内部: 多候補列挙（snapAllWithin から呼ばれる）
+  // 各道路につき最近接 segment を 1 つ算出し、distanceM 昇順 K 個を返す。
+  RoadDecoder.prototype._searchAllSnaps = function(lat, lng, options, radiusGrids, K) {
+    const maxDistM = options.maxDistM != null ? options.maxDistM : 50;
+    const typeFilter = options.typeFilter || null;
+    const mpd = metersPerDegree(lat);
+    const mpdLat = mpd.lat, mpdLng = mpd.lng;
+    const precision = this.precision;
+    const latInt = Math.round(lat * precision);
+    const lngInt = Math.round(lng * precision);
+    const gy = Math.floor(latInt / this.gridSize);
+    const gx = Math.floor(lngInt / this.gridSize);
+    const maxDistSq = maxDistM * maxDistM;
+    const candidates = [];
+    const seen = {};
+
+    for (let dy = -radiusGrids; dy <= radiusGrids; dy++) {
+      for (let dx = -radiusGrids; dx <= radiusGrids; dx++) {
+        const key = (gy + dy) + '_' + (gx + dx);
+        const ids = this.grid[key];
+        if (!ids) continue;
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i];
+          if (seen[id]) continue;
+          seen[id] = 1;
+          const road = this.decodeRoadAt(id);
+          if (!road) continue;
+          if (typeFilter && typeFilter.indexOf(road.typeCode) < 0) continue;
+          const points = road.points;
+          let bestSegIdx = -1, bestT = 0;
+          let bestSnapLat = 0, bestSnapLng = 0;
+          let bestDistSq = Infinity;
+          for (let j = 0; j < points.length - 1; j++) {
+            const aLat = points[j][0] / precision;
+            const aLng = points[j][1] / precision;
+            const bLat = points[j+1][0] / precision;
+            const bLng = points[j+1][1] / precision;
+            const ax = (aLng - lng) * mpdLng;
+            const ay = (aLat - lat) * mpdLat;
+            const bx = (bLng - lng) * mpdLng;
+            const by = (bLat - lat) * mpdLat;
+            const abx = bx - ax, aby = by - ay;
+            const ab2 = abx*abx + aby*aby;
+            let t;
+            if (ab2 < 1e-9) t = 0;
+            else {
+              t = (-ax * abx + -ay * aby) / ab2;
+              if (t < 0) t = 0; else if (t > 1) t = 1;
+            }
+            const sx = ax + t * abx, sy = ay + t * aby;
+            const distSq = sx*sx + sy*sy;
+            if (distSq < bestDistSq) {
+              bestDistSq = distSq;
+              bestSegIdx = j;
+              bestT = t;
+              bestSnapLat = aLat + t * (bLat - aLat);
+              bestSnapLng = aLng + t * (bLng - aLng);
+            }
+          }
+          if (bestSegIdx >= 0 && bestDistSq <= maxDistSq) {
+            // segment 端点を保持（heading score の bearing 計算に使用）
+            const segLatA = points[bestSegIdx][0] / precision;
+            const segLngA = points[bestSegIdx][1] / precision;
+            const segLatB = points[bestSegIdx+1][0] / precision;
+            const segLngB = points[bestSegIdx+1][1] / precision;
+            candidates.push({
+              roadIndex: id,
+              segmentIndex: bestSegIdx,
+              t: bestT,
+              snapLat: bestSnapLat,
+              snapLng: bestSnapLng,
+              distanceM: Math.sqrt(bestDistSq),
+              typeCode: road.typeCode,
+              // v6 attribute info（emission scoring 用）
+              oneway: road.oneway != null ? road.oneway : 0,
+              layer: road.layer != null ? road.layer : 0,
+              lanes: road.lanes != null ? road.lanes : 0,
+              width: road.width != null ? road.width : 0,
+              incline: road.incline != null ? road.incline : 0,
+              // segment bearing 計算用
+              segLatA: segLatA, segLngA: segLngA,
+              segLatB: segLatB, segLngB: segLngB,
+            });
+          }
+        }
+      }
+    }
+    candidates.sort(function(a, b){ return a.distanceM - b.distanceM; });
+    return candidates.slice(0, K);
+  };
+
   // ─── calcRoadDistance ───────────────────────────────────────────
   // 2つの snap 点間の道路上の距離を計算（メートル）
   // snapA, snapB: snapToNearestRoad の戻り値

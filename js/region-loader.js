@@ -269,6 +269,27 @@ const RegionLoader = (() => {
     return best;
   }
 
+  // MM-2 (2026-05-08): 多候補化 API。loadedRoads 全 pref を横断し
+  // 距離昇順で上位 K 個（既定 8）を返す。emission scoring 入力用。
+  // maxM は呼び出し側で GPS accuracy × 1.5（最小30m・最大100m）として渡す想定。
+  function snapAllWithin(lat, lng, options) {
+    if (loadedRoads.size === 0) return [];
+    options = options || {};
+    const K = options.K != null ? options.K : 8;
+    const all = [];
+    for (const pref of loadedRoads) {
+      const decoder = roadDecoders.get(pref);
+      if (!decoder || !decoder.snapAllWithin) continue;
+      const cands = decoder.snapAllWithin(lat, lng, options);
+      for (const c of cands) {
+        c.prefecture = pref;
+        all.push(c);
+      }
+    }
+    all.sort(function(a, b){ return a.distanceM - b.distanceM; });
+    return all.slice(0, K);
+  }
+
   function calcRoadDistance(snapA, snapB) {
     if (!snapA || !snapB) return null;
     if (snapA.prefecture !== snapB.prefecture) {
@@ -291,7 +312,7 @@ const RegionLoader = (() => {
     // 公開 API（シグネチャ維持）
     getRegion, ensureLoaded, findNearestTunnel, findNearestBridge, getStats,
     getPrefecture, ensureRoadsLoaded, getRoadDecoder,
-    snapToNearestRoad, calcRoadDistance,
+    snapToNearestRoad, snapAllWithin, calcRoadDistance,
     // 追加（参考）
     nearestPrefectures,
   };
