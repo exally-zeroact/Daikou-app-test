@@ -978,11 +978,13 @@ try {
       dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
     } else if(m.type === 'graphLoaded'){
-      // MM-4b: road-graph 受信ログ
+      // MM-4b: road-graph 受信ログ + Phase A: version / memMB 表示
       dlog('[MM] worker graph ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref +
-           (m.ok ? ' (nodes=' + m.numNodes + ' edges=' + m.numEdges +
+           (m.ok ? ' (v=' + (m.version || 1) +
+                   ' nodes=' + m.numNodes + ' edges=' + m.numEdges +
                    ' shortcuts=' + m.numShortcuts +
+                   ' RAM=' + (m.memMB || '?') + 'MB' +
                    (m.decodeMs ? ' decode=' + m.decodeMs.toFixed(0) + 'ms' : '') + ')'
                  : ' err=' + m.error));
     } else if(m.type === 'demLoaded'){

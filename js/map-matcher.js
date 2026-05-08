@@ -336,8 +336,14 @@ function _b64ToArrayBuffer(b64){
   return buf;
 }
 
+// Phase A (2026-05-08): v=1（旧）/ v=2（圧縮版）両対応のデコーダー
+//   v=2 では edgeLenM が Uint16 × 0.1m / edgeRoad+Seg+nodeLevel+shortcutMidNode はドロップ
+//   v=2 では roadOffset/roadSegFromNode/roadSegToNode を持つ（runtime Map 不要）
+//   regression 検出後に v=1 経路を削除する予定
 function _decodeGraphData(g){
-  return {
+  const v = g.v || 1;
+  const result = {
+    v: v,
     prefecture:   g.prefecture,
     precision:    g.precision,
     numNodes:     g.numNodes,
@@ -347,17 +353,55 @@ function _decodeGraphData(g){
     nodeLng:      new Int32Array(_b64ToArrayBuffer(g.nodeLngB64)),
     nodeOffset:   new Uint32Array(_b64ToArrayBuffer(g.nodeOffsetB64)),
     edgeTo:       new Uint32Array(_b64ToArrayBuffer(g.edgeToB64)),
-    edgeLenM:     new Float32Array(_b64ToArrayBuffer(g.edgeLenMB64)),
     edgeFlags:    new Uint8Array(_b64ToArrayBuffer(g.edgeFlagsB64)),
-    edgeRoad:     new Uint32Array(_b64ToArrayBuffer(g.edgeRoadB64)),
-    edgeSeg:      new Uint16Array(_b64ToArrayBuffer(g.edgeSegB64)),
-    nodeLevel:    new Uint16Array(_b64ToArrayBuffer(g.nodeLevelB64)),
     shortcutEdgeFrom:  new Uint32Array(_b64ToArrayBuffer(g.shortcutEdgeFromB64)),
     shortcutEdgeTo:    new Uint32Array(_b64ToArrayBuffer(g.shortcutEdgeToB64)),
     shortcutEdgeLenM:  new Float32Array(_b64ToArrayBuffer(g.shortcutEdgeLenMB64)),
     shortcutEdgeFlags: new Uint8Array(_b64ToArrayBuffer(g.shortcutEdgeFlagsB64)),
-    shortcutMidNode:   new Uint32Array(_b64ToArrayBuffer(g.shortcutMidNodeB64)),
   };
+  if(v >= 2){
+    // Phase A v=2: edgeLenM は Uint16 ×0.1m / roadSeg* index 付き
+    result.edgeLenM = new Uint16Array(_b64ToArrayBuffer(g.edgeLenMB64));
+    result.edgeLenScale = (typeof g.edgeLenScale === 'number') ? g.edgeLenScale : 0.1;
+    result.numRoads = g.numRoads;
+    result.roadOffset = new Uint32Array(_b64ToArrayBuffer(g.roadOffsetB64));
+    result.roadSegFromNode = new Uint32Array(_b64ToArrayBuffer(g.roadSegFromNodeB64));
+    result.roadSegToNode = new Uint32Array(_b64ToArrayBuffer(g.roadSegToNodeB64));
+  } else {
+    // v=1（旧形式・regression 確認用に温存）
+    result.edgeLenM = new Float32Array(_b64ToArrayBuffer(g.edgeLenMB64));
+    result.edgeLenScale = 1.0;
+    result.edgeRoad = new Uint32Array(_b64ToArrayBuffer(g.edgeRoadB64));
+    result.edgeSeg = new Uint16Array(_b64ToArrayBuffer(g.edgeSegB64));
+    if(g.nodeLevelB64){
+      result.nodeLevel = new Uint16Array(_b64ToArrayBuffer(g.nodeLevelB64));
+    }
+    if(g.shortcutMidNodeB64){
+      result.shortcutMidNode = new Uint32Array(_b64ToArrayBuffer(g.shortcutMidNodeB64));
+    }
+  }
+  return result;
+}
+
+// Phase A: graph の RAM サイズを概算（debug 用）
+function _calcGraphMemBytes(g){
+  let bytes = 0;
+  const fields = ['nodeLat','nodeLng','nodeOffset','edgeTo','edgeLenM','edgeFlags',
+                  'edgeRoad','edgeSeg','nodeLevel',
+                  'roadOffset','roadSegFromNode','roadSegToNode',
+                  'shortcutEdgeFrom','shortcutEdgeTo','shortcutEdgeLenM',
+                  'shortcutEdgeFlags','shortcutMidNode',
+                  'shortcutOffset','shortcutIndexByFrom',
+                  '_dist','_visited'];
+  for(const k of fields){
+    const arr = g[k];
+    if(arr && arr.byteLength) bytes += arr.byteLength;
+  }
+  // Map のおおまかなオーバーヘッド（v=1 で構築される roadSegToEdge）
+  if(g.roadSegToEdge && g.roadSegToEdge.size){
+    bytes += g.roadSegToEdge.size * 50;  // JS Map entry ~50 bytes
+  }
+  return bytes;
 }
 
 // shortcut を from-node 順に整列して CSR-like インデックスを構築
@@ -379,9 +423,11 @@ function _buildShortcutIndex(g){
   g.shortcutIndexByFrom = sorted;
 }
 
-// (roadIdx, segIdx) → 最初に登場した edge index の Map（数値キーで省メモリ）
+// v=1 旧経路: (roadIdx, segIdx) → 最初に登場した edge index の Map
+//   regression 確認後に削除予定
 function _buildRoadSegIndex(g){
   if(g.roadSegToEdge) return;
+  if(!g.edgeRoad || !g.edgeSeg) return;  // v=2 ではフィールド無し
   const m = new Map();
   for(let e = 0; e < g.numEdges; e++){
     const key = g.edgeRoad[e] * 65536 + g.edgeSeg[e];
@@ -390,7 +436,7 @@ function _buildRoadSegIndex(g){
   g.roadSegToEdge = m;
 }
 
-// edge index → from-node を二分探索（nodeOffset 上）
+// v=1 旧経路: edge index → from-node を二分探索（nodeOffset 上）
 function _findFromNode(g, edgeIdx){
   let lo = 0, hi = g.numNodes;
   while(lo < hi){
@@ -403,9 +449,24 @@ function _findFromNode(g, edgeIdx){
 
 // snap 結果から graph node id へマッピング
 // snap.t < 0.5 なら segment の from 側、それ以上なら to 側
+// Phase A v=2: roadOffset + roadSegFromNode/ToNode の compile-time index で O(1)
+//   （runtime Map 構築コスト 40MB を 4MB の TypedArray index に置換）
 function _snapToGraphNode(g, snap){
   if(snap == null || typeof snap.roadIndex !== 'number') return -1;
+  if(g.v >= 2 && g.roadOffset && g.roadSegFromNode && g.roadSegToNode){
+    const r = snap.roadIndex;
+    if(r < 0 || r >= g.numRoads) return -1;
+    const start = g.roadOffset[r];
+    const end = g.roadOffset[r + 1];
+    const s = snap.segmentIndex || 0;
+    if(s < 0 || start + s >= end) return -1;
+    const fromNode = g.roadSegFromNode[start + s];
+    const toNode = g.roadSegToNode[start + s];
+    return (snap.t != null && snap.t >= 0.5) ? toNode : fromNode;
+  }
+  // v=1 fallback（旧形式 graph）
   _buildRoadSegIndex(g);
+  if(!g.roadSegToEdge) return -1;
   const key = snap.roadIndex * 65536 + (snap.segmentIndex || 0);
   const e = g.roadSegToEdge.get(key);
   if(e === undefined) return -1;
@@ -529,10 +590,11 @@ function _chDijkstra(g, srcNode, dstNode, maxDistM, deadline){
     // 通常 forward edges
     const eStart = g.nodeOffset[u];
     const eEnd = g.nodeOffset[u + 1];
+    const lenScale = g.edgeLenScale || 1.0;   // Phase A v=2 で 0.1 / v=1 で 1.0
     for(let k = eStart; k < eEnd; k++){
       const v = g.edgeTo[k];
       if(visited[v]) continue;
-      const newD = du + g.edgeLenM[k];
+      const newD = du + g.edgeLenM[k] * lenScale;
       if(newD < dist[v] && newD <= maxDistM){
         dist[v] = newD;
         if(touched.length < 16384) touched.push(v);
@@ -868,15 +930,19 @@ self.onmessage = function(e){
       const g = _decodeGraphData(msg.graphData);
       // shortcut インデックス事前構築
       _buildShortcutIndex(g);
-      // road-segment → edge index（Dijkstra src/dst マッピング用）
-      _buildRoadSegIndex(g);
+      // road-segment → edge index（v=1 のみ・v=2 は compile-time index 使用）
+      if(g.v < 2) _buildRoadSegIndex(g);
       graphs.set(msg.pref, g);
       // graph 更新で route キャッシュは無効化（pref 切替時の整合性担保）
       _routeCache.clear();
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      // Phase A: graph の RAM 実測値を main 側で確認できるように post に含める
+      const memBytes = _calcGraphMemBytes(g);
       self.postMessage({
         type: 'graphLoaded', pref: msg.pref, ok: true,
+        version: g.v,
         numNodes: g.numNodes, numEdges: g.numEdges, numShortcuts: g.numShortcuts,
+        memBytes: memBytes, memMB: (memBytes / 1024 / 1024).toFixed(2),
         decodeMs: t1 - t0,
       });
     } catch(err){
