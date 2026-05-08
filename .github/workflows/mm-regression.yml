@@ -112,7 +112,19 @@ jobs:
           git add data/test-results/latest.json data/test-results/history.json
           if git diff --cached --quiet; then
             echo "No changes to commit"
-          else
-            git commit -m "chore(test-results): update from CI [skip ci]"
-            git push
+            exit 0
           fi
+          git commit -m "chore(test-results): update from CI [skip ci]"
+          # auto-version.yml が並走して sw.js を先に push してくる race を吸収する
+          # rebase + retry 3 回で競合を解消する (本 commit は data/test-results/ のみ
+          # 触るため auto-version.yml の sw.js commit と衝突しない)
+          for i in 1 2 3; do
+            if git pull --rebase origin main && git push; then
+              echo "push ok on attempt $i"
+              exit 0
+            fi
+            echo "attempt $i failed, retrying after backoff..."
+            sleep $((5 * i))
+          done
+          echo "push failed after 3 attempts"
+          exit 1
