@@ -380,7 +380,15 @@ async function loadDlStatus(){
   }
 }
 
-// 手動更新ボタン処理：未DL県があればDL実行
+// 手動更新ボタン処理：全47県を強制再フェッチして最新化
+// 修正 (2026-05-08):
+//   旧版は「IndexedDB に未登録の県のみ DL」だったため,
+//   既に全 47 県 DL 済の状態 (=ほぼ全ての利用シーン) では
+//   常に "すべて最新です" トーストが一瞬出るだけで実質 no-op に見えていた.
+//   サーバ側で daily push される新版データを取得できなかった.
+//   → 全県を cache-busting クエリ + cache:'no-store' で強制再 DL,
+//     SW SWR を確実にバイパスし, 取得 size と既存 size を比較して
+//     真の更新数を toast に出す.
 async function onCheckUpdate(){
   const btn = document.getElementById('dlUpdateBtn');
   if(!btn) return;
@@ -388,58 +396,53 @@ async function onCheckUpdate(){
   const originalText = btn.textContent;
   btn.textContent = '⏳ 確認中...';
 
+  // cache-busting: SW の SWR は cache.match(request) で query 違いを別 entry 扱う
+  // → 新しい query 付き URL は キャッシュミス → 必ず network fetch
+  const stamp = Date.now();
+
   try {
-    const all = await getAllPrefectures();
-    const doneSet = new Set(all.map(r => r.pref));
-    const todo = PREFECTURES_DL.filter(p => !doneSet.has(p));
+    // 既存の登録 size を pref → size の Map にしておく (差分判定用)
+    const existing = await getAllPrefectures();
+    const sizeMap = new Map(existing.map(r => [r.pref, r.size || 0]));
 
-    if(todo.length === 0){
-      // 全完了
-      showSettingsToast('✅ すべて最新です');
-      btn.disabled = false;
-      btn.textContent = originalText;
-      return;
-    }
-
-    // 不足あり → 順次DL（並列2でメモリ負荷抑える）
-    btn.textContent = '⏳ ' + todo.length + '県をダウンロード中...';
-    let ok = 0;
-    let failed = 0;
-    let processed = 0;
-    const queue = todo.slice();
+    const total = PREFECTURES_DL.length;
+    const queue = PREFECTURES_DL.slice();
     const PARALLEL = 2;
-
-    // 1県あたり最大3回リトライ（指数バックオフ 1s / 2s）
-    // 初回起動直後の IndexedDB v3 migration や SW 起動初期の race を救済
     const MAX_RETRY = 3;
+    let ok = 0, failed = 0, processed = 0, updated = 0;
+    const failedList = [];
+
     async function worker(){
       while(queue.length > 0){
         const pref = queue.shift();
-        let success = false;
-        let lastErr = null;
+        let success = false, lastErr = null, newSize = 0;
         for(let attempt = 1; attempt <= MAX_RETRY && !success; attempt++){
           try {
-            const url = '/data/roads-' + pref + '.js';
-            const res = await fetch(url, { cache: 'reload' });
+            // ① cache-busting query  ② cache:'no-store' で HTTP cache も無効
+            const url = '/data/roads-' + pref + '.js?_v=' + stamp;
+            const res = await fetch(url, { cache: 'no-store' });
             if(!res.ok) throw new Error('HTTP ' + res.status);
             const blob = await res.blob();
-            await markPrefDoneInStore(pref, blob.size);
+            newSize = blob.size;
+            await markPrefDoneInStore(pref, newSize);
             success = true;
           } catch(e){
             lastErr = e;
-            if(attempt < MAX_RETRY){
-              await new Promise(r => setTimeout(r, 1000 * attempt));
-            }
+            if(attempt < MAX_RETRY) await new Promise(r => setTimeout(r, 1000 * attempt));
           }
         }
         if(success){
           ok++;
+          // 既存サイズと差があれば「更新」とカウント
+          const prev = sizeMap.get(pref) || 0;
+          if (prev !== newSize) updated++;
         } else {
           failed++;
+          failedList.push(pref);
           console.warn('DL失敗:', pref, lastErr);
         }
         processed++;
-        btn.textContent = '⏳ ' + processed + '/' + todo.length + '県処理中...';
+        btn.textContent = '⏳ ' + processed + '/' + total + '県確認中...';
       }
     }
 
@@ -448,24 +451,28 @@ async function onCheckUpdate(){
     await Promise.all(workers);
 
     // 結果トースト
-    if(ok > 0 && failed === 0){
-      showSettingsToast('✅ 最新の地図データに更新しました');
-    } else if(ok > 0 && failed > 0){
-      showSettingsToast('⚠️ ' + ok + '県成功・' + failed + '県失敗');
+    if(ok === total){
+      if(updated === 0){
+        showSettingsToast('✅ すべて最新です (' + total + '県確認)');
+      } else {
+        showSettingsToast('✅ ' + updated + '県を更新しました (全' + total + '県確認)');
+      }
+    } else if(ok > 0){
+      showSettingsToast('⚠️ ' + ok + '県成功・' + failed + '県失敗 (失敗: ' + failedList.slice(0, 3).join(',') + (failedList.length > 3 ? '…' : '') + ')');
     } else {
-      showSettingsToast('❌ 更新に失敗しました');
+      showSettingsToast('❌ 更新に失敗しました (オフライン?)');
     }
 
-    // 表示更新
+    // 表示更新 (ファイル一覧 + 最終更新日)
     await loadDlStatus();
 
   } catch(e){
     console.error('更新チェック失敗:', e);
     showSettingsToast('❌ エラーが発生しました');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
   }
-
-  btn.disabled = false;
-  btn.textContent = originalText;
 }
 
 // 設定画面用トースト表示（2.5秒で自動消滅）
