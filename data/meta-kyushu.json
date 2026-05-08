@@ -1,86 +1,26 @@
 {
   "region": "kyushu",
-  "generated": "2026-05-04T12:30:57.796Z",
+  "generated": "2026-05-08T02:23:10.177Z",
   "prefectures": {
     "fukuoka": {
-      "numRoads": 194232,
-      "sizeBytes": 5556903,
+      "numRoads": 198638,
+      "sizeBytes": 5947969,
       "bbox": [
         3314617,
         13028841,
         3400008,
         13117243
-      ]
-    },
-    "saga": {
-      "numRoads": 131277,
-      "sizeBytes": 3890330,
-      "bbox": [
-        3300045,
-        12916936,
-        3470017,
-        13054828
-      ]
-    },
-    "nagasaki": {
-      "numRoads": 91369,
-      "sizeBytes": 2898238,
-      "bbox": [
-        3211753,
-        12859138,
-        3339243,
-        13031918
-      ]
-    },
-    "kumamoto": {
-      "numRoads": 144745,
-      "sizeBytes": 4552397,
-      "bbox": [
-        3204414,
-        13012515,
-        3315881,
-        13130143
-      ]
-    },
-    "oita": {
-      "numRoads": 101836,
-      "sizeBytes": 3515576,
-      "bbox": [
-        3259767,
-        13091158,
-        3373611,
-        13208170
-      ]
-    },
-    "miyazaki": {
-      "numRoads": 91856,
-      "sizeBytes": 2983542,
-      "bbox": [
-        3136204,
-        13074350,
-        3261990,
-        13174749
-      ]
-    },
-    "kagoshima": {
-      "numRoads": 144721,
-      "sizeBytes": 4589426,
-      "bbox": [
-        2913576,
-        12919463,
-        3208911,
-        13117984
-      ]
-    },
-    "okinawa": {
-      "numRoads": 95492,
-      "sizeBytes": 2762512,
-      "bbox": [
-        2404661,
-        12293533,
-        2852890,
-        13132916
-      ]
+      ],
+      "attrCounts": {
+        "oneway": 9862,
+        "incline": 43817,
+        "lanes": 10538,
+        "width": 3963,
+        "layer": 9591,
+        "track": 15769,
+        "inclineFromOSM": 12,
+        "inclineFromDem": 43805
+      }
     }
   }
 }

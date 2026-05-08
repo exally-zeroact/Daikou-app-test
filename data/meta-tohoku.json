@@ -1,66 +1,26 @@
 {
   "region": "tohoku",
-  "generated": "2026-05-04T12:27:13.998Z",
+  "generated": "2026-05-07T14:35:11.601Z",
   "prefectures": {
-    "aomori": {
-      "numRoads": 90245,
-      "sizeBytes": 2730061,
-      "bbox": [
-        4017418,
-        13986171,
-        4154672,
-        14157927
-      ]
-    },
-    "iwate": {
-      "numRoads": 117814,
-      "sizeBytes": 3986446,
-      "bbox": [
-        3886169,
-        14079535,
-        4053871,
-        14205311
-      ]
-    },
-    "miyagi": {
-      "numRoads": 140236,
-      "sizeBytes": 4462001,
-      "bbox": [
-        3747128,
-        14037159,
-        3904520,
-        14167260
-      ]
-    },
-    "akita": {
-      "numRoads": 109592,
-      "sizeBytes": 3229155,
-      "bbox": [
-        3890262,
-        13954342,
-        4041369,
-        14080715
-      ]
-    },
-    "yamagata": {
-      "numRoads": 84563,
-      "sizeBytes": 2560772,
-      "bbox": [
-        3768523,
-        13954219,
-        3903962,
-        14048604
-      ]
-    },
     "fukushima": {
-      "numRoads": 151553,
-      "sizeBytes": 4903481,
+      "numRoads": 177359,
+      "sizeBytes": 6089003,
       "bbox": [
-        3678976,
-        13921121,
-        3789020,
+        3678576,
+        13920751,
+        3789954,
         14103722
-      ]
+      ],
+      "attrCounts": {
+        "oneway": 4359,
+        "incline": 55282,
+        "lanes": 7005,
+        "width": 40,
+        "layer": 8847,
+        "track": 26043,
+        "inclineFromOSM": 6,
+        "inclineFromDem": 55276
+      }
     }
   }
 }

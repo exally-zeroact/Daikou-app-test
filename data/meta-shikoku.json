@@ -1,46 +1,26 @@
 {
   "region": "shikoku",
-  "generated": "2026-05-04T12:30:19.473Z",
+  "generated": "2026-05-07T23:55:57.931Z",
   "prefectures": {
-    "tokushima": {
-      "numRoads": 56437,
-      "sizeBytes": 1764397,
-      "bbox": [
-        3324565,
-        13392012,
-        3425791,
-        13481916
-      ]
-    },
-    "kagawa": {
-      "numRoads": 77296,
-      "sizeBytes": 2341576,
-      "bbox": [
-        3381258,
-        13352821,
-        3456374,
-        13435819
-      ]
-    },
-    "ehime": {
-      "numRoads": 117497,
-      "sizeBytes": 3967864,
-      "bbox": [
-        3270859,
-        13201828,
-        3429947,
-        13332927
-      ]
-    },
     "kochi": {
-      "numRoads": 56511,
-      "sizeBytes": 1858972,
+      "numRoads": 52812,
+      "sizeBytes": 1817877,
       "bbox": [
-        3272272,
+        3272264,
         13292826,
-        3401558,
+        3389787,
         13412764
-      ]
+      ],
+      "attrCounts": {
+        "oneway": 1436,
+        "incline": 18667,
+        "lanes": 4007,
+        "width": 4,
+        "layer": 4237,
+        "track": 3118,
+        "inclineFromOSM": 24,
+        "inclineFromDem": 18643
+      }
     }
   }
 }
