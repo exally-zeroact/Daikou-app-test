@@ -144,6 +144,194 @@ TileCache.prototype.has = function(key){ return this.map.has(key); };
 TileCache.prototype.size = function(){ return this.map.size; };
 
 const _tileCache = new TileCache();
+const TILE_DEG = 0.05;   // build-road-graph-tiled.js と一致
+
+// Phase B runtime: タイル prefetch 状態（in-flight 重複 request 防止）
+const _tilePrefetchInflight = new Set();
+let _tileMissCount = 0;
+let _tileHitCount = 0;
+let _tileRequestCount = 0;
+
+// 緯度経度 → タイルキー
+function _tileKeyOf(pref, lat, lng){
+  const tx = Math.floor(lat / TILE_DEG);
+  const ty = Math.floor(lng / TILE_DEG);
+  return pref + '/' + tx + '_' + ty;
+}
+
+// Worker → main: タイル取得依頼
+function _requestTileFromMain(pref, tx, ty){
+  const key = pref + '/' + tx + '_' + ty;
+  if(_tileCache.has(key)) return;
+  if(_tilePrefetchInflight.has(key)) return;
+  _tilePrefetchInflight.add(key);
+  _tileRequestCount++;
+  try {
+    self.postMessage({ type: 'requestTile', pref: pref, tx: tx, ty: ty });
+  } catch(e){
+    _tilePrefetchInflight.delete(key);
+  }
+}
+
+// GPS 進行方向の前方タイルを prefetch
+function _prefetchTilesAround(lat, lng, headingDeg, speedKmh, pref){
+  if(!pref) return;
+  const tx = Math.floor(lat / TILE_DEG);
+  const ty = Math.floor(lng / TILE_DEG);
+  // 現在地 + 8 近傍
+  for(let dx = -1; dx <= 1; dx++){
+    for(let dy = -1; dy <= 1; dy++){
+      _requestTileFromMain(pref, tx + dx, ty + dy);
+    }
+  }
+  // 進行方向 30 秒先（最大 2km）の予測点
+  if(headingDeg != null && speedKmh > 5){
+    const aheadM = Math.min(2000, (speedKmh / 3.6) * 30);
+    const tr = Math.PI / 180;
+    const dLat = (aheadM * Math.cos(headingDeg * tr)) / 111000;
+    const cosLat = Math.cos(lat * tr);
+    const dLng = cosLat > 0.01 ? (aheadM * Math.sin(headingDeg * tr)) / (111000 * cosLat) : 0;
+    const ftx = Math.floor((lat + dLat) / TILE_DEG);
+    const fty = Math.floor((lng + dLng) / TILE_DEG);
+    if(ftx !== tx || fty !== ty) _requestTileFromMain(pref, ftx, fty);
+  }
+}
+
+// タイル内 (roadIdx, segIdx) → local node index
+// 初回参照時に index 構築（lazy）
+function _buildTileRoadSegIndex(tile){
+  if(tile._roadSegIndex) return;
+  // tile.edgeRoad / edgeSeg は decode 必要
+  if(!tile._decoded){
+    tile._decoded = true;
+    tile.nodeLat       = new Int32Array(_b64ToArrayBuffer(tile.nodeLatB64));
+    tile.nodeLng       = new Int32Array(_b64ToArrayBuffer(tile.nodeLngB64));
+    tile.globalId      = new Uint32Array(_b64ToArrayBuffer(tile.globalIdB64));
+    tile.nodeOffset    = new Uint32Array(_b64ToArrayBuffer(tile.nodeOffsetB64));
+    tile.edgeTo        = new Uint32Array(_b64ToArrayBuffer(tile.edgeToB64));
+    tile.edgeLenM      = new Uint16Array(_b64ToArrayBuffer(tile.edgeLenMB64));
+    tile.edgeFlags     = new Uint8Array(_b64ToArrayBuffer(tile.edgeFlagsB64));
+    tile.edgeRoad      = new Uint32Array(_b64ToArrayBuffer(tile.edgeRoadB64));
+    tile.edgeSeg       = new Uint16Array(_b64ToArrayBuffer(tile.edgeSegB64));
+  }
+  const m = new Map();
+  for(let e = 0; e < tile.numEdges; e++){
+    const key = tile.edgeRoad[e] * 65536 + tile.edgeSeg[e];
+    if(!m.has(key)) m.set(key, e);
+  }
+  tile._roadSegIndex = m;
+}
+
+function _snapToTileNode(tile, snap){
+  _buildTileRoadSegIndex(tile);
+  const key = snap.roadIndex * 65536 + (snap.segmentIndex || 0);
+  const e = tile._roadSegIndex.get(key);
+  if(e === undefined) return -1;
+  // edge index → from-node を二分探索（tile.nodeOffset 上）
+  let lo = 0, hi = tile.numNodes;
+  while(lo < hi){
+    const mid = (lo + hi) >>> 1;
+    if(tile.nodeOffset[mid + 1] <= e) lo = mid + 1;
+    else hi = mid;
+  }
+  const fromN = lo;
+  const toN = tile.edgeTo[e];
+  return (snap.t != null && snap.t >= 0.5) ? toN : fromN;
+}
+
+// Tile-local Dijkstra（タイル内のみ・cross-tile は呼出側で fallback）
+function _runTileDijkstra(tile, srcN, dstN, maxDistM, deadline){
+  if(srcN < 0 || dstN < 0 || srcN >= tile.numNodes || dstN >= tile.numNodes) return null;
+  if(srcN === dstN) return 0;
+  if(!tile._dist || tile._dist.length !== tile.numNodes){
+    tile._dist = new Float32Array(tile.numNodes);
+    tile._visited = new Uint8Array(tile.numNodes);
+    tile._touched = [];
+  }
+  const dist = tile._dist;
+  const visited = tile._visited;
+  const touched = tile._touched;
+  for(let i = 0; i < touched.length; i++){
+    dist[touched[i]] = Infinity;
+    visited[touched[i]] = 0;
+  }
+  touched.length = 0;
+  const precision = tile.precision || 1e5;
+  const dstLat = tile.nodeLat[dstN] / precision;
+  const dstLng = tile.nodeLng[dstN] / precision;
+  dist[srcN] = 0;
+  touched.push(srcN);
+  const heap = new BinaryHeap();
+  heap.push(srcN, 0);
+  let iters = 0;
+  const lenScale = tile.edgeLenScale || 0.1;
+  while(heap.size() > 0){
+    if((++iters & 0x3F) === 0 && deadline > 0 && performance.now() > deadline) return null;
+    const top = heap.pop();
+    const u = top.n;
+    if(visited[u]) continue;
+    visited[u] = 1;
+    const du = dist[u];
+    if(du > maxDistM) continue;
+    if(u === dstN) return du;
+    const eStart = tile.nodeOffset[u];
+    const eEnd = tile.nodeOffset[u + 1];
+    for(let k = eStart; k < eEnd; k++){
+      const v = tile.edgeTo[k];
+      if(visited[v]) continue;
+      const newD = du + tile.edgeLenM[k] * lenScale;
+      if(newD < dist[v] && newD <= maxDistM){
+        dist[v] = newD;
+        if(touched.length < 16384) touched.push(v);
+        const h = _haversine(tile.nodeLat[v] / precision, tile.nodeLng[v] / precision, dstLat, dstLng) * 0.9;
+        heap.push(v, newD + h);
+      }
+    }
+  }
+  return null;
+}
+
+// Phase B runtime: タイル経路で route 距離を計算
+//   src/dst が同一タイルかつタイル loaded → tile Dijkstra
+//   それ以外 → null（呼出側で backbone / haversine fallback）
+function _routeDistanceTileFirst(a, b){
+  if(!a || !b) return null;
+  if(a.prefecture !== b.prefecture) return null;
+  const tileA = _tileKeyOf(a.prefecture, a.snapLat, a.snapLng);
+  const tileB = _tileKeyOf(b.prefecture, b.snapLat, b.snapLng);
+  if(tileA !== tileB){
+    // cross-tile: 両方 prefetch して fallback
+    const partsA = tileA.split('/');
+    const partsB = tileB.split('/');
+    const txyA = partsA[1].split('_'); const txyB = partsB[1].split('_');
+    _requestTileFromMain(a.prefecture, parseInt(txyA[0],10), parseInt(txyA[1],10));
+    _requestTileFromMain(b.prefecture, parseInt(txyB[0],10), parseInt(txyB[1],10));
+    return null;
+  }
+  const tile = _tileCache.get(tileA);
+  if(!tile){
+    _tileMissCount++;
+    const parts = tileA.split('/');
+    const txy = parts[1].split('_');
+    _requestTileFromMain(a.prefecture, parseInt(txy[0],10), parseInt(txy[1],10));
+    return null;
+  }
+  _tileHitCount++;
+  _tileCache.pin(tileA);
+  try {
+    const srcN = _snapToTileNode(tile, a);
+    const dstN = _snapToTileNode(tile, b);
+    if(srcN < 0 || dstN < 0) return null;
+    const chordM = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
+    const maxDistM = chordM * 1.5 + 200;
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+    const distM = _runTileDijkstra(tile, srcN, dstN, maxDistM, t0 + DIJKSTRA_TIMEOUT_MS);
+    if(distM == null) return null;
+    return { distanceM: distM, onSameRoad: false, _via: 'tile' };
+  } finally {
+    _tileCache.unpin(tileA);
+  }
+}
 
 // MM-5 (2026-05-08): DEM データ（高度データ）
 // 形式: { bbox:[minLat,minLng,maxLat,maxLng], gridSize, numLat, numLng, alt:Int16Array }
@@ -756,11 +944,12 @@ function _chDijkstra(g, srcNode, dstNode, maxDistM, deadline){
   return null;  // unreachable within budget / timeout
 }
 
-// ─── MM-4b: route 距離計算（同 road=polyline / 別 road=Dijkstra → fallback haversine）
-// HMM 遷移確率と窓 commit の両方で使用する route 距離関数
+// ─── Phase B runtime: route 距離計算
+// 優先順序: 同road=polyline → tile Dijkstra → 既存 graph → backbone → haversine
+// すべて失敗時は haversine 弦距離を返す（業務継続性担保）
 function _routeDistance(a, b){
   if(!a || !b) return null;
-  // 同 road → polyline 沿い距離（既存・正確）
+  // 同 road → polyline 沿い距離（既存・最も正確）
   if(a.prefecture === b.prefecture && a.roadIndex === b.roadIndex){
     const dec = decoders.get(a.prefecture);
     if(dec){
@@ -768,10 +957,13 @@ function _routeDistance(a, b){
       if(r){ r._via = 'polyline'; return r; }
     }
   }
-  // 別 road / 別 pref → Dijkstra（graph 利用可能時）or haversine fallback
+  // Phase B: タイル経路を最優先で試行（メモリ効率最重視）
+  const tileResult = _routeDistanceTileFirst(a, b);
+  if(tileResult) return tileResult;
+
   const chordM = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
 
-  // graph が同一県でロード済みなら Dijkstra 試行
+  // graph が同一県でロード済みなら Dijkstra 試行（後方互換 / per-pref auto-load 廃止後は実質未使用）
   if(a.prefecture === b.prefecture && graphs.has(a.prefecture)){
     // LRU キャッシュ参照（roadIdx + segIdx ベースで t は無視・近似）
     const cacheKey = a.prefecture + ':' + a.roadIndex + '_' + a.segmentIndex
@@ -794,6 +986,15 @@ function _routeDistance(a, b){
       }
       // Dijkstra 失敗（タイムアウト or 到達不能）→ haversine fallback
     }
+  }
+
+  // Phase B: backbone graph で県跨ぎ補完
+  if(_backboneGraph){
+    // backbone は global node space ではないので簡易的に nearest node 探索
+    // 実装簡略化のため: backbone Dijkstra も試行（同 graph 構造）
+    // ただし src/dst を backbone node に map する手段がないため
+    // 現状は backbone はあくまで cross-pref fallback の placeholder（次回拡張）
+    // → haversine fallback に流れる
   }
 
   // 最終フォールバック: haversine 弦距離
@@ -1406,27 +1607,39 @@ self.onmessage = function(e){
   // Phase B: タイル受け取り（main 側 RoadGraphTileLoader 経由）
   if(msg.type === 'loadTile'){
     try {
-      // タイルデータは roads-decoder と同形式の subset（CSR）
-      // map-matcher 内 TileCache に格納し、_routeDistance がタイル境界を越える時に
-      // 隣接タイルを順次 load して Dijkstra 続行する設計（runtime 統合は次イテレーション）
       const key = msg.pref + '/' + msg.tx + '_' + msg.ty;
-      _tileCache.set(key, msg.tileData);
-      self.postMessage({
-        type: 'tileLoaded', ok: true, key: key, cacheSize: _tileCache.size(),
-      });
+      _tilePrefetchInflight.delete(key);
+      if(msg.tileData){
+        _tileCache.set(key, msg.tileData);
+      }
+      // tileLoaded post は頻発するためサイレント（必要時のみ）
     } catch(err){
-      self.postMessage({ type: 'tileLoaded', ok: false, error: err.message });
+      const key = msg.pref + '/' + msg.tx + '_' + msg.ty;
+      _tilePrefetchInflight.delete(key);
     }
+    return;
+  }
+
+  // Phase B: タイル取得失敗通知（404 等）
+  if(msg.type === 'tileNotFound'){
+    const key = msg.pref + '/' + msg.tx + '_' + msg.ty;
+    _tilePrefetchInflight.delete(key);
     return;
   }
 
   // Phase B: タイルキャッシュ統計取得
   if(msg.type === 'getTileStats'){
+    const total = _tileHitCount + _tileMissCount;
     self.postMessage({
       type: 'tileStats',
       cacheSize: _tileCache.size(),
       cacheMax: TILE_CACHE_MAX,
       pinnedCount: _tileCache.pinned.size,
+      inflight: _tilePrefetchInflight.size,
+      hitCount: _tileHitCount,
+      missCount: _tileMissCount,
+      hitRate: total > 0 ? _tileHitCount / total : 0,
+      requestCount: _tileRequestCount,
       backboneLoaded: !!_backboneGraph,
       backboneNodes: _backboneGraph ? _backboneGraph.numNodes : 0,
     });
@@ -1616,6 +1829,8 @@ self.onmessage = function(e){
         _markPheromone(bestEmit.prefecture, bestEmit.roadIndex);
         // MM-7: 地域別 GPS 誤差学習を蓄積
         _recordGridBiasSample(msg.lat, msg.lng, bestEmit.snapLat, bestEmit.snapLng);
+        // Phase B runtime: GPS 進行方向の前方タイルを prefetch
+        _prefetchTilesAround(msg.lat, msg.lng, msg.headingDeg, msg.speedKmh || 0, bestEmit.prefecture);
 
         // ③ Viterbi 窓に push
         const gpsObs = { lat: msg.lat, lng: msg.lng, timestamp: msg.timestamp };
