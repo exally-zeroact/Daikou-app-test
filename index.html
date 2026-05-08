@@ -933,6 +933,9 @@ class NoSleep {
 
 <script src="js/region-loader.js"></script>
 
+<!-- ★road-graph-loader.js: MM-4b road-graph 遅延ロード -->
+<script src="js/road-graph-loader.js"></script>
+
 <script src="js/gps.js"></script>
 
 <!-- OSRM削除済（2026/04/26）：公開API依存ゼロ化・スケール無制限化のため -->
@@ -967,9 +970,18 @@ try {
   });
   _mmWorker.addEventListener('message', function(e){
     const m = e.data;
-    if(m && m.type === 'roadsLoaded' && typeof dlog === 'function'){
+    if(!m || typeof dlog !== 'function') return;
+    if(m.type === 'roadsLoaded'){
       dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
+    } else if(m.type === 'graphLoaded'){
+      // MM-4b: road-graph 受信ログ
+      dlog('[MM] worker graph ' + (m.ok ? 'loaded' : 'fail') +
+           ': ' + m.pref +
+           (m.ok ? ' (nodes=' + m.numNodes + ' edges=' + m.numEdges +
+                   ' shortcuts=' + m.numShortcuts +
+                   (m.decodeMs ? ' decode=' + m.decodeMs.toFixed(0) + 'ms' : '') + ')'
+                 : ' err=' + m.error));
     }
   });
   if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
@@ -1026,6 +1038,23 @@ function _forwardRoadsToMmWorker(prefs){
       _mmWorker.postMessage({ type: 'loadRoads', pref: pref, roadsData: data });
     } catch(e){
       console.warn('[MM] forward roads ' + pref + ' err:', e.message);
+    }
+  }
+}
+
+// MM-4b (2026-05-08): road-graph-{pref}.js を Worker B に転送する関数
+// 該当 pref の graph がロード済（window.ROAD_GRAPH_<PREF> 設定済）の時のみ post
+// graph 未ビルドの pref は単純にスキップ → MM-4b は haversine fallback で稼働
+function _forwardRoadGraphToMmWorker(prefs){
+  if(!_mmWorker || !Array.isArray(prefs)) return;
+  for(const pref of prefs){
+    const varName = 'ROAD_GRAPH_' + String(pref).toUpperCase().replace(/-/g, '_');
+    const data = window[varName];
+    if(!data) continue;
+    try {
+      _mmWorker.postMessage({ type: 'loadGraph', pref: pref, graphData: data });
+    } catch(e){
+      console.warn('[MM] forward road-graph ' + pref + ' err:', e.message);
     }
   }
 }
@@ -1246,6 +1275,21 @@ function loadUserRegions(){
       // MM-1: Worker B にも roads データを転送（main 側 RegionLoader と二重保持）
       // 失敗しても main 側の MM 動作には影響しない（fallback あり）
       _forwardRoadsToMmWorker(regions);
+
+      // MM-4b: road-graph も併せて遅延ロード → Worker B に転送
+      // 該当 pref の road-graph-{pref}.js が未ビルド（404）の場合は haversine fallback
+      // ファイルサイズが大きい（県あたり 30〜80MB）ため roads 完了後に並列開始
+      if(typeof RoadGraphLoader !== 'undefined' && RoadGraphLoader.ensureLoaded){
+        RoadGraphLoader.ensureLoaded(regions).then((graphs)=>{
+          const okCount = graphs.filter(g => g != null).length;
+          if(typeof dlog === 'function'){
+            dlog('[RoadGraph] 活動エリア graph ロード完了: ' + okCount + '/' + regions.length + '県');
+          }
+          _forwardRoadGraphToMmWorker(regions);
+        }).catch(e=>{
+          console.error('road-graph ロードエラー:', e);
+        });
+      }
     }).catch(e=>{
       console.error('活動エリアロードエラー:', e);
     });

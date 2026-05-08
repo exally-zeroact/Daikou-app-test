@@ -41,6 +41,13 @@ const ONEWAY_PENALTY       = 0.05;    // 一方通行違反時の transition 乗
 const decoders   = new Map();
 const loadedPrefs = new Set();
 
+// MM-4b: 県別 road-graph（CSR + CH ショートカット）
+const graphs = new Map();   // pref → decoded graph object
+
+// MM-4b: Dijkstra タイムアウト・LRU キャッシュ
+const DIJKSTRA_TIMEOUT_MS = 3;
+const ROUTE_CACHE_SIZE    = 100;
+
 // MM-3: 確定済み（commit 済み）snap・main 側の prev に相当
 let lastCommittedSnap = null;
 // MM-1/2 互換用 prevSnap（Viterbi 不在時の fallback 経路で使用）
@@ -253,9 +260,245 @@ function _snapAcrossPrefs(lat, lng){
   return best;
 }
 
-// ─── MM-3: route 距離計算（仕様: 同 road=polyline / 別 road=haversine） ──
+// ─── MM-4b: road-graph デコード ─────────────────────────────────
+// main から postMessage で受信した base64 を TypedArray に展開
+function _b64ToArrayBuffer(b64){
+  const bin = atob(b64);
+  const len = bin.length;
+  const buf = new ArrayBuffer(len);
+  const view = new Uint8Array(buf);
+  for(let i = 0; i < len; i++) view[i] = bin.charCodeAt(i);
+  return buf;
+}
+
+function _decodeGraphData(g){
+  return {
+    prefecture:   g.prefecture,
+    precision:    g.precision,
+    numNodes:     g.numNodes,
+    numEdges:     g.numEdges,
+    numShortcuts: g.numShortcuts,
+    nodeLat:      new Int32Array(_b64ToArrayBuffer(g.nodeLatB64)),
+    nodeLng:      new Int32Array(_b64ToArrayBuffer(g.nodeLngB64)),
+    nodeOffset:   new Uint32Array(_b64ToArrayBuffer(g.nodeOffsetB64)),
+    edgeTo:       new Uint32Array(_b64ToArrayBuffer(g.edgeToB64)),
+    edgeLenM:     new Float32Array(_b64ToArrayBuffer(g.edgeLenMB64)),
+    edgeFlags:    new Uint8Array(_b64ToArrayBuffer(g.edgeFlagsB64)),
+    edgeRoad:     new Uint32Array(_b64ToArrayBuffer(g.edgeRoadB64)),
+    edgeSeg:      new Uint16Array(_b64ToArrayBuffer(g.edgeSegB64)),
+    nodeLevel:    new Uint16Array(_b64ToArrayBuffer(g.nodeLevelB64)),
+    shortcutEdgeFrom:  new Uint32Array(_b64ToArrayBuffer(g.shortcutEdgeFromB64)),
+    shortcutEdgeTo:    new Uint32Array(_b64ToArrayBuffer(g.shortcutEdgeToB64)),
+    shortcutEdgeLenM:  new Float32Array(_b64ToArrayBuffer(g.shortcutEdgeLenMB64)),
+    shortcutEdgeFlags: new Uint8Array(_b64ToArrayBuffer(g.shortcutEdgeFlagsB64)),
+    shortcutMidNode:   new Uint32Array(_b64ToArrayBuffer(g.shortcutMidNodeB64)),
+  };
+}
+
+// shortcut を from-node 順に整列して CSR-like インデックスを構築
+// shortcutOffset[v..v+1] が v 始点の shortcut の sortedShortcutIdx 区間
+function _buildShortcutIndex(g){
+  if(g.shortcutOffset) return;
+  const N = g.numNodes, S = g.numShortcuts;
+  const offsets = new Uint32Array(N + 1);
+  for(let i = 0; i < S; i++) offsets[g.shortcutEdgeFrom[i] + 1]++;
+  for(let v = 1; v <= N; v++) offsets[v] += offsets[v - 1];
+  const cursor = new Uint32Array(N);
+  const sorted = new Uint32Array(S);
+  for(let i = 0; i < S; i++){
+    const v = g.shortcutEdgeFrom[i];
+    sorted[offsets[v] + cursor[v]] = i;
+    cursor[v]++;
+  }
+  g.shortcutOffset = offsets;
+  g.shortcutIndexByFrom = sorted;
+}
+
+// (roadIdx, segIdx) → 最初に登場した edge index の Map（数値キーで省メモリ）
+function _buildRoadSegIndex(g){
+  if(g.roadSegToEdge) return;
+  const m = new Map();
+  for(let e = 0; e < g.numEdges; e++){
+    const key = g.edgeRoad[e] * 65536 + g.edgeSeg[e];
+    if(!m.has(key)) m.set(key, e);
+  }
+  g.roadSegToEdge = m;
+}
+
+// edge index → from-node を二分探索（nodeOffset 上）
+function _findFromNode(g, edgeIdx){
+  let lo = 0, hi = g.numNodes;
+  while(lo < hi){
+    const mid = (lo + hi) >>> 1;
+    if(g.nodeOffset[mid + 1] <= edgeIdx) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// snap 結果から graph node id へマッピング
+// snap.t < 0.5 なら segment の from 側、それ以上なら to 側
+function _snapToGraphNode(g, snap){
+  if(snap == null || typeof snap.roadIndex !== 'number') return -1;
+  _buildRoadSegIndex(g);
+  const key = snap.roadIndex * 65536 + (snap.segmentIndex || 0);
+  const e = g.roadSegToEdge.get(key);
+  if(e === undefined) return -1;
+  const fromNode = _findFromNode(g, e);
+  const toNode = g.edgeTo[e];
+  return (snap.t != null && snap.t >= 0.5) ? toNode : fromNode;
+}
+
+// ─── MM-4b: Binary Heap（Priority Queue） ─────────────────────
+function BinaryHeap(){ this.items = []; }
+BinaryHeap.prototype.push = function(node, priority){
+  const items = this.items;
+  let i = items.length;
+  items.push({ n: node, p: priority });
+  while(i > 0){
+    const parent = (i - 1) >>> 1;
+    if(items[parent].p <= items[i].p) break;
+    const tmp = items[parent]; items[parent] = items[i]; items[i] = tmp;
+    i = parent;
+  }
+};
+BinaryHeap.prototype.pop = function(){
+  const items = this.items;
+  if(items.length === 0) return null;
+  const top = items[0];
+  const last = items.pop();
+  if(items.length > 0){
+    items[0] = last;
+    let i = 0;
+    const len = items.length;
+    while(true){
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      let smallest = i;
+      if(left < len && items[left].p < items[smallest].p) smallest = left;
+      if(right < len && items[right].p < items[smallest].p) smallest = right;
+      if(smallest === i) break;
+      const tmp = items[smallest]; items[smallest] = items[i]; items[i] = tmp;
+      i = smallest;
+    }
+  }
+  return top;
+};
+BinaryHeap.prototype.size = function(){ return this.items.length; };
+
+// ─── MM-4b: LRU キャッシュ（Map の挿入順を利用） ──────────────
+function LRUCache(maxSize){ this.maxSize = maxSize; this.cache = new Map(); }
+LRUCache.prototype.get = function(key){
+  if(!this.cache.has(key)) return undefined;
+  const v = this.cache.get(key);
+  this.cache.delete(key);
+  this.cache.set(key, v);
+  return v;
+};
+LRUCache.prototype.set = function(key, value){
+  if(this.cache.has(key)) this.cache.delete(key);
+  this.cache.set(key, value);
+  if(this.cache.size > this.maxSize){
+    const firstKey = this.cache.keys().next().value;
+    this.cache.delete(firstKey);
+  }
+};
+LRUCache.prototype.clear = function(){ this.cache.clear(); };
+
+const _routeCache = new LRUCache(ROUTE_CACHE_SIZE);
+
+// ─── MM-4b: CH-Dijkstra + A* ヒューリスティック ───────────────
+// graph の CSR + shortcut を辿る forward 探索
+// CH 制約: nodeLevel が 高い方向のみ relax（仕様）
+//   ただし src の level より低いノードへの relax も初期段階では許容しないと
+//   到達不能になるため、既に到達済みのノードからは upward のみとする
+//   実装簡略化のため: forward は全方向 relax + shortcut 利用で correctness 保証
+//   （shortcut が冗長 path を提供するため Dijkstra でも最短到達できる）
+// A*: priority = dist + h, h = haversine(node, dst) × 0.9（admissible）
+function _chDijkstra(g, srcNode, dstNode, maxDistM, deadline){
+  if(srcNode < 0 || dstNode < 0 || srcNode >= g.numNodes || dstNode >= g.numNodes) return null;
+  if(srcNode === dstNode) return 0;
+
+  // 動的 dist / visited を pre-allocate（lazy）
+  if(!g._dist || g._dist.length !== g.numNodes){
+    g._dist = new Float32Array(g.numNodes);
+    g._visited = new Uint8Array(g.numNodes);
+    g._touched = [];
+  }
+  const dist = g._dist;
+  const visited = g._visited;
+  const touched = g._touched;
+
+  // touched-list reset で前回呼び出し分だけクリア（O(touched)）
+  for(let i = 0; i < touched.length; i++){
+    dist[touched[i]] = Infinity;
+    visited[touched[i]] = 0;
+  }
+  touched.length = 0;
+
+  _buildShortcutIndex(g);
+
+  const precision = g.precision || 1e5;
+  const dstLat = g.nodeLat[dstNode] / precision;
+  const dstLng = g.nodeLng[dstNode] / precision;
+
+  dist[srcNode] = 0;
+  touched.push(srcNode);
+
+  const heap = new BinaryHeap();
+  heap.push(srcNode, 0);
+
+  let iters = 0;
+  while(heap.size() > 0){
+    // タイムアウトチェック（64 反復ごと）
+    if((++iters & 0x3F) === 0 && deadline > 0 && performance.now() > deadline) return null;
+
+    const top = heap.pop();
+    const u = top.n;
+    if(visited[u]) continue;
+    visited[u] = 1;
+    const du = dist[u];
+    if(du > maxDistM) continue;
+    if(u === dstNode) return du;
+
+    // 通常 forward edges
+    const eStart = g.nodeOffset[u];
+    const eEnd = g.nodeOffset[u + 1];
+    for(let k = eStart; k < eEnd; k++){
+      const v = g.edgeTo[k];
+      if(visited[v]) continue;
+      const newD = du + g.edgeLenM[k];
+      if(newD < dist[v] && newD <= maxDistM){
+        dist[v] = newD;
+        if(touched.length < 16384) touched.push(v);
+        const h = _haversine(g.nodeLat[v] / precision, g.nodeLng[v] / precision, dstLat, dstLng) * 0.9;
+        heap.push(v, newD + h);
+      }
+    }
+
+    // CH shortcuts
+    if(g.shortcutOffset){
+      const sStart = g.shortcutOffset[u];
+      const sEnd = g.shortcutOffset[u + 1];
+      for(let i = sStart; i < sEnd; i++){
+        const idx = g.shortcutIndexByFrom[i];
+        const v = g.shortcutEdgeTo[idx];
+        if(visited[v]) continue;
+        const newD = du + g.shortcutEdgeLenM[idx];
+        if(newD < dist[v] && newD <= maxDistM){
+          dist[v] = newD;
+          if(touched.length < 16384) touched.push(v);
+          const h = _haversine(g.nodeLat[v] / precision, g.nodeLng[v] / precision, dstLat, dstLng) * 0.9;
+          heap.push(v, newD + h);
+        }
+      }
+    }
+  }
+  return null;  // unreachable within budget / timeout
+}
+
+// ─── MM-4b: route 距離計算（同 road=polyline / 別 road=Dijkstra → fallback haversine）
 // HMM 遷移確率と窓 commit の両方で使用する route 距離関数
-// 別 road の haversine は MM-4 で Dijkstra に置換予定
 function _routeDistance(a, b){
   if(!a || !b) return null;
   // 同 road → polyline 沿い距離（既存・正確）
@@ -266,9 +509,37 @@ function _routeDistance(a, b){
       if(r){ r._via = 'polyline'; return r; }
     }
   }
-  // 別 road / 別 pref → haversine 弦距離（MM-4 で Dijkstra に置換予定）
+  // 別 road / 別 pref → Dijkstra（graph 利用可能時）or haversine fallback
+  const chordM = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
+
+  // graph が同一県でロード済みなら Dijkstra 試行
+  if(a.prefecture === b.prefecture && graphs.has(a.prefecture)){
+    // LRU キャッシュ参照（roadIdx + segIdx ベースで t は無視・近似）
+    const cacheKey = a.prefecture + ':' + a.roadIndex + '_' + a.segmentIndex
+                   + '|' + b.roadIndex + '_' + b.segmentIndex;
+    const cached = _routeCache.get(cacheKey);
+    if(cached !== undefined) return cached;
+
+    const g = graphs.get(a.prefecture);
+    const srcNode = _snapToGraphNode(g, a);
+    const dstNode = _snapToGraphNode(g, b);
+    if(srcNode >= 0 && dstNode >= 0){
+      const maxDistM = chordM * 1.5 + 200;
+      const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      const deadline = t0 + DIJKSTRA_TIMEOUT_MS;
+      const distM = _chDijkstra(g, srcNode, dstNode, maxDistM, deadline);
+      if(distM != null){
+        const result = { distanceM: distM, onSameRoad: false, _via: 'dijkstra' };
+        _routeCache.set(cacheKey, result);
+        return result;
+      }
+      // Dijkstra 失敗（タイムアウト or 到達不能）→ haversine fallback
+    }
+  }
+
+  // 最終フォールバック: haversine 弦距離
   return {
-    distanceM: _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng),
+    distanceM: chordM,
     onSameRoad: false, _via: 'haversine',
   };
 }
@@ -488,6 +759,40 @@ self.onmessage = function(e){
     } catch(err){
       self.postMessage({
         type: 'roadsLoaded', pref: msg.pref, ok: false, error: err.message,
+      });
+    }
+    return;
+  }
+
+  // MM-4b: road-graph 受け取り
+  if(msg.type === 'loadGraph'){
+    try {
+      if(graphs.has(msg.pref)){
+        self.postMessage({
+          type: 'graphLoaded', pref: msg.pref, ok: true,
+          numNodes: graphs.get(msg.pref).numNodes,
+          _reason: 'already loaded',
+        });
+        return;
+      }
+      const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      const g = _decodeGraphData(msg.graphData);
+      // shortcut インデックス事前構築
+      _buildShortcutIndex(g);
+      // road-segment → edge index（Dijkstra src/dst マッピング用）
+      _buildRoadSegIndex(g);
+      graphs.set(msg.pref, g);
+      // graph 更新で route キャッシュは無効化（pref 切替時の整合性担保）
+      _routeCache.clear();
+      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+      self.postMessage({
+        type: 'graphLoaded', pref: msg.pref, ok: true,
+        numNodes: g.numNodes, numEdges: g.numEdges, numShortcuts: g.numShortcuts,
+        decodeMs: t1 - t0,
+      });
+    } catch(err){
+      self.postMessage({
+        type: 'graphLoaded', pref: msg.pref, ok: false, error: err.message,
       });
     }
     return;
