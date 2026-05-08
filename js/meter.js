@@ -19,7 +19,13 @@ const Meter = (() => {
   };
 
   // Map Matching の内部状態（state とは別・stateはユーザー向け値のみ）
+  // MM-1 (2026-05-08): Worker 経路使用時は prevSnap は Worker 内で保持し
+  //   こちらは fallback（Worker 起動失敗時）でのみ使用される
   let prevSnap = null;
+
+  // MM-1: Worker B 参照（index.html から setMapMatcher で注入）
+  //   null の場合は既存インラインロジックにフォールバック
+  let mmWorker = null;
 
   // 起動時warm up：代行開始前から GPS を保持しておく（2026/04/30追加）
   // 「代行開始」押した瞬間にすぐメーターが動くようにするため
@@ -53,6 +59,33 @@ const Meter = (() => {
   function setFareConfig(config){ fareConfig = { ...fareConfig, ...config }; }
   function getFareConfig(){ return { ...fareConfig }; }
 
+  // ─── MM-1: Worker B 連携 ───────────────────────────────
+  // index.html で new Worker('js/map-matcher.js') 後にこの関数で注入する。
+  // null を渡すと Worker 経路を無効化し既存インラインロジック（fallback）に戻す。
+  function setMapMatcher(worker){
+    mmWorker = worker || null;
+    if(mmWorker){
+      mmWorker.addEventListener('message', _onMmWorkerMessage);
+    }
+  }
+
+  // Worker B からの mmResult を受けて state に反映するハンドラ
+  // ここでは state.distance_m / fare_yen には絶対触らない（業務継続性最優先）
+  function _onMmWorkerMessage(e){
+    const m = e && e.data;
+    if(!m || m.type !== 'mmResult') return;
+    if(typeof m.mmIncrementM === 'number' && m.mmIncrementM > 0){
+      state.mm_distance_m += m.mmIncrementM;
+    }
+    if(m.snapped) state.mm_snap_count++;
+    if(m.skipped){
+      state.mm_skip_count++;
+      if(typeof dlog === 'function' && m._reason){
+        dlog('[MM] skip: ' + m._reason);
+      }
+    }
+  }
+
   function start(){
     const now = Date.now();
     // 起動時warm up：5秒以上前のlastWarmupGpsは使わない（過剰課金リスク回避・2026/05/01）
@@ -85,7 +118,11 @@ const Meter = (() => {
       mm_total_count: 0,
       mm_skip_count: 0,
     };
-    prevSnap = null;  // Map Matching 連続性リセット
+    prevSnap = null;  // Map Matching 連続性リセット（fallback 用）
+    // MM-1: Worker 側 prevSnap も初期化（業務開始時の連続性リセット）
+    if(mmWorker){
+      try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
+    }
     if(timer) clearInterval(timer);
     timer = setInterval(() => { if(state.running) state.elapsed_sec++; }, 1000);
   }
@@ -115,6 +152,10 @@ const Meter = (() => {
       mm_skip_count: 0,
     };
     prevSnap = null;
+    // MM-1: Worker 側 prevSnap も初期化
+    if(mmWorker){
+      try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
+    }
     // 起動時warm up GPSもクリア（過剰課金リスク回避・2026/05/01）
     // GPS止まった状態で移動→次回代行開始時に古い座標と現在地で距離爆発するのを防ぐ
     lastWarmupGps = null;
@@ -272,17 +313,40 @@ const Meter = (() => {
   }
 
   // Map Matching 処理（update から呼ばれる・分離して既存ロジック保護）
-  // 2026/05/03 NAV-1 修正：prevSnap に timestamp を保持して連続性判定する
-  //   旧コードは state.last_timestamp を参照していたが、update() 末尾で
+  // MM-1 (2026-05-08): Worker B 経路を優先・worker 不在時は既存インライン fallback
+  //   挙動同一を担保するため、early-return 条件と各分岐を Worker / inline 双方で揃える
+  //   失敗しても state.distance_m / fare_yen は絶対に止めない（業務継続性最優先）
+  //
+  // 2026/05/03 NAV-1 修正（fallback 経路にも維持）：prevSnap に timestamp を保持
+  //   旧コードは state.last_timestamp を参照していたが update() 末尾で
   //   gpsResult.timestamp に先に更新されるため dtSec が常に 0 になっていた。
-  //   結果：MM_GAP_RESET_SEC（5秒）超過判定が永遠に発火せず、
-  //         GPS 長時間空白後でも古い prevSnap で距離加算され誤差混入リスク。
   //   修正：prevSnap 自身が時刻を持つ自己完結型に変更（snap オブジェクトは汚染しない）。
   function _updateMapMatching(gpsResult){
     if(!MM_ENABLED) return;
-    if(typeof RegionLoader === 'undefined' || !RegionLoader.snapToNearestRoad) return;
     if(gpsResult.isStationary) return;
     if(typeof gpsResult.lat !== 'number' || typeof gpsResult.lng !== 'number') return;
+
+    // ── MM-1: Worker B 経路（優先） ────────────────────
+    // mm_total_count は post タイミングで main 側がカウント（Worker と二重管理回避）
+    // mm_snap_count / mm_skip_count / mm_distance_m は _onMmWorkerMessage で加算
+    if(mmWorker){
+      state.mm_total_count++;
+      try {
+        mmWorker.postMessage({
+          type: 'gps',
+          lat: gpsResult.lat,
+          lng: gpsResult.lng,
+          timestamp: gpsResult.timestamp,
+        });
+      } catch(e) {
+        // post 失敗時はメーター本体に影響を与えず inline fallback に進む
+        if(typeof dlog === 'function') dlog('[MM] worker post error: ' + e.message);
+      }
+      return;
+    }
+
+    // ── Fallback: 既存インライン処理（Worker 起動失敗時の保険） ──
+    if(typeof RegionLoader === 'undefined' || !RegionLoader.snapToNearestRoad) return;
 
     state.mm_total_count++;
 
@@ -299,21 +363,17 @@ const Meter = (() => {
 
       state.mm_snap_count++;
 
-      // 前回の snap がある場合のみ距離計算
       if(prevSnap){
-        // NAV-1 修正：prevSnap.timestamp を参照（state.last_timestamp は不可・更新済み）
         const dtSec = prevSnap.timestamp != null
           ? (gpsResult.timestamp - prevSnap.timestamp) / 1000
           : 0;
         if(dtSec > MM_GAP_RESET_SEC){
-          // GPS 空白で連続性失う → prevSnap 更新だけして次回から再開
           prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
           return;
         }
 
         const r = RegionLoader.calcRoadDistance(prevSnap, snap);
         if(r && typeof r.distanceM === 'number'){
-          // サニティチェック：1更新で MM_MAX_SEGMENT_DIST_M 超えは異常
           if(r.distanceM >= 0 && r.distanceM <= MM_MAX_SEGMENT_DIST_M){
             state.mm_distance_m += r.distanceM;
           } else {
@@ -324,10 +384,8 @@ const Meter = (() => {
           }
         }
       }
-      // prevSnap に必ず timestamp を持たせる（次回の dtSec 判定用）
       prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
     } catch(e) {
-      // Map Matching が失敗しても既存処理は止めない
       state.mm_skip_count++;
       if(typeof dlog === 'function') dlog('[MM] error: ' + e.message);
     }
@@ -378,5 +436,5 @@ const Meter = (() => {
     };
   }
 
-  return { start, stop, reset, resume, update, updateGpsOnly, getState, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps };
+  return { start, stop, reset, resume, update, updateGpsOnly, getState, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher };
 })();

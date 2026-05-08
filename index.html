@@ -950,6 +950,54 @@ class NoSleep {
 <!-- ★business.js：業務管理スーパー機能（2026/05/01追加）-->
 
 <script>
+// ─── MM-1 (2026-05-08): Map Matching Worker B 起動 ───
+// js/map-matcher.js を Worker として起動し Meter.setMapMatcher で注入。
+// Worker 起動失敗時は Meter 内部で既存インライン経路にフォールバックするため
+// 業務継続性は損なわれない。
+let _mmWorker = null;
+try {
+  _mmWorker = new Worker('js/map-matcher.js');
+  _mmWorker.addEventListener('error', function(err){
+    console.error('[MM] worker error:', err.message);
+    // エラー時は Meter 側を fallback に切替
+    if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
+      Meter.setMapMatcher(null);
+    }
+    _mmWorker = null;
+  });
+  _mmWorker.addEventListener('message', function(e){
+    const m = e.data;
+    if(m && m.type === 'roadsLoaded' && typeof dlog === 'function'){
+      dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
+           ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
+    }
+  });
+  if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
+    Meter.setMapMatcher(_mmWorker);
+    if(typeof dlog === 'function') dlog('[MM] worker B 起動・Meter に注入完了');
+  }
+} catch(e){
+  console.warn('[MM] worker 起動失敗・既存インライン経路で稼働:', e.message);
+  _mmWorker = null;
+}
+window._mmWorker = _mmWorker;  // デバッグ・別 script からの参照用
+
+// 既ロード済 roads-{pref}.js があれば Worker に転送する関数
+// loadUserRegions / 設定画面からの追加ロード両方から呼べる共通化
+function _forwardRoadsToMmWorker(prefs){
+  if(!_mmWorker || !Array.isArray(prefs)) return;
+  for(const pref of prefs){
+    const varName = 'ROADS_' + String(pref).toUpperCase().replace(/-/g, '_');
+    const data = window[varName];
+    if(!data) continue;
+    try {
+      _mmWorker.postMessage({ type: 'loadRoads', pref: pref, roadsData: data });
+    } catch(e){
+      console.warn('[MM] forward roads ' + pref + ' err:', e.message);
+    }
+  }
+}
+
 // ─── 状態 ───
 let appState = 'idle'; // idle / driving / fare
 let histSaved = false; // 確定時の履歴保存済みフラグ
@@ -1163,6 +1211,9 @@ function loadUserRegions(){
       if(typeof dlog === 'function'){
         dlog('[Region] 活動エリア自動ロード完了: ' + loaded + '/' + regions.length + '県');
       }
+      // MM-1: Worker B にも roads データを転送（main 側 RegionLoader と二重保持）
+      // 失敗しても main 側の MM 動作には影響しない（fallback あり）
+      _forwardRoadsToMmWorker(regions);
     }).catch(e=>{
       console.error('活動エリアロードエラー:', e);
     });

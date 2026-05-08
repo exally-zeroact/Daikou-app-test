@@ -486,5 +486,8 @@
   
   // export
   global.RoadDecoder = RoadDecoder;
-  
-})(typeof window !== 'undefined' ? window : global);
+
+})(typeof window !== 'undefined' ? window
+   : typeof self !== 'undefined' ? self
+   : typeof globalThis !== 'undefined' ? globalThis
+   : this);
