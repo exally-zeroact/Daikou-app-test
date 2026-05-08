@@ -25,3 +25,9 @@ input/*/poi.geojson
 
 # Local logs
 *.log
+
+# input/ ディレクトリ全体を git 管理外
+# 理由: KSJ/N06等の生 GIS データは100MB超ファイルあり（例: input/ibaraki/streets.csv 114MB）
+# scripts/fetch-*.js で再取得可能・最終 data/*.js のみ追跡する方針
+# （既にtrack済みのファイルは git rm --cached で個別対応）
+input/
