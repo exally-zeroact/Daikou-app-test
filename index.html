@@ -2635,7 +2635,11 @@ function onDlToastTap(){
 // ─── チュートリアル（初回URL訪問時のみ） ───
 (function(){
   const done = localStorage.getItem('tutorial_done');
-  const isInstalled = window.navigator.standalone === true;
+  // 修正 (2026-05-08): iOS の navigator.standalone は Android で undefined のため
+  // matchMedia('(display-mode: standalone)') を併用してクロスプラットフォーム化
+  const isInstalled =
+    window.navigator.standalone === true ||
+    window.matchMedia('(display-mode: standalone)').matches;
   // PWAインストール済み（アイコンから起動）→ チュートリアル不要
   if(isInstalled) return;
   // 完了済みならスキップ
@@ -2665,6 +2669,12 @@ function tutorialNext(){
   if(_tutorialPage === 2){
     // ページ3（ホーム画面）：ボタンなし・自分で追加するだけ
     navArea.style.display = 'none';
+    // 修正 (2026-05-08): ユーザーが Chrome 離脱で tutorialComplete() が呼ばれないため
+    // ページ 3 到達時点で完了フラグを永続化 (Android 無限ループ対策)
+    try {
+      localStorage.setItem('tutorial_done', '1');
+      if(typeof dlog === 'function') dlog('[Tutorial] page 3 到達 → tutorial_done=1 設定');
+    } catch(e) {}
   } else {
     navArea.style.display = 'block';
     navBtn.textContent = '次へ';
