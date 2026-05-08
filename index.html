@@ -1008,6 +1008,11 @@ function _setupMmWorker(reason){
 // H-1: Worker B 再起動時に状態を全て再 forward
 function _mmReforwardAllState(){
   if(!_mmWorker) return;
+  // 実機デバッグログ ON/OFF (test-dashboard.html から localStorage で操作)
+  try {
+    const flag = localStorage.getItem('daikou_mm_debug') === '1';
+    _mmWorker.postMessage({ type: 'configDebug', enabled: flag });
+  } catch(e){}
   // OSRM 設定
   try {
     const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
@@ -3478,6 +3483,138 @@ if(navigator.storage && navigator.storage.persist){
     dlog('[Storage] 永続化エラー:', err.message);
   });
 }
+
+// ─── Wi-Fi 接続時の test-results 自動 push (2026-05-09 追加) ─────────
+// 走行終了して事務所に戻り Wi-Fi が掴めたら、IndexedDB に貯めた
+// data/test-results/latest.json のスナップショットを GitHub Contents API で push する。
+// 操作は不要・連続 push を防ぐためデバウンス + 24h 内重複ハッシュ skip。
+//
+// PAT は localStorage 'daikou_gh_pat' に保存 (UI 未提供・必要に応じて DevTools で投入)
+// 未設定なら一切走らない (= 通常ユーザーには無影響)
+//
+// IndexedDB ストア daikome_test_results: { id: 'latest', json: '...stringified...' }
+(function setupTestResultsAutoPush(){
+  const GH_OWNER = 'exally-zeroact';
+  const GH_REPO  = 'Daikou-app-test';
+  const GH_BRANCH = 'main';
+  const GH_PATH  = 'data/test-results/latest.json';
+  const TR_DB = 'daikome_test_results';
+  const TR_STORE = 'kv';
+  const COOLDOWN_MS = 5 * 60 * 1000;   // 5 分以内の連続 push は抑制
+
+  let _busy = false;
+  let _lastPushAt = 0;
+  let _lastPushedHash = null;
+
+  function _hash(s){
+    let h = 0;
+    for(let i = 0; i < s.length; i++){ h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+    return h.toString(16);
+  }
+  function _isWifi(){
+    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if(!c) return false;
+    if(c.type) return c.type === 'wifi' || c.type === 'ethernet';
+    // type 取れないブラウザは effectiveType=4g かつ saveData=false を Wi-Fi 相当扱い
+    return c.effectiveType === '4g' && !c.saveData;
+  }
+  function _openDb(){
+    return new Promise(function(resolve, reject){
+      const req = indexedDB.open(TR_DB, 1);
+      req.onupgradeneeded = function(e){
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains(TR_STORE)) db.createObjectStore(TR_STORE);
+      };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+  }
+  function _readLatest(){
+    return _openDb().then(function(db){
+      return new Promise(function(resolve){
+        const tx = db.transaction(TR_STORE, 'readonly');
+        const store = tx.objectStore(TR_STORE);
+        const req = store.get('latest');
+        req.onsuccess = function(){ db.close(); resolve(req.result || null); };
+        req.onerror = function(){ db.close(); resolve(null); };
+      });
+    });
+  }
+  // 公開: 端末側 OBD/ground-truth 計測ループ等が完了したら呼ぶ
+  // payload は schema 互換 JSON object (replay-mm.js が出力するもの相当)
+  window.saveTestResultsLocally = function(payload){
+    return _openDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(TR_STORE, 'readwrite');
+        const store = tx.objectStore(TR_STORE);
+        const req = store.put({ json: JSON.stringify(payload), savedAt: Date.now() }, 'latest');
+        req.onsuccess = function(){ db.close(); resolve(true); };
+        req.onerror = function(){ db.close(); reject(req.error); };
+      });
+    }).then(function(){ tryPush(false); });
+  };
+
+  async function tryPush(triggeredByConnChange){
+    if(_busy) return;
+    const pat = (function(){
+      try { return localStorage.getItem('daikou_gh_pat') || ''; } catch(_){ return ''; }
+    })();
+    if(!pat) return;                                 // PAT 無し → 自動 push 機能 OFF
+    if(!navigator.onLine) return;
+    if(!_isWifi()) return;
+    if(Date.now() - _lastPushAt < COOLDOWN_MS) return;
+    const rec = await _readLatest();
+    if(!rec || !rec.json) return;
+    const hash = _hash(rec.json);
+    if(hash === _lastPushedHash) return;             // 内容変化なし
+
+    _busy = true;
+    try {
+      const apiUrl = 'https://api.github.com/repos/' + GH_OWNER + '/' + GH_REPO + '/contents/' + GH_PATH;
+      // 既存 file の sha を取得 (上書き update に必要)
+      const headRes = await fetch(apiUrl + '?ref=' + GH_BRANCH, {
+        headers: { 'Authorization': 'token ' + pat, 'Accept': 'application/vnd.github+json' },
+      });
+      let sha = null;
+      if(headRes.ok){
+        const j = await headRes.json();
+        sha = j.sha || null;
+      } else if(headRes.status !== 404){
+        throw new Error('lookup HTTP ' + headRes.status);
+      }
+      const body = {
+        message: 'chore(test-results): auto-push from device [skip ci]',
+        content: btoa(unescape(encodeURIComponent(rec.json))),
+        branch: GH_BRANCH,
+      };
+      if(sha) body.sha = sha;
+      const putRes = await fetch(apiUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': 'token ' + pat,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if(!putRes.ok) throw new Error('put HTTP ' + putRes.status);
+      _lastPushAt = Date.now();
+      _lastPushedHash = hash;
+      if(typeof dlog === 'function') dlog('[TestPush] uploaded test-results (' + (triggeredByConnChange ? 'wifi' : 'manual') + ')');
+    } catch(e){
+      if(typeof dlog === 'function') dlog('[TestPush] failed: ' + (e && e.message || e));
+    } finally {
+      _busy = false;
+    }
+  }
+
+  // 接続状態変化を監視
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if(conn && conn.addEventListener) conn.addEventListener('change', function(){ tryPush(true); });
+  window.addEventListener('online', function(){ tryPush(true); });
+  // 初回起動時にも 1 回チェック
+  setTimeout(function(){ tryPush(false); }, 8000);
+})();
 </script>
 
 </body>

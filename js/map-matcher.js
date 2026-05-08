@@ -1498,10 +1498,28 @@ ViterbiMatcher.prototype.flush = function(){
 // MM-3 / MM-7: Viterbi インスタンス（reset で使い回し・N=15 で開始）
 let viterbi = new ViterbiMatcher(_viterbiN);
 
+// 実機デバッグログ (2026-05-09 追加・既定 OFF)
+//   true で gps 受信・候補スコア・mmResult を console.log 出力
+//   index.html → configDebug メッセージで動的切替・通常運用は OFF 維持
+let _mmDebug = false;
+function _dbg(){
+  if(!_mmDebug) return;
+  const args = ['[MM]'];
+  for(let i = 0; i < arguments.length; i++) args.push(arguments[i]);
+  try { console.log.apply(console, args); } catch(_){}
+}
+
 // ─── メッセージハンドラ ─────────────────────────────────────────
 self.onmessage = function(e){
   const msg = e.data;
   if(!msg || !msg.type) return;
+
+  // 実機デバッグログ ON/OFF
+  if(msg.type === 'configDebug'){
+    _mmDebug = !!msg.enabled;
+    self.postMessage({ type: 'debugConfigured', enabled: _mmDebug });
+    return;
+  }
 
   // 県データ受け取り
   if(msg.type === 'loadRoads'){
@@ -1769,6 +1787,10 @@ self.onmessage = function(e){
   // GPS 更新
   if(msg.type === 'gps'){
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if(_mmDebug) _dbg('gps', msg.lat.toFixed(6), msg.lng.toFixed(6),
+      'acc=' + (msg.accuracy != null ? msg.accuracy : '?'),
+      'spd=' + (msg.speedKmh != null ? msg.speedKmh : '?') + 'km/h',
+      'cell=' + (msg.cellularLayerHint || 'open'));
 
     // MM-1.5: cellular tunnel hint = デッドレコニングモード
     // Viterbi 窓は触らない（hint 解除後に自然復帰する）
@@ -1824,6 +1846,11 @@ self.onmessage = function(e){
         pickedEmission = bestEmit.emission;
         snapped = 1;
         outSnap = bestEmit;
+        if(_mmDebug) _dbg('score cand=' + candCount,
+          'pickedEmit=' + bestEmit.emission.toFixed(3),
+          'road=' + bestEmit.roadIndex,
+          'dist=' + bestEmit.distanceM.toFixed(1) + 'm',
+          'layer=' + (bestEmit.layer != null ? bestEmit.layer : '?'));
 
         // MM-7: 蟻コロニー pheromone を採用 road にマーク
         _markPheromone(bestEmit.prefecture, bestEmit.roadIndex);
@@ -1875,6 +1902,10 @@ self.onmessage = function(e){
     // MM-7: Worker 内 latency 自己監視 → 必要なら N を縮小
     _recordWorkerLat(t1 - t0);
     _maybeAdjustViterbiN();
+    if(_mmDebug) _dbg('result mmInc=' + mmIncrementM.toFixed(2) + 'm',
+      'snap=' + snapped, 'skip=' + skipped, 'commit=' + (committed ? 1 : 0),
+      'lat_ms=' + (t1 - t0).toFixed(2), 'win=' + viterbi.size(),
+      reason ? ('reason=' + reason) : '');
     self.postMessage({
       type: 'mmResult',
       mmIncrementM: mmIncrementM,
