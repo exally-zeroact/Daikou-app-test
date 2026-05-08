@@ -43,6 +43,9 @@ jobs:
       - name: Replay map-matcher (Tier2 self)
         run: node tests/replay-mm.js
 
+      - name: Meter MM-priority integration test
+        run: node tests/meter-mm-priority.js
+
       - name: Tier1 OSRM /match (skips if OSRM_ENDPOINT secret unset)
         env:
           OSRM_ENDPOINT: ${{ secrets.OSRM_ENDPOINT }}
