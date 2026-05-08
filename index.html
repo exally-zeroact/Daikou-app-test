@@ -2390,21 +2390,40 @@ const DakomeDL = (function(){
     const o = document.getElementById('dlOverlay');
     if(o) o.classList.remove('show');
   }
-  // 完了バナー表示 → 1.8秒後に dl_completed=true を保存しフェードアウト → メーター画面へ
+  // 完了バナー表示 → 1.5秒後に dl_completed=true を保存し
+  //  ① 業務未開始ならメイン画面（idle）へ自動遷移（業務開始押下と等価）
+  //  ② overlay を 0.5 秒フェードアウト（合計 2.0 秒で完了）
   // ユーザー操作ゼロで業務可能な状態へ（過去確定 G案：業務開始押下後はメーター直行 の真意を反映）
+  // 2026-05-08 修正：旧コードは overlay フェードのみで screenBusinessStart が裏に残り、
+  //   「業務開始」ボタンが表示されたまま自動遷移しない症状があった。onBusinessStart を
+  //   自動発火させて screenIdle（メイン画面）に遷移させる。
   function showCompleteBanner(){
     const loading = document.getElementById('dlStateLoading');
     const complete = document.getElementById('dlStateComplete');
     const overlay = document.getElementById('dlOverlay');
     if(loading) loading.classList.remove('show');
     if(complete) complete.classList.add('show');
-    // バナー表示の余韻 → IDB に完了マーク → 0.5秒フェード → 非表示
     setTimeout(() => {
       setDlCompleted().then(() => {
         if(typeof dlog === 'function') dlog('[DL] 完了・dl_completed=true 保存');
       }).catch(e => {
         console.warn('[DL] dl_completed 保存失敗:', e.message);
       });
+      // ① 自動で次画面へ：業務未開始(businessStart) なら onBusinessStart() を発火
+      //    業務開始押下と同等の処理（Business.start / GPS / NoSleep / showScreen('idle')）。
+      //    NoSleep.enable はユーザージェスチャ必須だが onBusinessStart 内 catch で warn のみ・遷移は継続。
+      //    センサー未許可なら blockIfSensorNotGranted がバナー表示しブロック → businessStart に留まる
+      //    （許可後にユーザーが手動で押下できる安全パス）
+      try {
+        if(typeof appState !== 'undefined' && appState === 'businessStart'
+           && typeof onBusinessStart === 'function'){
+          onBusinessStart();
+          if(typeof dlog === 'function') dlog('[DL] 自動遷移：onBusinessStart() 発火');
+        }
+      } catch(e){
+        console.warn('[DL] 自動遷移失敗:', e.message);
+      }
+      // ② overlay フェードアウト（裏で screen が idle に切り替わってから消える）
       if(overlay) overlay.classList.add('fade-out');
       setTimeout(() => {
         if(overlay){
@@ -2412,7 +2431,7 @@ const DakomeDL = (function(){
           overlay.classList.remove('fade-out');
         }
       }, 500);
-    }, 1800);
+    }, 1500);
   }
   function updateProgress(done, total){
     const fill = document.getElementById('dlProgressFill');
