@@ -176,25 +176,33 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
-  <!-- ★テスト用・リリース時削除 -->
-  <div class="section" id="testLinkSection">
+  <!-- 走行履歴リンク（TestMode 関連は H-3 対応で削除済） -->
+  <div class="section" id="historyLinkSection">
     <div class="row" onclick="location.href='history.html'" style="cursor:pointer;">
-      <div class="row-label">📊 走行履歴・テスト集計</div>
+      <div class="row-label">📊 走行履歴</div>
       <div style="color:#8E8E93;font-size:13px;">›</div>
     </div>
   </div>
 
-  <!-- MM-6: OSRM /match エンドポイント設定（テスト用・リリース時 UI 簡素化検討）-->
-  <div class="section" id="osrmEndpointSection">
-    <div class="section-title">Map Matching 校正サーバー（OSRM）</div>
-    <div class="row" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 16px;">
-      <div class="row-label" style="font-size:13px;color:#8E8E93;">
-        オンライン時のみ・30 秒ごとに後追い校正します。空欄で校正無効。
+  <!-- MM-6 (M-2 修正): 上級設定 collapsible・既定折りたたみ -->
+  <div class="section" id="advancedSection">
+    <div class="section-title" id="advancedToggle"
+         onclick="toggleAdvanced()"
+         style="cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center;">
+      <span>上級設定</span>
+      <span id="advancedChevron" style="color:#8E8E93;font-size:13px;">▼</span>
+    </div>
+    <div id="advancedBody" style="display:none;">
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 16px;">
+        <div class="row-label" style="font-size:12px;color:#8E8E93;font-weight:400;">
+          Map Matching 校正サーバー（OSRM）<br>
+          オンライン時のみ・30 秒ごとに後追い校正します。空欄で校正無効。
+        </div>
+        <input class="row-input" type="url" id="osrmEndpoint"
+               value="https://router.project-osrm.org"
+               placeholder="例: https://router.project-osrm.org"
+               style="width:100%;font-size:12px;">
       </div>
-      <input class="row-input" type="url" id="osrmEndpoint"
-             value="https://router.project-osrm.org"
-             placeholder="例: https://router.project-osrm.org"
-             style="width:100%;font-size:12px;">
     </div>
   </div>
 
@@ -219,6 +227,16 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
 let surchargeEnabled = false;
 let timeEnabled = false;
 let extraItems = [];
+
+// M-2 修正: 上級設定 collapsible toggle
+function toggleAdvanced(){
+  const body = document.getElementById('advancedBody');
+  const chev = document.getElementById('advancedChevron');
+  if(!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if(chev) chev.textContent = open ? '▼' : '▲';
+}
 
 // ─── ダウンロード状態（Phase 0a-3 設定画面拡張・2026/05/04追加） ───
 // 5/1 大方針転換で活動エリア（地域選択UI）廃止・全国一括DL方式に変更

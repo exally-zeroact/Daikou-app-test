@@ -947,7 +947,8 @@ class NoSleep {
 
 <script src="js/firebase.js"></script>
 
-<script src="js/test-mode.js"></script>
+<!-- test-mode.js は H-3 対応で削除済 -->
+
 
 <!-- ★テスト用・リリース時削除（2026/04/26追加）-->
 
@@ -956,22 +957,84 @@ class NoSleep {
 <!-- ★business.js：業務管理スーパー機能（2026/05/01追加）-->
 
 <script>
-// ─── MM-1 (2026-05-08): Map Matching Worker B 起動 ───
+// ─── MM-1 + H-1 修正 (2026-05-08): Map Matching Worker B 起動 + 自動再起動 ───
 // js/map-matcher.js を Worker として起動し Meter.setMapMatcher で注入。
-// Worker 起動失敗時は Meter 内部で既存インライン経路にフォールバックするため
-// 業務継続性は損なわれない。
+// H-1: Worker B が死んだら 5 秒後に自動再生成し state を再 forward する。
+//      再起動中も meter.js inline fallback で state.distance_m は継続。
 let _mmWorker = null;
-try {
-  _mmWorker = new Worker('js/map-matcher.js');
+let _mmWorkerRestartTimer = null;
+const _MM_WORKER_RESTART_DELAY_MS = 5000;
+
+function _setupMmWorker(reason){
+  try {
+    _mmWorker = new Worker('js/map-matcher.js');
+  } catch(e){
+    console.warn('[MM] worker 起動失敗・既存インライン経路で稼働:', e.message);
+    _mmWorker = null;
+    window._mmWorker = null;
+    return;
+  }
   _mmWorker.addEventListener('error', function(err){
-    console.error('[MM] worker error:', err.message);
-    // エラー時は Meter 側を fallback に切替
+    console.error('[MM] worker error:', (err && err.message) || err);
+    // エラー時は Meter 側を fallback に切替してから再起動を予約
     if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
       Meter.setMapMatcher(null);
     }
+    try { _mmWorker.terminate(); } catch(e){}
     _mmWorker = null;
+    window._mmWorker = null;
+    if(_mmWorkerRestartTimer){ clearTimeout(_mmWorkerRestartTimer); }
+    _mmWorkerRestartTimer = setTimeout(function(){
+      _mmWorkerRestartTimer = null;
+      if(typeof dlog === 'function') dlog('[MM] worker 自動再起動を試行（reason: error）');
+      _setupMmWorker('error-recover');
+    }, _MM_WORKER_RESTART_DELAY_MS);
   });
-  _mmWorker.addEventListener('message', function(e){
+  _mmWorker.addEventListener('message', _mmWorkerOnMessage);
+  if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
+    Meter.setMapMatcher(_mmWorker);
+  }
+  // H-1: 再起動時は state（OSRM/graph/dem）を全て再 forward
+  _mmReforwardAllState();
+  window._mmWorker = _mmWorker;
+  if(typeof dlog === 'function'){
+    dlog('[MM] worker B ' + (reason === 'init' ? '起動' : '再起動') + '・Meter 注入完了');
+  }
+}
+
+// H-1: Worker B 再起動時に状態を全て再 forward
+function _mmReforwardAllState(){
+  if(!_mmWorker) return;
+  // OSRM 設定
+  try {
+    const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
+    const cfg = { type: 'configOsrm' };
+    if(osrmEp == null){
+      cfg.endpoint = 'https://router.project-osrm.org';
+      cfg.enabled = true;
+    } else if(osrmEp.length === 0){
+      cfg.enabled = false;
+    } else {
+      cfg.endpoint = osrmEp;
+      cfg.enabled = true;
+    }
+    _mmWorker.postMessage(cfg);
+  } catch(e){}
+  // 既ロード済 roads / road-graph / DEM を再 forward
+  try {
+    const saved = localStorage.getItem('daikou_user_regions');
+    const regions = saved ? JSON.parse(saved) : [];
+    if(Array.isArray(regions) && regions.length > 0){
+      _forwardRoadsToMmWorker(regions);
+      _forwardRoadGraphToMmWorker(regions);
+    }
+  } catch(e){}
+  // DEM 再 forward
+  try { if(typeof _forwardDemToMmWorker === 'function') _forwardDemToMmWorker(); } catch(e){}
+}
+
+// メッセージハンドラを別関数に分離（addEventListener / removeEventListener 整合性）
+function _mmWorkerOnMessage(e){
     const m = e.data;
     if(!m || typeof dlog !== 'function') return;
     if(m.type === 'roadsLoaded'){
@@ -1002,6 +1065,8 @@ try {
       dlog('[MCM] window shrunk: N=' + m.from + ' → N=' + m.to +
            ' (p99=' + m.p99.toFixed(1) + 'ms)');
     } else if(m.type === 'mm7Stats'){
+      // M-3: visibility 復帰時 ping への応答（pong 代わり）
+      _mmHealthPongAt = Date.now();
       // MM-7: MCM/pheromone/grid 統計（debug 用 probe で取得）
       dlog('[MM-7] N=' + m.mcm_window_size + '/' + m.mcm_window_max +
            ' shrunk=' + m.mcm_shrunk +
@@ -1016,34 +1081,45 @@ try {
            ' batches=' + m.batches + ' fails=' + m.batchFails +
            ' onLine=' + m.onLine);
     }
-  });
-  if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
-    Meter.setMapMatcher(_mmWorker);
-    if(typeof dlog === 'function') dlog('[MM] worker B 起動・Meter に注入完了');
-  }
-  // MM-6: OSRM endpoint 設定を localStorage から復元して Worker B に送信
-  // 空文字なら enabled:false で OSRM 校正を無効化
-  try {
-    const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
-    const cfg = { type: 'configOsrm' };
-    if(osrmEp == null){
-      cfg.endpoint = 'https://router.project-osrm.org';
-      cfg.enabled = true;
-    } else if(osrmEp.length === 0){
-      cfg.enabled = false;
-    } else {
-      cfg.endpoint = osrmEp;
-      cfg.enabled = true;
-    }
-    _mmWorker.postMessage(cfg);
-  } catch(e){
-    console.warn('[MM] OSRM config error:', e.message);
-  }
-} catch(e){
-  console.warn('[MM] worker 起動失敗・既存インライン経路で稼働:', e.message);
-  _mmWorker = null;
 }
-window._mmWorker = _mmWorker;  // デバッグ・別 script からの参照用
+
+// 起動（H-1: 失敗しても自動再起動が回るので例外で止めない）
+_setupMmWorker('init');
+
+// ─── M-3: Page Visibility 復帰時 Worker B 生存確認 ───
+// document.visibilityState が visible になったら ping を送り、
+// 一定時間（3 秒）応答がなければ Worker を再起動する。
+let _mmHealthPongAt = 0;
+let _mmHealthPingAt = 0;
+const _MM_HEALTH_TIMEOUT_MS = 3000;
+function _mmHealthCheck(){
+  if(!_mmWorker) {
+    if(typeof dlog === 'function') dlog('[MM] visibility 復帰: worker 不在 → 再起動');
+    if(_mmWorkerRestartTimer){ clearTimeout(_mmWorkerRestartTimer); _mmWorkerRestartTimer = null; }
+    _setupMmWorker('visibility-recover');
+    return;
+  }
+  _mmHealthPingAt = Date.now();
+  try { _mmWorker.postMessage({ type: 'getMm7Stats' }); } catch(e){}
+  setTimeout(function(){
+    if(_mmHealthPongAt < _mmHealthPingAt){
+      // pong 未着 → worker が応答不能と判断して再起動
+      if(typeof dlog === 'function') dlog('[MM] visibility ping 応答なし → worker 再起動');
+      try { if(_mmWorker) _mmWorker.terminate(); } catch(e){}
+      _mmWorker = null;
+      window._mmWorker = null;
+      if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
+        Meter.setMapMatcher(null);
+      }
+      _setupMmWorker('visibility-timeout');
+    }
+  }, _MM_HEALTH_TIMEOUT_MS);
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible'){
+    _mmHealthCheck();
+  }
+});
 
 // ─── MM-2 (2026-05-08): 実機評価インフラ ──────────────────────
 // DEBUG.enabled の時のみ画面右下に MM 統計バッジを常時表示
@@ -1528,8 +1604,7 @@ function startGPS(){
         }
         // RegionLoader：トンネル/橋データを動的読込（meter.jsの補完で使用）
         if(typeof RegionLoader !== 'undefined') RegionLoader.ensureLoaded(g.lat, g.lng);
-        // TestMode：走行中のみ位置記録（★テスト用・リリース時削除）
-        if(typeof TestMode !== 'undefined' && appState==='driving') TestMode.recordPosition(g.lat, g.lng);
+        // TestMode 走行中位置記録は H-3 対応で削除済
       } catch(e){ console.error('GPS callback error:', e); }
     });
   } catch(e){ console.error('GPS start error:', e); }
@@ -1733,8 +1808,7 @@ function onMainBtn(){
     startGPS();
     try { Meter.start(); } catch(e){ console.error('Meter start error:', e); }
     try { FB.startSession(Meter.getFareConfig()); } catch(e){ console.error('FB session error:', e); }
-    // TestMode：走行開始記録（★テスト用・リリース時削除）
-    try { if(typeof TestMode !== 'undefined') TestMode.startTrip(); } catch(e){ console.error('TestMode start error:', e); }
+    // TestMode 走行開始記録は H-3 対応で削除済
     startUiTimer();
   } else if(appState==='driving'){
     // 実車中はメインボタン非表示（仕様2026/05/01）→ ここに来ない想定だが保険
@@ -2073,14 +2147,12 @@ function onIdle(){
     // 仕事開始時刻を取得
     const lastStart = parseInt(localStorage.getItem('daikou_last_start') || '0');
     tripStartTime = lastStart > 0 ? lastStart : null;
-    // TestMode：走行終了記録（★テスト用・リリース時削除）
-    try { if(typeof TestMode !== 'undefined') TestMode.endTrip(s.distance_m); } catch(e){ console.error('TestMode end error:', e); }
+    // TestMode 走行終了記録は H-3 対応で削除済
 
     // ─── 走行サマリートースト（5秒表示）───
     try {
-      const logs = (typeof TestMode !== 'undefined') ? TestMode.getLogs() : [];
-      const lastLog = logs[logs.length - 1];
-      const hasPosData = lastLog && lastLog.start_pos && lastLog.end_pos;
+      // TestMode 削除済（H-3）→ pos データは meter 経由で取得するか省略
+      const hasPosData = false;
       const gapCount = s.gap_fill_count || 0;
       const gapM    = Math.round(s.gap_fill_total_m || 0);
       const lines = [

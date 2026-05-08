@@ -89,7 +89,12 @@ const Meter = (() => {
   // ─── MM-1: Worker B 連携 ───────────────────────────────
   // index.html で new Worker('js/map-matcher.js') 後にこの関数で注入する。
   // null を渡すと Worker 経路を無効化し既存インラインロジック（fallback）に戻す。
+  // M-1 修正 (2026-05-08): 古い worker のリスナーを除去してから新 worker を登録
+  // （複数回呼ばれる Worker 自動再起動 H-1 シナリオで listener leak を防止）
   function setMapMatcher(worker){
+    if(mmWorker){
+      try { mmWorker.removeEventListener('message', _onMmWorkerMessage); } catch(e){}
+    }
     mmWorker = worker || null;
     if(mmWorker){
       mmWorker.addEventListener('message', _onMmWorkerMessage);
