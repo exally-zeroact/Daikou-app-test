@@ -80,6 +80,7 @@ const schoolClean    = clamp(school, 'school');
 
 const out = {
   v: 1,
+  type: 'road-attrs',
   prefecture: PREF,
   generated: new Date().toISOString(),
   numRoads: numRoads,
