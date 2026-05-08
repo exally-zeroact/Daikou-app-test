@@ -184,6 +184,20 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
+  <!-- MM-6: OSRM /match エンドポイント設定（テスト用・リリース時 UI 簡素化検討）-->
+  <div class="section" id="osrmEndpointSection">
+    <div class="section-title">Map Matching 校正サーバー（OSRM）</div>
+    <div class="row" style="flex-direction:column;align-items:stretch;gap:6px;padding:12px 16px;">
+      <div class="row-label" style="font-size:13px;color:#8E8E93;">
+        オンライン時のみ・30 秒ごとに後追い校正します。空欄で校正無効。
+      </div>
+      <input class="row-input" type="url" id="osrmEndpoint"
+             value="https://router.project-osrm.org"
+             placeholder="例: https://router.project-osrm.org"
+             style="width:100%;font-size:12px;">
+    </div>
+  </div>
+
   <button class="btn-save" onclick="saveAll()">保　存</button>
   <div class="save-msg" id="saveMsg"></div>
 
@@ -243,6 +257,12 @@ function load(){
     if(obj.surchargeRate) document.getElementById('surchargeRate').value = obj.surchargeRate;
     if(obj.timeRate)      document.getElementById('timeRate').value      = obj.timeRate;
     if(obj.resetTime)     document.getElementById('resetTime').value      = obj.resetTime;
+  }
+  // MM-6: OSRM endpoint をロード（既定 router.project-osrm.org）
+  const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
+  if(osrmEp != null){
+    const elOsrm = document.getElementById('osrmEndpoint');
+    if(elOsrm) elOsrm.value = osrmEp;
   }
   updateSurchargeUI();
   updateTimeUI();
@@ -586,6 +606,13 @@ function saveAll(){
     settings.resetTime = document.getElementById('resetTime').value || '12:00';
     localStorage.setItem('daikou_settings', JSON.stringify(settings));
     localStorage.setItem('daikou_extras',   JSON.stringify(extraItems));
+
+    // MM-6: OSRM endpoint 保存（trim+ trailing slash 削除）・空欄で校正 OFF
+    const elOsrm = document.getElementById('osrmEndpoint');
+    if(elOsrm){
+      const ep = (elOsrm.value || '').trim().replace(/\/+$/, '');
+      localStorage.setItem('daikou_osrm_endpoint', ep);
+    }
 
     // 活動エリア保存は廃止（2026/05/04・5/1大方針転換で全国一括DLに変更）
     // 旧 daikou_user_regions / daikou_user_auto_region キーは残ってるが

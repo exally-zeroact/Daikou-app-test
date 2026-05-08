@@ -992,11 +992,41 @@ try {
       dlog('[MM] worker DEM ' + (m.ok ? 'loaded' : 'fail') +
            (m.ok ? ' (cells=' + m.cells + ' size=' + m.sizeMB + 'MB)'
                  : ' err=' + m.error));
+    } else if(m.type === 'osrmConfigured'){
+      // MM-6: OSRM 設定確認ログ
+      dlog('[MM] OSRM ' + (m.ok ? ('configured: ' + (m.endpoint || '(none)') +
+                                    ' enabled=' + m.enabled)
+                                : ('config fail: ' + m.error)));
+    } else if(m.type === 'osrmStats'){
+      // MM-6: OSRM 統計（debug 用 probe で取得）
+      dlog('[MM] OSRM stats: enabled=' + m.enabled + ' endpoint=' + m.endpoint +
+           ' buf=' + m.bufferSize + ' teacher=' + (m.teacherActive ? '✓' : '✗') +
+           ' legs=' + m.teacherLegs + ' hits=' + m.hits + ' miss=' + m.misses +
+           ' batches=' + m.batches + ' fails=' + m.batchFails +
+           ' onLine=' + m.onLine);
     }
   });
   if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
     Meter.setMapMatcher(_mmWorker);
     if(typeof dlog === 'function') dlog('[MM] worker B 起動・Meter に注入完了');
+  }
+  // MM-6: OSRM endpoint 設定を localStorage から復元して Worker B に送信
+  // 空文字なら enabled:false で OSRM 校正を無効化
+  try {
+    const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
+    const cfg = { type: 'configOsrm' };
+    if(osrmEp == null){
+      cfg.endpoint = 'https://router.project-osrm.org';
+      cfg.enabled = true;
+    } else if(osrmEp.length === 0){
+      cfg.enabled = false;
+    } else {
+      cfg.endpoint = osrmEp;
+      cfg.enabled = true;
+    }
+    _mmWorker.postMessage(cfg);
+  } catch(e){
+    console.warn('[MM] OSRM config error:', e.message);
   }
 } catch(e){
   console.warn('[MM] worker 起動失敗・既存インライン経路で稼働:', e.message);

@@ -26,6 +26,7 @@
 // ============================================================
 
 importScripts('roads-decoder.js');
+importScripts('osrm-client.js');   // MM-6: OSRM /match クライアント
 
 // 既存定数（MM-1 と同一・挙動互換のため不変）
 const MM_MAX_SNAP_DIST_M    = 50;     // snap 単独の上限（fallback）
@@ -50,6 +51,29 @@ const graphs = new Map();   // pref → decoded graph object
 let _demData = null;
 const _LAYER_BOOST_FACTOR = 1.3;       // accel/cellular hint と layer 一致時のブースト
 const _LAYER_WRONG_PENALTY = 0.3;      // 高架/地下 で alt 矛盾時のペナルティ
+
+// ─── MM-6 (2026-05-08): OSRM /match 教師信号 ───────────────────
+// 30 秒分の GPS トレースをバッファし定期的に OSRM /match に送信。
+// 返却される leg distance を「教師信号」として transition score に重み付き反映。
+// オフライン時 / OSRM 失敗時は即スキップして既存処理に fallback。
+const _osrmTraceBuffer = [];                // [{lat,lng,timestamp,accuracy}]
+const OSRM_BATCH_INTERVAL_MS = 30000;       // 30 秒ごとに 1 回バッチ送信
+const OSRM_MAX_BUFFER_SIZE   = 60;          // バッファ最大点数（1Hz×60s で安全側）
+const OSRM_MIN_BATCH_POINTS  = 5;           // バッチ最小点数（短すぎ trace は無効）
+const OSRM_TEACHER_TTL_MS    = 60000;       // 教師信号の有効期限 60 秒
+const OSRM_BLEND_WEIGHT      = 0.7;         // 教師信号 0.7 + 自前 routing 0.3 で重み付き融合
+let _lastOsrmBatchAt = 0;
+let _osrmInflight = false;                  // 並列実行防止
+let _osrmEnabled = true;                    // false で機能無効化（main から configOsrm で制御）
+
+// 直近の教師信号: trace[i] と trace[i+1] 間の OSRM 計算距離 = legs[i]
+let _osrmTeacher = {
+  trace: [],
+  legs: [],
+  expiresAt: 0,
+  // 統計（diagnostic 用）
+  hits: 0, misses: 0, batches: 0, batchFails: 0,
+};
 
 // MM-4b: Dijkstra タイムアウト・LRU キャッシュ
 const DIJKSTRA_TIMEOUT_MS = 3;
@@ -725,13 +749,98 @@ function _violatesOneway(prev, curr, prevGps, currGps){
   return false;
 }
 
+// ─── MM-6: OSRM 教師信号 helpers ────────────────────────────────
+function _addToOsrmBuffer(gps){
+  if(!_osrmEnabled) return;
+  _osrmTraceBuffer.push({
+    lat: gps.lat, lng: gps.lng,
+    timestamp: gps.timestamp,
+    accuracy: gps.accuracy || 20,
+  });
+  if(_osrmTraceBuffer.length > OSRM_MAX_BUFFER_SIZE){
+    _osrmTraceBuffer.shift();
+  }
+  const now = Date.now();
+  if(now - _lastOsrmBatchAt >= OSRM_BATCH_INTERVAL_MS
+     && _osrmTraceBuffer.length >= OSRM_MIN_BATCH_POINTS
+     && !_osrmInflight){
+    _lastOsrmBatchAt = now;
+    _triggerOsrmBatch();
+  }
+}
+
+function _triggerOsrmBatch(){
+  if(_osrmInflight) return;
+  if(typeof navigator !== 'undefined' && navigator.onLine === false){
+    // オフライン → 即スキップ
+    return;
+  }
+  if(typeof self.OsrmClient === 'undefined' || !self.OsrmClient.matchBatch) return;
+  const trace = _osrmTraceBuffer.slice();
+  _osrmInflight = true;
+  self.OsrmClient.matchBatch(trace).then(result => {
+    _osrmInflight = false;
+    _osrmTeacher.batches++;
+    if(result && result.ok && result.legs && result.legs.length > 0){
+      _osrmTeacher.trace = trace;
+      _osrmTeacher.legs = result.legs;
+      _osrmTeacher.expiresAt = Date.now() + OSRM_TEACHER_TTL_MS;
+    } else {
+      _osrmTeacher.batchFails++;
+      // 失敗時は教師信号を更新しない（既存の有効期限内の信号は維持）
+    }
+  }).catch(() => {
+    _osrmInflight = false;
+    _osrmTeacher.batchFails++;
+  });
+}
+
+// 隣接 GPS 観測ペア間の OSRM 教師距離を返す（無ければ null）
+// timestamps を厳密一致でマッチング・連続インデックスのみ返す
+function _osrmTeacherDist(prevGps, currGps){
+  if(!_osrmTeacher.legs.length) return null;
+  if(Date.now() > _osrmTeacher.expiresAt) return null;
+  const trace = _osrmTeacher.trace;
+  let prevIdx = -1, currIdx = -1;
+  for(let i = 0; i < trace.length; i++){
+    if(trace[i].timestamp === prevGps.timestamp) prevIdx = i;
+    if(trace[i].timestamp === currGps.timestamp) currIdx = i;
+    if(prevIdx >= 0 && currIdx >= 0) break;
+  }
+  if(prevIdx < 0 || currIdx < 0){
+    _osrmTeacher.misses++;
+    return null;
+  }
+  // 連続インデックスのみ（leg は隣接ペア間で定義される）
+  if(currIdx - prevIdx !== 1){
+    _osrmTeacher.misses++;
+    return null;
+  }
+  const legM = _osrmTeacher.legs[prevIdx];
+  if(typeof legM !== 'number' || legM < 0){
+    _osrmTeacher.misses++;
+    return null;
+  }
+  _osrmTeacher.hits++;
+  return legM;
+}
+
 // ─── MM-3: 遷移確率（HMM transition score） ───────────────────
 // score = exp(-|routeDist - chordDist| / β)・β = 30m
 // oneway 違反は ×0.05 で事実上除外
 function _transitionScore(prevSnapC, currSnapC, prevGps, currGps){
   const chordM = _haversine(prevGps.lat, prevGps.lng, currGps.lat, currGps.lng);
   const r = _routeDistance(prevSnapC, currSnapC);
-  const routeM = r ? r.distanceM : chordM;
+  let routeM = r ? r.distanceM : chordM;
+
+  // MM-6: OSRM 教師信号があれば weighted blend で routing 距離を補正
+  // 教師信号 0.7 + 自前 routing 0.3（OSRM をより信頼）
+  // mm_distance_m への直接代入は禁止・transition score の補正にのみ使用
+  const teacherM = _osrmTeacherDist(prevGps, currGps);
+  if(teacherM != null){
+    routeM = OSRM_BLEND_WEIGHT * teacherM + (1 - OSRM_BLEND_WEIGHT) * routeM;
+  }
+
   let score = Math.exp(-Math.abs(routeM - chordM) / TRANSITION_BETA_M);
   if(_violatesOneway(prevSnapC, currSnapC, prevGps, currGps)){
     score *= ONEWAY_PENALTY;
@@ -891,6 +1000,46 @@ self.onmessage = function(e){
     return;
   }
 
+  // MM-6: OSRM 統計取得（debug 用）
+  if(msg.type === 'getOsrmStats'){
+    self.postMessage({
+      type: 'osrmStats',
+      enabled: _osrmEnabled,
+      endpoint: (typeof self.OsrmClient !== 'undefined') ? self.OsrmClient.getEndpoint() : null,
+      bufferSize: _osrmTraceBuffer.length,
+      teacherActive: Date.now() <= _osrmTeacher.expiresAt,
+      teacherLegs: _osrmTeacher.legs.length,
+      hits: _osrmTeacher.hits,
+      misses: _osrmTeacher.misses,
+      batches: _osrmTeacher.batches,
+      batchFails: _osrmTeacher.batchFails,
+      onLine: typeof navigator !== 'undefined' ? navigator.onLine : null,
+    });
+    return;
+  }
+
+  // MM-6: OSRM エンドポイント設定
+  // payload: { endpoint?: string, enabled?: boolean }
+  if(msg.type === 'configOsrm'){
+    try {
+      if(typeof msg.endpoint === 'string' && msg.endpoint.length > 0
+         && typeof self.OsrmClient !== 'undefined'){
+        self.OsrmClient.setEndpoint(msg.endpoint);
+      }
+      if(typeof msg.enabled === 'boolean'){
+        _osrmEnabled = msg.enabled;
+      }
+      self.postMessage({
+        type: 'osrmConfigured', ok: true,
+        endpoint: (typeof self.OsrmClient !== 'undefined') ? self.OsrmClient.getEndpoint() : null,
+        enabled: _osrmEnabled,
+      });
+    } catch(err){
+      self.postMessage({ type: 'osrmConfigured', ok: false, error: err.message });
+    }
+    return;
+  }
+
   // MM-5: DEM データ受け取り
   // payload: { bbox:[minLat,minLng,maxLat,maxLng], gridSize, numLat, numLng, altB64 }
   // alt は Int16Array を base64 化したもの（標高 m, sea level 基準）
@@ -1023,6 +1172,12 @@ self.onmessage = function(e){
     }
 
     _pushGpsBuffer({ lat: msg.lat, lng: msg.lng, timestamp: msg.timestamp });
+
+    // MM-6: OSRM 教師信号用バッファ追加（30 秒ごとに自動でバッチ送信トリガ）
+    _addToOsrmBuffer({
+      lat: msg.lat, lng: msg.lng,
+      timestamp: msg.timestamp, accuracy: msg.accuracy,
+    });
 
     let mmIncrementM = 0;
     let snapped = 0, skipped = 0;
