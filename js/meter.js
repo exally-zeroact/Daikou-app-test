@@ -337,6 +337,11 @@ const Meter = (() => {
           lat: gpsResult.lat,
           lng: gpsResult.lng,
           timestamp: gpsResult.timestamp,
+          // MM-1.5: cellular layer hint を Worker B に転送
+          // gps-worker.js（Worker A）が付与した値をそのまま渡す。
+          // 値がない（古い Worker A・非対応端末）場合は 'open' と 0 で安全側
+          cellularLayerHint: gpsResult.cellularLayerHint || 'open',
+          cellularConfidence: gpsResult.cellularConfidence || 0,
         });
       } catch(e) {
         // post 失敗時はメーター本体に影響を与えず inline fallback に進む

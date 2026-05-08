@@ -106,6 +106,29 @@ self.onmessage = function(e) {
 
   // ─── GPS 更新 ─────────────────────────────────────
   if (msg.type === 'gps') {
+    // MM-1.5 (2026-05-08): cellular tunnel hint = デッドレコニングモード
+    //   トンネル・地下進入を 1 秒以内に検知できる cellular API シグナルが
+    //   tunnel を示している間は snap せず・mm 距離加算もしない。
+    //   GPS 由来の距離計算（state.distance_m）は meter.js の calculateGapFill が
+    //   速度×時間 + tunnel/bridge データで継続するため業務継続性に影響なし。
+    //   hint='open' に戻ったら次回 GPS で snap が再開し、prevSnap との dtSec が
+    //   MM_GAP_RESET_SEC を超えていれば既存ロジックで自動的に連続性リセット
+    //   （MM-3 以降の Viterbi 窓投入時はここを HMM 自動回復に置き換える）。
+    if (msg.cellularLayerHint === 'tunnel') {
+      self.postMessage({
+        type: 'mmResult',
+        mmIncrementM: 0,
+        snap: null,
+        confidence: 1.0,
+        snapped: 0,
+        skipped: 0,
+        _reason: 'cellular tunnel hint (conf=' +
+                 (typeof msg.cellularConfidence === 'number'
+                   ? msg.cellularConfidence.toFixed(2) : '?') + ')',
+      });
+      return;
+    }
+
     let mmIncrementM = 0;
     let snapped = 0;
     let skipped = 0;
