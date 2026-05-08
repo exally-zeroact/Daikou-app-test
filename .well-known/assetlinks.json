@@ -5,9 +5,9 @@
     ],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.exally.daikome.twa",
+      "package_name": "app.vercel.daikou_app_test.twa",
       "sha256_cert_fingerprints": [
-        "PLACEHOLDER:REPLACE_WITH_SHA256_FROM_PWABUILDER_SIGNING_KEY:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+        "0B:E7:55:6D:3A:F3:D3:ED:A7:72:D8:D5:6C:0D:DC:F3:0D:7E:52:B8:C7:2C:69:46:D0:39:5B:92:7D:8A:52:17"
       ]
     }
   }
