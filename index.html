@@ -997,6 +997,17 @@ try {
       dlog('[MM] OSRM ' + (m.ok ? ('configured: ' + (m.endpoint || '(none)') +
                                     ' enabled=' + m.enabled)
                                 : ('config fail: ' + m.error)));
+    } else if(m.type === 'mcmShrink'){
+      // MM-7: MCM 窓自動縮小通知
+      dlog('[MCM] window shrunk: N=' + m.from + ' → N=' + m.to +
+           ' (p99=' + m.p99.toFixed(1) + 'ms)');
+    } else if(m.type === 'mm7Stats'){
+      // MM-7: MCM/pheromone/grid 統計（debug 用 probe で取得）
+      dlog('[MM-7] N=' + m.mcm_window_size + '/' + m.mcm_window_max +
+           ' shrunk=' + m.mcm_shrunk +
+           ' pheromone=' + m.pheromone_roads_count + ' roads (' + m.pheromone_prefs + ' prefs)' +
+           ' grid=' + m.grid_cells_count + '/' + m.grid_cells_max + ' cells' +
+           ' worker_p99=' + m.worker_p99_ms.toFixed(2) + 'ms');
     } else if(m.type === 'osrmStats'){
       // MM-6: OSRM 統計（debug 用 probe で取得）
       dlog('[MM] OSRM stats: enabled=' + m.enabled + ' endpoint=' + m.endpoint +
@@ -1059,10 +1070,11 @@ window._mmWorker = _mmWorker;  // デバッグ・別 script からの参照用
     const p99 = s.p99_latency_ms.toFixed(1);
     const ac = s.avg_candidates.toFixed(1);
     const w = s.worker_active ? 'W' : 'I';  // W=worker / I=inline
+    const mcm = (s.mcm_window_size && s.mcm_window_size > 0) ? (' N=' + s.mcm_window_size) : '';
     badge.textContent =
       '[' + w + '] snap=' + snapPct + '% skip=' + skipPct + '%' +
       ' mm=' + mmKm + 'km d=' + dKm + 'km' +
-      ' p99=' + p99 + 'ms cand=' + ac;
+      ' p99=' + p99 + 'ms cand=' + ac + mcm;
   }, 2000);
 })();
 

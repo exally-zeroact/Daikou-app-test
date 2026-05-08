@@ -96,6 +96,9 @@ const Meter = (() => {
     }
   }
 
+  // MM-7: 最新 MM-7 統計を保持（mmResult から間接取得）
+  let _lastMcmN = 0;
+
   // Worker B からの mmResult を受けて state に反映するハンドラ
   // ここでは state.distance_m / fare_yen には絶対触らない（業務継続性最優先）
   function _onMmWorkerMessage(e){
@@ -117,6 +120,8 @@ const Meter = (() => {
       _mmCandCountSum += m.candidatesCount;
       _mmCandCountSamples++;
     }
+    // MM-7: MCM 窓サイズの最新値
+    if(typeof m.mcmN === 'number') _lastMcmN = m.mcmN;
   }
 
   function start(){
@@ -467,6 +472,8 @@ const Meter = (() => {
       avg_candidates: _mmCandCountSamples > 0 ? _mmCandCountSum / _mmCandCountSamples : 0,
       // Worker 経路 / fallback の判別
       worker_active: !!mmWorker,
+      // MM-7: MCM 窓サイズ（mmResult 経由で更新される）
+      mcm_window_size: _lastMcmN,
     };
   }
 

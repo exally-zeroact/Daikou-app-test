@@ -33,10 +33,59 @@ const MM_MAX_SNAP_DIST_M    = 50;     // snap 単独の上限（fallback）
 const MM_MAX_SEGMENT_DIST_M = 1000;
 const MM_GAP_RESET_SEC      = 5;
 
-// MM-3: Viterbi パラメタ
-const VITERBI_N            = 5;       // 窓幅（仕様）
+// MM-3 / MM-7: Viterbi パラメタ
+// MM-7: 窓幅 N を 15 に拡張（MCM Lazy Viterbi）
+//        p99 latency が 5ms 超過時に N=10 へ自動縮小（性能予算遵守）
+const VITERBI_N_MAX        = 15;      // 通常運用の窓幅
+const VITERBI_N_MIN        = 10;      // 性能逼迫時の縮小値
+let   _viterbiN            = VITERBI_N_MAX;
 const TRANSITION_BETA_M    = 30;      // exp(-|routeDist-chordDist|/β) の β
 const ONEWAY_PENALTY       = 0.05;    // 一方通行違反時の transition 乗数
+
+// MM-7: Worker 内 latency 自己監視（p99 5ms 超過検知用）
+const _WORKER_LAT_BUFFER_SIZE = 200;
+const _workerLatBuf = new Float32Array(_WORKER_LAT_BUFFER_SIZE);
+let _workerLatIdx = 0, _workerLatCount = 0;
+let _viterbiShrinkLogged = false;
+const _MCM_LAT_THRESHOLD_MS = 5.0;
+const _MCM_CHECK_INTERVAL = 100;       // GPS 更新 100 件ごとにチェック
+let _mcmCheckCounter = 0;
+
+function _recordWorkerLat(ms){
+  if(typeof ms !== 'number' || !isFinite(ms) || ms < 0) return;
+  _workerLatBuf[_workerLatIdx] = ms;
+  _workerLatIdx = (_workerLatIdx + 1) % _WORKER_LAT_BUFFER_SIZE;
+  if(_workerLatCount < _WORKER_LAT_BUFFER_SIZE) _workerLatCount++;
+}
+
+function _calcWorkerP99(){
+  if(_workerLatCount === 0) return 0;
+  const arr = new Array(_workerLatCount);
+  for(let i = 0; i < _workerLatCount; i++) arr[i] = _workerLatBuf[i];
+  arr.sort(function(a, b){ return a - b; });
+  return arr[Math.min(Math.floor(_workerLatCount * 0.99), _workerLatCount - 1)];
+}
+
+// MM-7: Viterbi 窓サイズの自動調整
+function _maybeAdjustViterbiN(){
+  _mcmCheckCounter++;
+  if(_mcmCheckCounter < _MCM_CHECK_INTERVAL) return;
+  _mcmCheckCounter = 0;
+  if(_workerLatCount < 100) return;   // 統計サンプル不足
+  const p99 = _calcWorkerP99();
+  if(p99 > _MCM_LAT_THRESHOLD_MS && _viterbiN > VITERBI_N_MIN){
+    const oldN = _viterbiN;
+    _viterbiN = VITERBI_N_MIN;
+    if(viterbi){ viterbi.N = _viterbiN; }
+    if(!_viterbiShrinkLogged){
+      _viterbiShrinkLogged = true;
+      // dlog 相当（main 側に通知）
+      self.postMessage({
+        type: 'mcmShrink', from: oldN, to: _viterbiN, p99: p99,
+      });
+    }
+  }
+}
 
 // 県別 RoadDecoder
 const decoders   = new Map();
@@ -275,10 +324,15 @@ function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, accelLayerHint, cellularL
   return score;
 }
 
-// MM-2/MM-5: emission scoring（候補絞り込み後に layer score を最後段で乗算）
+// MM-2/MM-5/MM-7: emission scoring
+//   候補絞り込み後に layer score を最後段で乗算
+//   MM-7: 地域別 GPS 誤差学習 (grid bias) で σ を補正
+//   MM-7: フェロモン boost を最終乗算（常用ルートを優先）
 function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeBucket,
                          gpsAlt, accelLayerHint, cellularLayerHint){
-  const sigma = 4 + 0.5 * accuracy;
+  // MM-7: grid bias 補正で σ を地域固有に調整
+  const sigmaMult = _getGridSigmaMultiplier(gpsLat, gpsLng);
+  const sigma = (4 + 0.5 * accuracy) * sigmaMult;
   for(let i = 0; i < cands.length; i++){
     const c = cands[i];
     // ① 距離スコア exp(-d²/(2σ²))
@@ -298,17 +352,20 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     // ④ 道路種別遷移
     const currBucket = _roadTypeBucket(c.typeCode);
     const typeScore = _typeTransitionScore(prevTypeBucket, currBucket);
-    // ⑤ MM-5: layer score（最後段・候補絞り込み後）
+    // ⑤ MM-5: layer score（候補絞り込み後）
     const layerScore = _computeLayerScore(c, gpsLat, gpsLng, gpsAlt,
                                           accelLayerHint, cellularLayerHint);
+    // ⑥ MM-7: フェロモン boost（常用ルート優先）
+    const phBoost = _getPheromoneBoost(c.prefecture, c.roadIndex);
     // 総合
     c._distScore = distScore;
     c._headScore = headScore;
     c._mahalScore = mahalScore;
     c._typeScore = typeScore;
     c._layerScore = layerScore;
+    c._phBoost = phBoost;
     c._typeBucket = currBucket;
-    c.emission = distScore * headScore * mahalScore * typeScore * layerScore;
+    c.emission = distScore * headScore * mahalScore * typeScore * layerScore * phBoost;
   }
   return cands;
 }
@@ -749,6 +806,225 @@ function _violatesOneway(prev, curr, prevGps, currGps){
   return false;
 }
 
+// ─── MM-7: 蟻コロニー Pheromone（路網習熟）────────────────────
+// 各 pref の roadIndex ごとに float32 のフェロモン値を持つ。
+// snap 成功時に +1・1 乗務終了（reset）時に ×0.95 で蒸発。
+// 候補生成時の emission に (1 + log(1 + pheromone)) で乗算 → 常用ルートを優先。
+const _pheromoneByPref = new Map();   // pref → Float32Array(numRoads)
+const PHEROMONE_EVAPORATION = 0.95;
+const PHEROMONE_INC = 1.0;
+const PHEROMONE_BOOST_CAP = 3.0;      // log boost が暴走しないように上限 ×3
+
+function _ensurePheromone(pref, numRoads){
+  if(_pheromoneByPref.has(pref)) return _pheromoneByPref.get(pref);
+  const arr = new Float32Array(numRoads);
+  _pheromoneByPref.set(pref, arr);
+  return arr;
+}
+
+function _markPheromone(pref, roadIndex){
+  if(!pref) return;
+  const arr = _pheromoneByPref.get(pref);
+  if(!arr || roadIndex < 0 || roadIndex >= arr.length) return;
+  arr[roadIndex] += PHEROMONE_INC;
+}
+
+function _getPheromoneBoost(pref, roadIndex){
+  if(!pref) return 1.0;
+  const arr = _pheromoneByPref.get(pref);
+  if(!arr || roadIndex < 0 || roadIndex >= arr.length) return 1.0;
+  const ph = arr[roadIndex];
+  if(ph <= 0) return 1.0;
+  const boost = 1.0 + Math.log(1.0 + ph);
+  return boost > PHEROMONE_BOOST_CAP ? PHEROMONE_BOOST_CAP : boost;
+}
+
+function _evaporatePheromones(){
+  for(const arr of _pheromoneByPref.values()){
+    for(let i = 0; i < arr.length; i++) arr[i] *= PHEROMONE_EVAPORATION;
+  }
+}
+
+function _countActivePheromoneRoads(){
+  let total = 0;
+  for(const arr of _pheromoneByPref.values()){
+    for(let i = 0; i < arr.length; i++){
+      if(arr[i] > 0.01) total++;
+    }
+  }
+  return total;
+}
+
+// ─── MM-7: 地域別 GPS 誤差学習（500m × 500m grid bias） ────────
+// snap 成功時の (gpsLat - snapLat, gpsLng - snapLng) を grid 単位で蓄積。
+// 1000 サンプル超のセルは emission の σ を補正（地域固有 GPS bias を吸収）。
+// IndexedDB 永続保存。サイズ上限 5MB（200k entry 相当）でそれ以上は古いセル順に discard。
+const GRID_DEG = 0.005;                // 約 500m × 500m
+const GRID_MIN_SAMPLES = 1000;         // この件数超で σ 補正発動
+const GRID_MAX_CELLS = 200000;         // 5MB 以内（24 bytes/cell × 200k = 4.8MB）
+// stats 配列レイアウト (Float32 × 5): [count, sumDxM, sumDyM, sumDx2M2, sumDy2M2]
+const GRID_FIELDS = 5;
+const _gridBias = new Map();           // gridKey:string → Float32Array(GRID_FIELDS)
+
+function _gridKey(lat, lng){
+  const gy = Math.floor(lat / GRID_DEG);
+  const gx = Math.floor(lng / GRID_DEG);
+  return gy + '_' + gx;
+}
+
+function _recordGridBiasSample(gpsLat, gpsLng, snapLat, snapLng){
+  const key = _gridKey(gpsLat, gpsLng);
+  let cell = _gridBias.get(key);
+  if(!cell){
+    if(_gridBias.size >= GRID_MAX_CELLS){
+      // 上限到達: discard policy（最初の 1 件を削除＝挿入順 LRU 近似）
+      const first = _gridBias.keys().next();
+      if(!first.done) _gridBias.delete(first.value);
+    }
+    cell = new Float32Array(GRID_FIELDS);
+    _gridBias.set(key, cell);
+  }
+  // dx/dy はメートル換算（経度は緯度依存・精度十分）
+  const mpd = _metersPerDegree(gpsLat);
+  const dxM = (gpsLng - snapLng) * mpd.lng;
+  const dyM = (gpsLat - snapLat) * mpd.lat;
+  cell[0] += 1;
+  cell[1] += dxM;
+  cell[2] += dyM;
+  cell[3] += dxM * dxM;
+  cell[4] += dyM * dyM;
+}
+
+// セルが学習済（≥1000 samples）なら σ 補正係数を返す（>=1.0）
+// 補正後 σ_corrected = σ × multiplier
+function _getGridSigmaMultiplier(gpsLat, gpsLng){
+  const cell = _gridBias.get(_gridKey(gpsLat, gpsLng));
+  if(!cell || cell[0] < GRID_MIN_SAMPLES) return 1.0;
+  const n = cell[0];
+  const meanX = cell[1] / n;
+  const meanY = cell[2] / n;
+  const varX = cell[3] / n - meanX * meanX;
+  const varY = cell[4] / n - meanY * meanY;
+  const stddev = Math.sqrt(Math.max(0, varX) + Math.max(0, varY));
+  // σ は 4 + 0.5 × accuracy で典型 14m 程度。
+  // この grid の実測 stddev が 20m なら σ を ×1.4 倍する
+  if(stddev <= 0) return 1.0;
+  const baseSigma = 14.0;
+  const mult = stddev / baseSigma;
+  return mult < 1.0 ? 1.0 : (mult > 3.0 ? 3.0 : mult);  // [1.0, 3.0] でクランプ
+}
+
+// ─── MM-7: IndexedDB 永続化（pheromone + grid_bias） ────────────
+const _DB_NAME = 'daikome_mm7';
+const _DB_VERSION = 1;
+let _dbPromise = null;
+
+function _openDb(){
+  if(_dbPromise) return _dbPromise;
+  if(typeof indexedDB === 'undefined') return Promise.resolve(null);
+  _dbPromise = new Promise(function(resolve){
+    try {
+      const req = indexedDB.open(_DB_NAME, _DB_VERSION);
+      req.onupgradeneeded = function(e){
+        const db = e.target.result;
+        if(!db.objectStoreNames.contains('pheromone')){
+          db.createObjectStore('pheromone', { keyPath: 'pref' });
+        }
+        if(!db.objectStoreNames.contains('gridBias')){
+          db.createObjectStore('gridBias', { keyPath: 'k' });
+        }
+      };
+      req.onsuccess = function(e){ resolve(e.target.result); };
+      req.onerror = function(){ resolve(null); };
+    } catch(e){ resolve(null); }
+  });
+  return _dbPromise;
+}
+
+function _savePheromoneAll(){
+  return _openDb().then(function(db){
+    if(!db) return;
+    try {
+      const tx = db.transaction('pheromone', 'readwrite');
+      const store = tx.objectStore('pheromone');
+      for(const [pref, arr] of _pheromoneByPref){
+        store.put({ pref: pref, data: arr.buffer });
+      }
+    } catch(e){}
+  }).catch(function(){});
+}
+
+function _loadPheromoneFor(pref, numRoads){
+  return _openDb().then(function(db){
+    if(!db) return null;
+    return new Promise(function(resolve){
+      try {
+        const tx = db.transaction('pheromone', 'readonly');
+        const req = tx.objectStore('pheromone').get(pref);
+        req.onsuccess = function(){
+          if(req.result && req.result.data){
+            const restored = new Float32Array(req.result.data);
+            // numRoads 不一致時は同サイズ確保で truncate or pad（roads データ更新時の保険）
+            if(restored.length === numRoads){
+              _pheromoneByPref.set(pref, restored);
+            } else {
+              const arr = new Float32Array(numRoads);
+              const lim = Math.min(numRoads, restored.length);
+              for(let i = 0; i < lim; i++) arr[i] = restored[i];
+              _pheromoneByPref.set(pref, arr);
+            }
+            resolve(_pheromoneByPref.get(pref));
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = function(){ resolve(null); };
+      } catch(e){ resolve(null); }
+    });
+  }).catch(function(){ return null; });
+}
+
+function _saveGridBiasIncremental(){
+  return _openDb().then(function(db){
+    if(!db) return;
+    try {
+      const tx = db.transaction('gridBias', 'readwrite');
+      const store = tx.objectStore('gridBias');
+      // 全 entry 書き直し（write 量制御は後続最適化）
+      for(const [key, arr] of _gridBias){
+        store.put({ k: key, d: arr.buffer });
+      }
+    } catch(e){}
+  }).catch(function(){});
+}
+
+function _loadGridBias(){
+  return _openDb().then(function(db){
+    if(!db) return;
+    return new Promise(function(resolve){
+      try {
+        const tx = db.transaction('gridBias', 'readonly');
+        const req = tx.objectStore('gridBias').getAll();
+        req.onsuccess = function(){
+          const items = req.result || [];
+          for(let i = 0; i < items.length; i++){
+            const it = items[i];
+            if(it && it.k && it.d){
+              const arr = new Float32Array(it.d);
+              if(arr.length === GRID_FIELDS) _gridBias.set(it.k, arr);
+            }
+          }
+          resolve(_gridBias.size);
+        };
+        req.onerror = function(){ resolve(0); };
+      } catch(e){ resolve(0); }
+    });
+  }).catch(function(){ return 0; });
+}
+
+// 起動時に grid bias を復元（pheromone は graph load 時に各 pref ごとに復元）
+_loadGridBias();
+
 // ─── MM-6: OSRM 教師信号 helpers ────────────────────────────────
 function _addToOsrmBuffer(gps){
   if(!_osrmEnabled) return;
@@ -967,8 +1243,8 @@ ViterbiMatcher.prototype.flush = function(){
   return out;
 };
 
-// MM-3: Viterbi インスタンス（reset で使い回し）
-let viterbi = new ViterbiMatcher(VITERBI_N);
+// MM-3 / MM-7: Viterbi インスタンス（reset で使い回し・N=15 で開始）
+let viterbi = new ViterbiMatcher(_viterbiN);
 
 // ─── メッセージハンドラ ─────────────────────────────────────────
 self.onmessage = function(e){
@@ -997,6 +1273,23 @@ self.onmessage = function(e){
         type: 'roadsLoaded', pref: msg.pref, ok: false, error: err.message,
       });
     }
+    return;
+  }
+
+  // MM-7: 統計取得（debug 用）
+  if(msg.type === 'getMm7Stats'){
+    self.postMessage({
+      type: 'mm7Stats',
+      mcm_window_size: _viterbiN,
+      mcm_window_max: VITERBI_N_MAX,
+      mcm_shrunk: _viterbiN < VITERBI_N_MAX,
+      pheromone_roads_count: _countActivePheromoneRoads(),
+      pheromone_prefs: _pheromoneByPref.size,
+      grid_cells_count: _gridBias.size,
+      grid_cells_max: GRID_MAX_CELLS,
+      worker_p99_ms: _calcWorkerP99(),
+      worker_lat_samples: _workerLatCount,
+    });
     return;
   }
 
@@ -1084,6 +1377,9 @@ self.onmessage = function(e){
       graphs.set(msg.pref, g);
       // graph 更新で route キャッシュは無効化（pref 切替時の整合性担保）
       _routeCache.clear();
+      // MM-7: 該当 pref の pheromone を IDB から復元（無ければ新規 Float32Array）
+      _ensurePheromone(msg.pref, g.numRoads || g.numEdges);
+      _loadPheromoneFor(msg.pref, g.numRoads || g.numEdges);
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
       // Phase A: graph の RAM 実測値を main 側で確認できるように post に含める
       const memBytes = _calcGraphMemBytes(g);
@@ -1150,6 +1446,10 @@ self.onmessage = function(e){
     lastCommittedSnap = null;
     prevSnap = null;
     _gpsBuffer.length = 0;
+    // MM-7: 業務終了時に pheromone を蒸発・grid bias を含め IDB に永続保存
+    _evaporatePheromones();
+    _savePheromoneAll();
+    _saveGridBiasIncremental();
     return;
   }
 
@@ -1212,6 +1512,11 @@ self.onmessage = function(e){
         snapped = 1;
         outSnap = bestEmit;
 
+        // MM-7: 蟻コロニー pheromone を採用 road にマーク
+        _markPheromone(bestEmit.prefecture, bestEmit.roadIndex);
+        // MM-7: 地域別 GPS 誤差学習を蓄積
+        _recordGridBiasSample(msg.lat, msg.lng, bestEmit.snapLat, bestEmit.snapLng);
+
         // ③ Viterbi 窓に push
         const gpsObs = { lat: msg.lat, lng: msg.lng, timestamp: msg.timestamp };
         const newCommitted = viterbi.push(gpsObs, cands, _transitionScore);
@@ -1252,12 +1557,16 @@ self.onmessage = function(e){
     }
 
     const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    // MM-7: Worker 内 latency 自己監視 → 必要なら N を縮小
+    _recordWorkerLat(t1 - t0);
+    _maybeAdjustViterbiN();
     self.postMessage({
       type: 'mmResult',
       mmIncrementM: mmIncrementM,
       snap: outSnap,
       confidence: pickedEmission > 0 ? Math.min(1.0, pickedEmission) : 1.0,
       windowSize: viterbi.size(),
+      mcmN: _viterbiN,
       committed: committed,
       snapped: snapped,
       skipped: skipped,
