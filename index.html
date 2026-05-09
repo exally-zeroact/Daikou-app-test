@@ -1418,6 +1418,7 @@ const _attrsSchoolZoneByPref = new Map();      // pref → Set<roadIdx>
 const _attrsRoadFloodByPref = new Map();
 const _attrsRoadJizenByPref = new Map();
 const _attrsRoadYoboByPref  = new Map();
+const _attrsEmergencyByPref = new Map();       // D3 (2026-05-09): 緊急輸送道路指定
 function _decodeDeltaVarintB64(b64){
   if(!b64) return new Set();
   try {
@@ -1467,6 +1468,26 @@ function _autoLoadNearbyAttrs(prefs){
     _loadOneAttrFile(pref, 'road-flood', 'ROAD_FLOOD_' + PREF_UC, _attrsRoadFloodByPref, 'roadIdxB64');
     _loadOneAttrFile(pref, 'road-jizen', 'ROAD_JIZEN_' + PREF_UC, _attrsRoadJizenByPref, 'roadIdxB64');
     _loadOneAttrFile(pref, 'road-yobo',  'ROAD_YOBO_'  + PREF_UC, _attrsRoadYoboByPref,  'roadIdxB64');
+    // D3 (2026-05-09): emergencyRoute も同 road-attrs ファイルから抽出して
+    //   Worker B に forward (scoring boost に活用)
+    //   road-attrs file に emergencyRouteB64 と schoolZoneB64 が共存しているので
+    //   1 回 load で両方取れる - schoolZone load 完了後に処理
+    setTimeout(function(){
+      const data = window['ROAD_ATTRS_' + PREF_UC];
+      if(!data || !data.emergencyRouteB64) return;
+      const set = _decodeDeltaVarintB64(data.emergencyRouteB64);
+      _attrsEmergencyByPref.set(pref, set);
+      // Worker B に forward (Set は postMessage で送れないので Array 化)
+      if(_mmWorker && set.size > 0){
+        try {
+          _mmWorker.postMessage({
+            type: 'loadEmergencyAttrs',
+            pref: pref,
+            roadIndices: Array.from(set),
+          });
+        } catch(_){}
+      }
+    }, 1500);   // road-attrs ファイル load 完了想定で 1.5 秒後
   }
 }
 

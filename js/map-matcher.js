@@ -102,6 +102,11 @@ function _maybeAdjustViterbiN(){
 const decoders   = new Map();
 const loadedPrefs = new Set();
 
+// D3 (2026-05-09): 緊急輸送道路指定 道路の Set (pref → Set<roadIdx>)
+//   road-attrs-{pref}.js の emergencyRouteB64 を main 側で decode → forward
+//   scoring で c.roadIndex がこの set に含まれていれば ×1.05 boost
+const _emergencyRoutesByPref = new Map();
+
 // ─── Phase B (2026-05-08): バックボーン graph + タイルキャッシュ ──────
 // 全国 motorway/trunk バックボーンは常時 RAM 常駐（県跨ぎ routing 用）
 let _backboneGraph = null;
@@ -408,24 +413,84 @@ function _pushGpsBuffer(p){
   if(_gpsBuffer.length > _GPS_BUFFER_SIZE) _gpsBuffer.shift();
 }
 
-// Catmull-Rom 評価（p1〜p2 の間を t∈[0,1] で滑らかに補間）
-// p0,p3 は接線制御点
+// G1 (2026-05-09): HDOP/PDOP 簡易推定 (直近 GPS の不規則性ベース)
+//   accuracy 値だけでは衛星配置偏りによる実誤差を捕えられない
+//   直近 5 点の inter-step 距離の変動係数 (CV) で擬似 HDOP を算出
+//   CV 大 = trajectory 不規則 = GPS 不安定 → σ multiplier で scoring 緩める
+const _recentGpsBuf = [];
+const _RECENT_GPS_BUF_SIZE = 5;
+function _pushRecentGps(lat, lng, timestamp){
+  _recentGpsBuf.push({ lat: lat, lng: lng, t: timestamp });
+  if(_recentGpsBuf.length > _RECENT_GPS_BUF_SIZE) _recentGpsBuf.shift();
+}
+function _estimatePdopMultiplier(){
+  if(_recentGpsBuf.length < 3) return 1.0;
+  const steps = [];
+  for(let i = 1; i < _recentGpsBuf.length; i++){
+    const a = _recentGpsBuf[i - 1];
+    const b = _recentGpsBuf[i];
+    steps.push(_haversine(a.lat, a.lng, b.lat, b.lng));
+  }
+  let sum = 0;
+  for(let i = 0; i < steps.length; i++) sum += steps[i];
+  const mean = sum / steps.length;
+  if(mean < 0.5) return 1.0;   // 停車中・判定困難
+  let varSum = 0;
+  for(let i = 0; i < steps.length; i++) varSum += (steps[i] - mean) * (steps[i] - mean);
+  const stddev = Math.sqrt(varSum / steps.length);
+  const cv = stddev / mean;   // 変動係数
+  // CV>0.5 で「明らかに不規則」・>0.3 で「やや不規則」・以下は通常
+  if(cv > 0.5) return 1.5;
+  if(cv > 0.3) return 1.2;
+  return 1.0;
+}
+
+// M5 (2026-05-09): centripetal Catmull-Rom (alpha=0.5) でオーバーシュート抑制
+//   旧: 一様 (uniform) パラメタ化 → 急カーブで実走より 0.5-2% 過大評価
+//   新: chord 距離の sqrt を knot 距離として Barry-Goldman で評価
+//       急カーブでも overshoot しない (centripetal の数学的性質)
 function _catmullRom(p0, p1, p2, p3, t){
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const lat = 0.5 * (
-    (2 * p1.lat) +
-    (-p0.lat + p2.lat) * t +
-    (2*p0.lat - 5*p1.lat + 4*p2.lat - p3.lat) * t2 +
-    (-p0.lat + 3*p1.lat - 3*p2.lat + p3.lat) * t3
-  );
-  const lng = 0.5 * (
-    (2 * p1.lng) +
-    (-p0.lng + p2.lng) * t +
-    (2*p0.lng - 5*p1.lng + 4*p2.lng - p3.lng) * t2 +
-    (-p0.lng + 3*p1.lng - 3*p2.lng + p3.lng) * t3
-  );
-  return { lat: lat, lng: lng };
+  const ALPHA = 0.5;  // 0=uniform / 0.5=centripetal / 1.0=chordal
+  function knotDelta(a, b){
+    const d = _haversine(a.lat, a.lng, b.lat, b.lng);
+    return Math.pow(d + 1e-9, ALPHA);
+  }
+  const t0 = 0;
+  const t1 = t0 + knotDelta(p0, p1);
+  const t2 = t1 + knotDelta(p1, p2);
+  const t3 = t2 + knotDelta(p2, p3);
+  // 入力 t∈[0,1] を実 knot 区間 [t1, t2] にマップ
+  const T = t1 + t * (t2 - t1);
+  // Barry-Goldman 再帰的 lerp で centripetal Catmull-Rom 評価
+  function lerp(a, b, ta, tb){
+    if(tb === ta) return { lat: a.lat, lng: a.lng };
+    const f = (T - ta) / (tb - ta);
+    return {
+      lat: (1 - f) * a.lat + f * b.lat,
+      lng: (1 - f) * a.lng + f * b.lng,
+    };
+  }
+  const A1 = lerp(p0, p1, t0, t1);
+  const A2 = lerp(p1, p2, t1, t2);
+  const A3 = lerp(p2, p3, t2, t3);
+  const B1 = { lat: 0, lng: 0 };
+  const B2 = { lat: 0, lng: 0 };
+  if(t2 !== t0){
+    const f = (T - t0) / (t2 - t0);
+    B1.lat = (1 - f) * A1.lat + f * A2.lat;
+    B1.lng = (1 - f) * A1.lng + f * A2.lng;
+  } else { B1.lat = A1.lat; B1.lng = A1.lng; }
+  if(t3 !== t1){
+    const f = (T - t1) / (t3 - t1);
+    B2.lat = (1 - f) * A2.lat + f * A3.lat;
+    B2.lng = (1 - f) * A2.lng + f * A3.lng;
+  } else { B2.lat = A2.lat; B2.lng = A2.lng; }
+  if(t2 === t1) return { lat: B1.lat, lng: B1.lng };
+  const f = (T - t1) / (t2 - t1);
+  return {
+    lat: (1 - f) * B1.lat + f * B2.lat,
+    lng: (1 - f) * B1.lng + f * B2.lng,
+  };
 }
 
 // p1〜p2 間の Catmull-Rom 曲線長を 10 分割で積分
@@ -596,7 +661,10 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
                          gpsAlt, prevLayer){
   // MM-7: grid bias 補正で σ を地域固有に調整
   const sigmaMult = _getGridSigmaMultiplier(gpsLat, gpsLng);
-  const sigma = (4 + 0.5 * accuracy) * sigmaMult;
+  // G1 (2026-05-09): trajectory 不規則性ベースの擬似 PDOP で σ 補正
+  //   ビル街マルチパス・衛星配置偏りで accuracy が低くても実誤差大の状況に対応
+  const pdopMult = _estimatePdopMultiplier();
+  const sigma = (4 + 0.5 * accuracy) * sigmaMult * pdopMult;
   for(let i = 0; i < cands.length; i++){
     const c = cands[i];
     // ① 距離スコア exp(-d²/(2σ²))
@@ -641,6 +709,12 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
       // incline 1=登り急 / 2=下り急 / 3=方向不明
       // 急坂は GPS 高度誤差が出やすいので scoring わずかに緩める
       attrBoost *= 0.97;
+    }
+    // D3 (2026-05-09): 緊急輸送道路指定なら ×1.05 boost (主要道路優先)
+    //   災害輸送道路 = 通常時も主要幹線・誤 snap 抑制に有効
+    if(c.prefecture && c.roadIndex != null){
+      const emSet = _emergencyRoutesByPref.get(c.prefecture);
+      if(emSet && emSet.has(c.roadIndex)) attrBoost *= 1.05;
     }
     // 総合
     c._distScore = distScore;
@@ -1815,6 +1889,14 @@ self.onmessage = function(e){
     return;
   }
 
+  // D3 (2026-05-09): 緊急輸送道路指定の forward
+  if(msg.type === 'loadEmergencyAttrs'){
+    if(msg.pref && Array.isArray(msg.roadIndices)){
+      _emergencyRoutesByPref.set(msg.pref, new Set(msg.roadIndices));
+    }
+    return;
+  }
+
   // F5 (2026-05-09): trip 終了時の soft reset
   //   lastCommittedSnap / prevSnap のみクリア・Viterbi 窓は維持
   //   次の trip 開始時に warmup 不要・走行データ連続性を保つ
@@ -1845,6 +1927,8 @@ self.onmessage = function(e){
     //   トンネル道路が roads データにあれば snap は成功・課金継続
 
     _pushGpsBuffer({ lat: msg.lat, lng: msg.lng, timestamp: msg.timestamp });
+    // G1: trajectory 不規則性推定用に直近 GPS 履歴を維持
+    _pushRecentGps(msg.lat, msg.lng, msg.timestamp);
 
     // MM-6: OSRM 教師信号用バッファ追加（30 秒ごとに自動でバッチ送信トリガ）
     _addToOsrmBuffer({
