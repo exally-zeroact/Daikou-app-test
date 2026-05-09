@@ -7,7 +7,7 @@ const Meter = (() => {
   let state = {
     running: false,
     distance_m: 0,
-    distanceSource: 'gps',    // 'mm' | 'gps' 直近で distance_m を更新したソース
+    distanceSource: 'gps',    // 'mm' | 'gps' | 'gap' | 'inline' | 'offroad' 直近で distance_m を更新したソース
     fare_yen: 0,
     elapsed_sec: 0,
     start_time: null,
@@ -21,6 +21,9 @@ const Meter = (() => {
     mm_snap_count: 0,         // snap成功回数（精度評価用）
     mm_total_count: 0,        // update呼び出し回数（snap成功率算出用）
     mm_skip_count: 0,         // 異常値でスキップした回数
+    // ─── Phase 1.C Off-Road Mode (2026-05-10 追加) ───
+    offroad_distance_m: 0,    // Off-Road Mode で加算した距離 (参照値)
+    offroad_count: 0,         // Off-Road Mode 起動回数
   };
 
   // MM 優先設計 (2026-05-09):
@@ -29,6 +32,25 @@ const Meter = (() => {
   //   GPS 直線距離を fallback として state.distance_m に加算する
   let lastMmUsefulAt = 0;
   const MM_SILENT_THRESHOLD_MS = 2500;   // A2 (2026-05-09): 5000→2500 短縮で fallback 早期化
+
+  // ★設計変更宣言 Phase 1.C (2026-05-10): Off-Road Mode
+  //   snap 連続失敗時に Worker B が distance を計算できなくなる
+  //   (例: 私道・駐車場・農道・OSM 未登録道路)
+  //   → Kalman 平滑化済 GPS 連続点の haversine 累積で距離継続加算
+  //   絶対ルール準拠:
+  //     ・ Kalman 平滑化済 GPS 連続点の polyline 累積 = 許可
+  //     ・ A→B の一発 haversine 直線課金 = 禁止 (本実装は連続点間累積)
+  //   起動条件: snap miss 5 回連続 (= 直近 GPS が road から 50m 超 5 秒以上に等価)
+  //   保護: GPS accuracy >50m / 物理上限 160km/h / isStationary 時は加算しない
+  //   終了条件: Worker B が再 commit (mmIncrement>0) → 通常 HMM モード復帰
+  //   2 重課金防止:
+  //     ・ Off-Road active 中の Worker B mmIncrement は無視
+  //     ・ 退場時に Worker B に resetCommittedSnap 送信し未来の commit を再起点化
+  let _offRoadActive = false;
+  let _consecutiveSnapMiss = 0;
+  let _haverAccumSinceLastCommit = 0;   // 直近 commit からの haversine 累積 (retroactive 用)
+  const OFFROAD_SNAP_MISS_THRESHOLD = 5;
+  const OFFROAD_ABS_MAX_KMH = 160;      // 物理上限
 
   // Map Matching の内部状態（state とは別・stateはユーザー向け値のみ）
   // MM-1 (2026-05-08): Worker 経路使用時は prevSnap は Worker 内で保持し
@@ -141,9 +163,44 @@ const Meter = (() => {
   // MM-7: 最新 MM-7 統計を保持（mmResult から間接取得）
   let _lastMcmN = 0;
 
+  // Phase 1.C Off-Road Mode ヘルパー
+  //   通常時に GPS 連続点の haversine を累積する (= 直近 commit からの distance buffer)
+  //   Off-Road 起動時に retroactive add するため事前に蓄積しておく
+  function _trackHaversineBetweenGps(gpsResult, dtSec){
+    if(_offRoadActive) return;       // off-road 中は incremental add で別経路
+    if(!state.last_gps) return;
+    if(gpsResult.isStationary) return;
+    if(gpsResult.accuracy != null && gpsResult.accuracy > 50) return;
+    if(state.last_gps.accuracy != null && state.last_gps.accuracy > 50) return;
+    if(dtSec <= 0 || dtSec > 60) return;
+    const d = GPS.calcDistance(state.last_gps.lat, state.last_gps.lng, gpsResult.lat, gpsResult.lng);
+    // 物理上限 sanity (160km/h × dtSec + 5m 余裕)
+    const physMaxM = (OFFROAD_ABS_MAX_KMH / 3.6) * Math.max(1, dtSec) + 5;
+    if(d > physMaxM) return;
+    _haverAccumSinceLastCommit += d;
+  }
+
+  //   Off-Road 中に毎フレーム加算する 1 step distance
+  //   Kalman 平滑化済 GPS 連続点の haversine = polyline 累積の 1 区間
+  function _calculateOffRoadIncrement(gpsResult, dtSec){
+    if(!state.last_gps) return 0;
+    if(gpsResult.isStationary) return 0;
+    if(gpsResult.accuracy != null && gpsResult.accuracy > 50) return 0;
+    if(state.last_gps.accuracy != null && state.last_gps.accuracy > 50) return 0;
+    if(dtSec <= 0 || dtSec > 60) return 0;
+    const d = GPS.calcDistance(state.last_gps.lat, state.last_gps.lng, gpsResult.lat, gpsResult.lng);
+    const physMaxM = (OFFROAD_ABS_MAX_KMH / 3.6) * Math.max(1, dtSec) + 5;
+    if(d > physMaxM){
+      if(typeof dlog === 'function') dlog(`[Meter] Phase1.C off-road skip: ${d.toFixed(0)}m > phys max ${physMaxM.toFixed(0)}m`);
+      return 0;
+    }
+    return d;
+  }
+
   // Worker B からの mmResult を受けて state に反映するハンドラ
   // 2026-05-09: MM 優先設計に変更。mmIncrementM>0 を受信したら state.distance_m と
   //   fare_yen を直接更新する。業務継続性は update() 側 GPS fallback で担保。
+  // 2026-05-10 (Phase 1.C): Off-Road Mode の入退場制御を追加
   function _onMmWorkerMessage(e){
     const m = e && e.data;
     if(!m) return;
@@ -154,13 +211,58 @@ const Meter = (() => {
     }
     if(m.type !== 'mmResult') return;
     if(typeof m.mmIncrementM === 'number' && m.mmIncrementM > 0){
-      // MM 優先: 道路距離を課金距離に反映
-      state.distance_m += m.mmIncrementM;
-      state.fare_yen = calcFare(state.distance_m);
-      state.distanceSource = 'mm';
-      lastMmUsefulAt = Date.now();
-      // 参照値も並行更新 (旧設計互換・stats 表示用)
-      state.mm_distance_m += m.mmIncrementM;
+      if(_offRoadActive){
+        // Phase 1.C: Off-Road でカバー済 → 二重課金防止のため Worker B mmIncrement を無視
+        //   Worker B の lastCommittedSnap は古い (= off-road 突入前) 状態なので
+        //   resetCommittedSnap で null 化し未来の commit を再起点化
+        if(typeof dlog === 'function'){
+          dlog(`[Meter] Phase1.C Off-Road 終了 (Worker B 復帰・mmIncrement ${m.mmIncrementM.toFixed(0)}m を二重課金回避のため無視)`);
+        }
+        _offRoadActive = false;
+        _consecutiveSnapMiss = 0;
+        _haverAccumSinceLastCommit = 0;
+        if(mmWorker){
+          try { mmWorker.postMessage({ type: 'resetCommittedSnap' }); } catch(_){}
+        }
+        // mmIncrement は加算しない・lastMmUsefulAt も更新しない (= mmHealthy false 維持)
+      } else {
+        // 通常: MM 優先で道路距離を課金距離に反映
+        state.distance_m += m.mmIncrementM;
+        state.fare_yen = calcFare(state.distance_m);
+        state.distanceSource = 'mm';
+        lastMmUsefulAt = Date.now();
+        // 参照値も並行更新 (旧設計互換・stats 表示用)
+        state.mm_distance_m += m.mmIncrementM;
+        // Phase 1.C: 通常 commit が起きたので haversine 累積 buffer をリセット
+        _haverAccumSinceLastCommit = 0;
+      }
+    }
+    // Phase 1.C (2026-05-10): snap miss 連続検出 → Off-Road Mode 起動
+    if(m.snapped){
+      _consecutiveSnapMiss = 0;
+    } else if(m.skipped || (typeof m.mmIncrementM === 'number' && m.mmIncrementM === 0 && !m.committed)){
+      _consecutiveSnapMiss++;
+      if(!_offRoadActive && _consecutiveSnapMiss >= OFFROAD_SNAP_MISS_THRESHOLD){
+        _offRoadActive = true;
+        state.offroad_count = (state.offroad_count || 0) + 1;
+        // 直前 commit からの haversine 累積を retroactive で加算 (snap-miss 区間の課金漏れ防止)
+        if(_haverAccumSinceLastCommit > 0){
+          state.distance_m += _haverAccumSinceLastCommit;
+          state.fare_yen = calcFare(state.distance_m);
+          state.distanceSource = 'offroad';
+          state.offroad_distance_m = (state.offroad_distance_m || 0) + _haverAccumSinceLastCommit;
+          if(typeof dlog === 'function'){
+            dlog(`[Meter] Phase1.C Off-Road 起動 (${_consecutiveSnapMiss} 連続 snap miss)・retroactive add ${_haverAccumSinceLastCommit.toFixed(0)}m`);
+          }
+          _haverAccumSinceLastCommit = 0;
+        } else {
+          if(typeof dlog === 'function') dlog(`[Meter] Phase1.C Off-Road 起動 (${_consecutiveSnapMiss} 連続 snap miss)`);
+        }
+        // Worker B に resetCommittedSnap を送り、off-road 中の commit を抑制
+        if(mmWorker){
+          try { mmWorker.postMessage({ type: 'resetCommittedSnap' }); } catch(_){}
+        }
+      }
     }
     // D4 (2026-05-09): 直近 snap の typeCode を記録 (gap fill 速度クランプ用)
     // T5 (2026-05-09): 同じ typeCode を gps-worker.js に伝達して Kalman Q を動的化
@@ -231,8 +333,15 @@ const Meter = (() => {
       mm_snap_count: 0,
       mm_total_count: 0,
       mm_skip_count: 0,
+      // Phase 1.C Off-Road Mode リセット
+      offroad_distance_m: 0,
+      offroad_count: 0,
     };
     prevSnap = null;  // Map Matching 連続性リセット（fallback 用）
+    // Phase 1.C 状態リセット
+    _offRoadActive = false;
+    _consecutiveSnapMiss = 0;
+    _haverAccumSinceLastCommit = 0;
     _fareConfigFrozen = true;  // F6: 業務開始時に凍結
     // B2 (2026-05-09): 業務開始時 MM warmup grace
     //   lastMmUsefulAt=0 だと mmHealthy=false で fallback 経路に入る
@@ -290,8 +399,15 @@ const Meter = (() => {
       mm_snap_count: 0,
       mm_total_count: 0,
       mm_skip_count: 0,
+      // Phase 1.C Off-Road Mode リセット
+      offroad_distance_m: 0,
+      offroad_count: 0,
     };
     prevSnap = null;
+    // Phase 1.C 状態リセット
+    _offRoadActive = false;
+    _consecutiveSnapMiss = 0;
+    _haverAccumSinceLastCommit = 0;
     lastMmUsefulAt = 0;
     // F5 (2026-05-09): trip reset では Worker 'softReset' を送る
     //   → lastCommittedSnap のみクリア・Viterbi 窓は維持
@@ -489,6 +605,10 @@ const Meter = (() => {
     if(state.last_gps && state.last_timestamp){
       const dtSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
 
+      // Phase 1.C (2026-05-10): 通常時は haversine 累積を裏で track
+      //   off-road 起動時に retroactive 加算するための buffer
+      _trackHaversineBetweenGps(gpsResult, dtSec);
+
       // GPS消失検出：5秒以上の空白 (トンネル等で MM/GPS 共に不可)
       if(dtSec >= GAP_THRESHOLD_SEC){
         // gap fill: 速度×時間 (タイヤ回転由来の概算・GPS 直線弦ではない)
@@ -504,6 +624,16 @@ const Meter = (() => {
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = 'gap';
           _recordGapFill(filled);
+          _haverAccumSinceLastCommit = 0;   // gap fill で確定したのでバッファ reset
+        }
+      } else if(_offRoadActive){
+        // Phase 1.C Off-Road Mode: GPS polyline 累積で課金続行
+        const inc = _calculateOffRoadIncrement(gpsResult, dtSec);
+        if(inc > 0){
+          state.distance_m += inc;
+          state.fare_yen = calcFare(state.distance_m);
+          state.distanceSource = 'offroad';
+          state.offroad_distance_m = (state.offroad_distance_m || 0) + inc;
         }
       } else if(!mmHealthy){
         // MM 不健全時の inline 道路スナップ fallback (絶対ルール: GPS 直線禁止)

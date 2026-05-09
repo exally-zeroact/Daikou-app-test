@@ -2452,6 +2452,17 @@ self.onmessage = function(e){
     return;
   }
 
+  // Phase 1.C (2026-05-10): Off-Road Mode の境界制御
+  //   meter.js の Off-Road 起動 / 終了で送信される
+  //   起動時: Off-Road 中に Worker B が古い lastCommittedSnap を起点に
+  //           大きな mmIncrement を出すのを防ぐため null 化
+  //   終了時: Off-Road でカバー済の commit を「再起点化」するため null 化
+  //   Viterbi 窓は維持 (snap 候補蓄積を継続)・pheromone/grid bias も維持
+  if(msg.type === 'resetCommittedSnap'){
+    lastCommittedSnap = null;
+    return;
+  }
+
   // B6 (2026-05-09): 停車検出時の hint
   //   main 側で停車検知したら _gpsBuffer をクリアして
   //   再走行時に古い走行前 4 点で Catmull-Rom 計算するのを防ぐ
