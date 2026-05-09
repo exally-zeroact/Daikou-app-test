@@ -1,10 +1,10 @@
 {
   "region": "tohoku",
-  "generated": "2026-05-07T14:35:11.601Z",
+  "generated": "2026-05-09T09:45:07.076Z",
   "prefectures": {
     "fukushima": {
-      "numRoads": 177359,
-      "sizeBytes": 6089003,
+      "numRoads": 177361,
+      "sizeBytes": 6680796,
       "bbox": [
         3678576,
         13920751,
@@ -13,13 +13,15 @@
       ],
       "attrCounts": {
         "oneway": 4359,
-        "incline": 55282,
+        "incline": 60127,
         "lanes": 7005,
         "width": 40,
         "layer": 8847,
+        "access": 0,
+        "maxspeed": 0,
         "track": 26043,
         "inclineFromOSM": 6,
-        "inclineFromDem": 55276
+        "inclineFromDem": 60121
       }
     }
   }

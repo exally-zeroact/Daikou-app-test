@@ -1,10 +1,10 @@
 {
   "region": "shikoku",
-  "generated": "2026-05-07T23:55:57.931Z",
+  "generated": "2026-05-09T09:50:16.411Z",
   "prefectures": {
     "kochi": {
-      "numRoads": 52812,
-      "sizeBytes": 1817877,
+      "numRoads": 52811,
+      "sizeBytes": 2024464,
       "bbox": [
         3272264,
         13292826,
@@ -13,13 +13,15 @@
       ],
       "attrCounts": {
         "oneway": 1436,
-        "incline": 18667,
-        "lanes": 4007,
+        "incline": 19988,
+        "lanes": 4006,
         "width": 4,
         "layer": 4237,
-        "track": 3118,
+        "access": 0,
+        "maxspeed": 0,
+        "track": 3119,
         "inclineFromOSM": 24,
-        "inclineFromDem": 18643
+        "inclineFromDem": 19964
       }
     }
   }

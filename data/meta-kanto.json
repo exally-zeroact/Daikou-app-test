@@ -1,10 +1,10 @@
 {
   "region": "kanto",
-  "generated": "2026-05-07T21:41:57.551Z",
+  "generated": "2026-05-09T09:46:08.038Z",
   "prefectures": {
     "kanagawa": {
-      "numRoads": 148998,
-      "sizeBytes": 4358068,
+      "numRoads": 149002,
+      "sizeBytes": 4716336,
       "bbox": [
         3513218,
         13891577,
@@ -12,14 +12,16 @@
         13974427
       ],
       "attrCounts": {
-        "oneway": 10811,
-        "incline": 43632,
-        "lanes": 15186,
+        "oneway": 10816,
+        "incline": 46716,
+        "lanes": 15189,
         "width": 1475,
-        "layer": 6785,
-        "track": 10605,
+        "layer": 6787,
+        "access": 0,
+        "maxspeed": 0,
+        "track": 10606,
         "inclineFromOSM": 153,
-        "inclineFromDem": 43479
+        "inclineFromDem": 46563
       }
     }
   }

@@ -1,25 +1,27 @@
 {
   "region": "kyushu",
-  "generated": "2026-05-08T02:23:10.177Z",
+  "generated": "2026-05-09T09:51:32.665Z",
   "prefectures": {
-    "fukuoka": {
-      "numRoads": 198638,
-      "sizeBytes": 5947969,
+    "okinawa": {
+      "numRoads": 89286,
+      "sizeBytes": 2852852,
       "bbox": [
-        3314617,
-        13028841,
-        3400008,
-        13117243
+        2404661,
+        12293533,
+        2709411,
+        13132916
       ],
       "attrCounts": {
-        "oneway": 9862,
-        "incline": 43817,
-        "lanes": 10538,
-        "width": 3963,
-        "layer": 9591,
-        "track": 15769,
-        "inclineFromOSM": 12,
-        "inclineFromDem": 43805
+        "oneway": 4511,
+        "incline": 169,
+        "lanes": 10796,
+        "width": 74,
+        "layer": 2488,
+        "access": 0,
+        "maxspeed": 0,
+        "track": 10391,
+        "inclineFromOSM": 169,
+        "inclineFromDem": 0
       }
     }
   }

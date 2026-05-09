@@ -1,10 +1,10 @@
 {
   "region": "chubu",
-  "generated": "2026-05-07T22:34:34.532Z",
+  "generated": "2026-05-09T09:48:02.367Z",
   "prefectures": {
     "aichi": {
-      "numRoads": 358181,
-      "sizeBytes": 10405150,
+      "numRoads": 358174,
+      "sizeBytes": 11170404,
       "bbox": [
         3457892,
         13666919,
@@ -12,14 +12,16 @@
         13773173
       ],
       "attrCounts": {
-        "oneway": 20563,
-        "incline": 49976,
-        "lanes": 23925,
+        "oneway": 20562,
+        "incline": 54944,
+        "lanes": 23923,
         "width": 1324,
-        "layer": 16594,
+        "layer": 16593,
+        "access": 0,
+        "maxspeed": 0,
         "track": 30544,
         "inclineFromOSM": 32,
-        "inclineFromDem": 49944
+        "inclineFromDem": 54912
       }
     }
   }

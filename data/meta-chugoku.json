@@ -1,25 +1,27 @@
 {
   "region": "chugoku",
-  "generated": "2026-05-07T23:42:57.438Z",
+  "generated": "2026-05-09T09:49:55.496Z",
   "prefectures": {
     "yamaguchi": {
-      "numRoads": 110741,
-      "sizeBytes": 3554750,
+      "numRoads": 110742,
+      "sizeBytes": 3907534,
       "bbox": [
-        3371540,
+        3371537,
         13078430,
         3479749,
-        13227436
+        13227439
       ],
       "attrCounts": {
         "oneway": 3775,
-        "incline": 34977,
-        "lanes": 8854,
+        "incline": 38344,
+        "lanes": 8855,
         "width": 68,
         "layer": 6999,
-        "track": 4694,
+        "access": 0,
+        "maxspeed": 0,
+        "track": 4695,
         "inclineFromOSM": 0,
-        "inclineFromDem": 34977
+        "inclineFromDem": 38344
       }
     }
   }

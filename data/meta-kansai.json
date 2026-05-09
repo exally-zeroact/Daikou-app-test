@@ -1,25 +1,27 @@
 {
   "region": "kansai",
-  "generated": "2026-05-07T23:02:59.819Z",
+  "generated": "2026-05-09T09:49:00.579Z",
   "prefectures": {
     "wakayama": {
-      "numRoads": 38028,
-      "sizeBytes": 1393712,
+      "numRoads": 38030,
+      "sizeBytes": 1558315,
       "bbox": [
         3343731,
         13506004,
         3421397,
-        13600893
+        13600895
       ],
       "attrCounts": {
-        "oneway": 931,
-        "incline": 16609,
-        "lanes": 3454,
+        "oneway": 930,
+        "incline": 17719,
+        "lanes": 3453,
         "width": 278,
         "layer": 3495,
+        "access": 0,
+        "maxspeed": 0,
         "track": 3857,
         "inclineFromOSM": 38,
-        "inclineFromDem": 16571
+        "inclineFromDem": 17681
       }
     }
   }

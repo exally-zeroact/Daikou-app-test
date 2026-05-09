@@ -52,10 +52,13 @@ const args = process.argv.slice(2);
 const USE_DEM = args.includes('--dem');
 const onlyArg = args.find(a => a.startsWith('--only='));
 const ONLY_PREF = onlyArg ? onlyArg.slice(7) : null; // 単一県のみ書き出す
-// Phase E (2026-05-09): 国土地理院 1/2,500 道路縁データを OSM に統合する
+// [ARCHIVED 2026-05-09] GSI 1/2,500 統合フラグ
+//   測量法申請リスクにより現在は未使用 (フラグ未指定時は実行されない)
+//   将来国土地理院がオープンデータ化した場合に再活用予定
+//   Phase E (2026-05-09): 国土地理院 1/2,500 道路縁データを OSM に統合する
 //   --gsi-2500-dir=<path>  parse-gsi-2500-gml.js が出力した GeoJSON ディレクトリ
 //   merge-gsi-into-osm.js を呼び出して input.geojson を高精度版に置換する
-//   フラグ未指定時は OSM のみで build (= 旧挙動)
+//   フラグ未指定時は OSM のみで build (= 旧挙動・現在の運用)
 const gsiArg = args.find(a => a.startsWith('--gsi-2500-dir='));
 const GSI_2500_DIR = gsiArg ? gsiArg.slice(15) : null;
 // T4 (2026-05-09): turn:restriction サイドカーファイル
@@ -282,7 +285,12 @@ function packAttrBitmap(typeCode, props, inclineCode) {
 }
 
 // ─── Douglas-Peucker ──────────────────────────────────────────────
-const DP_TOLERANCE = 5;
+// 2026-05-09: 国土地理院 1/2,500 不採用 (測量法申請リスク) の代替策として
+//   DP_TOLERANCE を 5m → 3m に緩和し OSM polyline の実効精度を約 1.7 倍化。
+//   検証結果:
+//     DP=2 → ehime +20% / 47 県推定 235MB
+//     DP=3 → ehime +12% / 47 県推定 209MB (基準 200MB を 4.5% 超過・要判断)
+const DP_TOLERANCE = 3;
 
 function pointLineDist(p, a, b) {
   const [px, py] = p, [ax, ay] = a, [bx, by] = b;
@@ -398,7 +406,10 @@ let raw = fs.readFileSync(INPUT, 'utf8');
 let geo = JSON.parse(raw);
 if (!geo.features) throw new Error('Invalid GeoJSON');
 
-// Phase E (2026-05-09): 国土地理院 1/2,500 統合
+// [ARCHIVED 2026-05-09] GSI 1/2,500 統合ブロック
+//   測量法申請リスクにより現在は未使用 (GSI_2500_DIR は --gsi-2500-dir フラグ未指定時 null)
+//   将来国土地理院がオープンデータ化した場合に再活用予定
+//   Phase E (2026-05-09): 国土地理院 1/2,500 統合
 //   --gsi-2500-dir=<path> 指定時は merge-gsi-into-osm.js と同等の処理を内部で行う
 //   GSI ポリラインで近接 (<5m) なものがあれば OSM の geometry を置換 (高精度化)
 //   properties は OSM 維持・build 側のロジックは変更不要
