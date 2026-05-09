@@ -118,9 +118,9 @@
 
 | ID | 機能 | 詳細 | 場所 |
 |----|------|------|------|
-| Phase3.UI | 注意書き表示 | 初回起動時バナー「データ収集について [詳しく見る]」 | index.html |
-| Phase3.Settings | 設定画面 | 「学習データ提供」トグル (デフォルト ON)・過去データ削除ボタン | settings.html |
-| Phase3.Terms | 利用規約改定 | 1 段落追加 (匿名加速度+速度送信・位置情報なし・opt-out 可) | terms |
+| Phase3.UI | 注意書き表示 | ✅ 実装完了 (2026-05-10・commit 87f878c2)。初回起動時オーバーレイバナー (緑系・1 回限り)・OK/閉じるで consent 確定・即時 refreshEnabledFromStorage | index.html |
+| Phase3.Settings | 設定画面 | ✅ 実装完了。settings.html の '学習データ提供' セクション・トグル/詳細 collapsible/過去データ削除ボタン | settings.html |
+| Phase3.Terms | 利用規約改定 | ✅ 実装完了。settings.html 内に inline 段落 (送信される/されない の明示) | settings.html (inline) |
 
 ### Phase 4: AI 推論統合 (将来・データ蓄積後・2-4 週間工数)
 
