@@ -75,16 +75,32 @@ function _getDynamicBaseQ(){ return _typeCodeToQ(_currentTypeCode); }
 let _prevAccuracy = null;
 
 // ─── Kalmanフィルター（案D・2026/04/27） ───
+// ★設計変更宣言 Phase 1.ZUPT (2026-05-10): Zero Velocity Update
+//   現 Kalman は position-only (vx/vy 状態を持たない) のため、
+//   ユーザー指示「vx/vy を 0 に強制リセット」は process noise Q の override で実現する。
+//   ZUPT active 中: Q = 0.01 (≒ 速度ドリフト 0)
+//     → decayed accuracy ≒ 既存 _accuracy (= 位置共分散維持)
+//     → K ≒ 0 (新 GPS 値による位置移動は小・GPS noise 由来 drift を抑制)
+//   ZUPT inactive: 既存通り T5 動的 Q (typeCode 連動) または qOverride
+//   起動条件: 直前 frame の isStationary 判定 (3 点 AND: GPS+C-1+C-2)
+//   停車終了で自動的に通常 Q に復帰 (Off-Road Mode 中の慣性誤差累積も抑える効果)
+const ZUPT_Q = 0.01;
 class KalmanGPS {
   constructor() {
     this._lat      = null;
     this._lng      = null;
     this._accuracy = 0;
     this._timestamp = null;
+    this._zuptActive = false;   // Phase 1.ZUPT: 停車中フラグ
   }
   reset() {
     this._lat = null; this._lng = null;
     this._accuracy = 0; this._timestamp = null;
+    this._zuptActive = false;
+  }
+  // Phase 1.ZUPT: 停車検出に応じて ZUPT モードを切替
+  setZuptActive(active) {
+    this._zuptActive = !!active;
   }
   update(lat, lng, accuracy, timestamp, qOverride) {
     if (this._lat === null) {
@@ -98,8 +114,17 @@ class KalmanGPS {
       this._accuracy = accuracy; this._timestamp = timestamp;
       return { lat, lng };
     }
-    // T5: typeCode 連動の動的 Q を既定とし、qOverride (コンパス融合) があれば優先
-    const Q = (qOverride != null) ? qOverride : _getDynamicBaseQ();
+    // Phase 1.ZUPT: ZUPT active 中は速度成分 (Q) を 0 ≒ ZUPT_Q に強制
+    //   通常時: T5 typeCode 連動の動的 Q または qOverride (コンパス融合)
+    //   ZUPT active 時: ZUPT_Q (0.01) に強制し速度ドリフトを抑制
+    let Q;
+    if (this._zuptActive) {
+      Q = ZUPT_Q;
+    } else if (qOverride != null) {
+      Q = qOverride;
+    } else {
+      Q = _getDynamicBaseQ();
+    }
     const decayed = Math.sqrt(
       this._accuracy * this._accuracy + Q * Q * dt * dt
     );
@@ -117,6 +142,11 @@ class KalmanGPS {
     return { lat: this._lat, lng: this._lng };
   }
 }
+
+// Phase 1.ZUPT: 直前 frame の停車判定を carry
+//   processPosition 内で stationary 検出は Kalman 後に走るため、
+//   今 frame の Kalman に ZUPT を適用するには「前 frame の判定」を使う必要あり (1 frame lag)
+let _isStationaryLast = false;
 
 // ─── 動的accuracy閾値 ───
 function getDynamicAccuracyLimit(speedKmh, now) {
@@ -469,6 +499,10 @@ function processPosition(data) {
   checkTrafficJam(speedKmh, now);
 
   // ④ Kalmanフィルター（コンパス融合Q値で更新）
+  // Phase 1.ZUPT (2026-05-10): 直前 frame の isStationary 判定を carry
+  //   今 frame の Kalman に ZUPT (Q ≈ 0) を適用して GPS noise 由来 drift を抑制
+  //   停車終了で自動的に通常 Q に復帰
+  kalman.setZuptActive(_isStationaryLast);
   const filtered = kalman.update(lat, lng, accuracy, now, CONFIG._kalman_Q_override);
   CONFIG._kalman_Q_override = null; // 使い捨て
 
@@ -505,6 +539,8 @@ function processPosition(data) {
     finalStationary = gpsStationary && c1Stationary && !c2Moving;
   }
   isStationary = finalStationary;
+  // Phase 1.ZUPT (2026-05-10): 次 frame の Kalman 用に判定を carry
+  _isStationaryLast = finalStationary;
 
   // T12 (2026-05-09): 急ブレーキ検出 → 速度クランプを強化
   //   速度誤検出 (GPS spike) を抑え、急ブレーキ後の異常な高速度報告をフィルタ
@@ -570,6 +606,7 @@ self.onmessage = function(e) {
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;
+    _isStationaryLast = false;   // Phase 1.ZUPT: ZUPT carry リセット
     // 2026-05-09 (P4): cellular polling 廃止
     wlog('[Worker] 初期化完了');
     return;
@@ -584,6 +621,7 @@ self.onmessage = function(e) {
     trafficJamSince = null;
     isTrafficJam = false;
     _currentTypeCode = null;     // T5: typeCode もリセット
+    _isStationaryLast = false;   // Phase 1.ZUPT: ZUPT carry リセット
     return;
   }
 
