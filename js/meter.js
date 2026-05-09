@@ -351,6 +351,37 @@ const Meter = (() => {
 
     if(typeof RegionLoader === 'undefined') return naiveDistance;
 
+    // ★設計変更宣言 Phase 1.B (2026-05-10): GPS lost A 点・GPS recovered B 点
+    //   両方が同じ tunnel/bridge polyline 上にあれば polyline 上の A→B 実走距離で精緻化
+    //   既存 findNearestTunnel は mid から 200m 半径で短トンネル限定だったため、
+    //   findTunnelByPosition (polyline 距離ベース) を併用して長トンネルも検出
+    //   過少課金防止のため Math.max(polylineDist, naiveDistance) を採用
+    //   (polylineDist は tunnel 部分のみ・naiveDistance は前後アプローチ含む total 推定)
+    if(typeof RegionLoader.findTunnelByPosition === 'function'
+       && typeof RegionLoader.calcInfraPolylineDistance === 'function'){
+      let infraA = RegionLoader.findTunnelByPosition(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
+      if(!infraA) infraA = RegionLoader.findBridgeByPosition(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
+      let infraB = RegionLoader.findTunnelByPosition(currLat, currLng, NEAR_INFRA_RADIUS_M);
+      if(!infraB) infraB = RegionLoader.findBridgeByPosition(currLat, currLng, NEAR_INFRA_RADIUS_M);
+
+      // 同じ infra (item 配列の参照一致) → polyline 上の A→B 距離
+      if(infraA && infraB && infraA.item === infraB.item){
+        const polylineDist = RegionLoader.calcInfraPolylineDistance(
+          infraA, prevLat, prevLng, currLat, currLng);
+        if(polylineDist != null && polylineDist > 0){
+          // 物理上限 sanity (160km/h × gapSec + 余裕)
+          const physMaxM = (ABS_MAX_KMH / 3.6) * Math.max(1, gapSec) + 50;
+          if(polylineDist <= physMaxM){
+            // 過少課金防止: polyline と naive の max
+            const filled = Math.max(polylineDist, naiveDistance);
+            dlog(`[Meter] Phase1.B A→B polyline: ${polylineDist.toFixed(0)}m vs naive ${naiveDistance.toFixed(0)}m → ${filled.toFixed(0)}m (${infraA.item[0]} 全長${infraA.item[1]}m)`);
+            return filled;
+          }
+        }
+      }
+    }
+
+    // 既存ロジック (fallback): A 周辺の単発 infra 検出
     let infra = RegionLoader.findNearestTunnel(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
     if(!infra) infra = RegionLoader.findNearestBridge(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
 

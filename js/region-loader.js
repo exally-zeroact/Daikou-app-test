@@ -141,6 +141,117 @@ const RegionLoader = (() => {
   }
 
   // ════════════════════════════════════════════════════════════
+  // Phase 1.B (2026-05-10): polyline 投影系 API
+  //   findNearestTunnel/Bridge は mid から半径 maxDist で探すため、
+  //   長トンネル (1km+) の端点が mid から離れていると見逃す。
+  //   polyline 投影距離で「点が tunnel 上にあるか」を判定する API を追加。
+  //   tunnels の polyline は [start, mid, end] の 3 点 (= 2 segment)。
+  // ════════════════════════════════════════════════════════════
+
+  // 点 (lat, lng) を polyline (= [[lat,lng], ...]) に投影
+  // 戻り値: { segmentIndex, t (0-1), projectedLat, projectedLng, distM }
+  function _projectOntoPolyline(lat, lng, polyline) {
+    let bestSeg = -1, bestT = 0, bestDistM = Infinity;
+    let bestLat = lat, bestLng = lng;
+    for (let i = 0; i < polyline.length - 1; i++) {
+      const aLat = polyline[i][0], aLng = polyline[i][1];
+      const bLat = polyline[i+1][0], bLng = polyline[i+1][1];
+      const refLat = (aLat + bLat) / 2;
+      const tr = Math.PI / 180;
+      const mpdLat = 111000;
+      const mpdLng = 111000 * Math.cos(refLat * tr);
+      const ax = (aLng - lng) * mpdLng;
+      const ay = (aLat - lat) * mpdLat;
+      const bx = (bLng - lng) * mpdLng;
+      const by = (bLat - lat) * mpdLat;
+      const abx = bx - ax, aby = by - ay;
+      const ab2 = abx*abx + aby*aby;
+      let t = 0;
+      if (ab2 > 1e-9) {
+        t = -(ax * abx + ay * aby) / ab2;
+        if (t < 0) t = 0;
+        else if (t > 1) t = 1;
+      }
+      const sx = ax + t * abx, sy = ay + t * aby;
+      const distM = Math.sqrt(sx*sx + sy*sy);
+      if (distM < bestDistM) {
+        bestDistM = distM;
+        bestSeg = i;
+        bestT = t;
+        bestLat = aLat + t * (bLat - aLat);
+        bestLng = aLng + t * (bLng - aLng);
+      }
+    }
+    return {
+      segmentIndex: bestSeg, t: bestT,
+      projectedLat: bestLat, projectedLng: bestLng,
+      distM: bestDistM,
+    };
+  }
+
+  // (lat, lng) が tunnel/bridge polyline の maxDistM 以内にあるか探す
+  // 長トンネルでも端点近傍を正しく検出できる
+  function findTunnelByPosition(lat, lng, maxDistM = 200) {
+    return _findInfraByPosition(lat, lng, maxDistM, tunnelsData, loaded.tunnels);
+  }
+  function findBridgeByPosition(lat, lng, maxDistM = 200) {
+    return _findInfraByPosition(lat, lng, maxDistM, bridgesData, loaded.bridges);
+  }
+  function _findInfraByPosition(lat, lng, maxDistM, dataMap, loadedSet) {
+    let best = null;
+    let bestDist = maxDistM;
+    for (const pref of loadedSet) {
+      const list = dataMap[pref];
+      if (!list) continue;
+      for (const t of list) {
+        const polyline = [t[2], t[4], t[3]]; // start, mid, end
+        const proj = _projectOntoPolyline(lat, lng, polyline);
+        if (proj.distM < bestDist) {
+          bestDist = proj.distM;
+          best = { item: t, distanceToPolyline_m: proj.distM, projection: proj };
+        }
+      }
+    }
+    return best;
+  }
+
+  // infra (tunnel/bridge) polyline 上の A→B 実走距離を計算
+  // infra: { item: [name, length, start, end, mid] }
+  // 戻り値: 距離 (m)・projection 距離が大きすぎる場合 null
+  // 計算:
+  //   1. polyline (start,mid,end) 上に A・B を射影
+  //   2. 各々の projection の polyline 始点からの累積距離を求める
+  //   3. |dB - dA| が straight-line 累積・実 length / straight-line 比で curvature 補正
+  function calcInfraPolylineDistance(infra, latA, lngA, latB, lngB) {
+    if (!infra || !infra.item) return null;
+    const start = infra.item[2];
+    const mid = infra.item[4];
+    const end = infra.item[3];
+    const polyline = [start, mid, end];
+    const totalLength = infra.item[1];
+    const seg1 = haversine(start[0], start[1], mid[0], mid[1]);
+    const seg2 = haversine(mid[0], mid[1], end[0], end[1]);
+    const polyStraightLen = seg1 + seg2;
+    if (polyStraightLen < 1) return null;
+    // 実 length / straight 比で curvature 補正
+    const curveScale = totalLength / polyStraightLen;
+    const projA = _projectOntoPolyline(latA, lngA, polyline);
+    const projB = _projectOntoPolyline(latB, lngB, polyline);
+    // polyline から離れすぎ → 信頼できない
+    if (projA.distM > 200 || projB.distM > 200) return null;
+    function cumDist(proj) {
+      let d = 0;
+      if (proj.segmentIndex >= 1) d += seg1;
+      const segLen = (proj.segmentIndex === 0) ? seg1 : seg2;
+      d += segLen * proj.t;
+      return d;
+    }
+    const dA = cumDist(projA);
+    const dB = cumDist(projB);
+    return Math.abs(dB - dA) * curveScale;
+  }
+
+  // ════════════════════════════════════════════════════════════
   // roads-*.js（都道府県別道路データ）対応
   // ════════════════════════════════════════════════════════════
 
@@ -238,5 +349,7 @@ const RegionLoader = (() => {
     ensureRoadsLoaded,
     snapToNearestRoad, calcRoadDistance,
     nearestPrefectures,
+    // Phase 1.B (2026-05-10): polyline 投影 API
+    findTunnelByPosition, findBridgeByPosition, calcInfraPolylineDistance,
   };
 })();
