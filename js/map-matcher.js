@@ -1583,7 +1583,24 @@ ViterbiMatcher.prototype.push = function(gps, candidates, transitionFn){
   }
   this.steps.push({ gps: gps, cands: newCands });
   // 窓溢れ → 最古を確定
+  // M3 (2026-05-09): top-2 path 評価で confidence ギャップ小なら commit を遅延
+  //   合流・分岐で top-1 と top-2 のスコアが拮抗時に誤確定するのを防止
+  //   ギャップ閾値 < 0.5 log-space (= 60% 程度の確率比) で 2*N まで延長許容
   if(this.steps.length > this.N){
+    const last = this.steps[this.steps.length - 1];
+    let topScore = -Infinity, top2Score = -Infinity;
+    for(let i = 0; i < last.cands.length; i++){
+      const s = last.cands[i].score;
+      if(s > topScore){ top2Score = topScore; topScore = s; }
+      else if(s > top2Score){ top2Score = s; }
+    }
+    const COMMIT_GAP = 0.5;
+    const MAX_DEFER_FACTOR = 2;
+    const gap = topScore - top2Score;
+    if(gap < COMMIT_GAP && this.steps.length < this.N * MAX_DEFER_FACTOR){
+      // 遅延 commit (top-1 / top-2 拮抗中・将来 step で disambiguate 期待)
+      return null;
+    }
     return this._commitOldest();
   }
   return null;

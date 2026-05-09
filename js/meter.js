@@ -79,8 +79,22 @@ const Meter = (() => {
   };
 
   // ハイブリッド計測の閾値
-  const HYBRID_SPEED_KMH = 30;
-  const HYBRID_DISCREPANCY = 0.5;
+  // 旧: HYBRID_SPEED_KMH = 30 (Tier S P3 で update() の hybrid 経路を撤廃済・現在 dead)
+  //     HYBRID_DISCREPANCY = 0.5 (同様に dead)
+  // D4 (2026-05-09): 道路種別別の最大期待速度 (GPS 異常値クランプ用・gap fill で使用)
+  //   GPS が誤って 200km/h を報告しても road type で sanity check
+  //   typeCode: 0=motorway, 1=trunk, 2=primary, 3=secondary, 4=tertiary,
+  //             5=unclassified, 6=residential, 7-11=*_link, 12=track
+  const ROAD_MAX_KMH_BY_TYPE = {
+    0: 120, 1: 100, 2: 80, 3: 70, 4: 60,
+    5: 50, 6: 40, 7: 80, 8: 80, 9: 70, 10: 60, 11: 50, 12: 30
+  };
+  function _maxSpeedFor(typeCode){
+    if(typeCode == null) return 100;
+    const v = ROAD_MAX_KMH_BY_TYPE[typeCode];
+    return v != null ? v : 80;
+  }
+  let _lastSnapTypeCode = null;
 
   // GPS消失補完の閾値
   const GAP_THRESHOLD_SEC = 5;        // 5秒以上の空白＝GPS消失
@@ -147,6 +161,10 @@ const Meter = (() => {
       lastMmUsefulAt = Date.now();
       // 参照値も並行更新 (旧設計互換・stats 表示用)
       state.mm_distance_m += m.mmIncrementM;
+    }
+    // D4 (2026-05-09): 直近 snap の typeCode を記録 (gap fill 速度クランプ用)
+    if(m.snap && m.snap.typeCode != null){
+      _lastSnapTypeCode = m.snap.typeCode;
     }
     if(m.snapped) state.mm_snap_count++;
     if(m.skipped){
@@ -296,7 +314,12 @@ const Meter = (() => {
     }
 
     // 走行中の補完（速度×時間）
-    const speedMs = lastSpeedKmh / 3.6;
+    // D4 (2026-05-09): 道路種別ベースの最大速度でクランプ
+    //   GPS が誤って 200km/h を報告しても road type に従って sanity check
+    //   _lastSnapTypeCode は mmResult から記録した直近 snap の typeCode
+    const maxKmh = _maxSpeedFor(_lastSnapTypeCode);
+    const clampedKmh = Math.min(lastSpeedKmh, maxKmh);
+    const speedMs = clampedKmh / 3.6;
     const naiveDistance = speedMs * gapSec;
 
     if(typeof RegionLoader === 'undefined') return naiveDistance;
