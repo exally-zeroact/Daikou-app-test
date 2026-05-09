@@ -160,6 +160,25 @@ let _tileMissCount = 0;
 let _tileHitCount = 0;
 let _tileRequestCount = 0;
 
+// M6 (2026-05-09): 現在 active な snap タイルを GPS 更新間で持続 pin
+//   bestEmit / lastCommittedSnap が指すタイルを次の routing でも使うため
+//   prefetch eviction で消されるのを防ぐ
+let _activePinnedTileKey = null;
+function _setActivePinnedTile(prefecture, snapLat, snapLng){
+  if(!prefecture || typeof snapLat !== 'number') return;
+  const newKey = _tileKeyOf(prefecture, snapLat, snapLng);
+  if(newKey === _activePinnedTileKey) return;
+  if(_activePinnedTileKey) _tileCache.unpin(_activePinnedTileKey);
+  _tileCache.pin(newKey);
+  _activePinnedTileKey = newKey;
+}
+function _clearActivePinnedTile(){
+  if(_activePinnedTileKey){
+    _tileCache.unpin(_activePinnedTileKey);
+    _activePinnedTileKey = null;
+  }
+}
+
 // 緯度経度 → タイルキー
 function _tileKeyOf(pref, lat, lng){
   const tx = Math.floor(lat / TILE_DEG);
@@ -632,7 +651,21 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     c._phBoost = phBoost;
     c._attrBoost = attrBoost;
     c._typeBucket = currBucket;
-    c.emission = distScore * headScore * mahalScore * typeScore * layerScore * phBoost * attrBoost;
+    // M1 (2026-05-09): log 空間で和算化して数値 underflow を防止
+    //   旧: 7 個の [0,1] 値を乗算 → 連続 100 step で 1e-30 以下に underflow
+    //       Viterbi 全候補同点化 → snap 不安定
+    //   新: log(emission) = log(distScore) + log(headScore) + ... + log(attrBoost)
+    //       Viterbi 比較は log 値で行う・c.emission は表示/diagnostic 用に exp で復元
+    //   各 score が 0 に近い場合は -Infinity 回避のため LOG_FLOOR で clamp
+    const LOG_FLOOR = -50;   // exp(-50) ≈ 1.9e-22 で Float64 安全圏
+    function _safeLog(x){ return x <= 0 ? LOG_FLOOR : Math.max(LOG_FLOOR, Math.log(x)); }
+    const logEmission = _safeLog(distScore) + _safeLog(headScore)
+                      + _safeLog(mahalScore) + _safeLog(typeScore)
+                      + _safeLog(layerScore) + _safeLog(phBoost)
+                      + _safeLog(attrBoost);
+    c.logEmission = logEmission;
+    // 互換性のため emission も持つ (Viterbi 内では logEmission を優先利用)
+    c.emission = Math.exp(logEmission);
   }
   return cands;
 }
@@ -1139,19 +1172,26 @@ function _gridKey(lat, lng){
   return gy + '_' + gx;
 }
 
+// M7 (2026-05-09): 真の LRU eviction
+//   旧: 最古「挿入」順削除 (FIFO・頻繁訪問セルが消えるリスク)
+//   新: 各 cell をアクセス時に delete + re-insert で末尾へ移動 (touch)
+//       Map iteration は insertion order なので keys().next() が真の oldest になる
+//   オーバーヘッド: アクセス毎の delete + set 操作・~100ns / call で許容
 function _recordGridBiasSample(gpsLat, gpsLng, snapLat, snapLng){
   const key = _gridKey(gpsLat, gpsLng);
   let cell = _gridBias.get(key);
   if(!cell){
     if(_gridBias.size >= GRID_MAX_CELLS){
-      // 上限到達: discard policy（最初の 1 件を削除＝挿入順 LRU 近似）
+      // 上限到達: 真の oldest (最後にアクセスされたのが一番古い) を削除
       const first = _gridBias.keys().next();
       if(!first.done) _gridBias.delete(first.value);
     }
     cell = new Float32Array(GRID_FIELDS);
-    _gridBias.set(key, cell);
+  } else {
+    // M7 touch: 既存 cell を末尾へ移動 (LRU 順を維持)
+    _gridBias.delete(key);
   }
-  // dx/dy はメートル換算（経度は緯度依存・精度十分）
+  _gridBias.set(key, cell);
   const mpd = _metersPerDegree(gpsLat);
   const dxM = (gpsLng - snapLng) * mpd.lng;
   const dyM = (gpsLat - snapLat) * mpd.lat;
@@ -1165,8 +1205,12 @@ function _recordGridBiasSample(gpsLat, gpsLng, snapLat, snapLng){
 // セルが学習済（≥1000 samples）なら σ 補正係数を返す（>=1.0）
 // 補正後 σ_corrected = σ × multiplier
 function _getGridSigmaMultiplier(gpsLat, gpsLng){
-  const cell = _gridBias.get(_gridKey(gpsLat, gpsLng));
+  const key = _gridKey(gpsLat, gpsLng);
+  const cell = _gridBias.get(key);
   if(!cell || cell[0] < GRID_MIN_SAMPLES) return 1.0;
+  // M7: read touch (LRU 順維持・GRID_MIN_SAMPLES 超の頻繁参照セルを保護)
+  _gridBias.delete(key);
+  _gridBias.set(key, cell);
   const n = cell[0];
   const meanX = cell[1] / n;
   const meanY = cell[2] / n;
@@ -1419,14 +1463,13 @@ ViterbiMatcher.prototype.reset = function(){ this.steps = []; };
 ViterbiMatcher.prototype.push = function(gps, candidates, transitionFn){
   if(!candidates || candidates.length === 0) return null;
   if(this.steps.length === 0){
-    // 初期ステップ：累積 = log(emission) のみ・back=-1
+    // 初期ステップ：累積 = logEmission のみ・back=-1
+    // M1 (2026-05-09): logEmission を直接使用 (再 log 取得不要・桁落ち防止)
     const cs = new Array(candidates.length);
     for(let i = 0; i < candidates.length; i++){
-      cs[i] = {
-        c: candidates[i],
-        score: Math.log(candidates[i].emission + 1e-12),
-        back: -1,
-      };
+      const c = candidates[i];
+      const eLog = (c.logEmission != null) ? c.logEmission : Math.log(c.emission + 1e-12);
+      cs[i] = { c: c, score: eLog, back: -1 };
     }
     this.steps.push({ gps: gps, cands: cs });
     return null;
@@ -1436,7 +1479,8 @@ ViterbiMatcher.prototype.push = function(gps, candidates, transitionFn){
   const newCands = new Array(candidates.length);
   for(let j = 0; j < candidates.length; j++){
     const cand = candidates[j];
-    const eLog = Math.log(cand.emission + 1e-12);
+    // M1: logEmission 優先・後方互換で emission からも fall back
+    const eLog = (cand.logEmission != null) ? cand.logEmission : Math.log(cand.emission + 1e-12);
     let bestScore = -Infinity;
     let bestBack = -1;
     for(let i = 0; i < prev.cands.length; i++){
@@ -1763,6 +1807,7 @@ self.onmessage = function(e){
     lastCommittedSnap = null;
     prevSnap = null;
     _gpsBuffer.length = 0;
+    _clearActivePinnedTile();   // M6: アクティブ pin も解除
     // MM-7: 業務終了時に pheromone を蒸発・grid bias を含め IDB に永続保存
     _evaporatePheromones();
     _savePheromoneAll();
@@ -1776,6 +1821,7 @@ self.onmessage = function(e){
   if(msg.type === 'softReset'){
     lastCommittedSnap = null;
     prevSnap = null;
+    _clearActivePinnedTile();   // M6: アクティブ pin も解除
     return;
   }
 
@@ -1834,13 +1880,19 @@ self.onmessage = function(e){
                          msg.altitude, prevLayer);
 
         // 出力用に「最高 emission の 1 件」を選んでおく（diagnostic / mmResult.snap 用）
+        // M1 (2026-05-09): logEmission で比較 (underflow 安全)
         let bestEmit = cands[0];
+        let bestLog = (bestEmit.logEmission != null) ? bestEmit.logEmission : Math.log(bestEmit.emission + 1e-12);
         for(let i = 1; i < cands.length; i++){
-          if(cands[i].emission > bestEmit.emission) bestEmit = cands[i];
+          const cur = cands[i];
+          const curLog = (cur.logEmission != null) ? cur.logEmission : Math.log(cur.emission + 1e-12);
+          if(curLog > bestLog){ bestEmit = cur; bestLog = curLog; }
         }
         pickedEmission = bestEmit.emission;
         snapped = 1;
         outSnap = bestEmit;
+        // M6 (2026-05-09): bestEmit のタイルを持続 pin (eviction 防止)
+        _setActivePinnedTile(bestEmit.prefecture, bestEmit.snapLat, bestEmit.snapLng);
         if(_mmDebug) _dbg('score cand=' + candCount,
           'pickedEmit=' + bestEmit.emission.toFixed(3),
           'road=' + bestEmit.roadIndex,
