@@ -102,7 +102,7 @@
 
 | ID | 機能 | 詳細 | 場所 |
 |----|------|------|------|
-| Phase1.B | トンネル A→B polyline 精緻化 | calculateGapFill が現状 Math.max(naive, infraLength) で粗い。GPS lost 点 A と GPS recovered 点 B 両方を使ってトンネル polyline 上の A→B 距離を計算するよう精緻化 | meter.js calculateGapFill 改修 |
+| Phase1.B | トンネル A→B polyline 精緻化 | ✅ 実装完了 (2026-05-10・commit c18b2c57)。region-loader.js に findTunnelByPosition / findBridgeByPosition / calcInfraPolylineDistance を追加。meter.js calculateGapFill が A・B 両方が同じ infra 上にあれば polyline 距離で計算・Math.max(polylineDist, naive) で過少課金防止 | meter.js + region-loader.js |
 | Phase1.C | Off-Road Mode (GPS polyline 累積) | snap 連続失敗 N 回検出時に Kalman 平滑化済 GPS 連続点を polyline として累積。GPS accuracy >50m / 物理上限 160km/h / isStationary はフィルタ。公道復帰で通常モード | meter.js + map-matcher.js 拡張 |
 | Phase1.ZUPT | Zero Velocity Update | 停車検出時に Kalman 速度ドリフトをリセット。既存 isStationary 判定の延長 | gps-worker.js 拡張 |
 
