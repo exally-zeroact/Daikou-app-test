@@ -103,7 +103,7 @@
 | ID | 機能 | 詳細 | 場所 |
 |----|------|------|------|
 | Phase1.B | トンネル A→B polyline 精緻化 | ✅ 実装完了 (2026-05-10・commit c18b2c57)。region-loader.js に findTunnelByPosition / findBridgeByPosition / calcInfraPolylineDistance を追加。meter.js calculateGapFill が A・B 両方が同じ infra 上にあれば polyline 距離で計算・Math.max(polylineDist, naive) で過少課金防止 | meter.js + region-loader.js |
-| Phase1.C | Off-Road Mode (GPS polyline 累積) | snap 連続失敗 N 回検出時に Kalman 平滑化済 GPS 連続点を polyline として累積。GPS accuracy >50m / 物理上限 160km/h / isStationary はフィルタ。公道復帰で通常モード | meter.js + map-matcher.js 拡張 |
+| Phase1.C | Off-Road Mode (GPS polyline 累積) | ✅ 実装完了 (2026-05-10・commit fa11e75f)。snap 連続失敗 5 回検出で起動・retroactive add で取り漏れ補填・Worker B 復帰で二重課金回避し終了。state.offroad_distance_m / offroad_count を追加 | meter.js + map-matcher.js |
 | Phase1.ZUPT | Zero Velocity Update | 停車検出時に Kalman 速度ドリフトをリセット。既存 isStationary 判定の延長 | gps-worker.js 拡張 |
 
 ### Phase 2: AI 訓練データ収集 framework (2 日工数)
