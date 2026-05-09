@@ -23,7 +23,7 @@ let CONFIG = {
   heading_diff_threshold_deg: 90,
   heading_check_min_distance_m: 5,
   heading_check_min_speed_kmh: 5,
-  kalman_Q: 3,
+  kalman_Q: 3,                      // T5 既定値 (typeCode 不明時 / setRoadType 未受信時)
   jam_speed_max_kmh: 10,
   jam_duration_sec: 60,
   _kalman_Q_override: null, // コンパス融合で動的に変更
@@ -44,6 +44,28 @@ let isStationary = false;
 let trafficJamSince = null;
 let isTrafficJam = false;
 let kalman = null;
+
+// T5 (2026-05-09): Adaptive Kalman Q (道路種別連動)
+//   map-matcher.js で commit された snap の typeCode を main 経由で受信し、
+//   typeCode に応じて Q を動的化する。
+//   motorway/trunk: 直線・信頼度高 → Q 小 (1.5)
+//   residential/track: カーブ多・信頼度低 → Q 大 (4.0)
+//   typeCode 不明時は CONFIG.kalman_Q (=3) を使う。
+let _currentTypeCode = null;
+function _typeCodeToQ(typeCode){
+  if(typeCode == null) return CONFIG.kalman_Q;
+  switch(typeCode){
+    case 0: case 1:           return 1.5;  // motorway / trunk
+    case 7: case 8:           return 1.5;  // motorway_link / trunk_link
+    case 2: case 3:           return 2.5;  // primary / secondary
+    case 9: case 10:          return 2.5;  // primary_link / secondary_link
+    case 4: case 5:           return 3.0;  // tertiary / unclassified
+    case 11:                  return 3.0;  // tertiary_link
+    case 6: case 12:          return 4.0;  // residential / track
+    default:                  return CONFIG.kalman_Q;
+  }
+}
+function _getDynamicBaseQ(){ return _typeCodeToQ(_currentTypeCode); }
 
 // 2026-05-09 (P4 廃止): cellular tunnel hint 完全削除
 //   理由: layer (v6 attribute) + tunnels-{pref}.js データで道路属性ベースに代替
@@ -76,7 +98,8 @@ class KalmanGPS {
       this._accuracy = accuracy; this._timestamp = timestamp;
       return { lat, lng };
     }
-    const Q = (qOverride != null) ? qOverride : CONFIG.kalman_Q;
+    // T5: typeCode 連動の動的 Q を既定とし、qOverride (コンパス融合) があれば優先
+    const Q = (qOverride != null) ? qOverride : _getDynamicBaseQ();
     const decayed = Math.sqrt(
       this._accuracy * this._accuracy + Q * Q * dt * dt
     );
@@ -376,8 +399,12 @@ function processPosition(data) {
       // 不一致（diff大）→ Q大きく（GPS座標をより信頼）
       if (compassHeading != null) {
         const matchRatio = 1 - (diff / CONFIG.heading_diff_threshold_deg); // 0〜1
-        CONFIG._kalman_Q_override = CONFIG.kalman_Q * (0.5 + 0.5 * (1 - matchRatio));
-        CONFIG._compassDebug = 'コンパス融合: 方向差' + diff.toFixed(0) + '° Q=' + CONFIG._kalman_Q_override.toFixed(1);
+        // T5: ベース Q を typeCode 連動の動的値にし、コンパス融合は乗算で適用
+        const baseQ = _getDynamicBaseQ();
+        CONFIG._kalman_Q_override = baseQ * (0.5 + 0.5 * (1 - matchRatio));
+        CONFIG._compassDebug = 'コンパス融合: 方向差' + diff.toFixed(0) + '° baseQ=' + baseQ.toFixed(1) +
+          ' Q=' + CONFIG._kalman_Q_override.toFixed(1) +
+          ' typeCode=' + (_currentTypeCode != null ? _currentTypeCode : '?');
         wlog('[GPS] ' + CONFIG._compassDebug);
       }
     }
@@ -473,6 +500,18 @@ self.onmessage = function(e) {
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;
+    _currentTypeCode = null;     // T5: typeCode もリセット
+    return;
+  }
+
+  // T5 (2026-05-09): main 経由で map-matcher の commit typeCode を受信
+  //   _currentTypeCode に保持し、次回以降の Kalman 更新で動的 Q を選択
+  if (type === 'setRoadType') {
+    if (data && typeof data.typeCode === 'number') {
+      _currentTypeCode = data.typeCode;
+    } else if (data && data.typeCode == null) {
+      _currentTypeCode = null;
+    }
     return;
   }
 

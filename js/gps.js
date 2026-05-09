@@ -578,6 +578,15 @@ const GPS = (() => {
     };
   }
 
+  // T5 (2026-05-09): map-matcher.js が commit した snap の typeCode を Worker に伝達
+  //   meter.js の mmResult ハンドラから呼ばれる
+  //   Worker 側で typeCode → Q の動的マッピングを行う
+  function setRoadType(typeCode){
+    if (useWorker && worker){
+      worker.postMessage({ type: 'setRoadType', data: { typeCode: typeCode } });
+    }
+  }
+
   return {
     start, stop,
     calcDistance, calcDistance3D,
@@ -589,5 +598,7 @@ const GPS = (() => {
     //   重複防止フラグ（_compassListenerAdded/_motionListenerAdded）で
     //   既に登録済みなら何もしない
     startCompass, startMotion,
+    // T5 (2026-05-09): Adaptive Kalman Q (道路種別連動) 用 API
+    setRoadType,
   };
 })();

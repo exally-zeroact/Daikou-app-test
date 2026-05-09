@@ -163,8 +163,17 @@ const Meter = (() => {
       state.mm_distance_m += m.mmIncrementM;
     }
     // D4 (2026-05-09): 直近 snap の typeCode を記録 (gap fill 速度クランプ用)
+    // T5 (2026-05-09): 同じ typeCode を gps-worker.js に伝達して Kalman Q を動的化
+    //   - motorway/trunk: Q=1.5・residential/track: Q=4.0 等
+    //   - typeCode 変化時のみ送信 (postMessage 過剰防止)
     if(m.snap && m.snap.typeCode != null){
-      _lastSnapTypeCode = m.snap.typeCode;
+      const newTypeCode = m.snap.typeCode;
+      if(newTypeCode !== _lastSnapTypeCode){
+        _lastSnapTypeCode = newTypeCode;
+        if(typeof GPS !== 'undefined' && typeof GPS.setRoadType === 'function'){
+          try { GPS.setRoadType(newTypeCode); } catch(_){}
+        }
+      }
     }
     if(m.snapped) state.mm_snap_count++;
     if(m.skipped){

@@ -582,8 +582,44 @@ function _typeTransitionScore(prevBucket, currBucket){
   return 0.05;  // 不自然な遷移（motorway → residential 等）に強ペナルティ
 }
 
+// T7 (2026-05-09): 道路曲率による σ_perp 動的化
+//   直近 commit 履歴 N=4 の segment bearing 差から平均角度差を推定
+//   平均角度差大 (カーブ多) → σ_perp 緩和 (snap miss 防止)
+//   平均角度差小 (直線) → σ_perp 厳格 (snap 精度向上)
+//   範囲: 1.0σ (完全直線) 〜 2.5σ (急カーブ)・既定 1.5σ (履歴不足時)
+const _CURVATURE_HISTORY_MAX = 4;
+let _curvatureHistory = [];   // bearing deg list (FIFO・新→旧 push 順)
+let _currentSigmaPMult = 1.5; // _scoreCandidates → _mahalanobisEmission に渡す
+
+function _updateCurvatureFromCommit(snap){
+  if(!snap || snap.segLatA == null || snap.segLatB == null) return;
+  const bearing = _segmentBearing(snap.segLatA, snap.segLngA, snap.segLatB, snap.segLngB);
+  _curvatureHistory.push(bearing);
+  if(_curvatureHistory.length > _CURVATURE_HISTORY_MAX){
+    _curvatureHistory.shift();
+  }
+  if(_curvatureHistory.length >= 2){
+    let sumDiff = 0, count = 0;
+    for(let i = 1; i < _curvatureHistory.length; i++){
+      sumDiff += _angleDiff(_curvatureHistory[i], _curvatureHistory[i - 1]);
+      count++;
+    }
+    const avgDiffDeg = sumDiff / count;
+    // 0° (直線) → 1.0σ・30° (急カーブ) 以上で 2.5σ・clamp
+    //   avgDiffDeg / 20 を 1.0 に加算 (傾き調整) し [1.0, 2.5] にクランプ
+    const mult = Math.max(1.0, Math.min(2.5, 1.0 + avgDiffDeg / 20));
+    _currentSigmaPMult = mult;
+  } else {
+    _currentSigmaPMult = 1.5;
+  }
+}
+function _resetCurvatureHistory(){
+  _curvatureHistory = [];
+  _currentSigmaPMult = 1.5;
+}
+
 // Mahalanobis 楕円 emission（進行方向に短く・直交方向に長い）
-// 走行方向 σ_along = 0.5σ / 直交方向 σ_perp = 1.5σ・σ = 4 + 0.5 × accuracy
+// 走行方向 σ_along = 0.5σ / 直交方向 σ_perp = T7 動的 (1.0〜2.5σ)・σ = 4 + 0.5 × accuracy
 // heading 不明時は等方化（σ_along = σ_perp = σ）
 function _mahalanobisEmission(snap, gpsLat, gpsLng, accuracy, headingDeg){
   const mpd = _metersPerDegree(gpsLat);
@@ -598,7 +634,8 @@ function _mahalanobisEmission(snap, gpsLat, gpsLng, accuracy, headingDeg){
     along =  dx * sinH + dy * cosH;        // 進行方向成分
     perp  = -dx * cosH + dy * sinH;        // 直交方向成分
     const sigmaA = 0.5 * sigma;
-    const sigmaP = 1.5 * sigma;
+    // T7: 1.5 固定 → 曲率連動 _currentSigmaPMult に置換
+    const sigmaP = _currentSigmaPMult * sigma;
     const arg = -0.5 * ((along/sigmaA)**2 + (perp/sigmaP)**2);
     return Math.exp(arg);
   } else {
@@ -1937,6 +1974,7 @@ self.onmessage = function(e){
     prevSnap = null;
     _gpsBuffer.length = 0;
     _clearActivePinnedTile();   // M6: アクティブ pin も解除
+    _resetCurvatureHistory();   // T7: 業務終了で曲率履歴もクリア
     // MM-7: 業務終了時に pheromone を蒸発・grid bias を含め IDB に永続保存
     _evaporatePheromones();
     _savePheromoneAll();
@@ -2074,6 +2112,8 @@ self.onmessage = function(e){
             }
           }
           lastCommittedSnap = newCommitted;  // observationTimestamp を含む
+          // T7 (2026-05-09): commit ごとに曲率履歴を更新
+          _updateCurvatureFromCommit(newCommitted);
         }
 
         // MM-2 互換 prevSnap も更新（Viterbi 不在時 fallback 経路用に維持）
