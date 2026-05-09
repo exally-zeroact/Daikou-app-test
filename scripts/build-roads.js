@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 /**
- * GeoJSON道路データ → ダイコメ用 roads-<prefecture>.js 変換 v6
+ * GeoJSON道路データ → ダイコメ用 roads-<prefecture>.js 変換 v7
  *
- * v6 (2026-05-07): typeCode 1byte → 16bit bitmap 2byte
+ * v7 (2026-05-09): T6 - 24bit bitmap 3byte (maxspeed 追加)
  *   bit 0-3   typeCode (motorway-track, 0-12)
  *   bit 4     oneway
- *   bit 5-6   incline (00=なし, 01=登り急, 10=下り急, 11=方向不明)
- *   bit 7-9   lanes   (0=不明, 1-6=本数, 7=7+)
- *   bit 10-11 width   (00=不明, 01=≤2m, 10=2-5m, 11=>5m)
- *   bit 12-13 layer   (00=平面, 01=高架, 10=地下, 11=その他)
- *   bit 14-15 access  (D1 2026-05-09: 00=public, 01=private/customers, 10=no_motor)
+ *   bit 5-6   incline
+ *   bit 7-9   lanes
+ *   bit 10-11 width
+ *   bit 12-13 layer
+ *   bit 14-15 access  (D1: 00=public/01=private/10=no_motor)
+ *   bit 16-18 maxspeed (T6 2026-05-09・8段階):
+ *               0=不明, 1=≤30km/h, 2=40, 3=50, 4=60, 5=70, 6=80, 7=≥100km/h
+ *   bit 19-23 reserved
+ *
+ * v6 (2026-05-07): typeCode 1byte → 16bit bitmap 2byte
+ *   bit 0-3   typeCode / bit 4 oneway / bit 5-6 incline /
+ *   bit 7-9 lanes / bit 10-11 width / bit 12-13 layer / bit 14-15 access
  *
  * v5: per-prefecture, 全通過グリッド登録 (継続)
  * v4: per-prefecture
@@ -22,10 +29,17 @@
  *
  * 入力 GeoJSON properties で参照する OSM タグ:
  *   highway, oneway, incline, lanes, width, layer
- *   access, motor_vehicle (D1 2026-05-09 追加)
+ *   access, motor_vehicle (D1 2026-05-09)
+ *   maxspeed (T6 2026-05-09・整数または "30 km/h" / "30 mph")
+ *
+ * T4 (2026-05-09): turn:restriction サイドカー
+ *   --turn-restrictions=<path> JSON: [{ pref, fromRoadIdx, toRoadIdx, kind }]
+ *   roads-{pref}.js の restrictions[] に格納される
  *
  * 使い方:
  *   node build-roads.js <input.geojson> <output_dir> <region> [--dem]
+ *                       [--turn-restrictions=<path>]
+ *                       [--gsi-2500-dir=<path>]
  *   --dem  : 国土地理院 標高タイル (tmp/tiles) で各道路の勾配を計算し
  *            OSM incline タグが無い道路の incline bit を補完する。
  *            事前に scripts/fetch-dem-tiles.js で県別に取得しておく。
@@ -44,6 +58,10 @@ const ONLY_PREF = onlyArg ? onlyArg.slice(7) : null; // 単一県のみ書き出
 //   フラグ未指定時は OSM のみで build (= 旧挙動)
 const gsiArg = args.find(a => a.startsWith('--gsi-2500-dir='));
 const GSI_2500_DIR = gsiArg ? gsiArg.slice(15) : null;
+// T4 (2026-05-09): turn:restriction サイドカーファイル
+//   JSON 形式: [{ pref: 'ehime', fromRoadIdx: 12, toRoadIdx: 34, kind: 'no_right_turn' }]
+const trArg = args.find(a => a.startsWith('--turn-restrictions='));
+const TURN_RESTRICTIONS_PATH = trArg ? trArg.slice(20) : null;
 const positional = args.filter(a => !a.startsWith('--'));
 const [INPUT, OUTPUT_DIR, REGION] = positional;
 if (!INPUT || !OUTPUT_DIR || !REGION) {
@@ -185,6 +203,32 @@ function parseLayer(raw) {
   return 3;
 }
 
+// T6 (2026-05-09): maxspeed → 0-7 (3 bit)
+//   0=不明 / 1=≤30 / 2=40 / 3=50 / 4=60 / 5=70 / 6=80 / 7=≥100 (km/h)
+//   OSM raw: "30", "30 km/h", "30 mph", "JP:urban", "signals" 等
+function parseMaxspeed(raw) {
+  if (raw == null) return 0;
+  let v = String(raw).trim().toLowerCase();
+  if (!v) return 0;
+  // JP / DE / city zone 等の symbolic は不明扱い
+  if (/^(none|signals|variable|jp|de|fr)/.test(v)) return 0;
+  const m = v.match(/^(\d+(?:\.\d+)?)\s*(km\/?h|kmh|kph|mph|km|m)?$/);
+  if (!m) return 0;
+  let kmh = parseFloat(m[1]);
+  if (isNaN(kmh) || kmh <= 0) return 0;
+  const unit = m[2] || '';
+  if (unit === 'mph') kmh *= 1.60934;
+  // ビン分け
+  if (kmh >= 100) return 7;
+  if (kmh >= 80)  return 6;
+  if (kmh >= 70)  return 5;
+  if (kmh >= 60)  return 4;
+  if (kmh >= 50)  return 3;
+  if (kmh >= 40)  return 2;
+  if (kmh > 0)    return 1;        // ≤30
+  return 0;
+}
+
 // D1 (2026-05-09): access フラグを bit 14-15 に追加
 //   00 = public (通行可・通常道路)
 //   01 = private (access=private/customers/destination・関係者用)
@@ -205,7 +249,7 @@ function parseAccessRestriction(props) {
   return 0;
 }
 
-// 4ビット typeCode + 4ビット incline/oneway + 8ビット lanes/width/layer + access
+// v7 (T6 2026-05-09): 24-bit bitmap
 //   bit 0-3   typeCode
 //   bit 4     oneway
 //   bit 5-6   incline
@@ -213,6 +257,8 @@ function parseAccessRestriction(props) {
 //   bit 10-11 width
 //   bit 12-13 layer
 //   bit 14-15 access (D1 2026-05-09・00=public/01=private/10=no_motor)
+//   bit 16-18 maxspeed (T6 2026-05-09・8段階)
+//   bit 19-23 reserved
 function packAttrBitmap(typeCode, props, inclineCode) {
   let bits = typeCode & 0x0F;
   bits |= (parseOneway(props.oneway) & 0x01) << 4;
@@ -221,7 +267,8 @@ function packAttrBitmap(typeCode, props, inclineCode) {
   bits |= (parseWidth(props.width) & 0x03) << 10;
   bits |= (parseLayer(props.layer) & 0x03) << 12;
   bits |= (parseAccessRestriction(props) & 0x03) << 14;
-  return bits & 0xFFFF;
+  bits |= (parseMaxspeed(props.maxspeed) & 0x07) << 16;
+  return bits & 0xFFFFFF;     // 24bit mask
 }
 
 // ─── Douglas-Peucker ──────────────────────────────────────────────
@@ -358,6 +405,30 @@ if(GSI_2500_DIR){
   }
 }
 
+// T4 (2026-05-09): turn:restriction サイドカーロード
+//   形式: [{ pref, fromRoadIdx, toRoadIdx, kind? }]
+//   pref ごとに [[from, to], ...] にグループ化して JSON 出力に埋め込む
+const turnRestrictionsByPref = {};
+if (TURN_RESTRICTIONS_PATH) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TURN_RESTRICTIONS_PATH, 'utf8'));
+    if (Array.isArray(raw)) {
+      let count = 0;
+      for (const r of raw) {
+        if (r && r.pref && typeof r.fromRoadIdx === 'number' && typeof r.toRoadIdx === 'number') {
+          (turnRestrictionsByPref[r.pref] ||= []).push([r.fromRoadIdx, r.toRoadIdx]);
+          count++;
+        }
+      }
+      console.log(`  → turn:restriction: ${count} 件を ${Object.keys(turnRestrictionsByPref).length} 県に振り分け`);
+    } else {
+      console.warn(`  → turn-restrictions: array 形式ではないため無視`);
+    }
+  } catch (e) {
+    console.warn(`  → turn-restrictions ロード失敗: ${e.message} (制約なしで build 続行)`);
+  }
+}
+
 let totalRoads = 0;
 let totalPointsBefore = 0, totalPointsAfter = 0;
 let droppedUnknownType = 0;
@@ -369,7 +440,7 @@ for (const p of targetPrefs) { buckets[p] = []; bboxByPref[p] = [Infinity, Infin
 
 // 属性充足率カウンタ
 const attrCounters = {};
-for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, access: 0, track: 0, inclineFromOSM: 0, inclineFromDem: 0 };
+for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, access: 0, maxspeed: 0, track: 0, inclineFromOSM: 0, inclineFromDem: 0 };
 
 for (const f of geo.features) {
   if (!f.geometry) continue;
@@ -431,6 +502,7 @@ for (const f of geo.features) {
     if ((bitmap >> 10) & 0x03) c.width++;
     if ((bitmap >> 12) & 0x03) c.layer++;
     if ((bitmap >> 14) & 0x03) c.access++;
+    if ((bitmap >> 16) & 0x07) c.maxspeed++;     // T6
     if (typeCode === 12) c.track++;
     if (inclineSource === 'osm') c.inclineFromOSM++;
     if (inclineSource === 'dem') c.inclineFromDem++;
@@ -451,11 +523,12 @@ for (const pref of targetPrefs) {
     continue;
   }
 
-  // バイナリエンコード（v6: bitmap 2byte little-endian）
+  // バイナリエンコード（v7: bitmap 3byte little-endian）
   const byteBuf = [];
   for (const [bitmap, points] of entries) {
-    byteBuf.push(bitmap & 0xFF);          // LSB
-    byteBuf.push((bitmap >> 8) & 0xFF);   // MSB
+    byteBuf.push(bitmap & 0xFF);             // LSB
+    byteBuf.push((bitmap >> 8) & 0xFF);      // mid
+    byteBuf.push((bitmap >> 16) & 0xFF);     // MSB (maxspeed bits + reserved)
     writeVarint(byteBuf, points.length);
     writeSignedVarint(byteBuf, points[0][0]);
     writeSignedVarint(byteBuf, points[0][1]);
@@ -506,8 +579,11 @@ for (const pref of targetPrefs) {
 
   const PREF_UPPER = pref.toUpperCase().replace(/-/g, '_');
   const c = attrCounters[pref];
+  // T4 (2026-05-09): turn:restriction サイドカーから当該県分を抽出
+  //   形式: [[fromIdx, toIdx], ...]・空 array なら制約なし
+  const restrictionsForPref = (turnRestrictionsByPref[pref] || []);
   let outBody = JSON.stringify({
-    v: 6,
+    v: 7,
     region: REGION,
     prefecture: pref,
     generated: new Date().toISOString(),
@@ -523,10 +599,13 @@ for (const pref of targetPrefs) {
       lanes:    'bit 7-9 (0=unknown, 1-6=lanes, 7=7+)',
       width:    'bit 10-11 (0=unknown, 1=≤2m, 2=2-5m, 3=>5m)',
       layer:    'bit 12-13 (0=ground, 1=bridge+, 2=tunnel-, 3=other)',
+      access:   'bit 14-15 (0=public, 1=private, 2=no_motor)',
+      maxspeed: 'bit 16-18 (0=unk, 1=≤30, 2=40, 3=50, 4=60, 5=70, 6=80, 7=≥100 km/h)',
     },
     attrCounts: c,
     grid,
     roadsB64,
+    restrictions: restrictionsForPref,    // T4
   });
   // GitHub push protection の Tencent Cloud Secret ID 誤検出パターン
   // AKID[A-Za-z0-9]{32,} を文字列リテラル境界で分割して回避
@@ -543,8 +622,8 @@ for (const pref of targetPrefs) {
   const out = `// Auto-generated by .github/workflows/osm-update.yml
 // Source: Geofabrik ${REGION}-latest.osm.pbf → ${pref}
 // Generated: ${new Date().toISOString()}
-// Format v6: per-prefecture, 16bit attr bitmap + varint + base64 + 全通過グリッド登録
-//   bitmap: typeCode(4) | oneway(1) | incline(2) | lanes(3) | width(2) | layer(2) | reserved(2)
+// Format v7: per-prefecture, 24bit attr bitmap + varint + base64 + 全通過グリッド登録
+//   bitmap: typeCode(4) | oneway(1) | incline(2) | lanes(3) | width(2) | layer(2) | access(2) | maxspeed(3) | reserved(5)
 // © OpenStreetMap contributors (ODbL)
 window.ROADS_${PREF_UPPER} = ${outBody};
 `;

@@ -30,8 +30,17 @@ importScripts('osrm-client.js');   // MM-6: OSRM /match クライアント
 
 // 既存定数（MM-1 と同一・挙動互換のため不変）
 const MM_MAX_SNAP_DIST_M    = 50;     // snap 単独の上限（fallback）
-const MM_MAX_SEGMENT_DIST_M = 1000;
+const MM_MAX_SEGMENT_DIST_M = 1000;   // T9 (2026-05-09): 単純 skip ではなく「明らかな jump」判定の閾値として使用
 const MM_GAP_RESET_SEC      = 5;
+
+// T4 (2026-05-09): turn:restriction 違反 transition のペナルティ
+//   _violatesOneway と同じ ×0.05 (事実上除外だが完全 0 にはしない)
+const TURN_RESTRICTION_PENALTY = 0.05;
+// T9 (2026-05-09): GPS jump 関連
+//   ・ jump prob が大きい候補 emission を緩める乗数 (1 - jumpProb × strength)
+//   ・ jump prob 0.95 超で「明らかなジャンプ」として segment 加算 skip
+const T9_JUMP_PENALTY_STRENGTH = 0.7;   // jump prob×strength で emission 減衰
+const T9_HARD_SKIP_PROB        = 0.95;  // 確率ベース skip 閾値
 
 // MM-3 / MM-7: Viterbi パラメタ
 // MM-7: 窓幅 N を 15 に拡張（MCM Lazy Viterbi）
@@ -452,6 +461,71 @@ function _estimatePdopMultiplier(){
   return 1.0;
 }
 
+// T9 (2026-05-09): GPS jump 確率推定
+//   直近 4 step (= recent buf 5 点) の trajectory 一貫性を見て、現在の GPS 点が
+//   「multipath による瞬間ジャンプ」なのか「実際の高速移動」なのかを区別する。
+//   jumpProb ∈ [0,1]・1 に近いほど multipath ジャンプの確率が高い
+//
+//   要素:
+//     speedJump: 直近の typical 速度に対する current step の速度比
+//     bearingJump: 直近 trajectory bearing に対する current step bearing の差
+//     ピーク検出: jumpProb = combine(speedJump, bearingJump)
+//
+//   _recentGpsBuf は _pushRecentGps で先に積まれている (現在の点を含む末尾)
+//   末尾と prev (-2) で current step を計算
+function _estimateJumpProb(){
+  const n = _recentGpsBuf.length;
+  if(n < 3) return 0;
+  const curr = _recentGpsBuf[n - 1];
+  const prev = _recentGpsBuf[n - 2];
+  const dtCurr = (curr.t - prev.t) / 1000;
+  if(dtCurr <= 0 || dtCurr > 30) return 0;
+  const distCurr = _haversine(prev.lat, prev.lng, curr.lat, curr.lng);
+  const speedCurrKmh = (distCurr / dtCurr) * 3.6;
+
+  // ベースライン速度 (current 除外の median 的扱い)
+  const baseSpeeds = [];
+  for(let i = 1; i < n - 1; i++){
+    const a = _recentGpsBuf[i - 1];
+    const b = _recentGpsBuf[i];
+    const dt = (b.t - a.t) / 1000;
+    if(dt <= 0 || dt > 30) continue;
+    const d = _haversine(a.lat, a.lng, b.lat, b.lng);
+    baseSpeeds.push((d / dt) * 3.6);
+  }
+  if(baseSpeeds.length === 0) return 0;
+  baseSpeeds.sort(function(a,b){ return a - b; });
+  const baseSpeedKmh = baseSpeeds[Math.floor(baseSpeeds.length / 2)];   // median
+
+  // 速度比ベースの jump 確率
+  //   ratio < 2.5 → 0   /   ratio = 5 → ~0.5   /   ratio > 7.5 → ~1.0
+  //   但しベース速度が 5km/h 未満の場合は除算で爆発するので底上げ
+  const refSpeed = Math.max(baseSpeedKmh, 5);
+  const ratio = speedCurrKmh / refSpeed;
+  let speedJumpProb = 0;
+  if(ratio > 2.5){
+    speedJumpProb = Math.min(1.0, (ratio - 2.5) / 5.0);
+  }
+
+  // bearing change ベース
+  let bearingJumpProb = 0;
+  if(n >= 4){
+    const prev2 = _recentGpsBuf[n - 3];
+    if(_haversine(prev2.lat, prev2.lng, prev.lat, prev.lng) > 1 && distCurr > 1){
+      const baseBearing = _segmentBearing(prev2.lat, prev2.lng, prev.lat, prev.lng);
+      const currBearing = _segmentBearing(prev.lat, prev.lng, curr.lat, curr.lng);
+      const diff = _angleDiff(baseBearing, currBearing);
+      // 90° 以下なら 0・90-180° で線形 0→1
+      bearingJumpProb = Math.max(0, Math.min(1, (diff - 90) / 90));
+    }
+  }
+
+  // 速度 jump と bearing jump は独立的に見て max を採用 (どちらかが強ければ jump)
+  // ただし両方弱い時は (1 - (1 - a)(1 - b)) で増幅 (= probabilistic OR)
+  const orProb = 1 - (1 - speedJumpProb) * (1 - bearingJumpProb);
+  return Math.max(speedJumpProb, bearingJumpProb, orProb * 0.9);
+}
+
 // M5 (2026-05-09): centripetal Catmull-Rom (alpha=0.5) でオーバーシュート抑制
 //   旧: 一様 (uniform) パラメタ化 → 急カーブで実走より 0.5-2% 過大評価
 //   新: chord 距離の sqrt を knot 距離として Barry-Goldman で評価
@@ -618,8 +692,28 @@ function _resetCurvatureHistory(){
   _currentSigmaPMult = 1.5;
 }
 
+// T6 (2026-05-09): maxspeed (3-bit) → σ_perp 乗数
+//   高速制限道路 (100+) は GPS 横ブレ大なので σ 緩める = snap miss 防止
+//   低速制限道路 (≤30) は細道なので σ 厳しく = 隣の道に snap 流出を防止
+//   maxspeed が 0 (不明) の場合は中立 (1.0・既存挙動)
+function _maxspeedSigmaMultiplier(maxspeedCode){
+  if(maxspeedCode == null || maxspeedCode === 0) return 1.0;
+  switch(maxspeedCode){
+    case 1: return 0.7;    // ≤30 km/h
+    case 2: return 0.85;   // 40 km/h
+    case 3: return 0.85;   // 50 km/h
+    case 4: return 1.0;    // 60 km/h (中立)
+    case 5: return 1.0;    // 70 km/h (中立)
+    case 6: return 1.15;   // 80 km/h
+    case 7: return 1.3;    // ≥100 km/h
+    default: return 1.0;
+  }
+}
+
 // Mahalanobis 楕円 emission（進行方向に短く・直交方向に長い）
-// 走行方向 σ_along = 0.5σ / 直交方向 σ_perp = T7 動的 (1.0〜2.5σ)・σ = 4 + 0.5 × accuracy
+// 走行方向 σ_along = 0.5σ
+// 直交方向 σ_perp = (T7 曲率連動 _currentSigmaPMult × T6 maxspeed 乗数) × σ
+// σ = 4 + 0.5 × accuracy
 // heading 不明時は等方化（σ_along = σ_perp = σ）
 function _mahalanobisEmission(snap, gpsLat, gpsLng, accuracy, headingDeg){
   const mpd = _metersPerDegree(gpsLat);
@@ -634,8 +728,9 @@ function _mahalanobisEmission(snap, gpsLat, gpsLng, accuracy, headingDeg){
     along =  dx * sinH + dy * cosH;        // 進行方向成分
     perp  = -dx * cosH + dy * sinH;        // 直交方向成分
     const sigmaA = 0.5 * sigma;
-    // T7: 1.5 固定 → 曲率連動 _currentSigmaPMult に置換
-    const sigmaP = _currentSigmaPMult * sigma;
+    // T7: 曲率連動 + T6: maxspeed 乗数
+    const speedMult = _maxspeedSigmaMultiplier(snap.maxspeed);
+    const sigmaP = _currentSigmaPMult * speedMult * sigma;
     const arg = -0.5 * ((along/sigmaA)**2 + (perp/sigmaP)**2);
     return Math.exp(arg);
   } else {
@@ -709,6 +804,10 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
   //   ビル街マルチパス・衛星配置偏りで accuracy が低くても実誤差大の状況に対応
   const pdopMult = _estimatePdopMultiplier();
   const sigma = (4 + 0.5 * accuracy) * sigmaMult * pdopMult;
+  // T9 (2026-05-09): GPS jump 確率を一度だけ計算 (全候補共通)
+  //   _recentGpsBuf は本関数の外で _pushRecentGps 済 (現在の点が末尾)
+  const jumpProb = _estimateJumpProb();
+  const jumpScale = 1 - jumpProb * T9_JUMP_PENALTY_STRENGTH;   // [1 - 0.7, 1]
   for(let i = 0; i < cands.length; i++){
     const c = cands[i];
     // ① 距離スコア exp(-d²/(2σ²))
@@ -766,6 +865,12 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     //   no_motor (2) → ×0.05 (歩行者専用・絶対通らない)
     if(c.access === 1) attrBoost *= 0.5;
     else if(c.access === 2) attrBoost *= 0.05;
+    // T9 (2026-05-09): GPS jump 確率分の emission 緩和
+    //   全候補に共通の jumpScale (1 - jumpProb × strength) を乗算
+    //   jump 時は全候補 emission が一律下がる → Viterbi 内で旧 commit 維持側が
+    //   勝ちやすくなり、multipath による誤 snap を抑制
+    //   実際の高速移動では bearing が一致するため bearingJumpProb が低く影響少
+    attrBoost *= jumpScale;
     // 総合
     c._distScore = distScore;
     c._headScore = headScore;
@@ -774,6 +879,7 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     c._layerScore = layerScore;
     c._phBoost = phBoost;
     c._attrBoost = attrBoost;
+    c._jumpProb = jumpProb;     // T9: diagnostic
     c._typeBucket = currBucket;
     // M1 (2026-05-09): log 空間で和算化して数値 underflow を防止
     //   旧: 7 個の [0,1] 値を乗算 → 連続 100 step で 1e-30 以下に underflow
@@ -1565,6 +1671,18 @@ function _transitionScore(prevSnapC, currSnapC, prevGps, currGps){
   if(_violatesOneway(prevSnapC, currSnapC, prevGps, currGps)){
     score *= ONEWAY_PENALTY;
   }
+  // T4 (2026-05-09): turn:restriction 違反 (右折/直進禁止等) にペナルティ
+  //   roads-{pref}.js の restrictions[] に [fromIdx, toIdx] が登録されていれば違反
+  //   prev/curr が同 pref 異 road の遷移時のみ判定 (road 内移動は対象外)
+  if(prevSnapC && currSnapC
+     && prevSnapC.prefecture && prevSnapC.prefecture === currSnapC.prefecture
+     && prevSnapC.roadIndex !== currSnapC.roadIndex){
+    const dec = decoders.get(prevSnapC.prefecture);
+    if(dec && typeof dec.isRestrictedTransition === 'function'
+       && dec.isRestrictedTransition(prevSnapC.roadIndex, currSnapC.roadIndex)){
+      score *= TURN_RESTRICTION_PENALTY;
+    }
+  }
   // 数値安全化（log(0) 防止）
   return score < 1e-10 ? 1e-10 : score;
 }
@@ -1944,9 +2062,20 @@ self.onmessage = function(e){
             : 0;
           if(dtSec <= MM_GAP_RESET_SEC){
             const r = _routeDistance(prev, c);
-            if(r && typeof r.distanceM === 'number'
-               && r.distanceM >= 0 && r.distanceM <= MM_MAX_SEGMENT_DIST_M){
-              totalIncrement += r.distanceM;
+            if(r && typeof r.distanceM === 'number' && r.distanceM >= 0){
+              // T9 (2026-05-09): flush 経路でも物理上限ベースの判定に統一
+              const physMaxM = 58 * Math.max(1, dtSec) + 50;
+              const allowedMaxM = Math.max(MM_MAX_SEGMENT_DIST_M, physMaxM);
+              if(r.distanceM <= allowedMaxM){
+                totalIncrement += r.distanceM;
+              } else {
+                // flush は業務終了時の最終 commit・最後に多少の不確実性は許容
+                // ただし jumpProb 高なら skip
+                const jp = _estimateJumpProb();
+                if(jp < T9_HARD_SKIP_PROB){
+                  totalIncrement += allowedMaxM;
+                }
+              }
             }
           }
         }
@@ -2101,12 +2230,28 @@ self.onmessage = function(e){
               reason = 'gap reset between commits';
             } else {
               const r = _routeDistance(lastCommittedSnap, newCommitted);
-              if(r && typeof r.distanceM === 'number'){
-                if(r.distanceM >= 0 && r.distanceM <= MM_MAX_SEGMENT_DIST_M){
+              if(r && typeof r.distanceM === 'number' && r.distanceM >= 0){
+                // T9 (2026-05-09): 旧 MM_MAX_SEGMENT_DIST_M=1000 の単純 skip を廃止
+                //   ・ 短時間に 1km 超過は通常 ありえないが、120km/h 高速道路なら 30 秒で 1km
+                //     普通車でも実 13.3m/s × dtSec 程度は妥当
+                //   ・ 物理的に許容できる移動距離 + jumpProb の確信度で skip 判定
+                //   許容上限: max(MM_MAX_SEGMENT_DIST_M, 物理上限速度 × dtSec × 余裕係数)
+                //   物理上限 = 160km/h ≈ 44.4 m/s × 1.3 余裕 ≈ 58 m/s
+                const physMaxM = 58 * Math.max(1, dtSec) + 50;     // dtSec=1s でも下限 108m
+                const allowedMaxM = Math.max(MM_MAX_SEGMENT_DIST_M, physMaxM);
+                const lastJumpProb = _estimateJumpProb();
+                if(r.distanceM <= allowedMaxM){
+                  // 物理範囲内 → 加算 (jumpProb は scoring で既に減衰済)
                   mmIncrementM = r.distanceM;
+                } else if(lastJumpProb < T9_HARD_SKIP_PROB){
+                  // 物理範囲超過だが jump 確率が低い (実際の高速移動の可能性)
+                  // → 物理上限まで採用 (絶対ルール「過少課金禁止」と整合)
+                  mmIncrementM = allowedMaxM;
+                  reason = 'capped at phys-max ' + allowedMaxM.toFixed(0) + 'm (raw ' + r.distanceM.toFixed(0) + 'm via ' + r._via + ', jumpProb=' + lastJumpProb.toFixed(2) + ')';
                 } else {
+                  // 物理範囲超過 + jump 確率高 → 「明らかな multipath ジャンプ」と確信して skip
                   skipped = 1;
-                  reason = 'over segment limit ' + r.distanceM.toFixed(0) + 'm via ' + r._via;
+                  reason = 'jump skip dist=' + r.distanceM.toFixed(0) + 'm jumpProb=' + lastJumpProb.toFixed(2) + ' via ' + r._via;
                 }
               }
             }

@@ -5,7 +5,7 @@
 // メモリ消費を抑えるため、オフセットテーブルだけ事前構築し、
 // 必要な道路だけオンデマンドデコードする。
 //
-// 対応フォーマット：v4 / v5 / v6 (build-roads.js)
+// 対応フォーマット：v4 / v5 / v6 / v7 (build-roads.js)
 //
 // エンコード仕様 (v4/v5):
 //   各道路 = [typeCode 1byte][numPoints varint][lat0 svarint][lng0 svarint]
@@ -13,14 +13,22 @@
 // エンコード仕様 (v6):
 //   各道路 = [bitmap 2byte LE][numPoints varint][lat0 svarint][lng0 svarint]
 //            [(dLat svarint)(dLng svarint) × (numPoints-1)]
-//   bitmap (16bit, little-endian):
+// エンコード仕様 (v7・T6 2026-05-09):
+//   各道路 = [bitmap 3byte LE][numPoints varint][lat0 svarint][lng0 svarint]
+//            [(dLat svarint)(dLng svarint) × (numPoints-1)]
+//   bitmap (24bit, little-endian):
 //     bit 0-3   typeCode (motorway-track, 0-12)
 //     bit 4     oneway   (1=一方通行)
 //     bit 5-6   incline  (00=なし, 01=登り急, 10=下り急, 11=方向不明・急)
 //     bit 7-9   lanes    (0=不明, 1-6=本数, 7=7+)
 //     bit 10-11 width    (00=不明, 01=≤2m, 10=2-5m, 11=>5m)
 //     bit 12-13 layer    (00=平面, 01=高架, 10=地下, 11=その他)
-//     bit 14-15 reserved
+//     bit 14-15 access   (00=public, 01=private, 10=no_motor)
+//     bit 16-18 maxspeed (T6: 0=unk/1=≤30/2=40/3=50/4=60/5=70/6=80/7=≥100 km/h)
+//     bit 19-23 reserved
+//
+// roadsData.restrictions[] (T4 2026-05-09):
+//   [[fromRoadIdx, toRoadIdx], ...]  禁止 transition 対 (右折禁止等)
 //
 //   varint：LSB7bit + 継続フラグ（0x80）
 //   signed varint = zigzag varint
@@ -72,11 +80,13 @@
     return [zigzagDecode(r[0]), r[1]];
   }
   
-  // bitmap (v6, 16bit) → 属性オブジェクト
+  // bitmap (v6=16bit / v7=24bit) → 属性オブジェクト
   // D1 (2026-05-09): bit 14-15 を access (00=public/01=private/10=no_motor) として追加
-  //   既存 v6 build データ (bit 14-15 = 0) は access=0=public で同じ動作
+  // T6 (2026-05-09): bit 16-18 を maxspeed (0=unk/1=≤30/.../7=≥100 km/h) として追加
+  //   既存 v6 build データは v6 path で読まれ maxspeed フィールドは未付与
+  //   新 v7 build データは bit 16-18 から maxspeed を取得
   function unpackAttrBitmap(bits) {
-    return {
+    const a = {
       typeCode: bits & 0x0F,
       oneway:  (bits >> 4) & 0x01,
       incline: (bits >> 5) & 0x03,
@@ -84,14 +94,16 @@
       width:   (bits >> 10) & 0x03,
       layer:   (bits >> 12) & 0x03,
       access:  (bits >> 14) & 0x03,
+      maxspeed: (bits >> 16) & 0x07,    // v6 (16bit) は常に 0=不明・v7 で実値
     };
+    return a;
   }
 
   // 1道路のバイト長を計算（デコードせず）
   // 戻り値：次の道路の開始オフセット
-  // headerSize: v4/v5=1, v6=2
+  // headerSize: v4/v5=1, v6=2, v7=3
   function skipRoad(bytes, offset, headerSize) {
-    offset += headerSize; // typeCode (1byte) or bitmap (2byte)
+    offset += headerSize; // typeCode (1byte) or bitmap (2/3byte)
     let numPoints;
     [numPoints, offset] = readVarint(bytes, offset);
     // 始点 lat, lng
@@ -106,14 +118,20 @@
   }
 
   // 1道路を部分デコード
-  // version 6: 戻り値に oneway/incline/lanes/width/layer 追加
-  // version 4/5: 戻り値は { typeCode, points }
+  // version 7: 24bit bitmap (3 byte) + maxspeed (T6)
+  // version 6: 16bit bitmap (2 byte) + access (D1)
+  // version 4/5: 1 byte typeCode のみ
   function decodeRoadAtOffset(bytes, offset, version) {
     let attrs;
-    if (version >= 6) {
+    if (version >= 7) {
+      const bits = bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
+      offset += 3;
+      attrs = unpackAttrBitmap(bits);
+    } else if (version >= 6) {
       const bits = bytes[offset] | (bytes[offset + 1] << 8);
       offset += 2;
       attrs = unpackAttrBitmap(bits);
+      // v6 では maxspeed フィールドは存在しないが unpack で 0 が入っているため neutral
     } else {
       attrs = { typeCode: bytes[offset++] };
     }
@@ -138,12 +156,13 @@
   
   // ─── RoadDecoder クラス ────────────────────────────────────────
   function RoadDecoder(roadsData) {
-    if (!roadsData || roadsData.v < 4 || roadsData.v > 6) {
+    if (!roadsData || roadsData.v < 4 || roadsData.v > 7) {
       throw new Error('[RoadDecoder] 未対応フォーマット v=' + (roadsData && roadsData.v));
     }
     this.data = roadsData;
     this.version = roadsData.v;
-    this.headerSize = (this.version >= 6) ? 2 : 1;
+    // headerSize: v4/v5=1, v6=2, v7=3
+    this.headerSize = (this.version >= 7) ? 3 : (this.version >= 6 ? 2 : 1);
     this.bytes = base64ToBytes(roadsData.roadsB64);
     this.offsetTable = null;  // buildOffsetTable() で構築
     this.gridSize = roadsData.gridSize || 1000;
@@ -152,7 +171,22 @@
     this.grid = roadsData.grid || {};
     this.numRoads = roadsData.numRoads || 0;
     this.prefecture = roadsData.prefecture || '';
+    // T4 (2026-05-09): turn:restriction Set ("from|to" string キー)
+    //   data.restrictions = [[fromIdx, toIdx], ...]・無ければ空 Set
+    this._restrictionSet = new Set();
+    if (Array.isArray(roadsData.restrictions)) {
+      for (const r of roadsData.restrictions) {
+        if (Array.isArray(r) && r.length >= 2) {
+          this._restrictionSet.add(r[0] + '|' + r[1]);
+        }
+      }
+    }
   }
+  // T4: 指定 from→to の transition が禁止されているか
+  RoadDecoder.prototype.isRestrictedTransition = function(fromRoadIdx, toRoadIdx) {
+    if (this._restrictionSet.size === 0) return false;
+    return this._restrictionSet.has(fromRoadIdx + '|' + toRoadIdx);
+  };
 
   // オフセットテーブル構築（起動時1回・線形スキャン）
   RoadDecoder.prototype.buildOffsetTable = function() {
@@ -495,13 +529,14 @@
               snapLng: bestSnapLng,
               distanceM: Math.sqrt(bestDistSq),
               typeCode: road.typeCode,
-              // v6 attribute info（emission scoring 用）
+              // v6/v7 attribute info（emission scoring 用）
               oneway: road.oneway != null ? road.oneway : 0,
               layer: road.layer != null ? road.layer : 0,
               lanes: road.lanes != null ? road.lanes : 0,
               width: road.width != null ? road.width : 0,
               incline: road.incline != null ? road.incline : 0,
               access: road.access != null ? road.access : 0,
+              maxspeed: road.maxspeed != null ? road.maxspeed : 0,   // T6 v7
               // segment bearing 計算用
               segLatA: segLatA, segLngA: segLngA,
               segLatB: segLatB, segLngB: segLngB,
