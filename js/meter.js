@@ -654,6 +654,15 @@ const Meter = (() => {
     state.last_timestamp = gpsResult.timestamp;
     state.last_speed_kmh = gpsResult.speedKmh || 0;
 
+    // Phase 2.A (2026-05-10): 訓練データ収集
+    //   GPS 良好 (accuracy<=20m) + 速度>5km/h + !isStationary で 1 サンプル保存
+    //   将来 AI 推論 (Phase 4・CarSpeedNet ONNX) のための蓄積基盤
+    //   位置情報は一切送られない (TrainingCollector 内で禁止)
+    //   default ON・Phase 3 設定画面で OFF 切替可能
+    if(typeof TrainingCollector !== 'undefined' && typeof TrainingCollector.collectIfEligible === 'function'){
+      try { TrainingCollector.collectIfEligible(gpsResult); } catch(_){}
+    }
+
     // ━━━━━ Map Matching: Worker B にも GPS を転送 ━━━━━
     _updateMapMatching(gpsResult);
   }
