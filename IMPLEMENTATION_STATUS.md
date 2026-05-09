@@ -110,7 +110,7 @@
 
 | ID | 機能 | 詳細 | 場所 |
 |----|------|------|------|
-| Phase2.A | training-collector | GPS 良好時 (accuracy<=20m + 速度>5km/h) に DeviceMotion 4 秒窓 + GPS 速度 をペアで IndexedDB に保存 | js/training-collector.js (新規) |
+| Phase2.A | training-collector | ✅ 実装完了 (2026-05-10・commit ce7e4c93)。js/training-collector.js 新規・IndexedDB 'daikome-training'/'samples'・80 sample×3 軸 (20Hz 4 秒)・FIFO 50,000 件・位置情報非保存 | js/training-collector.js + meter.js + index.html |
 | Phase2.B | training-uploader | 既存 Firebase 接続時 (LINE 同期等) に自動送信。Service Worker Background Sync 活用。失敗時 retry queue | js/training-uploader.js (新規) + Cloud Storage |
 | Phase2.C | 蓄積データの仕様 | 1 サンプル ≈ 2KB・1 trip 約 300KB・gzip 50KB・最大 100MB ローカル保持 | spec |
 
