@@ -329,9 +329,64 @@ const TrainingCollector = (() => {
     });
   }
 
+  // Phase 2.B (2026-05-10): training-uploader 用 batch 読み出し
+  //   maxCount 件まで古い順 (id ascending) に読み出す
+  //   id を含めて返す (deleteUpToId で再利用)
+  function readBatch(maxCount) {
+    return new Promise(function(resolve) {
+      if (!_db) return resolve([]);
+      try {
+        const tx = _db.transaction([STORE_NAME], 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const samples = [];
+        const cur = store.openCursor();
+        cur.onsuccess = function(e) {
+          const c = e.target.result;
+          if (!c || samples.length >= maxCount) {
+            resolve(samples);
+            return;
+          }
+          samples.push(c.value);
+          c.continue();
+        };
+        cur.onerror = function() { resolve(samples); };
+      } catch(e) {
+        resolve([]);
+      }
+    });
+  }
+
+  // Phase 2.B (2026-05-10): 送信完了後の削除
+  //   id <= maxId のレコードを全削除
+  function deleteUpToId(maxId) {
+    return new Promise(function(resolve) {
+      if (!_db) return resolve(0);
+      try {
+        const tx = _db.transaction([STORE_NAME], 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const range = IDBKeyRange.upperBound(maxId);
+        const cur = store.openCursor(range);
+        let deleted = 0;
+        cur.onsuccess = function(e) {
+          const c = e.target.result;
+          if (!c) return;
+          c.delete();
+          deleted++;
+          c.continue();
+        };
+        tx.oncomplete = function() { resolve(deleted); };
+        tx.onerror = function() { resolve(deleted); };
+      } catch(e) {
+        resolve(0);
+      }
+    });
+  }
+
   return {
     init, collectIfEligible, setEnabled, getEnabled, deleteAll,
     getStats, getCount,
+    // Phase 2.B 用
+    readBatch, deleteUpToId,
   };
 })();
 

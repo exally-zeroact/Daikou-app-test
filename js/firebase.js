@@ -146,10 +146,39 @@ const FB = (() => {
     return function unsubscribe(){ ref.off('value', handler); };
   }
 
+  // Phase 2.B (2026-05-10): training-uploader 用 Cloud Storage upload
+  //   path: training-data/{deviceId}/{date}-{firstId}.json[.gz]
+  //   blob: gzip 済 (CompressionStream) または raw JSON
+  //   失敗時は reject・上位 (training-uploader) で retry queue 管理
+  function uploadTrainingBatch(path, blob) {
+    return new Promise(function(resolve, reject) {
+      if (typeof firebase === 'undefined' || !firebase.storage) {
+        return reject(new Error('Firebase Storage not initialized'));
+      }
+      if (!isOnline) {
+        return reject(new Error('offline'));
+      }
+      try {
+        const ref = firebase.storage().ref(path);
+        const metadata = { contentType: blob.type || 'application/octet-stream' };
+        const task = ref.put(blob, metadata);
+        task.on('state_changed',
+          null,
+          function(err) { reject(err); },
+          function() { resolve({ path: path, size: blob.size }); }
+        );
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   return {
     setVehicleId, updateVehicle, startSession, endSession,
     setIdle, loadFareConfig, saveFareConfig, watchVehicle,
     // T8 (2026-05-09)
     markVisited, pushSessionAggregates, subscribeCrossUserPheromone,
+    // Phase 2.B (2026-05-10)
+    uploadTrainingBatch,
   };
 })();

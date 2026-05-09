@@ -221,4 +221,18 @@ self.addEventListener('sync', function(e){
   if(e.tag === 'firebase-sync'){
     console.log('[SW] Background Sync: Firebase送信');
   }
+  // Phase 2.B (2026-05-10): 訓練データ upload trigger
+  //   SW では Firebase SDK / IndexedDB 直接アクセスは複雑なため、
+  //   page client に message を送って main thread で実行する
+  if(e.tag === 'training-upload'){
+    e.waitUntil(_notifyClientsTrainingUpload());
+  }
 });
+
+function _notifyClientsTrainingUpload(){
+  return self.clients.matchAll({ type: 'window' }).then(function(clients){
+    for(const c of clients){
+      try { c.postMessage({ type: 'TRAINING_UPLOAD_TRIGGER' }); } catch(_) {}
+    }
+  });
+}
