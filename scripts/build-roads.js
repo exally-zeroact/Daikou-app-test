@@ -62,6 +62,16 @@ const GSI_2500_DIR = gsiArg ? gsiArg.slice(15) : null;
 //   JSON 形式: [{ pref: 'ehime', fromRoadIdx: 12, toRoadIdx: 34, kind: 'no_right_turn' }]
 const trArg = args.find(a => a.startsWith('--turn-restrictions='));
 const TURN_RESTRICTIONS_PATH = trArg ? trArg.slice(20) : null;
+// T11 (2026-05-09): conditional restriction (時間帯) サイドカー
+//   JSON 形式: [{ pref, roadIndex, startMin, endMin, days?, kind: 'oneway'|'no_through' }]
+//   startMin/endMin: 0-1439 (= 0:00-23:59)
+//   days: [0-6] (0=Sun)・null=全日
+const crArg = args.find(a => a.startsWith('--conditional-restrictions='));
+const CONDITIONAL_RESTRICTIONS_PATH = crArg ? crArg.slice(27) : null;
+// T3 (2026-05-09): POI サイドカー (各種 9 カテゴリの座標)
+//   JSON 形式: [{ pref, lat, lng, category? }]
+const poiArg = args.find(a => a.startsWith('--pois='));
+const POIS_PATH = poiArg ? poiArg.slice(7) : null;
 const positional = args.filter(a => !a.startsWith('--'));
 const [INPUT, OUTPUT_DIR, REGION] = positional;
 if (!INPUT || !OUTPUT_DIR || !REGION) {
@@ -429,6 +439,54 @@ if (TURN_RESTRICTIONS_PATH) {
   }
 }
 
+// T11 (2026-05-09): conditional restriction (時間帯) サイドカー
+const conditionalRestrictionsByPref = {};
+if (CONDITIONAL_RESTRICTIONS_PATH) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(CONDITIONAL_RESTRICTIONS_PATH, 'utf8'));
+    if (Array.isArray(raw)) {
+      let count = 0;
+      for (const r of raw) {
+        if (r && r.pref && typeof r.roadIndex === 'number'
+            && typeof r.startMin === 'number' && typeof r.endMin === 'number') {
+          (conditionalRestrictionsByPref[r.pref] ||= []).push({
+            roadIndex: r.roadIndex,
+            startMin: r.startMin,
+            endMin: r.endMin,
+            days: Array.isArray(r.days) ? r.days : null,
+            kind: r.kind || 'no_through',
+          });
+          count++;
+        }
+      }
+      console.log(`  → conditional restriction: ${count} 件を ${Object.keys(conditionalRestrictionsByPref).length} 県に振り分け`);
+    }
+  } catch (e) {
+    console.warn(`  → conditional-restrictions ロード失敗: ${e.message} (制約なしで build 続行)`);
+  }
+}
+
+// T3 (2026-05-09): POI サイドカー (47 県データ)
+//   形式: [{ pref, lat, lng, category? }]
+const poisByPref = {};
+if (POIS_PATH) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(POIS_PATH, 'utf8'));
+    if (Array.isArray(raw)) {
+      let count = 0;
+      for (const r of raw) {
+        if (r && r.pref && typeof r.lat === 'number' && typeof r.lng === 'number') {
+          (poisByPref[r.pref] ||= []).push([r.lat, r.lng]);
+          count++;
+        }
+      }
+      console.log(`  → POI: ${count} 件を ${Object.keys(poisByPref).length} 県に振り分け`);
+    }
+  } catch (e) {
+    console.warn(`  → pois ロード失敗: ${e.message} (POI なしで build 続行)`);
+  }
+}
+
 let totalRoads = 0;
 let totalPointsBefore = 0, totalPointsAfter = 0;
 let droppedUnknownType = 0;
@@ -605,7 +663,9 @@ for (const pref of targetPrefs) {
     attrCounts: c,
     grid,
     roadsB64,
-    restrictions: restrictionsForPref,    // T4
+    restrictions: restrictionsForPref,                                // T4
+    conditionalRestrictions: conditionalRestrictionsByPref[pref] || [],  // T11
+    pois: poisByPref[pref] || [],                                     // T3
   });
   // GitHub push protection の Tencent Cloud Secret ID 誤検出パターン
   // AKID[A-Za-z0-9]{32,} を文字列リテラル境界で分割して回避

@@ -1407,11 +1407,39 @@ function _forwardRoadsToMmWorker(prefs){
     try {
       _mmWorker.postMessage({ type: 'loadRoads', pref: pref, roadsData: data });
       _forwardedPrefs.add(pref);
+      // T3 (2026-05-09): POI proximity prior データを Worker B に転送
+      if(Array.isArray(data.pois) && data.pois.length > 0){
+        _mmWorker.postMessage({ type: 'loadPois', pref: pref, points: data.pois });
+      }
+      // T11 (2026-05-09): 時間帯条件付き oneway/通行制限を Worker B に転送
+      if(Array.isArray(data.conditionalRestrictions) && data.conditionalRestrictions.length > 0){
+        _mmWorker.postMessage({
+          type: 'loadConditionalRestrictions',
+          pref: pref,
+          list: data.conditionalRestrictions,
+        });
+      }
+      // T8 (2026-05-09): cross-user pheromone 購読開始 → Worker B に転送
+      if(typeof FB !== 'undefined' && typeof FB.subscribeCrossUserPheromone === 'function'
+         && !_crossUserSubscribedPrefs.has(pref)){
+        _crossUserSubscribedPrefs.add(pref);
+        try {
+          FB.subscribeCrossUserPheromone(pref, function(list){
+            if(_mmWorker){
+              _mmWorker.postMessage({ type: 'updateCrossUserPheromone', pref: pref, list: list });
+            }
+          });
+        } catch(e){
+          console.warn('[T8] cross-user pheromone 購読失敗 ' + pref + ': ' + e.message);
+        }
+      }
     } catch(e){
       console.warn('[MM] forward roads ' + pref + ' err:', e.message);
     }
   }
 }
+// T8 (2026-05-09): cross-user pheromone 購読済 pref (重複防止)
+const _crossUserSubscribedPrefs = new Set();
 // 既に Worker B に forward 済みの pref を記録 (重複 postMessage 抑制)
 const _forwardedPrefs = new Set();
 

@@ -341,6 +341,7 @@ function _runTileDijkstra(tile, srcN, dstN, maxDistM, deadline){
 
 // Phase B runtime: タイル経路で route 距離を計算
 //   src/dst が同一タイルかつタイル loaded → tile Dijkstra
+//   T2 (2026-05-09): 隣接タイル両方 loaded → border node 接続でクロスタイル Dijkstra
 //   それ以外 → null（呼出側で backbone / haversine fallback）
 function _routeDistanceTileFirst(a, b){
   if(!a || !b) return null;
@@ -348,12 +349,28 @@ function _routeDistanceTileFirst(a, b){
   const tileA = _tileKeyOf(a.prefecture, a.snapLat, a.snapLng);
   const tileB = _tileKeyOf(b.prefecture, b.snapLat, b.snapLng);
   if(tileA !== tileB){
-    // cross-tile: 両方 prefetch して fallback
+    // T2: cross-tile・両方 loaded なら border node 接続で multi-tile Dijkstra を試す
     const partsA = tileA.split('/');
     const partsB = tileB.split('/');
     const txyA = partsA[1].split('_'); const txyB = partsB[1].split('_');
-    _requestTileFromMain(a.prefecture, parseInt(txyA[0],10), parseInt(txyA[1],10));
-    _requestTileFromMain(b.prefecture, parseInt(txyB[0],10), parseInt(txyB[1],10));
+    const txA = parseInt(txyA[0],10), tyA = parseInt(txyA[1],10);
+    const txB = parseInt(txyB[0],10), tyB = parseInt(txyB[1],10);
+    // 隣接 (chebyshev 距離 ≤ 1) かつ両方 loaded なら multi-tile Dijkstra へ
+    const adj = Math.max(Math.abs(txA - txB), Math.abs(tyA - tyB)) <= 1;
+    const tA = _tileCache.get(tileA);
+    const tB = _tileCache.get(tileB);
+    if(adj && tA && tB){
+      _tileCache.pin(tileA); _tileCache.pin(tileB);
+      try {
+        const r = _runTileDijkstraMulti([tA, tB], a, b);
+        if(r != null) return { distanceM: r, onSameRoad: false, _via: 'tile-multi' };
+      } finally {
+        _tileCache.unpin(tileA); _tileCache.unpin(tileB);
+      }
+    }
+    // 失敗時は両方 prefetch して呼出側 fallback
+    _requestTileFromMain(a.prefecture, txA, tyA);
+    _requestTileFromMain(a.prefecture, txB, tyB);
     return null;
   }
   const tile = _tileCache.get(tileA);
@@ -381,12 +398,216 @@ function _routeDistanceTileFirst(a, b){
   }
 }
 
+// T2 (2026-05-09): 複数タイルにわたる Dijkstra
+//   各タイル node には globalId が割り当てられている (同 globalId = 物理的に同一 node)
+//   2 つのタイルを (tileIdx, localNodeIdx) ペアでまとめ、
+//   globalId 一致を「コスト 0 のリンク」として扱って探索する。
+//   maxDistM 上限・DIJKSTRA_TIMEOUT_MS タイムアウトは既存と同じ。
+function _runTileDijkstraMulti(tiles, a, b){
+  for(const t of tiles) _buildTileRoadSegIndex(t);
+  // src/dst の所属タイル (tiles 中の index) を判定
+  // a/b の snapLat/snapLng がどのタイルに含まれるかは _tileKeyOf で求める
+  const srcTileKey = _tileKeyOf(a.prefecture, a.snapLat, a.snapLng);
+  const dstTileKey = _tileKeyOf(b.prefecture, b.snapLat, b.snapLng);
+  let srcTileIdx = -1, dstTileIdx = -1;
+  for(let i = 0; i < tiles.length; i++){
+    const t = tiles[i];
+    const tk = a.prefecture + '/' + t.tx + '_' + t.ty;
+    if(tk === srcTileKey) srcTileIdx = i;
+    if(tk === dstTileKey) dstTileIdx = i;
+  }
+  if(srcTileIdx < 0 || dstTileIdx < 0) return null;
+  const srcLocal = _snapToTileNode(tiles[srcTileIdx], a);
+  const dstLocal = _snapToTileNode(tiles[dstTileIdx], b);
+  if(srcLocal < 0 || dstLocal < 0) return null;
+  // 合計 node 数とオフセット
+  const nodeOffsets = [];   // tileIdx → 開始グローバル node 番号
+  let totalNodes = 0;
+  for(let i = 0; i < tiles.length; i++){
+    nodeOffsets.push(totalNodes);
+    totalNodes += tiles[i].numNodes;
+  }
+  // globalId → 最初に登場した glob node 番号 (同 globalId はそこに統合)
+  const gidToFirst = new Map();
+  // glob node 番号 → 代表 (gidToFirst の値)
+  function repr(gn){
+    const tileIdx = _tileIdxOfGlobalNode(nodeOffsets, gn);
+    const localN = gn - nodeOffsets[tileIdx];
+    const gid = tiles[tileIdx].globalId[localN];
+    if(gid === 0) return gn;       // gid=0 = 内部 node のみ
+    if(!gidToFirst.has(gid)){ gidToFirst.set(gid, gn); return gn; }
+    return gidToFirst.get(gid);
+  }
+  // 事前に全 node の代表を計算
+  const reprArr = new Int32Array(totalNodes);
+  for(let g = 0; g < totalNodes; g++) reprArr[g] = repr(g);
+  // src/dst の代表
+  const srcGN = reprArr[nodeOffsets[srcTileIdx] + srcLocal];
+  const dstGN = reprArr[nodeOffsets[dstTileIdx] + dstLocal];
+  if(srcGN === dstGN) return 0;
+  const chordM = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
+  const maxDistM = chordM * 1.5 + 500;
+  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+  const deadline = t0 + DIJKSTRA_TIMEOUT_MS;
+  const dist = new Float32Array(totalNodes);
+  const visited = new Uint8Array(totalNodes);
+  for(let i = 0; i < totalNodes; i++) dist[i] = Infinity;
+  dist[srcGN] = 0;
+  const heap = new BinaryHeap();
+  heap.push(srcGN, 0);
+  let iters = 0;
+  while(heap.size() > 0){
+    if((++iters & 0x3F) === 0 && performance.now() > deadline) return null;
+    const top = heap.pop();
+    const u = top.n;
+    if(visited[u]) continue;
+    visited[u] = 1;
+    const du = dist[u];
+    if(du > maxDistM) continue;
+    if(u === dstGN) return du;
+    // u の所属タイル/local node
+    const tileIdx = _tileIdxOfGlobalNode(nodeOffsets, u);
+    const tile = tiles[tileIdx];
+    const localU = u - nodeOffsets[tileIdx];
+    const eStart = tile.nodeOffset[localU];
+    const eEnd = tile.nodeOffset[localU + 1];
+    const lenScale = tile.edgeLenScale || 0.1;
+    for(let k = eStart; k < eEnd; k++){
+      const localV = tile.edgeTo[k];
+      const v = reprArr[nodeOffsets[tileIdx] + localV];
+      if(visited[v]) continue;
+      const newD = du + tile.edgeLenM[k] * lenScale;
+      if(newD < dist[v] && newD <= maxDistM){
+        dist[v] = newD;
+        heap.push(v, newD);
+      }
+    }
+  }
+  return null;
+}
+function _tileIdxOfGlobalNode(nodeOffsets, gn){
+  for(let i = nodeOffsets.length - 1; i >= 0; i--){
+    if(gn >= nodeOffsets[i]) return i;
+  }
+  return 0;
+}
+
 // MM-5 (2026-05-08): DEM データ（高度データ）
 // 形式: { bbox:[minLat,minLng,maxLat,maxLng], gridSize, numLat, numLng, alt:Int16Array }
 // alt[y * numLng + x] = 該当グリッドの標高 (m, sea level 基準, Int16 範囲 -32768〜32767m)
 let _demData = null;
 const _LAYER_BOOST_FACTOR = 1.3;       // accel/cellular hint と layer 一致時のブースト
 const _LAYER_WRONG_PENALTY = 0.3;      // 高架/地下 で alt 矛盾時のペナルティ
+
+// T3 (2026-05-09): POI proximity prior
+//   pref → 100m × 100m grid に POI 中心 [lat, lng] を index 化
+//   proximity 50m 以内なら候補 emission を ×1.05 boost
+//   未ロード時 (Map 空) は boost なしで既存挙動
+const _poisGrid = new Map();          // pref → Map(gridKey → [[lat,lng], ...])
+const POI_GRID_DEG = 0.001;            // 約 100m
+const POI_RADIUS_M = 50;
+const POI_BOOST_FACTOR = 1.05;
+function _setPois(pref, points){
+  // points: [[lat, lng], ...]
+  const g = new Map();
+  for(const p of points){
+    const lat = p[0], lng = p[1];
+    if(!isFinite(lat) || !isFinite(lng)) continue;
+    const k = Math.floor(lat / POI_GRID_DEG) + '_' + Math.floor(lng / POI_GRID_DEG);
+    let arr = g.get(k);
+    if(!arr){ arr = []; g.set(k, arr); }
+    arr.push([lat, lng]);
+  }
+  _poisGrid.set(pref, g);
+}
+function _hasPoiNearby(pref, lat, lng){
+  const g = _poisGrid.get(pref);
+  if(!g || g.size === 0) return false;
+  const cy = Math.floor(lat / POI_GRID_DEG);
+  const cx = Math.floor(lng / POI_GRID_DEG);
+  const r2 = POI_RADIUS_M * POI_RADIUS_M;
+  const mpd = _metersPerDegree(lat);
+  for(let dy = -1; dy <= 1; dy++){
+    for(let dx = -1; dx <= 1; dx++){
+      const arr = g.get((cy + dy) + '_' + (cx + dx));
+      if(!arr) continue;
+      for(const p of arr){
+        const ex = (p[1] - lng) * mpd.lng;
+        const ey = (p[0] - lat) * mpd.lat;
+        if(ex*ex + ey*ey <= r2) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// T11 (2026-05-09): 時間帯条件付き oneway / 通行制限
+//   pref → roadIndex → [{startMin, endMin, days?, kind}]
+//   kind: 'oneway' | 'no_through' (= 通行禁止)
+//   現在時刻 (msg.timestamp 由来) が窓内なら oneway 違反/通行禁止 として transition penalty
+const _conditionalRestrictionsByPref = new Map();   // pref → Map(roadIndex → array)
+function _setConditionalRestrictions(pref, list){
+  const m = new Map();
+  for(const r of list){
+    if(!r || typeof r.roadIndex !== 'number') continue;
+    let arr = m.get(r.roadIndex);
+    if(!arr){ arr = []; m.set(r.roadIndex, arr); }
+    arr.push({
+      startMin: r.startMin | 0,
+      endMin: r.endMin | 0,
+      days: Array.isArray(r.days) ? r.days : null,    // 0=Sun..6=Sat / null=全日
+      kind: r.kind || 'no_through',
+    });
+  }
+  _conditionalRestrictionsByPref.set(pref, m);
+}
+function _isUnderConditionalRestriction(pref, roadIndex, ts){
+  const m = _conditionalRestrictionsByPref.get(pref);
+  if(!m) return null;
+  const list = m.get(roadIndex);
+  if(!list) return null;
+  const d = new Date(ts);
+  const minOfDay = d.getHours() * 60 + d.getMinutes();
+  const dow = d.getDay();
+  for(const r of list){
+    if(r.days && r.days.indexOf(dow) < 0) continue;
+    // 時間帯判定 (跨ぎ対応: end < start なら 24h ラップ)
+    let inWindow;
+    if(r.endMin >= r.startMin){
+      inWindow = minOfDay >= r.startMin && minOfDay < r.endMin;
+    } else {
+      inWindow = minOfDay >= r.startMin || minOfDay < r.endMin;
+    }
+    if(inWindow) return r.kind;
+  }
+  return null;
+}
+
+// T8 (2026-05-09): Cross-user pheromone (Firebase 連携)
+//   pref → roadIndex → 他ドライバ走行カウント (ローカル _pheromoneByPref と独立)
+//   main から 'updateCrossUserPheromone' message でロード
+//   オフライン / 未接続時は空のまま (ブーストなし = 既存挙動)
+const _crossUserPheromoneByPref = new Map();    // pref → Map(roadIndex → number)
+const CROSS_USER_BOOST_PEAK = 1.10;             // 高頻度道路に最大 +10% transition prior
+function _setCrossUserPheromone(pref, list){
+  const m = new Map();
+  for(const r of list){
+    if(typeof r.roadIndex === 'number' && typeof r.count === 'number'){
+      m.set(r.roadIndex, r.count);
+    }
+  }
+  _crossUserPheromoneByPref.set(pref, m);
+}
+function _getCrossUserBoost(pref, roadIndex){
+  if(!pref) return 1.0;
+  const m = _crossUserPheromoneByPref.get(pref);
+  if(!m) return 1.0;
+  const c = m.get(roadIndex);
+  if(!c || c <= 0) return 1.0;
+  // 1 → 1.02 / 5 → 1.05 / ≥20 → 1.10
+  const boost = 1.0 + Math.min(0.10, Math.log(1 + c) / Math.log(20) * 0.10);
+  return boost > CROSS_USER_BOOST_PEAK ? CROSS_USER_BOOST_PEAK : boost;
+}
 
 // ─── MM-6 (2026-05-08): OSRM /match 教師信号 ───────────────────
 // 30 秒分の GPS トレースをバッファし定期的に OSRM /match に送信。
@@ -754,6 +975,22 @@ function _demLookup(lat, lng){
   return _demData.alt[y * _demData.numLng + x];
 }
 
+// T1 (2026-05-09): DEM 3D 距離補正
+//   水平距離 distM (haversine 等) + 標高差 |Δh| → 実距離 √(distM² + Δh²)
+//   勾配 5-10% (Δh/distM = 0.05-0.10) で実距離は 0.12-0.5% 増加
+//   両端の DEM lookup が成功した場合のみ補正・失敗時は distM を変更しない
+function _apply3DCorrection(distM, lat1, lng1, lat2, lng2){
+  if(!_demData || !(distM > 0)) return distM;
+  const h1 = _demLookup(lat1, lng1);
+  const h2 = _demLookup(lat2, lng2);
+  if(h1 == null || h2 == null) return distM;
+  const dh = h2 - h1;
+  if(!isFinite(dh) || dh === 0) return distM;
+  // 勾配が現実的か検証 (>50% は誤データの可能性・補正しない)
+  if(Math.abs(dh) > distM * 0.5) return distM;
+  return Math.sqrt(distM * distM + dh * dh);
+}
+
 // 2026-05-09 (P4/P5): cellular/accel hint 廃止・layer score を road 属性のみで算出
 //   c.layer: 0=平面 1=高架 2=地下 3=その他
 //   gpsAlt: GPS 高度 (m)・null なら DEM 比較スキップ
@@ -815,15 +1052,34 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     // ② heading スコア exp(-headingDiff/β)
     //   P9 (2026-05-09): GPS accuracy 劣化時は heading に強く依存 (β を狭める)
     //   accuracy>40m で β=15 (通常 30) → heading 一致候補を 2 倍以上 boost
+    //   T10 (2026-05-09): Lane-level matching - 上下分離道路 (dual carriageway)
+    //     oneway 候補は forward bearing のみ採用・反対方向は ×LANE_PENALTY
+    //     非 oneway は両方向考慮 (既存挙動維持)
+    //     これにより oneway 道路のペアで GPS heading に合う側のみが高スコアを得る
     let headScore = 1.0;
+    let laneFlag = 0;     // T10: diagnostic - 0=neutral / 1=lane-correct / 2=lane-wrong
     if(headingDeg != null){
       const segB = _segmentBearing(c.segLatA, c.segLngA, c.segLatB, c.segLngB);
       const diffFwd = _angleDiff(headingDeg, segB);
       const diffRev = _angleDiff(headingDeg, (segB + 180) % 360);
-      const diff = c.oneway ? diffFwd : Math.min(diffFwd, diffRev);
       const beta = (accuracy > 40) ? 15 : 30;
-      headScore = Math.exp(-diff / beta);
+      if(c.oneway){
+        // T10: oneway 候補は forward に対する diff のみで scoring
+        headScore = Math.exp(-diffFwd / beta);
+        // 反対方向 (diffFwd >> diffRev) は車線判別失敗 → 追加ペナルティで除外
+        if(diffFwd > 90 && diffRev < 60){
+          headScore *= 0.05;        // 反対車線・oneway 違反系 → ほぼ除外
+          laneFlag = 2;
+        } else if(diffFwd < 60){
+          laneFlag = 1;             // 進行方向一致
+        }
+      } else {
+        // 非 oneway → 既存挙動 (両方向)
+        const diff = Math.min(diffFwd, diffRev);
+        headScore = Math.exp(-diff / beta);
+      }
     }
+    c._laneFlag = laneFlag;     // T10 diagnostic
     // ③ Mahalanobis 楕円
     const mahalScore = _mahalanobisEmission(c, gpsLat, gpsLng, accuracy, headingDeg);
     // ④ 道路種別遷移
@@ -871,6 +1127,12 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     //   勝ちやすくなり、multipath による誤 snap を抑制
     //   実際の高速移動では bearing が一致するため bearingJumpProb が低く影響少
     attrBoost *= jumpScale;
+    // T3 (2026-05-09): POI proximity prior (+5%)
+    //   POI 50m 以内の候補は emission を ×1.05 boost (常用立寄り先での誤 snap 抑制)
+    //   POI データ未ロード時は _hasPoiNearby が false → boost なし
+    if(c.prefecture && _hasPoiNearby(c.prefecture, c.snapLat, c.snapLng)){
+      attrBoost *= POI_BOOST_FACTOR;
+    }
     // 総合
     c._distScore = distScore;
     c._headScore = headScore;
@@ -1228,12 +1490,20 @@ function _routeDistance(a, b){
     const dec = decoders.get(a.prefecture);
     if(dec){
       const r = dec.calcRoadDistance(a, b);
-      if(r){ r._via = 'polyline'; return r; }
+      if(r){
+        r._via = 'polyline';
+        // T1 (2026-05-09): DEM 3D 補正・両端の標高差を加味
+        r.distanceM = _apply3DCorrection(r.distanceM, a.snapLat, a.snapLng, b.snapLat, b.snapLng);
+        return r;
+      }
     }
   }
   // Phase B: タイル経路を最優先で試行（メモリ効率最重視）
   const tileResult = _routeDistanceTileFirst(a, b);
-  if(tileResult) return tileResult;
+  if(tileResult){
+    tileResult.distanceM = _apply3DCorrection(tileResult.distanceM, a.snapLat, a.snapLng, b.snapLat, b.snapLng);
+    return tileResult;
+  }
 
   const chordM = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
 
@@ -1266,7 +1536,9 @@ function _routeDistance(a, b){
       const deadline = t0 + DIJKSTRA_TIMEOUT_MS;
       const inner = _chDijkstra(_backboneGraph, srcN, dstN, maxDistM, deadline);
       if(inner != null){
-        const distM = inner + stubA + stubB;
+        let distM = inner + stubA + stubB;
+        // T1: 補正 (両端の DEM から)
+        distM = _apply3DCorrection(distM, a.snapLat, a.snapLng, b.snapLat, b.snapLng);
         const result = { distanceM: distM, onSameRoad: false, _via: 'backbone' };
         _routeCache.set(cacheKey, result);
         return result;
@@ -1275,9 +1547,9 @@ function _routeDistance(a, b){
     }
   }
 
-  // 最終フォールバック: haversine 弦距離
+  // 最終フォールバック: haversine 弦距離 (T1 補正付き)
   return {
-    distanceM: chordM,
+    distanceM: _apply3DCorrection(chordM, a.snapLat, a.snapLng, b.snapLat, b.snapLng),
     onSameRoad: false, _via: 'haversine',
   };
 }
@@ -1683,6 +1955,23 @@ function _transitionScore(prevSnapC, currSnapC, prevGps, currGps){
       score *= TURN_RESTRICTION_PENALTY;
     }
   }
+  // T11 (2026-05-09): 時間帯条件付き oneway / 通行制限
+  //   現在時刻が制限窓内かつ curr road が制限対象なら ×0.05 で除外
+  //   currGps.timestamp を時刻ソースに使用 (実測値)
+  if(currSnapC && currSnapC.prefecture && currGps && currGps.timestamp){
+    const cond = _isUnderConditionalRestriction(
+      currSnapC.prefecture, currSnapC.roadIndex, currGps.timestamp);
+    if(cond === 'no_through' || cond === 'oneway'){
+      // oneway 違反は既に _violatesOneway で見るため、ここでは no_through 主体
+      score *= TURN_RESTRICTION_PENALTY;
+    }
+  }
+  // T8 (2026-05-09): cross-user pheromone (+10%)
+  //   curr 候補が他ドライバ走行頻度が高い道路なら transition score を boost
+  //   未連携時は _getCrossUserBoost が 1.0 → 影響なし
+  if(currSnapC && currSnapC.prefecture && currSnapC.roadIndex != null){
+    score *= _getCrossUserBoost(currSnapC.prefecture, currSnapC.roadIndex);
+  }
   // 数値安全化（log(0) 防止）
   return score < 1e-10 ? 1e-10 : score;
 }
@@ -1898,6 +2187,36 @@ self.onmessage = function(e){
     return;
   }
 
+  // T3 (2026-05-09): POI ロード
+  //   msg.points: [[lat, lng], ...] (種別問わず全 POI を一括)
+  if(msg.type === 'loadPois'){
+    if(msg.pref && Array.isArray(msg.points)){
+      _setPois(msg.pref, msg.points);
+      self.postMessage({ type: 'poisLoaded', pref: msg.pref, count: msg.points.length });
+    }
+    return;
+  }
+
+  // T11 (2026-05-09): 時間帯条件付き制限ロード
+  //   msg.list: [{ roadIndex, startMin, endMin, days?, kind }]
+  if(msg.type === 'loadConditionalRestrictions'){
+    if(msg.pref && Array.isArray(msg.list)){
+      _setConditionalRestrictions(msg.pref, msg.list);
+      self.postMessage({ type: 'conditionalRestrictionsLoaded', pref: msg.pref, count: msg.list.length });
+    }
+    return;
+  }
+
+  // T8 (2026-05-09): Firebase 経由の cross-user pheromone 更新
+  //   msg.list: [{ roadIndex, count }, ...]
+  if(msg.type === 'updateCrossUserPheromone'){
+    if(msg.pref && Array.isArray(msg.list)){
+      _setCrossUserPheromone(msg.pref, msg.list);
+      self.postMessage({ type: 'crossUserPheromoneUpdated', pref: msg.pref, count: msg.list.length });
+    }
+    return;
+  }
+
   // MM-7: 統計取得（debug 用）
   if(msg.type === 'getMm7Stats'){
     self.postMessage({
@@ -1983,6 +2302,10 @@ self.onmessage = function(e){
       const key = msg.pref + '/' + msg.tx + '_' + msg.ty;
       _tilePrefetchInflight.delete(key);
       if(msg.tileData){
+        // T2 (2026-05-09): tx/ty を tile オブジェクトに記録 (multi-tile Dijkstra で使う)
+        msg.tileData.tx = msg.tx;
+        msg.tileData.ty = msg.ty;
+        msg.tileData.pref = msg.pref;
         _tileCache.set(key, msg.tileData);
       }
       // tileLoaded post は頻発するためサイレント（必要時のみ）

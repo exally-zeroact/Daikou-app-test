@@ -175,6 +175,13 @@ const Meter = (() => {
         }
       }
     }
+    // T8 (2026-05-09): commit が起きた road を Firebase 側 cross-user pheromone に集約
+    //   重複防止は FB.markVisited (Set) 側でやる
+    if(m.committed && m.snap && m.snap.prefecture && m.snap.roadIndex != null){
+      if(typeof FB !== 'undefined' && typeof FB.markVisited === 'function'){
+        try { FB.markVisited(m.snap.prefecture, m.snap.roadIndex); } catch(_){}
+      }
+    }
     if(m.snapped) state.mm_snap_count++;
     if(m.skipped){
       state.mm_skip_count++;
@@ -257,6 +264,10 @@ const Meter = (() => {
     _fareConfigFrozen = false;  // F6: 業務終了で解凍
     if(mmWorker){
       try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
+    }
+    // T8 (2026-05-09): 業務終了で当 session の cross-user pheromone を Firebase に push
+    if(typeof FB !== 'undefined' && typeof FB.pushSessionAggregates === 'function'){
+      try { FB.pushSessionAggregates(); } catch(_){}
     }
   }
 

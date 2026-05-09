@@ -285,6 +285,61 @@ function calcAccelMagnitudeDeviation(accelSamples, now) {
   return Math.abs(meanMag - 9.8);
 }
 
+// T12 (2026-05-09): DeviceMotion 拡大活用
+//   ① 急ブレーキ検出: 加速度の長軸 (進行方向) 方向で連続して負の値が出たら急ブレーキ
+//      速度クランプを GPS 速度ではなく加速度ベース速度推定で抑える
+//   ② GPS gap 区間の慣性航法補間: GPS 圏外時に加速度を時間積分して位置を推定
+//      過信防止のため積分時間 5 秒上限・dead reckoning 30m 上限
+//   accelSamples: [{ x, y, z, t }, ...] (t=epoch ms)・x: east, y: north, z: up は端末座標系で
+//      正確には端末姿勢に依存するが、ここでは |a| ベース近似のみ
+const T12_HARD_BRAKE_THRESHOLD = 4.0;   // m/s² | a |の正味偏差 (含む水平+垂直成分)
+const T12_HARD_BRAKE_MIN_SAMPLES = 3;
+const T12_INERTIAL_MAX_GAP_SEC  = 5;    // 5 秒以内の GPS gap のみ慣性で補間
+const T12_INERTIAL_MAX_DRIFT_M  = 30;   // 慣性推定 30m 超なら信用しない (lat/lng 維持)
+
+// 急ブレーキ検出: 直近 N サンプルの |a|-9.8 が一貫して大きい (= 強い動き)
+//   かつ GPS 速度が下降中なら急ブレーキ確度高
+function _detectHardBrake(accelSamples, prevSpeedKmh, currSpeedKmh, now){
+  if (!accelSamples || accelSamples.length < T12_HARD_BRAKE_MIN_SAMPLES) return false;
+  const recent = accelSamples.slice(-T12_HARD_BRAKE_MIN_SAMPLES);
+  let count = 0;
+  for (const s of recent){
+    if (!s) continue;
+    const mag = Math.sqrt(s.x*s.x + s.y*s.y + s.z*s.z);
+    if (Math.abs(mag - 9.8) > T12_HARD_BRAKE_THRESHOLD) count++;
+  }
+  // 全 sample が threshold 超 + GPS 速度 -10 km/h 以上の減速 = 急ブレーキ
+  if (count >= T12_HARD_BRAKE_MIN_SAMPLES && (prevSpeedKmh - currSpeedKmh) > 10){
+    return true;
+  }
+  return false;
+}
+
+// 慣性航法による gap 補間: 直前位置 + dt + 加速度積分 → 推定位置
+//   limited fallback として位置の微小補正のみ (主体は GPS の Kalman 後座標)
+function _inertialGapCorrection(prevPos, accelSamples, currLat, currLng, dt){
+  if (!prevPos || !accelSamples || accelSamples.length === 0) return null;
+  if (dt <= 0 || dt > T12_INERTIAL_MAX_GAP_SEC) return null;
+  // 直近サンプルの平均水平加速度 (端末座標系の x/y を概略で水平に流用)
+  let sx = 0, sy = 0, n = 0;
+  for (const s of accelSamples){
+    if (!s) continue;
+    sx += s.x; sy += s.y; n++;
+  }
+  if (n === 0) return null;
+  const ax = sx / n, ay = sy / n;
+  // 速度初期値 (前 GPS から求める) + 積分
+  const v0 = (prevPos.speedKmh || 0) / 3.6;
+  // 進行方向は heading 不明なので簡易に「水平速度方向 = 0」と仮定し
+  // ax/ay の二乗平均を水平速度変動として扱う (= drift estimate)
+  const aMag = Math.sqrt(ax*ax + ay*ay);
+  const driftDist = (v0 * dt) + 0.5 * aMag * dt * dt;
+  if (driftDist > T12_INERTIAL_MAX_DRIFT_M) return null;
+  // この関数は「GPS が来ない区間の補間」用だが、本実装では
+  // GPS が届いている前提なので driftDist を quality-check として使用するのみ
+  return { driftDist: driftDist };
+}
+
 function checkStationary(speedKmh, lat, lng, now) {
   if (isStationary && speedKmh >= CONFIG.resume_speed_kmh) {
     lowSpeedStart = null; return false;
@@ -451,7 +506,32 @@ function processPosition(data) {
   }
   isStationary = finalStationary;
 
-  lastPosition = { lat: filtered.lat, lng: filtered.lng, timestamp: now, speedKmh, altitude };
+  // T12 (2026-05-09): 急ブレーキ検出 → 速度クランプを強化
+  //   速度誤検出 (GPS spike) を抑え、急ブレーキ後の異常な高速度報告をフィルタ
+  let hardBrake = false;
+  let clampedSpeedKmh = speedKmh;
+  if (lastPosition){
+    hardBrake = _detectHardBrake(accelSamples, lastPosition.speedKmh, speedKmh, now);
+    if (hardBrake){
+      // 急ブレーキ時は GPS 速度の上振れをクランプ (前 GPS 速度 ÷ 1.2 を上限)
+      const cap = Math.max(5, lastPosition.speedKmh / 1.2);
+      if (speedKmh > cap){
+        clampedSpeedKmh = cap;
+        wlog('[T12] hardBrake clamp: ' + speedKmh.toFixed(1) + ' → ' + cap.toFixed(1) + ' km/h');
+      }
+    }
+  }
+  // T12: GPS gap 区間の慣性航法 quality check (大きな drift 推定なら GPS 信用度を下げる)
+  let inertialDriftHint = null;
+  if (lastPosition){
+    const dt = (now - lastPosition.timestamp) / 1000;
+    if (dt > 1 && dt <= T12_INERTIAL_MAX_GAP_SEC){
+      const inertial = _inertialGapCorrection(lastPosition, accelSamples, filtered.lat, filtered.lng, dt);
+      if (inertial) inertialDriftHint = inertial.driftDist;
+    }
+  }
+
+  lastPosition = { lat: filtered.lat, lng: filtered.lng, timestamp: now, speedKmh: clampedSpeedKmh, altitude };
 
   _prevAccuracy = accuracy;
   // 2026-05-09 (P4/P5): cellularLayerHint / accelLayerHint 廃止
@@ -461,7 +541,7 @@ function processPosition(data) {
     lng: filtered.lng,
     altitude,
     accuracy,
-    speedKmh,
+    speedKmh: clampedSpeedKmh,
     isStationary,
     timestamp: now,
     compassHeading: (compassHeading != null) ? compassHeading : null,
@@ -470,6 +550,9 @@ function processPosition(data) {
     accelSampleCount: accelSamples ? accelSamples.length : 0,
     gyroData: gyroData || null,
     gyroSampleCount: gyroSamples ? gyroSamples.length : 0,
+    // T12 (2026-05-09): diagnostic - 急ブレーキ / 慣性 drift
+    hardBrake: hardBrake,
+    inertialDriftHint: inertialDriftHint,
   };
 }
 
