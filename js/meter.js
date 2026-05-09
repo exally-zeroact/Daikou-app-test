@@ -314,13 +314,20 @@ const Meter = (() => {
     }
 
     // 走行中の補完（速度×時間）
-    // D4 (2026-05-09): 道路種別ベースの最大速度でクランプ
-    //   GPS が誤って 200km/h を報告しても road type に従って sanity check
-    //   _lastSnapTypeCode は mmResult から記録した直近 snap の typeCode
+    // D4 (2026-05-09): 道路種別ベースの最大速度を _maxSpeedFor で参照値として記録
+    // F7 (2026-05-09・設計変更): gap fill の clamp は道路種別cap ではなく
+    //   160km/h 絶対上限に変更。理由: 道路種別cap=120 (motorway) で実速度 160km/h
+    //   走行中の GPS 圏外時に距離が欠落していた (= 過少課金リスク・絶対ルール「GPS 直線禁止」
+    //   と並ぶ品質要件)。ROAD_MAX_KMH_BY_TYPE 表は将来の参照用に保持。
     const maxKmh = _maxSpeedFor(_lastSnapTypeCode);
-    const clampedKmh = Math.min(lastSpeedKmh, maxKmh);
+    const ABS_MAX_KMH = 160;
+    const clampedKmh = Math.min(lastSpeedKmh, ABS_MAX_KMH);
     const speedMs = clampedKmh / 3.6;
     const naiveDistance = speedMs * gapSec;
+    if(typeof dlog === 'function' && lastSpeedKmh > maxKmh){
+      dlog(`[Meter] gap fill: speed ${lastSpeedKmh.toFixed(1)}km/h > road-cap ${maxKmh}km/h ` +
+           `(absolute cap ${ABS_MAX_KMH} 適用)`);
+    }
 
     if(typeof RegionLoader === 'undefined') return naiveDistance;
 
