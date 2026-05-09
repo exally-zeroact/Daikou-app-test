@@ -2,6 +2,8 @@
 
 <html lang="ja">
 <head>
+<!-- M1 (2026-05-10): app version 設定・training-collector が deviceId と共に記録 -->
+<script>window.DAIKOME_APP_VERSION = '1.0.0';</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#007AFF">
@@ -535,6 +537,181 @@ justify-content:center;
 </script>
 </head>
 <body ontouchstart="" onclick="wakeScreen()">
+
+<!-- S1 (2026-05-10): 複数タブ guard・閲覧専用モードバナー -->
+<!-- 他タブが既に開いている時のみ表示・このタブは GPS/距離計算/課金を停止 -->
+<div id="multiTabGuardBanner" style="display:none;position:fixed;left:0;right:0;top:0;z-index:10000;background:#FF3B30;color:#fff;padding:14px 20px;padding-top:max(14px,env(safe-area-inset-top));text-align:center;font-family:'Noto Sans JP',sans-serif;font-size:14px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+  ⚠️ 別のタブで業務中です。このタブでは操作できません。
+</div>
+
+<!-- S2 (2026-05-10): 業務開始忘れ警告バナー -->
+<!-- GPS 速度 5km/h+ × 10 秒+ × accuracy<=50m × 業務外 で表示 -->
+<div id="businessForgotBanner" style="display:none;position:fixed;left:12px;right:12px;top:max(12px,env(safe-area-inset-top));z-index:9998;background:#FF9500;color:#fff;padding:14px 16px;border-radius:10px;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 16px rgba(0,0,0,0.3);">
+  <div style="font-size:14px;font-weight:700;margin-bottom:8px;">🚗 走行を検知しました</div>
+  <div style="font-size:12px;line-height:1.5;margin-bottom:10px;">業務開始していますか?</div>
+  <div style="display:flex;gap:8px;">
+    <button onclick="dismissBusinessForgotBanner()" style="flex:1;padding:9px;background:transparent;border:1px solid #fff;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;font-family:inherit;">閉じる</button>
+    <button onclick="startBusinessFromForgotBanner()" style="flex:2;padding:9px;background:#fff;border:none;border-radius:8px;color:#FF9500;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">業務開始する</button>
+  </div>
+</div>
+
+<!-- S3 (2026-05-10): 1 trip 上限警告バナー (500km 超) -->
+<div id="tripLimitWarningBanner" style="display:none;position:fixed;left:12px;right:12px;top:max(64px,calc(env(safe-area-inset-top) + 56px));z-index:9997;background:#FF3B30;color:#fff;padding:12px 16px;border-radius:10px;font-family:'Noto Sans JP',sans-serif;font-size:13px;font-weight:700;box-shadow:0 4px 16px rgba(0,0,0,0.3);text-align:center;">
+  ⚠️ 走行距離が異常です。確認してください。
+</div>
+
+<script>
+// ━━ S1 (2026-05-10): 複数タブ guard ━━
+//   BroadcastChannel で他タブを検知・閲覧専用モード切替
+//   先発タブは継続稼働・後発タブが閲覧専用化
+//   絶対ルール「過剰課金 = クレーム」防止: 同 trip の二重課金を防ぐ
+(function(){
+  if(typeof BroadcastChannel === 'undefined') return; // 古いブラウザは guard なし
+  const TAB_ID = (function(){
+    if(typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'tab-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  })();
+  const ch = new BroadcastChannel('daikome-tab-guard');
+  let _readOnly = false;
+
+  function _enterReadOnly(){
+    if(_readOnly) return;
+    _readOnly = true;
+    window._tabReadOnly = true;
+    const banner = document.getElementById('multiTabGuardBanner');
+    if(banner) banner.style.display = 'block';
+    // 業務開始ボタンを無効化
+    const startBtn = document.querySelector('.btn-business-start');
+    if(startBtn){ startBtn.disabled = true; startBtn.style.opacity = '0.4'; startBtn.style.pointerEvents = 'none'; }
+    const resumeBtn = document.getElementById('btnResumeFromStart');
+    if(resumeBtn){ resumeBtn.disabled = true; resumeBtn.style.opacity = '0.4'; resumeBtn.style.pointerEvents = 'none'; }
+    if(typeof dlog === 'function') dlog('[TabGuard] 閲覧専用モード起動');
+  }
+  function _exitReadOnly(){
+    if(!_readOnly) return;
+    _readOnly = false;
+    window._tabReadOnly = false;
+    const banner = document.getElementById('multiTabGuardBanner');
+    if(banner) banner.style.display = 'none';
+    const startBtn = document.querySelector('.btn-business-start');
+    if(startBtn){ startBtn.disabled = false; startBtn.style.opacity = ''; startBtn.style.pointerEvents = ''; }
+    const resumeBtn = document.getElementById('btnResumeFromStart');
+    if(resumeBtn){ resumeBtn.disabled = false; resumeBtn.style.opacity = ''; resumeBtn.style.pointerEvents = ''; }
+    if(typeof dlog === 'function') dlog('[TabGuard] 閲覧専用モード解除');
+  }
+
+  ch.addEventListener('message', function(e){
+    const m = e && e.data;
+    if(!m || !m.type) return;
+    if(m.tabId === TAB_ID) return;       // 自タブの message は無視
+    if(m.type === 'tab-open'){
+      // 他タブが起動した・自タブが先発なら ack を返して相手を read-only に
+      // 自タブが既に read-only なら何もしない (= 先発がさらに優位)
+      if(!_readOnly){
+        ch.postMessage({ type: 'tab-ack', tabId: TAB_ID });
+      }
+    } else if(m.type === 'tab-ack'){
+      // 自タブの tab-open に他タブが ack を返した = 先発がいる → 閲覧専用化
+      _enterReadOnly();
+    } else if(m.type === 'tab-close'){
+      // 他タブが閉じた・read-only なら解除
+      if(_readOnly) _exitReadOnly();
+    }
+  });
+
+  // 起動時に他タブの存在をチェック
+  ch.postMessage({ type: 'tab-open', tabId: TAB_ID });
+
+  // タブ閉じる時に通知
+  window.addEventListener('beforeunload', function(){
+    try { ch.postMessage({ type: 'tab-close', tabId: TAB_ID }); } catch(_){}
+  });
+
+  window._daikomeTabId = TAB_ID;
+})();
+
+// ━━ S2 (2026-05-10): 業務開始忘れ警告 ━━
+//   GPS 5km/h+ が 10 秒以上継続 + 業務外 + accuracy<=50m で警告表示
+//   1 回閉じたら 5 分間抑制
+let _gpsHighSpeedStart = null;
+let _businessForgotSnoozeUntil = 0;
+let _businessForgotShown = false;
+
+function _checkBusinessForgot(gpsResult){
+  if(window._tabReadOnly) return;       // S1 連携: 閲覧専用は警告も表示しない
+  if(!gpsResult || gpsResult.accuracy == null) return;
+  if(gpsResult.accuracy > 50) return;
+  if(typeof Meter === 'undefined') return;
+  const state = Meter.getState();
+  if(state.running) {
+    // 業務中 → 警告非表示・state リセット
+    if(_businessForgotShown){
+      const banner = document.getElementById('businessForgotBanner');
+      if(banner) banner.style.display = 'none';
+      _businessForgotShown = false;
+    }
+    _gpsHighSpeedStart = null;
+    return;
+  }
+  if(Date.now() < _businessForgotSnoozeUntil) return;
+  if(_businessForgotShown) return;       // 既に表示中
+  const speedKmh = gpsResult.speedKmh || 0;
+  if(speedKmh < 5){
+    _gpsHighSpeedStart = null;
+    return;
+  }
+  // 5km/h 以上
+  if(_gpsHighSpeedStart === null){
+    _gpsHighSpeedStart = Date.now();
+  } else if(Date.now() - _gpsHighSpeedStart >= 10000){
+    // 10 秒継続 → 警告表示
+    const banner = document.getElementById('businessForgotBanner');
+    if(banner) banner.style.display = 'block';
+    _businessForgotShown = true;
+    if(typeof dlog === 'function') dlog('[BusinessForgot] 警告表示 (走行 10 秒継続)');
+  }
+}
+
+function dismissBusinessForgotBanner(){
+  const banner = document.getElementById('businessForgotBanner');
+  if(banner) banner.style.display = 'none';
+  _businessForgotShown = false;
+  _gpsHighSpeedStart = null;
+  _businessForgotSnoozeUntil = Date.now() + 5 * 60 * 1000;   // 5 分抑制
+  if(typeof dlog === 'function') dlog('[BusinessForgot] 5 分間抑制');
+}
+
+function startBusinessFromForgotBanner(){
+  const banner = document.getElementById('businessForgotBanner');
+  if(banner) banner.style.display = 'none';
+  _businessForgotShown = false;
+  _gpsHighSpeedStart = null;
+  if(typeof onBusinessStart === 'function') onBusinessStart();
+}
+
+// ━━ S3 (2026-05-10): 1 trip 上限警告 (500km 超) ━━
+let _tripLimitWarningShown = false;
+function _checkTripLimit(){
+  if(typeof Meter === 'undefined') return;
+  const state = Meter.getState();
+  if(!state.running) {
+    if(_tripLimitWarningShown){
+      const b = document.getElementById('tripLimitWarningBanner');
+      if(b) b.style.display = 'none';
+      _tripLimitWarningShown = false;
+    }
+    return;
+  }
+  if(state.distance_m > 500000 && !_tripLimitWarningShown){
+    const b = document.getElementById('tripLimitWarningBanner');
+    if(b) b.style.display = 'block';
+    _tripLimitWarningShown = true;
+    if(typeof dlog === 'function') dlog('[TripLimit] 500km 超過警告表示');
+  }
+}
+// 30 秒ごとにチェック
+setInterval(_checkTripLimit, 30000);
+</script>
 
 <!-- Phase 3 (2026-05-10): 初回起動時バナー (データ収集についての注意) -->
 <!-- 表示条件: localStorage 'daikome_training_consent' が null (= 初回 or 未consent) -->
@@ -2085,6 +2262,8 @@ function startGPS(){
         if(typeof Business !== 'undefined' && typeof Business.onGps === 'function'){
           Business.onGps(g);
         }
+        // S2 (2026-05-10): 業務開始忘れ検出
+        try { _checkBusinessForgot(g); } catch(_){}
         // 復元後の補完検知：距離・料金が変わったらバナーを更新
         if(window._restoreDistanceM != null){
           const cur = Meter.getState();
@@ -2357,6 +2536,11 @@ function onMainBtn(){
 //   司さん仕様「業務開始から1日の総距離もほしい」に合致
 //   業務開始 = 1日の業務スタート = 全GPS情報を取り始める
 function onBusinessStart(){
+  // S1 (2026-05-10): 閲覧専用モードでは業務開始不可
+  if(window._tabReadOnly){
+    showToast('別のタブで業務中です');
+    return;
+  }
   // 全ボタン共通：センサー未許可ならバナー表示してブロック（2026/05/01）
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined'){
@@ -2393,6 +2577,8 @@ function onBusinessStart(){
 
 // [業務終了] 押下：Business.end() 発火 → 日報画面へ
 function onBusinessEnd(){
+  // S3 (2026-05-10): 業務終了の確認 dialog (誤操作防止)
+  if(!confirm('業務を終了します。よろしいですか?')) return;
   // 全ボタン共通：センサー未許可ならバナー表示してブロック
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined') return;

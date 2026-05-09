@@ -216,14 +216,10 @@ self.addEventListener('fetch', function(e){
   e.respondWith(staleWhileRevalidate(req));
 });
 
-// Background Sync（Firebase送信）
+// Background Sync（Phase 2.B 訓練データ upload trigger）
+//   M2 (2026-05-10): 旧 'firebase-sync' tag handler は dead code のため削除
+//   現在使用中の tag は 'training-upload' のみ
 self.addEventListener('sync', function(e){
-  if(e.tag === 'firebase-sync'){
-    console.log('[SW] Background Sync: Firebase送信');
-  }
-  // Phase 2.B (2026-05-10): 訓練データ upload trigger
-  //   SW では Firebase SDK / IndexedDB 直接アクセスは複雑なため、
-  //   page client に message を送って main thread で実行する
   if(e.tag === 'training-upload'){
     e.waitUntil(_notifyClientsTrainingUpload());
   }
