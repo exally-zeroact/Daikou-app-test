@@ -24,6 +24,8 @@ const Meter = (() => {
     // ─── Phase 1.C Off-Road Mode (2026-05-10 追加) ───
     offroad_distance_m: 0,    // Off-Road Mode で加算した距離 (参照値)
     offroad_count: 0,         // Off-Road Mode 起動回数
+    // ─── 待機料金 (fareConfig v2・2026-05-10 追加) ───
+    wait_sec: 0,              // 累積待機時間 (秒・速度<3km/h で加算)
   };
 
   // MM 優先設計 (2026-05-09):
@@ -93,12 +95,35 @@ const Meter = (() => {
   // ボタン追加せず、内部で常に GPS を受け取って lastWarmupGps に保存
   let lastWarmupGps = null;
 
+  // ★設計変更宣言 (2026-05-10): fareConfig を v2 に拡張
+  //   後方互換維持: 旧キー (base_fare/base_distance_m/add_fare/add_distance_m) は残し、
+  //   tiers/surcharges 等の新キーが空 or 不在なら旧来通り動作する。
+  //   firebase.js の loadFareConfig migration で旧形式を自動 v2 化する。
   let fareConfig = {
+    version: 2,
     base_fare: 1300,
     base_distance_m: 1000,
     add_fare: 100,
     add_distance_m: 420,
+    tiers: [],
+    surcharges: [],
+    minFare: null,
+    maxFare: null,
+    rounding: 10,
+    autoSurcharges: {
+      night:    { enabled: false, from: 22, to: 5, rate: 1.2 },
+      weekend:  { enabled: false, rate: 1.1 },
+      winter:   { enabled: false, from: '12-15', to: '03-15', rate: 1.1 },
+    },
+    vehicles: [],
+    vehiclesEnabled: false,
+    wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
   };
+
+  // 業務画面で ON/OFF された手動 surcharge の id Set
+  let _activeSurchargeIds = new Set();
+  // 業務開始時に選択された車種 id (vehiclesEnabled=true のみ有効)
+  let _activeVehicleId = null;
 
   // ハイブリッド計測の閾値
   // 旧: HYBRID_SPEED_KMH = 30 (Tier S P3 で update() の hybrid 経路を撤廃済・現在 dead)
@@ -336,12 +361,28 @@ const Meter = (() => {
       // Phase 1.C Off-Road Mode リセット
       offroad_distance_m: 0,
       offroad_count: 0,
+      // 待機料金 リセット
+      wait_sec: 0,
     };
     prevSnap = null;  // Map Matching 連続性リセット（fallback 用）
     // Phase 1.C 状態リセット
     _offRoadActive = false;
     _consecutiveSnapMiss = 0;
     _haverAccumSinceLastCommit = 0;
+    // fareConfig v2: 業務開始時に default ON の surcharge を初期 active に
+    _activeSurchargeIds = new Set();
+    if(Array.isArray(fareConfig.surcharges)){
+      for(const s of fareConfig.surcharges){
+        if(s && s.active_default && s.id) _activeSurchargeIds.add(s.id);
+      }
+    }
+    // vehicle 初期選択 (default フラグ・なければ最初の vehicle)
+    if(fareConfig.vehiclesEnabled && Array.isArray(fareConfig.vehicles) && fareConfig.vehicles.length > 0){
+      const def = fareConfig.vehicles.find(v => v && v.default);
+      _activeVehicleId = (def && def.id) || fareConfig.vehicles[0].id || null;
+    } else {
+      _activeVehicleId = null;
+    }
     _fareConfigFrozen = true;  // F6: 業務開始時に凍結
     // B2 (2026-05-09): 業務開始時 MM warmup grace
     //   lastMmUsefulAt=0 だと mmHealthy=false で fallback 経路に入る
@@ -402,6 +443,8 @@ const Meter = (() => {
       // Phase 1.C Off-Road Mode リセット
       offroad_distance_m: 0,
       offroad_count: 0,
+      // 待機料金 リセット
+      wait_sec: 0,
     };
     prevSnap = null;
     // Phase 1.C 状態リセット
@@ -650,6 +693,16 @@ const Meter = (() => {
       // 初回 GPS step: 比較対象がないので加算せず prevSnap を初期化
       _inlineSnapAndIncrement(gpsResult);
     }
+    // 待機時間累積 (fareConfig v2): 速度 < 3km/h かつ業務中で wait_sec を増加
+    //   wait.enabled が true でなくても累積する (= 集計用・課金は wait.enabled 時のみ)
+    //   無料時間 freeMins は calcFare 側で控除する
+    if(state.last_timestamp){
+      const dtSec2 = (gpsResult.timestamp - state.last_timestamp) / 1000;
+      if(dtSec2 > 0 && dtSec2 < 60 && (gpsResult.speedKmh || 0) < 3){
+        state.wait_sec += dtSec2;
+      }
+    }
+
     state.last_gps = { lat: gpsResult.lat, lng: gpsResult.lng, altitude: gpsResult.altitude, compassHeading: gpsResult.compassHeading || null };
     state.last_timestamp = gpsResult.timestamp;
     state.last_speed_kmh = gpsResult.speedKmh || 0;
@@ -754,12 +807,159 @@ const Meter = (() => {
     }
   }
 
+  // ★設計変更宣言 (2026-05-10): calcFare を v2 多段階パイプライン化
+  //   後方互換: tiers/surcharges/vehicles/wait が空 or 不在なら旧来動作
+  //   計算順序:
+  //     Step 1 距離料金 (tiers 優先・旧来 base+add は fallback)
+  //     Step 2 vehicle 倍率 + addon (vehiclesEnabled 時)
+  //     Step 3 手動 surcharges 乗算 (_activeSurchargeIds の rate 積)
+  //     Step 4 autoSurcharges 乗算 (現在時刻ベースの自動判定)
+  //     Step 5 wait 料金加算 (wait.enabled 時)
+  //     Step 6 minFare/maxFare clamp
+  //     Step 7 rounding 単位丸め
   function calcFare(distanceM){
-    if(distanceM < fareConfig.base_distance_m) return fareConfig.base_fare;
-    const extra = distanceM - fareConfig.base_distance_m;
-    const steps = Math.floor(extra / fareConfig.add_distance_m) + 1;
-    return fareConfig.base_fare + (steps * fareConfig.add_fare);
+    let fare = 0;
+
+    // Step 1: 距離料金
+    if(Array.isArray(fareConfig.tiers) && fareConfig.tiers.length > 0){
+      // 新形式: tiers 配列 走査
+      if(distanceM <= fareConfig.base_distance_m){
+        fare = fareConfig.base_fare;
+      } else {
+        fare = fareConfig.base_fare;
+        for(const tier of fareConfig.tiers){
+          if(!tier || typeof tier.from_m !== 'number') continue;
+          if(distanceM <= tier.from_m) continue;
+          const tierEnd = (tier.to_m === null || tier.to_m === undefined)
+            ? distanceM : Math.min(distanceM, tier.to_m);
+          const tierDist = tierEnd - tier.from_m;
+          if(tierDist <= 0) continue;
+          const ad = tier.add_distance_m > 0 ? tier.add_distance_m : 1;
+          const af = tier.add_fare || 0;
+          const steps = Math.floor(tierDist / ad) + 1;
+          fare += steps * af;
+          if(tier.to_m === null || tier.to_m === undefined) break;
+          if(distanceM <= tier.to_m) break;
+        }
+      }
+    } else {
+      // 旧形式 fallback: base + add 単純計算
+      if(distanceM < fareConfig.base_distance_m){
+        fare = fareConfig.base_fare;
+      } else {
+        const extra = distanceM - fareConfig.base_distance_m;
+        const steps = Math.floor(extra / fareConfig.add_distance_m) + 1;
+        fare = fareConfig.base_fare + (steps * fareConfig.add_fare);
+      }
+    }
+
+    // Step 2: vehicle 倍率 + addon
+    if(fareConfig.vehiclesEnabled && _activeVehicleId && Array.isArray(fareConfig.vehicles)){
+      const v = fareConfig.vehicles.find(x => x && x.id === _activeVehicleId);
+      if(v){
+        const mul = (typeof v.multiplier === 'number' && v.multiplier > 0) ? v.multiplier : 1.0;
+        const addon = (typeof v.addon === 'number') ? v.addon : 0;
+        fare = fare * mul + addon;
+      }
+    }
+
+    // Step 3: 手動 surcharges 乗算
+    let manualMul = 1.0;
+    if(Array.isArray(fareConfig.surcharges)){
+      for(const id of _activeSurchargeIds){
+        const s = fareConfig.surcharges.find(x => x && x.id === id);
+        if(s && typeof s.rate === 'number' && s.rate >= 1.0) manualMul *= s.rate;
+      }
+    }
+    fare *= manualMul;
+
+    // Step 4: autoSurcharges 自動判定 (現在時刻ベース)
+    fare *= _calcAutoSurchargeMultiplier(new Date());
+
+    // Step 5: wait 料金加算
+    if(fareConfig.wait && fareConfig.wait.enabled){
+      const waitMin = (state.wait_sec || 0) / 60;
+      const free = (typeof fareConfig.wait.freeMins === 'number') ? fareConfig.wait.freeMins : 5;
+      const rate = (typeof fareConfig.wait.ratePerMin === 'number') ? fareConfig.wait.ratePerMin : 100;
+      const billable = Math.max(0, waitMin - free);
+      fare += billable * rate;
+    }
+
+    // Step 6: min/max clamp
+    if(typeof fareConfig.minFare === 'number' && fareConfig.minFare > 0 && fare < fareConfig.minFare){
+      fare = fareConfig.minFare;
+    }
+    if(typeof fareConfig.maxFare === 'number' && fareConfig.maxFare > 0 && fare > fareConfig.maxFare){
+      fare = fareConfig.maxFare;
+    }
+
+    // Step 7: 丸め
+    const unit = (typeof fareConfig.rounding === 'number' && fareConfig.rounding > 0) ? fareConfig.rounding : 1;
+    if(unit > 1) fare = Math.round(fare / unit) * unit;
+    else fare = Math.round(fare);
+
+    return fare;
   }
+
+  // autoSurcharges 自動判定: 現在時刻に該当する全 auto rule の rate 積
+  function _calcAutoSurchargeMultiplier(now){
+    if(!fareConfig.autoSurcharges) return 1.0;
+    let mul = 1.0;
+    const a = fareConfig.autoSurcharges;
+    // night: 時刻範囲 (wraparound 対応)
+    if(a.night && a.night.enabled){
+      const h = now.getHours();
+      const f = a.night.from, t = a.night.to;
+      const inRange = (f <= t) ? (h >= f && h < t) : (h >= f || h < t);
+      if(inRange && typeof a.night.rate === 'number') mul *= a.night.rate;
+    }
+    // weekend: 土日固定 (簡易仕様・要件通り)
+    if(a.weekend && a.weekend.enabled){
+      const dow = now.getDay();
+      if((dow === 0 || dow === 6) && typeof a.weekend.rate === 'number') mul *= a.weekend.rate;
+    }
+    // winter: 月日範囲 (年跨ぎ対応・MM-DD 文字列)
+    if(a.winter && a.winter.enabled){
+      const mmdd = String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      const f = a.winter.from || '12-15';
+      const t = a.winter.to || '03-15';
+      const inRange = (f <= t) ? (mmdd >= f && mmdd <= t) : (mmdd >= f || mmdd <= t);
+      if(inRange && typeof a.winter.rate === 'number') mul *= a.winter.rate;
+    }
+    return mul;
+  }
+
+  // fareConfig v2: 公開 API
+  function setSurchargeActive(id, active){
+    if(!id) return;
+    if(active) _activeSurchargeIds.add(id);
+    else _activeSurchargeIds.delete(id);
+    state.fare_yen = calcFare(state.distance_m);
+  }
+  function toggleSurcharge(id){
+    if(!id) return;
+    if(_activeSurchargeIds.has(id)) _activeSurchargeIds.delete(id);
+    else _activeSurchargeIds.add(id);
+    state.fare_yen = calcFare(state.distance_m);
+  }
+  function getActiveSurcharges(){ return Array.from(_activeSurchargeIds); }
+  // 現在の合計 surcharge 倍率 (手動 × 自動・vehicle 倍率は除外)
+  function getSurchargeMultiplier(){
+    let mul = 1.0;
+    if(Array.isArray(fareConfig.surcharges)){
+      for(const id of _activeSurchargeIds){
+        const s = fareConfig.surcharges.find(x => x && x.id === id);
+        if(s && typeof s.rate === 'number' && s.rate >= 1.0) mul *= s.rate;
+      }
+    }
+    mul *= _calcAutoSurchargeMultiplier(new Date());
+    return mul;
+  }
+  function setVehicleType(vehicleId){
+    _activeVehicleId = vehicleId || null;
+    state.fare_yen = calcFare(state.distance_m);
+  }
+  function getVehicleType(){ return _activeVehicleId; }
 
   function getState(){ return { ...state }; }
 
@@ -828,5 +1028,9 @@ const Meter = (() => {
     };
   }
 
-  return { start, stop, businessEnd, reset, resume, update, updateGpsOnly, getState, getMMStats, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher, isMmReady };
+  return { start, stop, businessEnd, reset, resume, update, updateGpsOnly, getState, getMMStats, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher, isMmReady,
+    // fareConfig v2 (2026-05-10)
+    setSurchargeActive, toggleSurcharge, getActiveSurcharges, getSurchargeMultiplier,
+    setVehicleType, getVehicleType,
+  };
 })();

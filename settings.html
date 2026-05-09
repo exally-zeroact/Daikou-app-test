@@ -81,41 +81,20 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
-  <!-- 料金設定 -->
+  <!-- 料金設定 (2026-05-10: fareConfig v2 で fare.html へ独立) -->
   <div class="section">
     <div class="section-title">料金設定</div>
-    <div class="row">
-      <div class="row-label">初乗り料金</div>
-      <div style="display:flex;align-items:center;">
-        <input class="row-input" type="number" id="baseFare" value="1300">
-        <span class="row-unit">円</span>
-      </div>
-    </div>
-    <div class="row">
-      <div class="row-label">加算開始距離<br><span style="font-size:11px;color:#aaa;">この距離から加算（例：1000mで¥1,400）</span></div>
-      <div style="display:flex;align-items:center;">
-        <input class="row-input" type="number" id="baseDist" value="1000">
-        <span class="row-unit">m未満</span>
-      </div>
-    </div>
-    <div class="row">
-      <div class="row-label">加算距離</div>
-      <div style="display:flex;align-items:center;">
-        <input class="row-input" type="number" id="addDist" value="420">
-        <span class="row-unit">mごと</span>
-      </div>
-    </div>
-    <div class="row">
-      <div class="row-label">加算金額</div>
-      <div style="display:flex;align-items:center;">
-        <input class="row-input" type="number" id="addFare" value="100">
-        <span class="row-unit">円</span>
-      </div>
-    </div>
-    <div style="padding:12px 16px;">
-      <div class="preview" id="preview"></div>
+    <div class="row" onclick="location.href='fare.html'" style="cursor:pointer;">
+      <div class="row-label">料金設定（基本・段階・割増・自動・車種・待機・区間）</div>
+      <div style="color:#8E8E93;font-size:13px;">›</div>
     </div>
   </div>
+  <!-- 旧 input は fare.html に移行・互換のため hidden で保持 (load 関数が参照する) -->
+  <input type="hidden" id="baseFare" value="1300">
+  <input type="hidden" id="baseDist" value="1000">
+  <input type="hidden" id="addDist" value="420">
+  <input type="hidden" id="addFare" value="100">
+  <div style="display:none;"><div class="preview" id="preview"></div></div>
 
   <!-- 割増設定 -->
   <div class="section">

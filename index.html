@@ -119,6 +119,16 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 .apk-modal-close{background:#eee;color:#555;border:none;border-radius:10px;padding:13px 18px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;}
 .gps-acc{font-size:11px;color:#fff;opacity:0.8;}
 .surcharge-badge{background:#FF3B30;border-radius:8px;padding:4px 10px;cursor:pointer;}
+/* fareConfig v2 (2026-05-10): 動的 surcharge ボタン群 */
+.surcharge-group{display:none;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:#F0FAF4;border-bottom:1px solid #C8ECD8;}
+.surcharge-group.show{display:flex;}
+.surcharge-btn{padding:6px 10px;border-radius:18px;border:1.5px solid;font-size:12px;font-weight:700;font-family:'DM Mono',monospace;cursor:pointer;background:#fff;color:#999;border-color:#ccc;-webkit-tap-highlight-color:transparent;}
+.surcharge-btn.on{color:#fff;}
+.surcharge-mult{margin-left:auto;font-size:13px;color:#1A4A2E;font-weight:700;font-family:'DM Mono',monospace;}
+@media (orientation: landscape){
+  .surcharge-group{flex-wrap:nowrap;overflow-x:auto;}
+  .surcharge-group::-webkit-scrollbar{display:none;}
+}
 .menu-btn{
 background:rgba(255,255,255,0.2);border:none;border-radius:8px;
 padding:4px 12px;cursor:pointer;
@@ -793,6 +803,11 @@ setInterval(_checkTripLimit, 30000);
     </div>
     <button class="menu-btn" id="menuBtn" onclick="event.stopPropagation();onMenuClick();return false;">≡</button>
   </div>
+</div>
+
+<!-- fareConfig v2 (2026-05-10): 手動 surcharge ボタン群 + 倍率表示 -->
+<div class="surcharge-group" id="surchargeGroup">
+  <span class="surcharge-mult" id="surchargeMult">×1.00</span>
 </div>
 
 <!-- センサー再起動バナー（全画面共通・appbar直下・2026/05/03 統一） -->
@@ -2521,6 +2536,8 @@ function onMainBtn(){
     try { FB.startSession(Meter.getFareConfig()); } catch(e){ console.error('FB session error:', e); }
     // TestMode 走行開始記録は H-3 対応で削除済
     startUiTimer();
+    // fareConfig v2: 業務開始で surcharge ボタン群を表示
+    try { if(typeof renderSurchargeButtons === 'function') renderSurchargeButtons(); } catch(_){}
   } else if(appState==='driving'){
     // 実車中はメインボタン非表示（仕様2026/05/01）→ ここに来ない想定だが保険
   } else if(appState==='fare'){
@@ -2593,6 +2610,8 @@ function onBusinessEnd(){
       Meter.businessEnd();
     }
     Business.end();
+    // fareConfig v2: 業務終了で surcharge ボタン群を非表示
+    try { if(typeof renderSurchargeButtons === 'function') renderSurchargeButtons(); } catch(_){}
     // GPS / センサー蓄積を停止（D案・2026/05/06）
     //   日報画面では位置・加速度・ジャイロを使わないので即停止
     //   [続ける]で再開された時は onBusinessResume 側で startGPS() し直す
@@ -3040,7 +3059,7 @@ function cancelFare(){
   document.getElementById('appbarTitle').textContent='代行中';
 }
 
-// ─── 割増トグル ───
+// ─── 割増トグル (旧式: 単一 surchargeOn) ───
 function toggleSurcharge(){
   surchargeOn = !surchargeOn;
   updateSurchargeBadge();
@@ -3053,6 +3072,48 @@ function updateSurchargeBadge(){
   badge.style.background = surchargeOn ? '#FF3B30' : '#8E8E93';
   document.getElementById('surchargeLabel').textContent = surchargeOn ? '割増 ON' : '割増 OFF';
 }
+
+// ─── fareConfig v2 (2026-05-10): 動的 surcharge ボタン群 ───
+function renderSurchargeButtons(){
+  const group = document.getElementById('surchargeGroup');
+  const multEl = document.getElementById('surchargeMult');
+  if(!group || typeof Meter === 'undefined') return;
+  const cfg = (typeof Meter.getFareConfig === 'function') ? Meter.getFareConfig() : null;
+  if(!cfg || !Array.isArray(cfg.surcharges) || cfg.surcharges.length === 0){
+    group.classList.remove('show');
+    return;
+  }
+  // ボタンを再描画
+  // multiplier element 以外を全削除して再生成
+  const multClone = multEl;
+  group.innerHTML = '';
+  const active = (typeof Meter.getActiveSurcharges === 'function') ? new Set(Meter.getActiveSurcharges()) : new Set();
+  cfg.surcharges.forEach(s => {
+    if(!s || !s.id) return;
+    const btn = document.createElement('button');
+    btn.className = 'surcharge-btn' + (active.has(s.id) ? ' on' : '');
+    btn.textContent = (s.name || '割増') + ' ×' + s.rate;
+    if(active.has(s.id)){
+      btn.style.background = s.color || '#52B788';
+      btn.style.borderColor = s.color || '#52B788';
+    }
+    btn.onclick = function(){
+      if(typeof Meter.toggleSurcharge === 'function') Meter.toggleSurcharge(s.id);
+      renderSurchargeButtons();
+    };
+    group.appendChild(btn);
+  });
+  group.appendChild(multClone);
+  // multiplier 更新
+  const mul = (typeof Meter.getSurchargeMultiplier === 'function') ? Meter.getSurchargeMultiplier() : 1.0;
+  if(multClone) multClone.textContent = '×' + mul.toFixed(2);
+  // 業務中のみ表示
+  const ms = (typeof Meter.getState === 'function') ? Meter.getState() : null;
+  if(ms && ms.running) group.classList.add('show');
+  else group.classList.remove('show');
+}
+// 業務開始/終了時に再描画
+window.renderSurchargeButtons = renderSurchargeButtons;
 
 // ─── 追加料金モーダル ───
 function openExtraModal(){

@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>料金設定</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{font-family:'Noto Sans JP',sans-serif;background:#F0FAF4;color:#1A4A2E;min-height:100vh;}
+body{display:flex;flex-direction:column;}
+
+/* AppBar (mint) */
+.appbar{background:#52B788;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.appbar-back{color:#fff;font-size:16px;cursor:pointer;padding:4px 8px;}
+.appbar-title{font-size:17px;font-weight:700;color:#fff;font-family:'DM Mono',monospace;letter-spacing:1px;}
+
+/* Layout container - portrait/landscape responsive */
+.layout{display:flex;flex-direction:column;flex:1;min-height:0;}
+
+/* Tab nav - portrait: horizontal scroll, landscape: left vertical */
+.tab-nav{display:flex;background:#fff;border-bottom:1.5px solid #C8ECD8;overflow-x:auto;flex-shrink:0;}
+.tab-nav::-webkit-scrollbar{display:none;}
+.tab-btn{padding:14px 16px;font-size:13px;color:#3D9E72;font-weight:700;cursor:pointer;white-space:nowrap;border:none;background:transparent;font-family:'Noto Sans JP',sans-serif;border-bottom:3px solid transparent;}
+.tab-btn.active{color:#1A4A2E;border-bottom-color:#52B788;background:#F0FAF4;}
+
+/* Content area */
+.tab-content{flex:1;overflow-y:auto;padding:16px;padding-bottom:120px;}
+.tab-pane{display:none;}
+.tab-pane.active{display:block;}
+
+/* Section card */
+.card{background:#fff;border:1.5px solid #C8ECD8;border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+.card-title{font-size:13px;color:#3D9E72;font-weight:700;margin-bottom:8px;letter-spacing:1px;font-family:'DM Mono',monospace;}
+.card-desc{font-size:12px;color:#3D9E72;line-height:1.6;margin-bottom:8px;}
+
+/* Form rows */
+.form-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #C8ECD8;gap:8px;}
+.form-row:last-child{border-bottom:none;}
+.form-label{font-size:14px;color:#1A4A2E;flex:1;}
+.form-input{width:120px;padding:8px 10px;border:1px solid #C8ECD8;border-radius:8px;font-size:15px;font-family:'DM Mono',monospace;text-align:right;background:#F0FAF4;color:#1A4A2E;}
+.form-input.text{font-family:'Noto Sans JP',sans-serif;text-align:left;}
+.form-input.wide{width:160px;}
+.form-input.fullwidth{width:100%;}
+.form-unit{font-size:12px;color:#3D9E72;font-family:'DM Mono',monospace;margin-left:4px;}
+
+/* Toggle (mint) */
+.toggle{width:44px;height:26px;background:#C8ECD8;border-radius:13px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;}
+.toggle.on{background:#52B788;}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:22px;height:22px;background:#fff;border-radius:50%;transition:left 0.2s;}
+.toggle.on::after{left:20px;}
+
+/* Buttons */
+.btn-add{display:block;width:100%;padding:12px;background:#F0FAF4;border:1.5px dashed #52B788;border-radius:10px;color:#3D9E72;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:8px;}
+.btn-add:active{background:#C8ECD8;}
+.btn-del{padding:6px 12px;background:#fff;border:1px solid #FF3B30;border-radius:6px;color:#FF3B30;font-size:12px;cursor:pointer;font-family:inherit;}
+.btn-save{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));padding:14px;background:#52B788;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 12px rgba(82,183,136,0.4);z-index:10;}
+.btn-save:active{transform:scale(0.97);filter:brightness(0.9);}
+
+/* Tier / surcharge / vehicle row card */
+.item-card{border:1px solid #C8ECD8;border-radius:10px;padding:12px;margin-bottom:10px;background:#F0FAF4;}
+.item-card-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.item-card-row:last-child{margin-bottom:0;}
+
+/* Color picker */
+.color-picker{display:flex;gap:6px;flex-wrap:wrap;}
+.color-swatch{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 1px #C8ECD8;}
+.color-swatch.selected{box-shadow:0 0 0 2px #1A4A2E;}
+
+/* Rounding pills */
+.pill-group{display:flex;gap:6px;flex-wrap:wrap;}
+.pill{padding:6px 12px;border:1.5px solid #C8ECD8;border-radius:16px;background:#fff;color:#3D9E72;font-size:13px;font-family:'DM Mono',monospace;cursor:pointer;}
+.pill.selected{background:#52B788;color:#fff;border-color:#52B788;}
+
+/* Preview table */
+.preview-table{width:100%;border-collapse:collapse;font-family:'DM Mono',monospace;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #C8ECD8;}
+.preview-table th,.preview-table td{padding:10px;font-size:13px;text-align:right;border-bottom:0.5px solid #C8ECD8;}
+.preview-table th{background:#C8ECD8;color:#1A4A2E;font-weight:700;}
+.preview-table td{color:#1A4A2E;}
+.preview-multiplier{padding:10px;background:#1A4A2E;color:#C8ECD8;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;text-align:center;margin-bottom:10px;}
+
+/* Auto surcharge active indicator */
+.auto-status{font-size:12px;color:#52B788;font-family:'DM Mono',monospace;font-weight:700;margin-top:4px;}
+.auto-status.inactive{color:#999;}
+
+/* Toast */
+.fare-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#1A4A2E;color:#C8ECD8;border-radius:10px;padding:10px 16px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:700;display:none;font-family:'Noto Sans JP',sans-serif;}
+.fare-toast.show{display:block;}
+
+/* Landscape: 2 column layout */
+@media (orientation: landscape) and (min-width: 700px){
+  .layout{flex-direction:row;}
+  .tab-nav{flex-direction:column;width:160px;border-right:1.5px solid #C8ECD8;border-bottom:none;overflow-y:auto;overflow-x:hidden;}
+  .tab-btn{text-align:left;padding:14px 16px;border-bottom:0.5px solid #C8ECD8;border-left:3px solid transparent;}
+  .tab-btn.active{border-left-color:#52B788;border-bottom-color:#C8ECD8;}
+  .tab-content{padding:24px;padding-bottom:100px;}
+  .btn-save{left:auto;right:24px;width:200px;}
+}
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="appbar-back" onclick="location.href='settings.html'">＜</div>
+  <div class="appbar-title">FARE CONFIG</div>
+</div>
+
+<div class="layout">
+
+  <nav class="tab-nav" id="tabNav">
+    <button class="tab-btn active" data-tab="basic">基本</button>
+    <button class="tab-btn" data-tab="tiers">段階</button>
+    <button class="tab-btn" data-tab="surcharges">割増</button>
+    <button class="tab-btn" data-tab="auto">自動割増</button>
+    <button class="tab-btn" data-tab="vehicles">車種</button>
+    <button class="tab-btn" data-tab="wait">待機</button>
+    <button class="tab-btn" data-tab="zones">区間</button>
+    <button class="tab-btn" data-tab="preview">確認</button>
+  </nav>
+
+  <div class="tab-content">
+
+    <!-- タブ 1 基本 -->
+    <section class="tab-pane active" data-pane="basic">
+      <div class="card">
+        <div class="card-title">基本料金</div>
+        <div class="form-row"><div class="form-label">初乗り料金</div><div><input class="form-input" type="number" id="baseFare" min="0"><span class="form-unit">円</span></div></div>
+        <div class="form-row"><div class="form-label">初乗り距離</div><div><input class="form-input" type="number" id="baseDistance" min="0"><span class="form-unit">m</span></div></div>
+        <div class="form-row"><div class="form-label">加算料金</div><div><input class="form-input" type="number" id="addFare" min="0"><span class="form-unit">円</span></div></div>
+        <div class="form-row"><div class="form-label">加算距離</div><div><input class="form-input" type="number" id="addDistance" min="0"><span class="form-unit">m</span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">最低 / 上限料金</div>
+        <div class="card-desc">空欄=制限なし</div>
+        <div class="form-row"><div class="form-label">最低料金</div><div><input class="form-input" type="number" id="minFare" min="0" placeholder="なし"><span class="form-unit">円</span></div></div>
+        <div class="form-row"><div class="form-label">上限料金</div><div><input class="form-input" type="number" id="maxFare" min="0" placeholder="なし"><span class="form-unit">円</span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">丸め単位</div>
+        <div class="pill-group" id="roundingPills">
+          <div class="pill" data-val="1">1円</div>
+          <div class="pill" data-val="10">10円</div>
+          <div class="pill" data-val="50">50円</div>
+          <div class="pill" data-val="100">100円</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- タブ 2 段階 -->
+    <section class="tab-pane" data-pane="tiers">
+      <div class="card">
+        <div class="card-title">段階料金</div>
+        <div class="form-row"><div class="form-label">段階料金を使用</div><div class="toggle" id="tiersEnabledToggle"></div></div>
+        <div class="card-desc">空=旧来 base+add 単純計算</div>
+      </div>
+      <div id="tiersList"></div>
+      <button class="btn-add" onclick="addTier()">＋ 区間追加</button>
+    </section>
+
+    <!-- タブ 3 割増 -->
+    <section class="tab-pane" data-pane="surcharges">
+      <div class="card">
+        <div class="card-title">手動割増ボタン</div>
+        <div class="card-desc">業務画面で ON/OFF できる割増・複数同時で乗算</div>
+      </div>
+      <div id="surchargesList"></div>
+      <button class="btn-add" onclick="addSurcharge()">＋ 割増追加</button>
+    </section>
+
+    <!-- タブ 4 自動割増 -->
+    <section class="tab-pane" data-pane="auto">
+      <div class="card">
+        <div class="card-title">深夜割増</div>
+        <div class="form-row"><div class="form-label">使用</div><div class="toggle" id="autoNightToggle"></div></div>
+        <div class="form-row"><div class="form-label">開始時</div><div><input class="form-input" type="number" id="autoNightFrom" min="0" max="23"><span class="form-unit">時</span></div></div>
+        <div class="form-row"><div class="form-label">終了時</div><div><input class="form-input" type="number" id="autoNightTo" min="0" max="23"><span class="form-unit">時</span></div></div>
+        <div class="form-row"><div class="form-label">倍率</div><div><input class="form-input" type="number" id="autoNightRate" step="0.05" min="1.0" max="3.0"><span class="form-unit">倍</span></div></div>
+        <div class="auto-status inactive" id="autoNightStatus">現在 適用外</div>
+      </div>
+      <div class="card">
+        <div class="card-title">週末割増 (土日)</div>
+        <div class="form-row"><div class="form-label">使用</div><div class="toggle" id="autoWeekendToggle"></div></div>
+        <div class="form-row"><div class="form-label">倍率</div><div><input class="form-input" type="number" id="autoWeekendRate" step="0.05" min="1.0" max="3.0"><span class="form-unit">倍</span></div></div>
+        <div class="auto-status inactive" id="autoWeekendStatus">現在 適用外</div>
+      </div>
+      <div class="card">
+        <div class="card-title">冬季割増</div>
+        <div class="form-row"><div class="form-label">使用</div><div class="toggle" id="autoWinterToggle"></div></div>
+        <div class="form-row"><div class="form-label">開始日</div><div><input class="form-input" type="text" id="autoWinterFrom" placeholder="12-15"></div></div>
+        <div class="form-row"><div class="form-label">終了日</div><div><input class="form-input" type="text" id="autoWinterTo" placeholder="03-15"></div></div>
+        <div class="form-row"><div class="form-label">倍率</div><div><input class="form-input" type="number" id="autoWinterRate" step="0.05" min="1.0" max="3.0"><span class="form-unit">倍</span></div></div>
+        <div class="auto-status inactive" id="autoWinterStatus">現在 適用外</div>
+      </div>
+    </section>
+
+    <!-- タブ 5 車種 -->
+    <section class="tab-pane" data-pane="vehicles">
+      <div class="card">
+        <div class="card-title">車種別料金</div>
+        <div class="form-row"><div class="form-label">車種別料金を使用</div><div class="toggle" id="vehiclesEnabledToggle"></div></div>
+        <div class="card-desc">業務開始時に車種を選択する設計</div>
+      </div>
+      <div id="vehiclesList"></div>
+      <button class="btn-add" onclick="addVehicle()">＋ 車種追加</button>
+    </section>
+
+    <!-- タブ 6 待機 -->
+    <section class="tab-pane" data-pane="wait">
+      <div class="card">
+        <div class="card-title">待機料金</div>
+        <div class="form-row"><div class="form-label">使用</div><div class="toggle" id="waitEnabledToggle"></div></div>
+        <div class="form-row"><div class="form-label">無料時間</div><div><input class="form-input" type="number" id="waitFreeMins" min="0"><span class="form-unit">分</span></div></div>
+        <div class="form-row"><div class="form-label">単価</div><div><input class="form-input" type="number" id="waitRate" min="0"><span class="form-unit">円/分</span></div></div>
+        <div class="form-row"><div class="form-label">停車判定速度</div><div><span class="form-unit" style="margin-right:8px;">3km/h 固定</span></div></div>
+      </div>
+    </section>
+
+    <!-- タブ 7 区間 -->
+    <section class="tab-pane" data-pane="zones">
+      <div class="card">
+        <div class="card-title">区間料金</div>
+        <div class="card-desc">「○○エリア → ○○エリア で固定料金」の設定<br>詳細設定はPCからも可能</div>
+        <div class="form-row"><div class="form-label">使用</div><div class="toggle" id="zonesEnabledToggle"></div></div>
+      </div>
+      <div id="zonesList"></div>
+      <button class="btn-add" onclick="addZone()">＋ 区間追加</button>
+    </section>
+
+    <!-- タブ 8 確認 -->
+    <section class="tab-pane" data-pane="preview">
+      <div class="card">
+        <div class="card-title">割増シミュレーション</div>
+        <div class="card-desc">適用した割増を組み合わせた料金プレビュー</div>
+        <div id="previewSurcharges"></div>
+        <div id="previewAutoStatus" style="margin-top:10px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">距離別料金</div>
+        <div class="preview-multiplier" id="previewMultiplier">適用倍率: 1.00</div>
+        <table class="preview-table">
+          <thead><tr><th>距離</th><th>料金</th></tr></thead>
+          <tbody id="previewTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<button class="btn-save" onclick="saveAll()">保　存</button>
+<div class="fare-toast" id="fareToast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/firebase.js"></script>
+
+<script>
+// 編集中の fareConfig
+let fc = {
+  version: 2,
+  base_fare: 1300,
+  base_distance_m: 1000,
+  add_fare: 100,
+  add_distance_m: 420,
+  tiers: [],
+  tiersEnabled: false,
+  surcharges: [],
+  minFare: null,
+  maxFare: null,
+  rounding: 10,
+  autoSurcharges: {
+    night:    { enabled: false, from: 22, to: 5, rate: 1.2 },
+    weekend:  { enabled: false, rate: 1.1 },
+    winter:   { enabled: false, from: '12-15', to: '03-15', rate: 1.1 },
+  },
+  vehicles: [],
+  vehiclesEnabled: false,
+  wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
+  zones: [],
+  zonesEnabled: false,
+};
+
+const COLOR_PRESETS = ['#52B788','#1A4A2E','#FF9500','#FF3B30','#A0287A','#007AFF','#FFCC00','#FF6B9D'];
+
+// ━━ Tab switching ━━
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    const pane = document.querySelector('.tab-pane[data-pane="' + tab + '"]');
+    if(pane) pane.classList.add('active');
+    if(tab === 'preview') updatePreview();
+    if(tab === 'auto') updateAutoStatus();
+  });
+});
+
+// ━━ Toggle helper ━━
+function bindToggle(elId, getter, setter){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  if(getter()) el.classList.add('on');
+  el.addEventListener('click', () => {
+    setter(!getter());
+    if(getter()) el.classList.add('on'); else el.classList.remove('on');
+    if(elId.startsWith('auto')) updateAutoStatus();
+  });
+}
+
+// ━━ Tab 1 基本 ━━
+function loadBasic(){
+  document.getElementById('baseFare').value = fc.base_fare;
+  document.getElementById('baseDistance').value = fc.base_distance_m;
+  document.getElementById('addFare').value = fc.add_fare;
+  document.getElementById('addDistance').value = fc.add_distance_m;
+  document.getElementById('minFare').value = (fc.minFare != null) ? fc.minFare : '';
+  document.getElementById('maxFare').value = (fc.maxFare != null) ? fc.maxFare : '';
+  document.querySelectorAll('#roundingPills .pill').forEach(p => {
+    if(parseInt(p.dataset.val,10) === fc.rounding) p.classList.add('selected');
+    else p.classList.remove('selected');
+    p.onclick = () => {
+      fc.rounding = parseInt(p.dataset.val,10);
+      document.querySelectorAll('#roundingPills .pill').forEach(x => x.classList.remove('selected'));
+      p.classList.add('selected');
+    };
+  });
+}
+function saveBasic(){
+  fc.base_fare = parseInt(document.getElementById('baseFare').value,10) || 0;
+  fc.base_distance_m = parseInt(document.getElementById('baseDistance').value,10) || 0;
+  fc.add_fare = parseInt(document.getElementById('addFare').value,10) || 0;
+  fc.add_distance_m = parseInt(document.getElementById('addDistance').value,10) || 0;
+  const mn = document.getElementById('minFare').value;
+  fc.minFare = mn === '' ? null : parseInt(mn,10);
+  const mx = document.getElementById('maxFare').value;
+  fc.maxFare = mx === '' ? null : parseInt(mx,10);
+}
+
+// ━━ Tab 2 段階 ━━
+function renderTiers(){
+  const root = document.getElementById('tiersList');
+  if(!root) return;
+  root.innerHTML = '';
+  (fc.tiers || []).forEach((t, i) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML =
+      '<div class="item-card-row"><span class="form-label">区間 ' + (i+1) + '</span><button class="btn-del" data-i="' + i + '">削除</button></div>' +
+      '<div class="item-card-row"><span class="form-label">から</span><input class="form-input" type="number" data-key="from_m" value="' + (t.from_m||0) + '"><span class="form-unit">m</span></div>' +
+      '<div class="item-card-row"><span class="form-label">まで</span><input class="form-input" type="number" data-key="to_m" value="' + (t.to_m == null ? '' : t.to_m) + '" placeholder="∞"><span class="form-unit">m</span></div>' +
+      '<div class="item-card-row"><span class="form-label">加算料金</span><input class="form-input" type="number" data-key="add_fare" value="' + (t.add_fare||0) + '"><span class="form-unit">円</span></div>' +
+      '<div class="item-card-row"><span class="form-label">加算距離</span><input class="form-input" type="number" data-key="add_distance_m" value="' + (t.add_distance_m||0) + '"><span class="form-unit">m</span></div>';
+    card.querySelectorAll('input').forEach(inp => {
+      inp.oninput = () => {
+        const k = inp.dataset.key;
+        const v = inp.value;
+        if(k === 'to_m'){
+          fc.tiers[i].to_m = (v === '') ? null : parseInt(v,10);
+        } else {
+          fc.tiers[i][k] = parseInt(v,10) || 0;
+        }
+        // 連続性自動同期: 編集 tier の to_m 変更 → 次 tier の from_m を同期
+        if(k === 'to_m' && fc.tiers[i+1]){
+          fc.tiers[i+1].from_m = fc.tiers[i].to_m || 0;
+          renderTiers();
+        }
+      };
+    });
+    card.querySelector('.btn-del').onclick = () => {
+      fc.tiers.splice(i, 1);
+      renderTiers();
+    };
+    root.appendChild(card);
+  });
+}
+function addTier(){
+  if(!fc.tiers) fc.tiers = [];
+  const last = fc.tiers[fc.tiers.length - 1];
+  const fromM = last ? (last.to_m || 0) : (fc.base_distance_m || 1000);
+  fc.tiers.push({ from_m: fromM, to_m: null, add_fare: 100, add_distance_m: 300 });
+  renderTiers();
+}
+
+// ━━ Tab 3 割増 ━━
+function renderSurcharges(){
+  const root = document.getElementById('surchargesList');
+  if(!root) return;
+  root.innerHTML = '';
+  (fc.surcharges || []).forEach((s, i) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    let colorHtml = '<div class="color-picker">';
+    COLOR_PRESETS.forEach(c => {
+      const sel = (c === s.color) ? ' selected' : '';
+      colorHtml += '<div class="color-swatch' + sel + '" style="background:' + c + '" data-color="' + c + '"></div>';
+    });
+    colorHtml += '</div>';
+    card.innerHTML =
+      '<div class="item-card-row"><span class="form-label">割増 ' + (i+1) + '</span><button class="btn-del" data-i="' + i + '">削除</button></div>' +
+      '<div class="item-card-row"><span class="form-label">業務開始時 ON</span><div class="toggle ' + (s.active_default ? 'on' : '') + '" data-toggle="active_default"></div></div>' +
+      '<div class="item-card-row"><span class="form-label">名称</span><input class="form-input text wide" data-key="name" value="' + (s.name||'') + '"></div>' +
+      '<div class="item-card-row"><span class="form-label">倍率</span><input class="form-input" type="number" step="0.05" min="1.0" max="3.0" data-key="rate" value="' + (s.rate||1.2) + '"><span class="form-unit">倍</span></div>' +
+      '<div class="item-card-row"><span class="form-label">色</span>' + colorHtml + '</div>';
+    card.querySelectorAll('input').forEach(inp => {
+      inp.oninput = () => {
+        const k = inp.dataset.key;
+        if(k === 'rate') fc.surcharges[i].rate = parseFloat(inp.value) || 1.0;
+        else fc.surcharges[i][k] = inp.value;
+      };
+    });
+    card.querySelectorAll('.color-swatch').forEach(sw => {
+      sw.onclick = () => {
+        fc.surcharges[i].color = sw.dataset.color;
+        card.querySelectorAll('.color-swatch').forEach(x => x.classList.remove('selected'));
+        sw.classList.add('selected');
+      };
+    });
+    card.querySelector('.toggle[data-toggle="active_default"]').onclick = (e) => {
+      fc.surcharges[i].active_default = !fc.surcharges[i].active_default;
+      e.currentTarget.classList.toggle('on');
+    };
+    card.querySelector('.btn-del').onclick = () => {
+      fc.surcharges.splice(i, 1);
+      renderSurcharges();
+    };
+    root.appendChild(card);
+  });
+}
+function addSurcharge(){
+  if(!fc.surcharges) fc.surcharges = [];
+  const id = 'sc_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+  fc.surcharges.push({ id: id, name: '割増' + (fc.surcharges.length+1), rate: 1.2, color: COLOR_PRESETS[fc.surcharges.length % COLOR_PRESETS.length], active_default: false });
+  renderSurcharges();
+}
+
+// ━━ Tab 4 自動割増 ━━
+function loadAuto(){
+  const a = fc.autoSurcharges || {};
+  document.getElementById('autoNightFrom').value = (a.night && a.night.from != null) ? a.night.from : 22;
+  document.getElementById('autoNightTo').value = (a.night && a.night.to != null) ? a.night.to : 5;
+  document.getElementById('autoNightRate').value = (a.night && a.night.rate) || 1.2;
+  document.getElementById('autoWeekendRate').value = (a.weekend && a.weekend.rate) || 1.1;
+  document.getElementById('autoWinterFrom').value = (a.winter && a.winter.from) || '12-15';
+  document.getElementById('autoWinterTo').value = (a.winter && a.winter.to) || '03-15';
+  document.getElementById('autoWinterRate').value = (a.winter && a.winter.rate) || 1.1;
+  ['autoNightFrom','autoNightTo','autoNightRate','autoWeekendRate','autoWinterFrom','autoWinterTo','autoWinterRate'].forEach(k => {
+    const el = document.getElementById(k);
+    if(!el) return;
+    el.oninput = () => { saveAuto(); updateAutoStatus(); };
+  });
+}
+function saveAuto(){
+  const a = fc.autoSurcharges || (fc.autoSurcharges = {});
+  a.night = a.night || {};
+  a.weekend = a.weekend || {};
+  a.winter = a.winter || {};
+  a.night.from = parseInt(document.getElementById('autoNightFrom').value,10);
+  a.night.to = parseInt(document.getElementById('autoNightTo').value,10);
+  a.night.rate = parseFloat(document.getElementById('autoNightRate').value) || 1.2;
+  a.weekend.rate = parseFloat(document.getElementById('autoWeekendRate').value) || 1.1;
+  a.winter.from = document.getElementById('autoWinterFrom').value || '12-15';
+  a.winter.to = document.getElementById('autoWinterTo').value || '03-15';
+  a.winter.rate = parseFloat(document.getElementById('autoWinterRate').value) || 1.1;
+}
+function updateAutoStatus(){
+  const a = fc.autoSurcharges || {};
+  const now = new Date();
+  // night
+  const nE = document.getElementById('autoNightStatus');
+  if(nE){
+    if(a.night && a.night.enabled){
+      const h = now.getHours();
+      const f = a.night.from, t = a.night.to;
+      const inRange = (f <= t) ? (h >= f && h < t) : (h >= f || h < t);
+      nE.textContent = inRange ? ('現在 適用中 ×' + (a.night.rate || 1.2)) : '現在 適用外';
+      nE.classList.toggle('inactive', !inRange);
+    } else {
+      nE.textContent = 'OFF';
+      nE.classList.add('inactive');
+    }
+  }
+  const wE = document.getElementById('autoWeekendStatus');
+  if(wE){
+    if(a.weekend && a.weekend.enabled){
+      const dow = now.getDay();
+      const inRange = (dow === 0 || dow === 6);
+      wE.textContent = inRange ? ('現在 適用中 ×' + (a.weekend.rate || 1.1)) : '現在 適用外';
+      wE.classList.toggle('inactive', !inRange);
+    } else {
+      wE.textContent = 'OFF';
+      wE.classList.add('inactive');
+    }
+  }
+  const xE = document.getElementById('autoWinterStatus');
+  if(xE){
+    if(a.winter && a.winter.enabled){
+      const mmdd = String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+      const f = a.winter.from || '12-15';
+      const t = a.winter.to || '03-15';
+      const inRange = (f <= t) ? (mmdd >= f && mmdd <= t) : (mmdd >= f || mmdd <= t);
+      xE.textContent = inRange ? ('現在 適用中 ×' + (a.winter.rate || 1.1)) : '現在 適用外';
+      xE.classList.toggle('inactive', !inRange);
+    } else {
+      xE.textContent = 'OFF';
+      xE.classList.add('inactive');
+    }
+  }
+}
+
+// ━━ Tab 5 車種 ━━
+function renderVehicles(){
+  const root = document.getElementById('vehiclesList');
+  if(!root) return;
+  root.innerHTML = '';
+  (fc.vehicles || []).forEach((v, i) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML =
+      '<div class="item-card-row"><span class="form-label">車種 ' + (i+1) + '</span><button class="btn-del" data-i="' + i + '">削除</button></div>' +
+      '<div class="item-card-row"><span class="form-label">デフォルト選択</span><div class="toggle ' + (v.default ? 'on' : '') + '" data-toggle="default"></div></div>' +
+      '<div class="item-card-row"><span class="form-label">名称</span><input class="form-input text wide" data-key="name" value="' + (v.name||'') + '"></div>' +
+      '<div class="item-card-row"><span class="form-label">倍率</span><input class="form-input" type="number" step="0.05" min="0.5" max="3.0" data-key="multiplier" value="' + (v.multiplier||1.0) + '"><span class="form-unit">倍</span></div>' +
+      '<div class="item-card-row"><span class="form-label">追加料金</span><input class="form-input" type="number" data-key="addon" value="' + (v.addon||0) + '"><span class="form-unit">円</span></div>';
+    card.querySelectorAll('input').forEach(inp => {
+      inp.oninput = () => {
+        const k = inp.dataset.key;
+        if(k === 'multiplier') fc.vehicles[i].multiplier = parseFloat(inp.value) || 1.0;
+        else if(k === 'addon') fc.vehicles[i].addon = parseInt(inp.value,10) || 0;
+        else fc.vehicles[i][k] = inp.value;
+      };
+    });
+    card.querySelector('.toggle[data-toggle="default"]').onclick = (e) => {
+      // default は 1 つのみ
+      (fc.vehicles||[]).forEach(x => x.default = false);
+      fc.vehicles[i].default = true;
+      renderVehicles();
+    };
+    card.querySelector('.btn-del').onclick = () => {
+      fc.vehicles.splice(i, 1);
+      renderVehicles();
+    };
+    root.appendChild(card);
+  });
+}
+function addVehicle(){
+  if(!fc.vehicles) fc.vehicles = [];
+  const id = 'v_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+  fc.vehicles.push({ id: id, name: '車種' + (fc.vehicles.length+1), multiplier: 1.0, addon: 0, default: fc.vehicles.length === 0 });
+  renderVehicles();
+}
+
+// ━━ Tab 6 待機 ━━
+function loadWait(){
+  const w = fc.wait || {};
+  document.getElementById('waitFreeMins').value = (typeof w.freeMins === 'number') ? w.freeMins : 5;
+  document.getElementById('waitRate').value = (typeof w.ratePerMin === 'number') ? w.ratePerMin : 100;
+  document.getElementById('waitFreeMins').oninput = () => { fc.wait.freeMins = parseInt(document.getElementById('waitFreeMins').value,10) || 0; };
+  document.getElementById('waitRate').oninput = () => { fc.wait.ratePerMin = parseInt(document.getElementById('waitRate').value,10) || 0; };
+}
+
+// ━━ Tab 7 区間 ━━
+function renderZones(){
+  const root = document.getElementById('zonesList');
+  if(!root) return;
+  root.innerHTML = '';
+  (fc.zones || []).forEach((z, i) => {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.innerHTML =
+      '<div class="item-card-row"><span class="form-label">区間 ' + (i+1) + '</span><button class="btn-del" data-i="' + i + '">削除</button></div>' +
+      '<div class="item-card-row"><span class="form-label">名称</span><input class="form-input text wide" data-key="name" value="' + (z.name||'') + '"></div>' +
+      '<div class="item-card-row"><span class="form-label">固定料金</span><input class="form-input" type="number" data-key="fare" value="' + (z.fare||0) + '"><span class="form-unit">円</span></div>';
+    card.querySelectorAll('input').forEach(inp => {
+      inp.oninput = () => {
+        const k = inp.dataset.key;
+        if(k === 'fare') fc.zones[i].fare = parseInt(inp.value,10) || 0;
+        else fc.zones[i][k] = inp.value;
+      };
+    });
+    card.querySelector('.btn-del').onclick = () => {
+      fc.zones.splice(i, 1);
+      renderZones();
+    };
+    root.appendChild(card);
+  });
+}
+function addZone(){
+  if(!fc.zones) fc.zones = [];
+  fc.zones.push({ name: '区間' + (fc.zones.length+1), fare: 5000 });
+  renderZones();
+}
+
+// ━━ Tab 8 確認 ━━
+let _previewActiveSurcharges = new Set();
+function renderPreviewSurcharges(){
+  const root = document.getElementById('previewSurcharges');
+  if(!root) return;
+  root.innerHTML = '';
+  (fc.surcharges || []).forEach(s => {
+    if(!s.id) return;
+    const wrap = document.createElement('label');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:14px;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!s.active_default;
+    if(s.active_default) _previewActiveSurcharges.add(s.id);
+    cb.onchange = () => {
+      if(cb.checked) _previewActiveSurcharges.add(s.id);
+      else _previewActiveSurcharges.delete(s.id);
+      updatePreview();
+    };
+    const dot = document.createElement('span');
+    dot.style.cssText = 'display:inline-block;width:14px;height:14px;border-radius:50%;background:' + (s.color||'#52B788') + ';';
+    const txt = document.createElement('span');
+    txt.textContent = s.name + ' ×' + s.rate;
+    wrap.appendChild(cb);
+    wrap.appendChild(dot);
+    wrap.appendChild(txt);
+    root.appendChild(wrap);
+  });
+}
+function updatePreview(){
+  renderPreviewSurcharges();
+  // multiplier 計算
+  let mul = 1.0;
+  (fc.surcharges || []).forEach(s => {
+    if(_previewActiveSurcharges.has(s.id) && typeof s.rate === 'number') mul *= s.rate;
+  });
+  // auto
+  const a = fc.autoSurcharges || {};
+  const now = new Date();
+  if(a.night && a.night.enabled){
+    const h = now.getHours();
+    const f = a.night.from, t = a.night.to;
+    const inRange = (f <= t) ? (h >= f && h < t) : (h >= f || h < t);
+    if(inRange) mul *= (a.night.rate || 1.2);
+  }
+  if(a.weekend && a.weekend.enabled){
+    const dow = now.getDay();
+    if(dow === 0 || dow === 6) mul *= (a.weekend.rate || 1.1);
+  }
+  if(a.winter && a.winter.enabled){
+    const mmdd = String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+    const f = a.winter.from || '12-15';
+    const t = a.winter.to || '03-15';
+    const inRange = (f <= t) ? (mmdd >= f && mmdd <= t) : (mmdd >= f || mmdd <= t);
+    if(inRange) mul *= (a.winter.rate || 1.1);
+  }
+  document.getElementById('previewMultiplier').textContent = '適用倍率 ×' + mul.toFixed(2);
+
+  // 距離別計算
+  const distances = [1000, 3000, 5000, 10000, 20000];
+  const tbody = document.getElementById('previewTbody');
+  tbody.innerHTML = '';
+  distances.forEach(d => {
+    const fare = _calcFareForPreview(d) * mul;
+    const rounded = _roundFare(fare);
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + (d/1000) + 'km</td><td>¥' + rounded.toLocaleString() + '</td>';
+    tbody.appendChild(tr);
+  });
+
+  // auto status (preview 内)
+  const ps = document.getElementById('previewAutoStatus');
+  if(ps){
+    const items = [];
+    if(a.night && a.night.enabled){
+      const h = now.getHours();
+      const f = a.night.from, t = a.night.to;
+      const inRange = (f <= t) ? (h >= f && h < t) : (h >= f || h < t);
+      if(inRange) items.push('深夜 ×' + a.night.rate);
+    }
+    if(a.weekend && a.weekend.enabled){
+      const dow = now.getDay();
+      if(dow === 0 || dow === 6) items.push('週末 ×' + a.weekend.rate);
+    }
+    if(a.winter && a.winter.enabled){
+      const mmdd = String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+      const f = a.winter.from || '12-15', t = a.winter.to || '03-15';
+      const inRange = (f <= t) ? (mmdd >= f && mmdd <= t) : (mmdd >= f || mmdd <= t);
+      if(inRange) items.push('冬季 ×' + a.winter.rate);
+    }
+    ps.textContent = items.length ? ('自動適用中: ' + items.join(' / ')) : '自動適用なし';
+    ps.style.color = items.length ? '#52B788' : '#999';
+    ps.style.fontFamily = 'DM Mono,monospace';
+    ps.style.fontSize = '12px';
+  }
+}
+// プレビュー専用 calcFare (Step 1 のみ・Step 2 vehicle は除外)
+function _calcFareForPreview(distanceM){
+  let fare;
+  if(Array.isArray(fc.tiers) && fc.tiers.length > 0 && fc.tiersEnabled !== false){
+    if(distanceM <= fc.base_distance_m){ fare = fc.base_fare; }
+    else {
+      fare = fc.base_fare;
+      for(const t of fc.tiers){
+        if(!t || typeof t.from_m !== 'number') continue;
+        if(distanceM <= t.from_m) continue;
+        const tierEnd = (t.to_m == null) ? distanceM : Math.min(distanceM, t.to_m);
+        const tierDist = tierEnd - t.from_m;
+        if(tierDist <= 0) continue;
+        const ad = t.add_distance_m > 0 ? t.add_distance_m : 1;
+        const af = t.add_fare || 0;
+        const steps = Math.floor(tierDist / ad) + 1;
+        fare += steps * af;
+        if(t.to_m == null) break;
+        if(distanceM <= t.to_m) break;
+      }
+    }
+  } else {
+    if(distanceM < fc.base_distance_m) fare = fc.base_fare;
+    else {
+      const extra = distanceM - fc.base_distance_m;
+      const steps = Math.floor(extra / fc.add_distance_m) + 1;
+      fare = fc.base_fare + (steps * fc.add_fare);
+    }
+  }
+  return fare;
+}
+function _roundFare(fare){
+  if(typeof fc.minFare === 'number' && fc.minFare > 0 && fare < fc.minFare) fare = fc.minFare;
+  if(typeof fc.maxFare === 'number' && fc.maxFare > 0 && fare > fc.maxFare) fare = fc.maxFare;
+  const unit = (typeof fc.rounding === 'number' && fc.rounding > 0) ? fc.rounding : 1;
+  if(unit > 1) fare = Math.round(fare / unit) * unit;
+  else fare = Math.round(fare);
+  return fare;
+}
+
+// ━━ Save / Load ━━
+function load(){
+  if(typeof FB !== 'undefined' && FB.loadFareConfig){
+    FB.loadFareConfig(cfg => {
+      Object.assign(fc, cfg);
+      // tiersEnabled は別フラグとして扱う (空配列 + flag で判定)
+      if(typeof fc.tiersEnabled === 'undefined') fc.tiersEnabled = (fc.tiers && fc.tiers.length > 0);
+      if(typeof fc.zonesEnabled === 'undefined') fc.zonesEnabled = (fc.zones && fc.zones.length > 0);
+      _initAll();
+    });
+  } else {
+    _initAll();
+  }
+}
+function _initAll(){
+  loadBasic();
+  renderTiers();
+  renderSurcharges();
+  loadAuto();
+  renderVehicles();
+  loadWait();
+  renderZones();
+  bindToggle('tiersEnabledToggle', () => fc.tiersEnabled, (v) => fc.tiersEnabled = v);
+  bindToggle('autoNightToggle', () => fc.autoSurcharges.night.enabled, (v) => fc.autoSurcharges.night.enabled = v);
+  bindToggle('autoWeekendToggle', () => fc.autoSurcharges.weekend.enabled, (v) => fc.autoSurcharges.weekend.enabled = v);
+  bindToggle('autoWinterToggle', () => fc.autoSurcharges.winter.enabled, (v) => fc.autoSurcharges.winter.enabled = v);
+  bindToggle('vehiclesEnabledToggle', () => fc.vehiclesEnabled, (v) => fc.vehiclesEnabled = v);
+  bindToggle('waitEnabledToggle', () => fc.wait.enabled, (v) => fc.wait.enabled = v);
+  bindToggle('zonesEnabledToggle', () => fc.zonesEnabled, (v) => fc.zonesEnabled = v);
+  updateAutoStatus();
+}
+function saveAll(){
+  saveBasic();
+  saveAuto();
+  // tiersEnabled OFF なら tiers は空配列で保存 (= 旧来動作)
+  if(!fc.tiersEnabled) fc.tiers = [];
+  if(!fc.zonesEnabled) fc.zones = [];
+  fc.version = 2;
+  if(typeof FB !== 'undefined' && FB.saveFareConfig){
+    FB.saveFareConfig(fc);
+  }
+  showToast('保存しました');
+}
+function showToast(msg){
+  const t = document.getElementById('fareToast');
+  if(!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+load();
+</script>
+</body>
+</html>

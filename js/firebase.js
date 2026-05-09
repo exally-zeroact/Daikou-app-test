@@ -86,11 +86,55 @@ const FB = (() => {
     });
   }
 
+  // ★設計変更宣言 (2026-05-10): fareConfig v2 migration
+  //   旧形式 (version 不在) を v2 化して callback に渡す
+  //   surchargeRate (旧単一倍率) は surcharges[0] として保持
+  //   破壊的変更なし・旧キーは維持
+  function _migrateFareConfig(cfg){
+    if(!cfg || cfg.version === 2) return cfg;
+    const out = Object.assign({}, cfg);
+    out.version = 2;
+    if(!Array.isArray(out.tiers)) out.tiers = [];
+    if(!Array.isArray(out.surcharges)){
+      out.surcharges = [];
+      const r = parseFloat(cfg.surchargeRate);
+      if(!isNaN(r) && r > 1.0){
+        out.surcharges.push({
+          id: 'legacy',
+          name: '割増',
+          rate: r,
+          color: '#FF9500',
+          active_default: false,
+        });
+      }
+    }
+    if(typeof out.minFare === 'undefined') out.minFare = null;
+    if(typeof out.maxFare === 'undefined') out.maxFare = null;
+    if(typeof out.rounding !== 'number') out.rounding = 10;
+    if(!out.autoSurcharges){
+      out.autoSurcharges = {
+        night:    { enabled: false, from: 22, to: 5,  rate: 1.2 },
+        weekend:  { enabled: false, rate: 1.1 },
+        winter:   { enabled: false, from: '12-15', to: '03-15', rate: 1.1 },
+      };
+    }
+    if(!Array.isArray(out.vehicles)) out.vehicles = [];
+    if(typeof out.vehiclesEnabled !== 'boolean') out.vehiclesEnabled = false;
+    if(!out.wait) out.wait = { enabled: false, freeMins: 5, ratePerMin: 100 };
+    return out;
+  }
+
   function loadFareConfig(callback){
     const db = getDb(); if(!db){ return; }
     db.ref('fare_config/default').once('value').then(snap => {
-      const config = snap.val();
-      if(config) callback(config);
+      const raw = snap.val();
+      if(!raw) return;
+      const config = _migrateFareConfig(raw);
+      callback(config);
+      // migration が走った場合は書き戻す (raw === config なら no-op)
+      if(raw.version !== 2){
+        try { db.ref('fare_config/default').set(config); } catch(e){}
+      }
     }).catch(e => console.error('[FB] loadFareConfig error:', e));
   }
 
