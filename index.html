@@ -788,6 +788,18 @@ justify-content:center;
                   background:#E8F7EE;color:#1A7340;line-height:1.4;">
         MM 課金中 (道路距離)
       </div>
+      <!-- P13 (2026-05-09): 停車 5 分以上で実車終了候補バナー -->
+      <div id="stopCandidateBanner" style="display:none;text-align:center;font-size:13px;
+           font-weight:700;padding:10px 14px;margin:6px 12px 0;border-radius:8px;
+           background:#FFF6E6;color:#7A5A12;border:1px solid #E0AC2F;line-height:1.5;">
+        ⏸ 停車 <span id="stopCandidateMin">5</span> 分以上 — 実車終了ですか?
+      </div>
+      <!-- P11/P12 (2026-05-09): 道路属性警告バナー (schoolZone/冠水/事前/予防) -->
+      <div id="roadAttrBanner" style="display:none;text-align:center;font-size:13px;
+           font-weight:700;padding:10px 14px;margin:6px 12px 0;border-radius:8px;
+           background:#FFF6E6;color:#7A5A12;border:1px solid #E0AC2F;line-height:1.5;">
+        <span id="roadAttrLabel">⚠ 警告</span>
+      </div>
       <div class="extras-list" id="extrasList"></div>
     </div>
   </div>
@@ -1072,6 +1084,31 @@ function _mmWorkerOnMessage(e){
     if(m.type === 'roadsLoaded'){
       dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
+    } else if(m.type === 'mmResult' && m.snap && appState === 'driving'){
+      // P11/P12 (2026-05-09): 道路属性警告 UI 更新
+      try {
+        const pref = m.snap.prefecture;
+        const roadIdx = m.snap.roadIndex;
+        const banner = document.getElementById('roadAttrBanner');
+        const label = document.getElementById('roadAttrLabel');
+        if(banner && label && pref != null && roadIdx != null){
+          const sz = _attrsSchoolZoneByPref.get(pref);
+          const fl = _attrsRoadFloodByPref.get(pref);
+          const ji = _attrsRoadJizenByPref.get(pref);
+          const yo = _attrsRoadYoboByPref.get(pref);
+          let warn = null;
+          if(sz && sz.has(roadIdx)) warn = '⚠ スクールゾーン (30km/h 制限)';
+          else if(fl && fl.has(roadIdx)) warn = '🌊 冠水履歴のある区間';
+          else if(ji && ji.has(roadIdx)) warn = '⚠ 事前通行規制 区間';
+          else if(yo && yo.has(roadIdx)) warn = '⚠ 予防的通行規制 区間';
+          if(warn){
+            label.textContent = warn;
+            banner.style.display = 'block';
+          } else {
+            banner.style.display = 'none';
+          }
+        }
+      } catch(_){}
     } else if(m.type === 'demLoaded'){
       // MM-5: DEM 受信ログ
       dlog('[MM] worker DEM ' + (m.ok ? 'loaded' : 'fail') +
@@ -1372,6 +1409,67 @@ function _forwardRoadsToMmWorker(prefs){
 // 既に Worker B に forward 済みの pref を記録 (重複 postMessage 抑制)
 const _forwardedPrefs = new Set();
 
+// P11/P12 (2026-05-09): road-attrs / road-flood/jizen/yobo の動的 load
+//   roads-{pref}.js と並行で同 pref のメタデータを script タグ load
+//   schoolZone / 冠水 / 通行規制 を運転手警告 UI に活用 (Tier B 範囲)
+//   delta-varint-base64 デコードはシンプル実装で Set<roadIdx> 化
+const _attrsLoadedPrefs = new Set();
+const _attrsSchoolZoneByPref = new Map();      // pref → Set<roadIdx>
+const _attrsRoadFloodByPref = new Map();
+const _attrsRoadJizenByPref = new Map();
+const _attrsRoadYoboByPref  = new Map();
+function _decodeDeltaVarintB64(b64){
+  if(!b64) return new Set();
+  try {
+    const bin = atob(b64);
+    const set = new Set();
+    let acc = 0, shift = 0, idx = 0;
+    for(let i = 0; i < bin.length; i++){
+      const b = bin.charCodeAt(i);
+      acc |= (b & 0x7f) << shift;
+      if((b & 0x80) === 0){
+        idx += acc;
+        set.add(idx);
+        acc = 0; shift = 0;
+      } else {
+        shift += 7;
+      }
+    }
+    return set;
+  } catch(_){ return new Set(); }
+}
+function _loadOneAttrFile(pref, base, varName, targetMap, fieldKey){
+  return new Promise(function(resolve){
+    const s = document.createElement('script');
+    s.src = 'data/' + base + '-' + pref + '.js';
+    s.async = true;
+    s.onload = function(){
+      try {
+        const data = window[varName];
+        if(data){
+          const b64 = fieldKey ? data[fieldKey] : data.roadIdxB64;
+          targetMap.set(pref, _decodeDeltaVarintB64(b64));
+        }
+      } catch(_){}
+      resolve();
+    };
+    s.onerror = function(){ resolve(); };
+    document.head.appendChild(s);
+  });
+}
+function _autoLoadNearbyAttrs(prefs){
+  if(!Array.isArray(prefs)) return;
+  for(const pref of prefs){
+    if(_attrsLoadedPrefs.has(pref)) continue;
+    _attrsLoadedPrefs.add(pref);
+    const PREF_UC = pref.toUpperCase().replace(/-/g, '_');
+    _loadOneAttrFile(pref, 'road-attrs', 'ROAD_ATTRS_' + PREF_UC, _attrsSchoolZoneByPref, 'schoolZoneB64');
+    _loadOneAttrFile(pref, 'road-flood', 'ROAD_FLOOD_' + PREF_UC, _attrsRoadFloodByPref, 'roadIdxB64');
+    _loadOneAttrFile(pref, 'road-jizen', 'ROAD_JIZEN_' + PREF_UC, _attrsRoadJizenByPref, 'roadIdxB64');
+    _loadOneAttrFile(pref, 'road-yobo',  'ROAD_YOBO_'  + PREF_UC, _attrsRoadYoboByPref,  'roadIdxB64');
+  }
+}
+
 // 2026-05-09 (M1): GPS から近隣 5 県を取得 → roads-{pref}.js を script 動的 load
 //   → 完了後 Worker B に forward。県境を跨ぐと自動拡張・重複は skip。
 //   絶対ルール: 「課金距離は道路距離」のため Worker B に roads が届く前は MM が
@@ -1388,6 +1486,8 @@ function _autoLoadNearbyRoads(lat, lng){
   _autoRoadLoadInflight = RegionLoader.ensureRoadsLoaded(pending).then(function(){
     _forwardRoadsToMmWorker(pending);
     if(typeof dlog === 'function') dlog('[MM] auto-loaded roads: ' + pending.join(','));
+    // P11/P12 (Tier B): roads と一緒に attrs もロード
+    _autoLoadNearbyAttrs(pending);
   }).catch(function(e){
     if(typeof dlog === 'function') dlog('[MM] auto-load roads err: ' + (e && e.message || e));
   }).then(function(){ _autoRoadLoadInflight = null; });
@@ -1839,6 +1939,11 @@ function startGPS(){
         // 起動時warm up（2026/04/30追加）：常にGPSをMeterに渡す
         // 代行開始前でもlastWarmupGpsを保持・押した瞬間に即時計測開始
         if(typeof Meter.updateGpsOnly === 'function') Meter.updateGpsOnly(g);
+        // B6 (2026-05-09): 停車に変化したら Worker B にヒント送って _gpsBuffer クリア
+        if(g.isStationary && !window._lastStationary && _mmWorker){
+          try { _mmWorker.postMessage({ type: 'stationaryHint' }); } catch(_){}
+        }
+        window._lastStationary = !!g.isStationary;
         // P3 (2026-05-09): 常時 Meter.update を呼出
         //   Meter は state.running=false 中は加算しないので副作用なし。
         //   業務外でも Worker B に GPS が流れて MM がウォームアップされる
@@ -2199,6 +2304,9 @@ function onBusinessResume(){
   }
   try {
     Business.resume();
+    // F3 (2026-05-09): Worker B 健全性 ping → 不調なら再起動して再 forward
+    //   3 時間後再開で Worker が kill されている可能性に対応
+    if(typeof _mmHealthCheck === 'function') _mmHealthCheck();
     // GPS / センサー蓄積を再開（D案・2026/05/06）
     //   onBusinessEnd で stopGPS() している分を起こし直す。
     //   リスナーは生きているので _isBizActive を true に戻すだけで蓄積復活。
@@ -3636,6 +3744,30 @@ if('serviceWorker' in navigator){
     dlog('[SW] 登録失敗（開発環境では正常）:', err.message);
   });
 }
+
+// P13 (2026-05-09): 停車 5 分以上で実車終了候補バナー
+//   driving 画面で isStationary 状態の連続秒数を track
+//   5 分超で stopCandidateBanner を表示・走行再開で隠す
+let _stopStartedAt = 0;
+const STOP_CANDIDATE_THRESHOLD_MS = 5 * 60 * 1000;
+setInterval(function(){
+  if(appState !== 'driving'){ _stopStartedAt = 0; return; }
+  const banner = document.getElementById('stopCandidateBanner');
+  if(!banner) return;
+  if(window._lastStationary){
+    if(_stopStartedAt === 0) _stopStartedAt = Date.now();
+    const elapsed = Date.now() - _stopStartedAt;
+    if(elapsed >= STOP_CANDIDATE_THRESHOLD_MS){
+      const min = Math.floor(elapsed / 60000);
+      const span = document.getElementById('stopCandidateMin');
+      if(span) span.textContent = min;
+      banner.style.display = 'block';
+    }
+  } else {
+    _stopStartedAt = 0;
+    banner.style.display = 'none';
+  }
+}, 5000);
 
 // P6 (2026-05-09): idle 画面 MM 準備状況インジケータ 1Hz 更新
 //   _forwardedPrefs Set のサイズを業務開始ボタン下に表示

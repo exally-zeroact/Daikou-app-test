@@ -1292,6 +1292,15 @@ function _loadGridBias(){
 // 起動時に grid bias を復元（pheromone は graph load 時に各 pref ごとに復元）
 _loadGridBias();
 
+// B9/B10 (2026-05-09): Pheromone / Grid bias を 5 分間隔で incremental save
+//   タスクキル時の学習消失を防ぐ
+//   reset 時の save とは独立・並行で動く
+const PERSIST_INTERVAL_MS = 5 * 60 * 1000;
+setInterval(function(){
+  try { _savePheromoneAll(); } catch(_){}
+  try { _saveGridBiasIncremental(); } catch(_){}
+}, PERSIST_INTERVAL_MS);
+
 // ─── MM-6: OSRM 教師信号 helpers ────────────────────────────────
 function _addToOsrmBuffer(gps){
   if(!_osrmEnabled) return;
@@ -1767,6 +1776,14 @@ self.onmessage = function(e){
   if(msg.type === 'softReset'){
     lastCommittedSnap = null;
     prevSnap = null;
+    return;
+  }
+
+  // B6 (2026-05-09): 停車検出時の hint
+  //   main 側で停車検知したら _gpsBuffer をクリアして
+  //   再走行時に古い走行前 4 点で Catmull-Rom 計算するのを防ぐ
+  if(msg.type === 'stationaryHint'){
+    _gpsBuffer.length = 0;
     return;
   }
 
