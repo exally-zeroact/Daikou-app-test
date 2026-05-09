@@ -38,6 +38,12 @@ const args = process.argv.slice(2);
 const USE_DEM = args.includes('--dem');
 const onlyArg = args.find(a => a.startsWith('--only='));
 const ONLY_PREF = onlyArg ? onlyArg.slice(7) : null; // 単一県のみ書き出す
+// Phase E (2026-05-09): 国土地理院 1/2,500 道路縁データを OSM に統合する
+//   --gsi-2500-dir=<path>  parse-gsi-2500-gml.js が出力した GeoJSON ディレクトリ
+//   merge-gsi-into-osm.js を呼び出して input.geojson を高精度版に置換する
+//   フラグ未指定時は OSM のみで build (= 旧挙動)
+const gsiArg = args.find(a => a.startsWith('--gsi-2500-dir='));
+const GSI_2500_DIR = gsiArg ? gsiArg.slice(15) : null;
 const positional = args.filter(a => !a.startsWith('--'));
 const [INPUT, OUTPUT_DIR, REGION] = positional;
 if (!INPUT || !OUTPUT_DIR || !REGION) {
@@ -331,9 +337,26 @@ function computeInclineFromDem(simplified) {
 
 // ─── メイン処理 ──────────────────────────────────────────────────
 console.log(`  → 入力: ${INPUT}`);
-const raw = fs.readFileSync(INPUT, 'utf8');
-const geo = JSON.parse(raw);
+let raw = fs.readFileSync(INPUT, 'utf8');
+let geo = JSON.parse(raw);
 if (!geo.features) throw new Error('Invalid GeoJSON');
+
+// Phase E (2026-05-09): 国土地理院 1/2,500 統合
+//   --gsi-2500-dir=<path> 指定時は merge-gsi-into-osm.js と同等の処理を内部で行う
+//   GSI ポリラインで近接 (<5m) なものがあれば OSM の geometry を置換 (高精度化)
+//   properties は OSM 維持・build 側のロジックは変更不要
+if(GSI_2500_DIR){
+  console.log(`  → GSI 1/2,500 統合: ${GSI_2500_DIR}`);
+  try {
+    const { mergeGsiIntoOsm } = require('./merge-gsi-into-osm.js');
+    const merged = mergeGsiIntoOsm(geo, GSI_2500_DIR);
+    geo = merged.featureCollection;
+    console.log(`    replaced=${merged.replaced} kept=${merged.kept} ` +
+                `coverage=${((merged.replaced * 100) / Math.max(1, merged.replaced + merged.kept)).toFixed(1)}%`);
+  } catch(e){
+    console.warn(`    GSI 統合失敗: ${e.message} (OSM のみで build 続行)`);
+  }
+}
 
 let totalRoads = 0;
 let totalPointsBefore = 0, totalPointsAfter = 0;

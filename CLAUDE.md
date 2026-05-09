@@ -144,3 +144,70 @@ Exallyのコードを触るときのみ適用。
 - Worker B（map-matcher.js）に道路データが届いていない状態は絶対に許容しない
 - distanceSourceは常にUI上で運転手が確認できるように表示すること
 - 実装した機能が動いているかどうかを常に確認してレポートに記載すること
+
+-----
+
+## 国土地理院 1/2,500 道路縁データ統合手順 (Phase E・2026-05-09)
+
+### 背景
+OSM polyline (10-50m サンプル間隔) より高精度な国土地理院 基盤地図情報
+1/2,500 道路縁データ (0.5-2.5m 精度) を build-roads.js に注入することで
+都市部 DID (人口集中地区) の MM 精度を向上させる。
+
+### データソース
+- 配布元: 国土地理院 基盤地図情報ダウンロードサービス
+- URL: https://fgd.gsi.go.jp/download/menu.php
+- 形式: GML (XML)・二次メッシュ単位
+- 利用条件: ユーザ登録 (氏名+メール・無料) 必須・自動 fetch 不可
+- ライセンス: 国土地理院コンテンツ利用規約 (出典明記で商用可)
+
+### 取得手順 (手動)
+1. ブラウザで上記 URL にアクセス・ユーザ登録 (初回のみ)
+2. 「基盤地図情報 (縮尺レベル 2500)」を選択
+3. 対象都道府県の DID メッシュ一覧を確認:
+   `node scripts/fetch-gsi-2500-roads.js <pref>`
+4. 該当メッシュコードを画面上で選択
+5. 「道路縁」レイヤを選択してダウンロード (zip)
+6. zip を `input/<pref>/gsi-2500/` に展開
+
+### 変換 + build 手順
+```bash
+# 1. GML → GeoJSON 変換
+node scripts/parse-gsi-2500-gml.js input/ehime/gsi-2500/ \
+     --output=tmp/ehime/gsi-geojson/
+
+# 2. build (--gsi-2500-dir フラグで内部 merge)
+node scripts/build-roads.js \
+     input/ehime/streets.geojson \
+     data/ ehime \
+     --gsi-2500-dir=tmp/ehime/gsi-geojson/
+
+# 3. (代替) merge-gsi-into-osm.js を単体で実行する場合
+node scripts/merge-gsi-into-osm.js \
+     input/ehime/streets.geojson \
+     tmp/ehime/gsi-geojson/ \
+     > input/ehime/streets-merged.geojson
+node scripts/build-roads.js input/ehime/streets-merged.geojson data/ ehime
+```
+
+### マッチングアルゴリズム
+- 100m × 100m 空間 grid に GSI ポリラインを index 化
+- 各 OSM polyline について grid で候補抽出
+- Hausdorff 距離 < 5m なら "同じ道路" と判定し OSM の geometry を GSI に置換
+- properties (highway/oneway/lanes 等の OSM タグ) は維持
+- 結果フラグ: `gsi_2500_merged: true` を properties に付与
+
+### カバレッジ
+- 国土地理院 1/2,500 は DID (人口集中地区) のみ整備
+- 全国の DID は OSM road 全体の約 30-40%
+- 期待マッチング率: DID 内で 70-90%・全体で 25-35%
+- 山間部・郊外・私道は OSM のみ (変化なし)
+
+### 注意事項
+- 47 県全データ (約 50GB+) のダウンロードは数日かかる
+- 自動 fetch 不可 (login 必須) のため OPERATOR が手動取得
+- メッシュコード一覧の prefecture mapping は scripts/fetch-gsi-2500-roads.js
+  に書かれているが現状 4 県のみ (ehime/tokyo/osaka/kanagawa)
+  他 43 県は OPERATOR が国土地理院 mesh tool で確認後追加
+- 商用利用には「国土地理院長承認」表記が必須
+- 47 県 build はローカル PC で 1 県あたり 5-30 分・全国で半日-1 日
