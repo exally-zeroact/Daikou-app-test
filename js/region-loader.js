@@ -237,5 +237,6 @@ const RegionLoader = (() => {
     ensureLoaded, findNearestTunnel, findNearestBridge,
     ensureRoadsLoaded,
     snapToNearestRoad, calcRoadDistance,
+    nearestPrefectures,
   };
 })();

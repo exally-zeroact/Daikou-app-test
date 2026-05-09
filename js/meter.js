@@ -306,65 +306,85 @@ const Meter = (() => {
     state.gap_fill_total_m += filledM;
   }
 
+  // 2026-05-09 絶対ルール: 課金距離は道路距離のみ。GPS 直線距離は使わない。
+  //   inline road-snap (RegionLoader.snapToNearestRoad + calcRoadDistance) は
+  //   道路距離計算なので使用可。Worker B 不在 / silent 時の代替経路として動かす。
+  //   road データが未 load・snap miss の場合は加算せず distance_m を据え置く
+  //   (= GPS 直線距離による誤課金を絶対に発生させない)。
+  function _inlineSnapAndIncrement(gpsResult){
+    if(typeof RegionLoader === 'undefined' || !RegionLoader.snapToNearestRoad) return null;
+    let snap;
+    try {
+      snap = RegionLoader.snapToNearestRoad(
+        gpsResult.lat, gpsResult.lng, { maxDistM: MM_MAX_SNAP_DIST_M });
+    } catch(_){ return null; }
+    if(!snap) return null;
+    let increment = 0;
+    if(prevSnap){
+      const dtSec = prevSnap.timestamp != null
+        ? (gpsResult.timestamp - prevSnap.timestamp) / 1000
+        : 0;
+      if(dtSec > MM_GAP_RESET_SEC){
+        prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
+        return null;
+      }
+      try {
+        const r = RegionLoader.calcRoadDistance(prevSnap, snap);
+        if(r && typeof r.distanceM === 'number'
+           && r.distanceM >= 0 && r.distanceM <= MM_MAX_SEGMENT_DIST_M){
+          increment = r.distanceM;
+        }
+      } catch(_){}
+    }
+    prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
+    return increment;
+  }
+
   function update(gpsResult){
     if(!state.running) return;
     if(gpsResult.isStationary) return;
 
-    // MM 優先設計 (2026-05-09):
+    // 2026-05-09 (絶対ルール準拠): 課金距離は MM (道路距離) のみ
     //   mmHealthy = MM Worker が直近 5 秒内に mmIncrementM>0 を返している
-    //   → distance_m への加算は _onMmWorkerMessage に任せ、ここでは加算しない
-    //   それ以外 (Worker dead / MM silent) → GPS 直線距離で fallback 加算
+    //   → distance_m への加算は _onMmWorkerMessage に任せる
+    //   不健全時 (Worker dead / 沈黙) → inline RegionLoader 道路スナップで加算
+    //     inline は GPS 直線ではなく道路距離計算なのでルール適合
+    //   inline でも snap 不可 (roads 未 load / 道路から 50m 超) → 加算しない
     const mmHealthy = mmWorker && (Date.now() - lastMmUsefulAt) <= MM_SILENT_THRESHOLD_MS;
 
     if(state.last_gps && state.last_timestamp){
       const dtSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
 
-      // GPS消失検出：5秒以上の空白
+      // GPS消失検出：5秒以上の空白 (トンネル等で MM/GPS 共に不可)
       if(dtSec >= GAP_THRESHOLD_SEC){
-        if(!mmHealthy){
-          // 補完計算（トンネル/橋データ活用）・MM が silent な間のみ加算
-          const filled = calculateGapFill(
-            state.last_gps.lat, state.last_gps.lng,
-            gpsResult.lat, gpsResult.lng,
-            dtSec, state.last_speed_kmh,
-            state.last_gps.compassHeading
-          );
-          if(filled !== null){
-            const gpsDistance = GPS.calcDistance3D(
-              state.last_gps.lat, state.last_gps.lng, state.last_gps.altitude,
-              gpsResult.lat, gpsResult.lng, gpsResult.altitude
-            );
-            const d = Math.min(filled, gpsDistance);
-            state.distance_m += d;
-            state.fare_yen = calcFare(state.distance_m);
-            state.distanceSource = 'gps';
-            _recordGapFill(d); // 補完カウント
-          }
+        // gap fill: 速度×時間 (タイヤ回転由来の概算・GPS 直線弦ではない)
+        //   トンネル/橋データがあれば infraLength を加味
+        const filled = calculateGapFill(
+          state.last_gps.lat, state.last_gps.lng,
+          gpsResult.lat, gpsResult.lng,
+          dtSec, state.last_speed_kmh,
+          state.last_gps.compassHeading
+        );
+        if(filled !== null){
+          state.distance_m += filled;
+          state.fare_yen = calcFare(state.distance_m);
+          state.distanceSource = 'gap';
+          _recordGapFill(filled);
         }
       } else if(!mmHealthy){
-        // 通常処理: MM silent な間のみ GPS 直線距離 + ハイブリッド速度積分を加算
-        // 案AA：3D距離計算（高度差を加味・2026/04/26）
-        const gpsDistance = GPS.calcDistance3D(
-          state.last_gps.lat, state.last_gps.lng, state.last_gps.altitude,
-          gpsResult.lat, gpsResult.lng, gpsResult.altitude
-        );
-        let d = gpsDistance;
-        // ハイブリッド計測：30km/h以上は速度×時間で積分
-        if(gpsResult.speedKmh >= HYBRID_SPEED_KMH){
-          if(dtSec > 0 && dtSec < 10){
-            const speedMs = gpsResult.speedKmh / 3.6;
-            const speedDistance = speedMs * dtSec;
-            const maxV = Math.max(speedDistance, gpsDistance);
-            if(maxV > 0 && Math.abs(speedDistance - gpsDistance) / maxV <= HYBRID_DISCREPANCY){
-              d = speedDistance;
-            }
-          }
+        // MM 不健全時の inline 道路スナップ fallback (絶対ルール: GPS 直線禁止)
+        const inc = _inlineSnapAndIncrement(gpsResult);
+        if(inc !== null && inc > 0){
+          state.distance_m += inc;
+          state.fare_yen = calcFare(state.distance_m);
+          state.distanceSource = 'inline';
         }
-        state.distance_m += d;
-        state.fare_yen = calcFare(state.distance_m);
-        state.distanceSource = 'gps';
+        // inc===null (snap miss / roads 未 load) → 加算なし・distance_m 据え置き
       }
       // mmHealthy 時はここで距離は加算しない・MM Worker が _onMmWorkerMessage で加算する
+    } else {
+      // 初回 GPS step: 比較対象がないので加算せず prevSnap を初期化
+      _inlineSnapAndIncrement(gpsResult);
     }
     state.last_gps = { lat: gpsResult.lat, lng: gpsResult.lng, altitude: gpsResult.altitude, compassHeading: gpsResult.compassHeading || null };
     state.last_timestamp = gpsResult.timestamp;

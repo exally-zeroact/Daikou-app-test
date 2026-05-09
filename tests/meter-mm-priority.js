@@ -134,82 +134,83 @@ console.log('\n[case1] MM healthy → distance_m は MM 由来で増える');
   Meter.stop();
 }
 
-console.log('\n[case1b] MM プライムなし → 起動直後 1 ステップは GPS fallback で課金される');
+console.log('\n[case1b] 絶対ルール: MM プライムなしでも GPS 直線距離は使われない');
 {
   Meter.reset();
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
-  // プライムなし → step 1 は GPS fallback (lastMmUsefulAt=0 → silent 判定)
-  // step 1 の mmResult 後は MM 健全に切替
+  // プライムなし → step 1 では mmHealthy=false だが、roads が無ければ
+  // inline road-snap も snap miss → distance_m は加算されない (絶対ルール)
+  // step 1 の mmResult 受信で MM 健全に切替・以後は MM 由来で加算
   for(let i = 0; i < 3; i++){
     Meter.update(gpsAt(i));
     if(i > 0) w._dispatch({ type: 'mmResult', mmIncrementM: 90, snapped: 1 });
   }
   const s = Meter.getState();
-  // step 1: GPS 直線 ~100m 加算 + MM 90m 加算 → 190m
-  // step 2: MM 90m 加算のみ → 280m
-  assertNear(s.distance_m, 280, 1.0, 'GPS fallback + MM 累積で ~280m');
-  assert(s.distanceSource === 'mm', '最終的に mm に切替');
+  // step 1: MM silent + RegionLoader 未定義 → 加算なし。mmResult で +90m
+  // step 2: mmResult で +90m → 計 180m
+  assertNear(s.distance_m, 180, 0.01, 'MM 経由のみで ~180m (GPS 直線は使わない)');
+  assert(s.distanceSource === 'mm', '最終 source = mm');
   Meter.stop();
 }
 
-console.log('\n[case2] MM が 5 秒以上沈黙 → GPS fallback に切替');
+console.log('\n[case2] 絶対ルール: MM 沈黙でも GPS 直線距離での課金は発生しない');
 {
   Meter.reset();
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
-  // MM 健全期 (即 mmResult を返す) を 1 ステップ走らせる
   Meter.update(gpsAt(0));
   Meter.update(gpsAt(1));
   w._dispatch({ type: 'mmResult', mmIncrementM: 90 });
-  let after1 = Meter.getState();
+  const after1 = Meter.getState();
   assert(after1.distanceSource === 'mm', 'step 1: source = mm');
-  // 6 秒待って (= MM_SILENT_THRESHOLD_MS=5000ms 超え) GPS step を投入
-  // テスト中は実時間待てないため Date.now を一時 mock する
+  // 6 秒待って MM 沈黙状態にし、normal-dt な GPS step を投入
+  // RegionLoader が未定義なので inline snap も不可 → distance_m 据え置き
   const realNow = Date.now;
   const fakeBase = realNow();
   Date.now = () => fakeBase + 6000;
-  Meter.update(gpsAt(2));   // この update では MM が沈黙
+  Meter.update(gpsAt(2));
   Date.now = realNow;
-  let after2 = Meter.getState();
-  assert(after2.distance_m > after1.distance_m, 'distance_m が GPS で更新された (MM silent)');
-  assert(after2.distanceSource === 'gps', `distanceSource = 'gps' (got '${after2.distanceSource}')`);
+  const after2 = Meter.getState();
+  assertNear(after2.distance_m, after1.distance_m, 0.01,
+    'MM 沈黙中は distance_m が動かない (絶対ルール: GPS 直線課金禁止)');
   Meter.stop();
 }
 
-console.log('\n[case3] Worker null → 常に GPS fallback で動く');
+console.log('\n[case3] 絶対ルール: Worker null + roads 未 load → distance_m 据え置き');
 {
   Meter.reset();
   Meter.setMapMatcher(null);
   Meter.start();
   for(let i = 0; i < 3; i++) Meter.update(gpsAt(i));
   const s = Meter.getState();
-  assert(s.distance_m > 150, `distance_m が GPS で 150m 超 (got ${s.distance_m.toFixed(1)})`);
-  assert(s.distanceSource === 'gps', `distanceSource = 'gps' (got '${s.distanceSource}')`);
+  assertNear(s.distance_m, 0, 0.01,
+    'roads データ無 + Worker 無 → 加算ゼロ (GPS 直線課金は絶対不可)');
+  assert(s.distanceSource === 'gps',
+    `distanceSource 初期値 'gps' のまま (got '${s.distanceSource}')`);
   Meter.stop();
 }
 
-console.log('\n[case4] MM 沈黙 → 復帰 → distanceSource が gps から mm に戻る');
+console.log('\n[case4] MM 沈黙 → 復帰 → distance_m は MM 復帰分のみ追加');
 {
   Meter.reset();
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
-  // 最初は GPS のみ (MM 未起動扱い)
   Meter.update(gpsAt(0));
-  // 6 秒経過して GPS step 投入 (silent) → fallback で距離追加
+  // 6 秒経過 → MM 沈黙中の GPS step (加算なし)
   const realNow = Date.now;
   const fakeBase = realNow();
   Date.now = () => fakeBase + 6000;
   Meter.update(gpsAt(1));
   Date.now = realNow;
-  let s1 = Meter.getState();
-  assert(s1.distanceSource === 'gps', 'silent 中: gps');
-  // MM 復帰 → mmResult が届く
+  const s1 = Meter.getState();
+  assertNear(s1.distance_m, 0, 0.01, 'silent 中は 0 据え置き');
+  // MM 復帰 → mmResult で 90m 加算
   w._dispatch({ type: 'mmResult', mmIncrementM: 90 });
-  let s2 = Meter.getState();
+  const s2 = Meter.getState();
   assert(s2.distanceSource === 'mm', 'MM 復帰: mm に切替');
   assertNear(s2.distance_m - s1.distance_m, 90, 0.01, 'MM 由来で 90m 追加');
   Meter.stop();
