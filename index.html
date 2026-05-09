@@ -1170,6 +1170,21 @@ function _mmHealthCheck(){
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'visible'){
     _mmHealthCheck();
+    // P7 (2026-05-09): iOS PWA backgrounded → resume race 短縮
+    //   visibility 復帰で last GPS から roads 再 warm を発火
+    //   Worker が kill されてた場合は _setupMmWorker 経由で _forwardedPrefs.clear→
+    //   全ROADS_<PREF> 再 forward が動くが、新規 pref が必要なら _autoLoadNearbyRoads
+    //   が補完
+    try {
+      const lastDriving = localStorage.getItem('daikou_driving_state');
+      if(lastDriving){
+        const d = JSON.parse(lastDriving);
+        if(d && typeof d.last_lat === 'number' && typeof d.last_lng === 'number'
+           && typeof _autoLoadNearbyRoads === 'function'){
+          _autoLoadNearbyRoads(d.last_lat, d.last_lng);
+        }
+      }
+    } catch(e){}
   }
 });
 

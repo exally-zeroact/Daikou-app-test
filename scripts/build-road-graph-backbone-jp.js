@@ -32,7 +32,9 @@ const PREFECTURES = [
   'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa',
 ];
 
-const BACKBONE_TYPES = new Set([0, 1, 7, 8]);   // motorway / trunk + 各 _link
+// C7 (2026-05-09): primary を追加して県跨ぎ精度を向上
+//   typeCode: 0=motorway, 1=trunk, 2=primary, 7=motorway_link, 8=trunk_link, 9=primary_link
+const BACKBONE_TYPES = new Set([0, 1, 2, 7, 8, 9]);
 const OUT_PATH = path.join(__dirname, '..', 'data', 'road-graph-backbone-jp.js');
 
 // 軽量デコーダー（依存ゼロ）

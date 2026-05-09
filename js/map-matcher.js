@@ -67,23 +67,34 @@ function _calcWorkerP99(){
 }
 
 // MM-7: Viterbi 窓サイズの自動調整
+// A6 (2026-05-09): 縮小後 5 分経過したら N=15 復帰試行を追加
+const VITERBI_RECOVERY_INTERVAL_MS = 5 * 60 * 1000;
+let _viterbiShrunkAt = 0;
 function _maybeAdjustViterbiN(){
   _mcmCheckCounter++;
   if(_mcmCheckCounter < _MCM_CHECK_INTERVAL) return;
   _mcmCheckCounter = 0;
-  if(_workerLatCount < 100) return;   // 統計サンプル不足
+  if(_workerLatCount < 100) return;
   const p99 = _calcWorkerP99();
   if(p99 > _MCM_LAT_THRESHOLD_MS && _viterbiN > VITERBI_N_MIN){
     const oldN = _viterbiN;
     _viterbiN = VITERBI_N_MIN;
+    _viterbiShrunkAt = Date.now();
     if(viterbi){ viterbi.N = _viterbiN; }
     if(!_viterbiShrinkLogged){
       _viterbiShrinkLogged = true;
-      // dlog 相当（main 側に通知）
-      self.postMessage({
-        type: 'mcmShrink', from: oldN, to: _viterbiN, p99: p99,
-      });
+      self.postMessage({ type: 'mcmShrink', from: oldN, to: _viterbiN, p99: p99 });
     }
+  } else if(_viterbiN < VITERBI_N_MAX && _viterbiShrunkAt > 0
+            && (Date.now() - _viterbiShrunkAt) > VITERBI_RECOVERY_INTERVAL_MS
+            && p99 < _MCM_LAT_THRESHOLD_MS * 0.6){
+    // A6: 5 分経過 + p99 が閾値の 60% 以下なら N=15 復帰試行
+    const oldN = _viterbiN;
+    _viterbiN = VITERBI_N_MAX;
+    if(viterbi){ viterbi.N = _viterbiN; }
+    _viterbiShrunkAt = 0;
+    _viterbiShrinkLogged = false;
+    self.postMessage({ type: 'mcmRecover', from: oldN, to: _viterbiN, p99: p99 });
   }
 }
 
@@ -571,15 +582,17 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     const c = cands[i];
     // ① 距離スコア exp(-d²/(2σ²))
     const distScore = Math.exp(-0.5 * (c.distanceM / sigma) ** 2);
-    // ② heading スコア exp(-headingDiff/30)
+    // ② heading スコア exp(-headingDiff/β)
+    //   P9 (2026-05-09): GPS accuracy 劣化時は heading に強く依存 (β を狭める)
+    //   accuracy>40m で β=15 (通常 30) → heading 一致候補を 2 倍以上 boost
     let headScore = 1.0;
     if(headingDeg != null){
       const segB = _segmentBearing(c.segLatA, c.segLngA, c.segLatB, c.segLngB);
       const diffFwd = _angleDiff(headingDeg, segB);
       const diffRev = _angleDiff(headingDeg, (segB + 180) % 360);
-      // oneway は逆方向を強ペナルティ（MM-2 では映情報のみ・厳格は MM-3+）
       const diff = c.oneway ? diffFwd : Math.min(diffFwd, diffRev);
-      headScore = Math.exp(-diff / 30);
+      const beta = (accuracy > 40) ? 15 : 30;
+      headScore = Math.exp(-diff / beta);
     }
     // ③ Mahalanobis 楕円
     const mahalScore = _mahalanobisEmission(c, gpsLat, gpsLng, accuracy, headingDeg);
@@ -590,6 +603,26 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     const layerScore = _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, prevLayer);
     // ⑥ MM-7: フェロモン boost（常用ルート優先）
     const phBoost = _getPheromoneBoost(c.prefecture, c.roadIndex);
+    // ⑦ C6 (2026-05-09): lanes/width/incline 属性 boost (各 ±5%)
+    //   主要道路 (車線多・道幅広) を優先・狭路はわずかにペナルティ
+    //   incline=急 (登り/下り急) は速度誤差大として heading scoring 緩めの代替指標
+    let attrBoost = 1.0;
+    if(c.lanes != null){
+      // lanes 0=不明 (中立) / 1=狭く ペナルティ / 2-4=主要 boost / 5+ 高速
+      if(c.lanes === 1) attrBoost *= 0.95;
+      else if(c.lanes >= 2 && c.lanes <= 4) attrBoost *= 1.05;
+      else if(c.lanes >= 5) attrBoost *= 1.08;
+    }
+    if(c.width != null){
+      // width 0=不明 / 1=≤2m 狭路 / 2=2-5m 中 / 3=>5m 主要
+      if(c.width === 1) attrBoost *= 0.95;
+      else if(c.width === 3) attrBoost *= 1.05;
+    }
+    if(c.incline != null && c.incline !== 0){
+      // incline 1=登り急 / 2=下り急 / 3=方向不明
+      // 急坂は GPS 高度誤差が出やすいので scoring わずかに緩める
+      attrBoost *= 0.97;
+    }
     // 総合
     c._distScore = distScore;
     c._headScore = headScore;
@@ -597,8 +630,9 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     c._typeScore = typeScore;
     c._layerScore = layerScore;
     c._phBoost = phBoost;
+    c._attrBoost = attrBoost;
     c._typeBucket = currBucket;
-    c.emission = distScore * headScore * mahalScore * typeScore * layerScore * phBoost;
+    c.emission = distScore * headScore * mahalScore * typeScore * layerScore * phBoost * attrBoost;
   }
   return cands;
 }
@@ -705,7 +739,9 @@ function _buildBackboneSpatialIndex(g){
   g._spatialGrid = grid;
 }
 
-function _backboneNearestNode(snapLat, snapLng){
+// A12 (2026-05-09): chord 距離に応じた動的探索半径
+//   maxDistOverride を渡せば優先・未指定時は固定 5km
+function _backboneNearestNode(snapLat, snapLng, maxDistOverride){
   if(!_backboneGraph) return -1;
   _buildBackboneSpatialIndex(_backboneGraph);
   const g = _backboneGraph;
@@ -715,10 +751,13 @@ function _backboneNearestNode(snapLat, snapLng){
   const gy = Math.floor(latI / inv);
   const gx = Math.floor(lngI / inv);
   const mpd = _metersPerDegree(snapLat);
-  const maxSq = BACKBONE_NEAREST_MAX_DIST_M * BACKBONE_NEAREST_MAX_DIST_M;
+  const maxDist = (typeof maxDistOverride === 'number' && maxDistOverride > 0)
+    ? maxDistOverride : BACKBONE_NEAREST_MAX_DIST_M;
+  const maxSq = maxDist * maxDist;
   let bestIdx = -1, bestSq = Infinity;
-  // 中心 + 8 近傍 (3x3) を検索・見つからなければ 5x5 まで拡張
-  for(let r = 1; r <= 2; r++){
+  // 中心 + 近傍を maxDist に応じて拡張 (5km/grid なので Math.ceil(maxDist/5km)+1)
+  const ringMax = Math.max(2, Math.ceil(maxDist / 5000) + 1);
+  for(let r = 1; r <= ringMax; r++){
     for(let dy = -r; dy <= r; dy++){
       for(let dx = -r; dx <= r; dx++){
         if(r === 2 && Math.abs(dy) !== r && Math.abs(dx) !== r) continue;  // 内側既見
@@ -942,8 +981,10 @@ function _routeDistance(a, b){
   //   - LRU キャッシュ参照可・キーは backbone node id ペア
   //   - タイムアウトは DIJKSTRA_TIMEOUT_MS (3ms) で打ち切り → haversine fallback
   if(_backboneGraph){
-    const srcN = _backboneNearestNode(a.snapLat, a.snapLng);
-    const dstN = _backboneNearestNode(b.snapLat, b.snapLng);
+    // A12 (2026-05-09): chord×2 + 5km で動的拡張・遠距離 cross-pref ほど広く
+    const dynMax = chordM * 2 + 5000;
+    const srcN = _backboneNearestNode(a.snapLat, a.snapLng, dynMax);
+    const dstN = _backboneNearestNode(b.snapLat, b.snapLng, dynMax);
     if(srcN >= 0 && dstN >= 0){
       const cacheKey = 'bb:' + srcN + '|' + dstN;
       const cached = _routeCache.get(cacheKey);

@@ -28,7 +28,7 @@ const Meter = (() => {
   //   (now - lastMmUsefulAt) > MM_SILENT_THRESHOLD_MS で MM "silent" と判定し
   //   GPS 直線距離を fallback として state.distance_m に加算する
   let lastMmUsefulAt = 0;
-  const MM_SILENT_THRESHOLD_MS = 5000;
+  const MM_SILENT_THRESHOLD_MS = 2500;   // A2 (2026-05-09): 5000→2500 短縮で fallback 早期化
 
   // Map Matching の内部状態（state とは別・stateはユーザー向け値のみ）
   // MM-1 (2026-05-08): Worker 経路使用時は prevSnap は Worker 内で保持し
