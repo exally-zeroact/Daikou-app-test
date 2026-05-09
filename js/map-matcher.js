@@ -91,9 +91,6 @@ function _maybeAdjustViterbiN(){
 const decoders   = new Map();
 const loadedPrefs = new Set();
 
-// MM-4b: 県別 road-graph（CSR + CH ショートカット）
-const graphs = new Map();   // pref → decoded graph object
-
 // ─── Phase B (2026-05-08): バックボーン graph + タイルキャッシュ ──────
 // 全国 motorway/trunk バックボーンは常時 RAM 常駐（県跨ぎ routing 用）
 let _backboneGraph = null;
@@ -656,72 +653,97 @@ function _b64ToArrayBuffer(b64){
   return buf;
 }
 
-// Phase A (2026-05-08): v=1（旧）/ v=2（圧縮版）両対応のデコーダー
-//   v=2 では edgeLenM が Uint16 × 0.1m / edgeRoad+Seg+nodeLevel+shortcutMidNode はドロップ
-//   v=2 では roadOffset/roadSegFromNode/roadSegToNode を持つ（runtime Map 不要）
-//   regression 検出後に v=1 経路を削除する予定
+// バックボーン graph デコーダー (2026-05-09 簡素化):
+//   入力は build-road-graph-backbone-jp.js が出力する CSR のみ
+//   nodeLat/Lng/nodeOffset/edgeTo/edgeLenM(Uint16 ×0.1m)/edgeFlags
+//   shortcut/edgeRoad/edgeSeg/nodeLevel/roadOffset 系は使用しない
 function _decodeGraphData(g){
-  const v = g.v || 1;
-  const result = {
-    v: v,
+  return {
+    v: g.v || 1,
     prefecture:   g.prefecture,
-    precision:    g.precision,
+    precision:    g.precision || 1e5,
     numNodes:     g.numNodes,
     numEdges:     g.numEdges,
-    numShortcuts: g.numShortcuts,
     nodeLat:      new Int32Array(_b64ToArrayBuffer(g.nodeLatB64)),
     nodeLng:      new Int32Array(_b64ToArrayBuffer(g.nodeLngB64)),
     nodeOffset:   new Uint32Array(_b64ToArrayBuffer(g.nodeOffsetB64)),
     edgeTo:       new Uint32Array(_b64ToArrayBuffer(g.edgeToB64)),
+    edgeLenM:     new Uint16Array(_b64ToArrayBuffer(g.edgeLenMB64)),
+    edgeLenScale: (typeof g.edgeLenScale === 'number') ? g.edgeLenScale : 0.1,
     edgeFlags:    new Uint8Array(_b64ToArrayBuffer(g.edgeFlagsB64)),
-    shortcutEdgeFrom:  new Uint32Array(_b64ToArrayBuffer(g.shortcutEdgeFromB64)),
-    shortcutEdgeTo:    new Uint32Array(_b64ToArrayBuffer(g.shortcutEdgeToB64)),
-    shortcutEdgeLenM:  new Float32Array(_b64ToArrayBuffer(g.shortcutEdgeLenMB64)),
-    shortcutEdgeFlags: new Uint8Array(_b64ToArrayBuffer(g.shortcutEdgeFlagsB64)),
   };
-  if(v >= 2){
-    // Phase A v=2: edgeLenM は Uint16 ×0.1m / roadSeg* index 付き
-    result.edgeLenM = new Uint16Array(_b64ToArrayBuffer(g.edgeLenMB64));
-    result.edgeLenScale = (typeof g.edgeLenScale === 'number') ? g.edgeLenScale : 0.1;
-    result.numRoads = g.numRoads;
-    result.roadOffset = new Uint32Array(_b64ToArrayBuffer(g.roadOffsetB64));
-    result.roadSegFromNode = new Uint32Array(_b64ToArrayBuffer(g.roadSegFromNodeB64));
-    result.roadSegToNode = new Uint32Array(_b64ToArrayBuffer(g.roadSegToNodeB64));
-  } else {
-    // v=1（旧形式・regression 確認用に温存）
-    result.edgeLenM = new Float32Array(_b64ToArrayBuffer(g.edgeLenMB64));
-    result.edgeLenScale = 1.0;
-    result.edgeRoad = new Uint32Array(_b64ToArrayBuffer(g.edgeRoadB64));
-    result.edgeSeg = new Uint16Array(_b64ToArrayBuffer(g.edgeSegB64));
-    if(g.nodeLevelB64){
-      result.nodeLevel = new Uint16Array(_b64ToArrayBuffer(g.nodeLevelB64));
-    }
-    if(g.shortcutMidNodeB64){
-      result.shortcutMidNode = new Uint32Array(_b64ToArrayBuffer(g.shortcutMidNodeB64));
-    }
-  }
-  return result;
 }
 
-// Phase A: graph の RAM サイズを概算（debug 用）
+// graph の RAM サイズを概算（debug 用）
 function _calcGraphMemBytes(g){
   let bytes = 0;
   const fields = ['nodeLat','nodeLng','nodeOffset','edgeTo','edgeLenM','edgeFlags',
-                  'edgeRoad','edgeSeg','nodeLevel',
-                  'roadOffset','roadSegFromNode','roadSegToNode',
-                  'shortcutEdgeFrom','shortcutEdgeTo','shortcutEdgeLenM',
-                  'shortcutEdgeFlags','shortcutMidNode',
-                  'shortcutOffset','shortcutIndexByFrom',
                   '_dist','_visited'];
   for(const k of fields){
     const arr = g[k];
     if(arr && arr.byteLength) bytes += arr.byteLength;
   }
-  // Map のおおまかなオーバーヘッド（v=1 で構築される roadSegToEdge）
-  if(g.roadSegToEdge && g.roadSegToEdge.size){
-    bytes += g.roadSegToEdge.size * 50;  // JS Map entry ~50 bytes
-  }
   return bytes;
+}
+
+// ─── 2026-05-09 追加: バックボーン graph 空間インデックス + nearest-node ──
+// 用途: cross-prefecture routing の src/dst を backbone node に snap する
+// 5km 度グリッドで O(1) 近傍 cell 取得 → cell 内 node 列を線形探索
+const BACKBONE_GRID_DEG = 0.05;            // 5km cell
+const BACKBONE_NEAREST_MAX_DIST_M = 5000;  // backbone 道路から 5km 以内のみ snap
+
+function _buildBackboneSpatialIndex(g){
+  if(g._spatialGrid) return;
+  const grid = new Map();
+  const inv = Math.round(g.precision * BACKBONE_GRID_DEG);
+  const N = g.numNodes;
+  for(let i = 0; i < N; i++){
+    const gy = Math.floor(g.nodeLat[i] / inv);
+    const gx = Math.floor(g.nodeLng[i] / inv);
+    const key = gy + '_' + gx;
+    let arr = grid.get(key);
+    if(!arr){ arr = []; grid.set(key, arr); }
+    arr.push(i);
+  }
+  g._spatialGrid = grid;
+}
+
+function _backboneNearestNode(snapLat, snapLng){
+  if(!_backboneGraph) return -1;
+  _buildBackboneSpatialIndex(_backboneGraph);
+  const g = _backboneGraph;
+  const inv = Math.round(g.precision * BACKBONE_GRID_DEG);
+  const latI = Math.round(snapLat * g.precision);
+  const lngI = Math.round(snapLng * g.precision);
+  const gy = Math.floor(latI / inv);
+  const gx = Math.floor(lngI / inv);
+  const mpd = _metersPerDegree(snapLat);
+  const maxSq = BACKBONE_NEAREST_MAX_DIST_M * BACKBONE_NEAREST_MAX_DIST_M;
+  let bestIdx = -1, bestSq = Infinity;
+  // 中心 + 8 近傍 (3x3) を検索・見つからなければ 5x5 まで拡張
+  for(let r = 1; r <= 2; r++){
+    for(let dy = -r; dy <= r; dy++){
+      for(let dx = -r; dx <= r; dx++){
+        if(r === 2 && Math.abs(dy) !== r && Math.abs(dx) !== r) continue;  // 内側既見
+        const arr = g._spatialGrid.get((gy + dy) + '_' + (gx + dx));
+        if(!arr) continue;
+        for(let i = 0; i < arr.length; i++){
+          const idx = arr[i];
+          const nLat = g.nodeLat[idx] / g.precision;
+          const nLng = g.nodeLng[idx] / g.precision;
+          const dxm = (nLng - snapLng) * mpd.lng;
+          const dym = (nLat - snapLat) * mpd.lat;
+          const sq = dxm*dxm + dym*dym;
+          if(sq < bestSq && sq <= maxSq){
+            bestSq = sq;
+            bestIdx = idx;
+          }
+        }
+      }
+    }
+    if(bestIdx >= 0) return bestIdx;
+  }
+  return bestIdx;
 }
 
 // shortcut を from-node 順に整列して CSR-like インデックスを構築
@@ -729,6 +751,11 @@ function _calcGraphMemBytes(g){
 function _buildShortcutIndex(g){
   if(g.shortcutOffset) return;
   const N = g.numNodes, S = g.numShortcuts;
+  if(!S || !g.shortcutEdgeFrom){
+    g.shortcutOffset = new Uint32Array(N + 1);
+    g.shortcutIndexByFrom = new Uint32Array(0);
+    return;
+  }
   const offsets = new Uint32Array(N + 1);
   for(let i = 0; i < S; i++) offsets[g.shortcutEdgeFrom[i] + 1]++;
   for(let v = 1; v <= N; v++) offsets[v] += offsets[v - 1];
@@ -741,58 +768,6 @@ function _buildShortcutIndex(g){
   }
   g.shortcutOffset = offsets;
   g.shortcutIndexByFrom = sorted;
-}
-
-// v=1 旧経路: (roadIdx, segIdx) → 最初に登場した edge index の Map
-//   regression 確認後に削除予定
-function _buildRoadSegIndex(g){
-  if(g.roadSegToEdge) return;
-  if(!g.edgeRoad || !g.edgeSeg) return;  // v=2 ではフィールド無し
-  const m = new Map();
-  for(let e = 0; e < g.numEdges; e++){
-    const key = g.edgeRoad[e] * 65536 + g.edgeSeg[e];
-    if(!m.has(key)) m.set(key, e);
-  }
-  g.roadSegToEdge = m;
-}
-
-// v=1 旧経路: edge index → from-node を二分探索（nodeOffset 上）
-function _findFromNode(g, edgeIdx){
-  let lo = 0, hi = g.numNodes;
-  while(lo < hi){
-    const mid = (lo + hi) >>> 1;
-    if(g.nodeOffset[mid + 1] <= edgeIdx) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
-// snap 結果から graph node id へマッピング
-// snap.t < 0.5 なら segment の from 側、それ以上なら to 側
-// Phase A v=2: roadOffset + roadSegFromNode/ToNode の compile-time index で O(1)
-//   （runtime Map 構築コスト 40MB を 4MB の TypedArray index に置換）
-function _snapToGraphNode(g, snap){
-  if(snap == null || typeof snap.roadIndex !== 'number') return -1;
-  if(g.v >= 2 && g.roadOffset && g.roadSegFromNode && g.roadSegToNode){
-    const r = snap.roadIndex;
-    if(r < 0 || r >= g.numRoads) return -1;
-    const start = g.roadOffset[r];
-    const end = g.roadOffset[r + 1];
-    const s = snap.segmentIndex || 0;
-    if(s < 0 || start + s >= end) return -1;
-    const fromNode = g.roadSegFromNode[start + s];
-    const toNode = g.roadSegToNode[start + s];
-    return (snap.t != null && snap.t >= 0.5) ? toNode : fromNode;
-  }
-  // v=1 fallback（旧形式 graph）
-  _buildRoadSegIndex(g);
-  if(!g.roadSegToEdge) return -1;
-  const key = snap.roadIndex * 65536 + (snap.segmentIndex || 0);
-  const e = g.roadSegToEdge.get(key);
-  if(e === undefined) return -1;
-  const fromNode = _findFromNode(g, e);
-  const toNode = g.edgeTo[e];
-  return (snap.t != null && snap.t >= 0.5) ? toNode : fromNode;
 }
 
 // ─── MM-4b: Binary Heap（Priority Queue） ─────────────────────
@@ -963,38 +938,40 @@ function _routeDistance(a, b){
 
   const chordM = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
 
-  // graph が同一県でロード済みなら Dijkstra 試行（後方互換 / per-pref auto-load 廃止後は実質未使用）
-  if(a.prefecture === b.prefecture && graphs.has(a.prefecture)){
-    // LRU キャッシュ参照（roadIdx + segIdx ベースで t は無視・近似）
-    const cacheKey = a.prefecture + ':' + a.roadIndex + '_' + a.segmentIndex
-                   + '|' + b.roadIndex + '_' + b.segmentIndex;
-    const cached = _routeCache.get(cacheKey);
-    if(cached !== undefined) return cached;
-
-    const g = graphs.get(a.prefecture);
-    const srcNode = _snapToGraphNode(g, a);
-    const dstNode = _snapToGraphNode(g, b);
-    if(srcNode >= 0 && dstNode >= 0){
-      const maxDistM = chordM * 1.5 + 200;
+  // 2026-05-09: backbone graph による cross-prefecture routing
+  //   src/dst それぞれを backbone 上で nearest-node に snap し、
+  //   両 node 間を A* で最短経路探索する。
+  //   - 検索半径: chord × 1.5 + 5km (寄り道含む実走の上限)
+  //   - LRU キャッシュ参照可・キーは backbone node id ペア
+  //   - タイムアウトは DIJKSTRA_TIMEOUT_MS (3ms) で打ち切り → haversine fallback
+  if(_backboneGraph){
+    const srcN = _backboneNearestNode(a.snapLat, a.snapLng);
+    const dstN = _backboneNearestNode(b.snapLat, b.snapLng);
+    if(srcN >= 0 && dstN >= 0){
+      const cacheKey = 'bb:' + srcN + '|' + dstN;
+      const cached = _routeCache.get(cacheKey);
+      if(cached !== undefined) return cached;
+      // src/dst 各々の snap 点 → backbone node 距離を加算 (両 stub 区間)
+      const stubA = _haversine(
+        a.snapLat, a.snapLng,
+        _backboneGraph.nodeLat[srcN] / _backboneGraph.precision,
+        _backboneGraph.nodeLng[srcN] / _backboneGraph.precision);
+      const stubB = _haversine(
+        b.snapLat, b.snapLng,
+        _backboneGraph.nodeLat[dstN] / _backboneGraph.precision,
+        _backboneGraph.nodeLng[dstN] / _backboneGraph.precision);
+      const maxDistM = chordM * 1.5 + 5000;
       const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
       const deadline = t0 + DIJKSTRA_TIMEOUT_MS;
-      const distM = _chDijkstra(g, srcNode, dstNode, maxDistM, deadline);
-      if(distM != null){
-        const result = { distanceM: distM, onSameRoad: false, _via: 'dijkstra' };
+      const inner = _chDijkstra(_backboneGraph, srcN, dstN, maxDistM, deadline);
+      if(inner != null){
+        const distM = inner + stubA + stubB;
+        const result = { distanceM: distM, onSameRoad: false, _via: 'backbone' };
         _routeCache.set(cacheKey, result);
         return result;
       }
-      // Dijkstra 失敗（タイムアウト or 到達不能）→ haversine fallback
+      // Dijkstra failed (timeout or unreachable) → haversine fallback
     }
-  }
-
-  // Phase B: backbone graph で県跨ぎ補完
-  if(_backboneGraph){
-    // backbone は global node space ではないので簡易的に nearest node 探索
-    // 実装簡略化のため: backbone Dijkstra も試行（同 graph 構造）
-    // ただし src/dst を backbone node に map する手段がないため
-    // 現状は backbone はあくまで cross-pref fallback の placeholder（次回拡張）
-    // → haversine fallback に流れる
   }
 
   // 最終フォールバック: haversine 弦距離
@@ -1604,16 +1581,19 @@ self.onmessage = function(e){
   }
 
   // Phase B: バックボーン graph 受け取り（全国 motorway/trunk・常駐）
+  // 2026-05-09: cross-prefecture routing で nearest-node 探索に使うため
+  //   load 時に空間インデックスも一緒に構築する。
   if(msg.type === 'loadBackbone'){
     try {
       const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
       _backboneGraph = _decodeGraphData(msg.graphData);
-      // Pheromone 不要・shortcut 不要・縮小バックボーンとしてのみ使用
+      _buildBackboneSpatialIndex(_backboneGraph);
       const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
       self.postMessage({
         type: 'backboneLoaded', ok: true,
         numNodes: _backboneGraph.numNodes,
         numEdges: _backboneGraph.numEdges,
+        gridCells: _backboneGraph._spatialGrid.size,
         decodeMs: t1 - t0,
       });
     } catch(err){
@@ -1684,47 +1664,6 @@ self.onmessage = function(e){
       });
     } catch(err){
       self.postMessage({ type: 'demLoaded', ok: false, error: err.message });
-    }
-    return;
-  }
-
-  // MM-4b: road-graph 受け取り
-  if(msg.type === 'loadGraph'){
-    try {
-      if(graphs.has(msg.pref)){
-        self.postMessage({
-          type: 'graphLoaded', pref: msg.pref, ok: true,
-          numNodes: graphs.get(msg.pref).numNodes,
-          _reason: 'already loaded',
-        });
-        return;
-      }
-      const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
-      const g = _decodeGraphData(msg.graphData);
-      // shortcut インデックス事前構築
-      _buildShortcutIndex(g);
-      // road-segment → edge index（v=1 のみ・v=2 は compile-time index 使用）
-      if(g.v < 2) _buildRoadSegIndex(g);
-      graphs.set(msg.pref, g);
-      // graph 更新で route キャッシュは無効化（pref 切替時の整合性担保）
-      _routeCache.clear();
-      // MM-7: 該当 pref の pheromone を IDB から復元（無ければ新規 Float32Array）
-      _ensurePheromone(msg.pref, g.numRoads || g.numEdges);
-      _loadPheromoneFor(msg.pref, g.numRoads || g.numEdges);
-      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
-      // Phase A: graph の RAM 実測値を main 側で確認できるように post に含める
-      const memBytes = _calcGraphMemBytes(g);
-      self.postMessage({
-        type: 'graphLoaded', pref: msg.pref, ok: true,
-        version: g.v,
-        numNodes: g.numNodes, numEdges: g.numEdges, numShortcuts: g.numShortcuts,
-        memBytes: memBytes, memMB: (memBytes / 1024 / 1024).toFixed(2),
-        decodeMs: t1 - t0,
-      });
-    } catch(err){
-      self.postMessage({
-        type: 'graphLoaded', pref: msg.pref, ok: false, error: err.message,
-      });
     }
     return;
   }

@@ -337,53 +337,6 @@ return {
 }
 
 // ─────────────────────────────────────────
-// CSV 出力
-// ─────────────────────────────────────────
-function exportCSV(){
-const r = getReport();
-const fmtTime = t => t ? new Date(t).toLocaleString('ja-JP') : '';
-const fmtDur = sec => {
-const h = Math.floor(sec / 3600);
-const m = Math.floor((sec % 3600) / 60);
-return h + '時間' + m + '分';
-};
-
-
-const lines = [
-  'ダイコメ業務日報',
-  '',
-  '業務開始,' + fmtTime(r.start_time),
-  '業務終了,' + fmtTime(r.end_time),
-  '業務時間,' + fmtDur(r.elapsed_sec),
-  '',
-  '総走行距離(km),' + (r.total_distance_m / 1000).toFixed(2),
-  '実車総距離(km),' + (r.actual_total_m / 1000).toFixed(2),
-  '空車距離(km),' + (r.empty_distance_m / 1000).toFixed(2),
-  '実車率(%),' + (r.actual_ratio * 100).toFixed(1),
-  '',
-  '売上合計(円),' + r.fare_total_yen,
-  '営業回数,' + r.trip_count,
-  '平均単価(円),' + r.avg_fare_yen,
-  '平均速度(km/h),' + r.avg_speed_kmh.toFixed(1),
-  '',
-  '【実車明細】',
-  '回,開始,終了,距離(km),料金(円)',
-];
-
-r.trips.forEach((t, i) => {
-  lines.push([
-    i + 1,
-    fmtTime(t.start_time),
-    fmtTime(t.end_time),
-    (t.distance_m / 1000).toFixed(2),
-    t.fare_yen,
-  ].join(','));
-});
-
-return lines.join('\n');
-
-}
-
 // ─────────────────────────────────────────
 // 永続化
 // ─────────────────────────────────────────
@@ -448,21 +401,6 @@ if(typeof dlog === 'function') dlog('[Business] history save error: ' + e.messag
 }
 }
 
-// 履歴取得
-function getHistory(){
-try {
-const raw = localStorage.getItem(HISTORY_KEY);
-return raw ? JSON.parse(raw) : [];
-} catch(e) {
-return [];
-}
-}
-
-// 履歴クリア（デバッグ用）
-function clearHistory(){
-try { localStorage.removeItem(HISTORY_KEY); } catch(e){}
-}
-
 // 履歴から業務状態を復元して active 状態に戻す（業務開始画面の「続きから再開」用）
 // history: getLastEndedBusiness() で取得した履歴オブジェクト
 function restoreFromHistory(history){
@@ -503,9 +441,8 @@ return {
 start, end, resume, abandon,
 canResume, checkAutoAbandon,
 onGps, onTripEnd,
-getState, getReport, exportCSV,
+getState, getReport,
 save, load,
-getHistory, clearHistory,
 restoreFromHistory,
 };
 })();

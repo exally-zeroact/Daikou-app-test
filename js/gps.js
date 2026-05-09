@@ -125,13 +125,9 @@ const GPS = (() => {
         if(e.webkitCompassHeading != null){
           if(compassHeading === null) dlog('[GPS] コンパス初回取得(iOS): ' + e.webkitCompassHeading.toFixed(0) + '°');
           compassHeading = e.webkitCompassHeading;
-          // Compat連携：コンパス取れたフラグ（B段階・2026/04/29）
-          if(typeof window.Compat !== 'undefined') window.Compat.hasCompass = true;
         } else if(e.alpha != null){
           if(compassHeading === null) dlog('[GPS] コンパス初回取得(Android): ' + e.alpha.toFixed(0) + '°');
           compassHeading = (360 - e.alpha + (e.beta || 0) * 0.1) % 360;
-          // Compat連携：コンパス取れたフラグ
-          if(typeof window.Compat !== 'undefined') window.Compat.hasCompass = true;
         }
       }, true);
       _compassListenerAdded = true;  // 登録完了フラグ（B段階修正・2026/04/30）
@@ -192,8 +188,6 @@ const GPS = (() => {
         accelData = accSample;       // 直近値
         accelBuffer.push(accSample); // バッファ蓄積（GPS更新時にWorkerへ）
         if(accelBuffer.length > 200) accelBuffer.shift();
-        // Compat連携：加速度取れたフラグ
-        if(typeof window.Compat !== 'undefined') window.Compat.hasAccel = true;
 
         // ジャイロ（B段階・新規）
         // null安全：rot自体null/プロパティ全てnull/非オブジェクトを完全防御
@@ -208,8 +202,6 @@ const GPS = (() => {
           gyroData = gyroSample;
           gyroBuffer.push(gyroSample);
           if(gyroBuffer.length > 200) gyroBuffer.shift();
-          // Compat連携：ジャイロ取れたフラグ
-          if(typeof window.Compat !== 'undefined') window.Compat.hasGyro = true;
         }
 
         // 初回ログ（加速度＋ジャイロ状態を一括表示）

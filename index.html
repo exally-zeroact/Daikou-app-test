@@ -921,10 +921,6 @@ class NoSleep {
 })();
 </script>
 
-<script src="js/compat.js"></script>
-
-<!-- ★compat.js：端末互換性判定レイヤー・古いスマホ対応基盤（2026/04/29追加） -->
-
 <script src="js/firebase-config.js"></script>
 
 <script src="js/roads-decoder.js"></script>
@@ -932,9 +928,6 @@ class NoSleep {
 <!-- ★roads-decoder.js：道路データデコーダー・Map Matching用（2026/04/30追加） -->
 
 <script src="js/region-loader.js"></script>
-
-<!-- ★road-graph-loader.js: MM-4b road-graph 遅延ロード -->
-<script src="js/road-graph-loader.js"></script>
 
 <!-- ★road-graph-tile-loader.js: Phase B タイル road-graph 遅延ロード（main 側）-->
 <script src="js/road-graph-tile-loader.js"></script>
@@ -1028,17 +1021,18 @@ function _mmReforwardAllState(){
     }
     _mmWorker.postMessage(cfg);
   } catch(e){}
-  // 既ロード済 roads / road-graph / DEM を再 forward
+  // 既ロード済 roads / DEM / backbone を再 forward
   try {
     const saved = localStorage.getItem('daikou_user_regions');
     const regions = saved ? JSON.parse(saved) : [];
     if(Array.isArray(regions) && regions.length > 0){
       _forwardRoadsToMmWorker(regions);
-      _forwardRoadGraphToMmWorker(regions);
     }
   } catch(e){}
   // DEM 再 forward
   try { if(typeof _forwardDemToMmWorker === 'function') _forwardDemToMmWorker(); } catch(e){}
+  // Backbone 再 forward (Worker 自動再起動時)
+  try { if(typeof _forwardBackboneToMmWorker === 'function') _forwardBackboneToMmWorker(); } catch(e){}
 }
 
 // メッセージハンドラを別関数に分離（addEventListener / removeEventListener 整合性）
@@ -1048,16 +1042,6 @@ function _mmWorkerOnMessage(e){
     if(m.type === 'roadsLoaded'){
       dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
-    } else if(m.type === 'graphLoaded'){
-      // MM-4b: road-graph 受信ログ + Phase A: version / memMB 表示
-      dlog('[MM] worker graph ' + (m.ok ? 'loaded' : 'fail') +
-           ': ' + m.pref +
-           (m.ok ? ' (v=' + (m.version || 1) +
-                   ' nodes=' + m.numNodes + ' edges=' + m.numEdges +
-                   ' shortcuts=' + m.numShortcuts +
-                   ' RAM=' + (m.memMB || '?') + 'MB' +
-                   (m.decodeMs ? ' decode=' + m.decodeMs.toFixed(0) + 'ms' : '') + ')'
-                 : ' err=' + m.error));
     } else if(m.type === 'demLoaded'){
       // MM-5: DEM 受信ログ
       dlog('[MM] worker DEM ' + (m.ok ? 'loaded' : 'fail') +
@@ -1257,9 +1241,6 @@ document.addEventListener('visibilitychange', function(){
                  ' pinned=' + m.pinnedCount);
       lines.push('Backbone  : ' + (m.backboneLoaded ? m.backboneNodes + ' nodes' : 'OFF'));
     }
-    if(typeof RoadGraphLoader !== 'undefined'){
-      lines.push('graphs    : ' + RoadGraphLoader.getStats().loadedPrefectures.join(',') || '(none)');
-    }
     lines.push('=== タップで閉じる ===');
     ramPanel.textContent = lines.join('\n');
   }
@@ -1291,23 +1272,6 @@ function _forwardRoadsToMmWorker(prefs){
       _mmWorker.postMessage({ type: 'loadRoads', pref: pref, roadsData: data });
     } catch(e){
       console.warn('[MM] forward roads ' + pref + ' err:', e.message);
-    }
-  }
-}
-
-// MM-4b (2026-05-08): road-graph-{pref}.js を Worker B に転送する関数
-// 該当 pref の graph がロード済（window.ROAD_GRAPH_<PREF> 設定済）の時のみ post
-// graph 未ビルドの pref は単純にスキップ → MM-4b は haversine fallback で稼働
-function _forwardRoadGraphToMmWorker(prefs){
-  if(!_mmWorker || !Array.isArray(prefs)) return;
-  for(const pref of prefs){
-    const varName = 'ROAD_GRAPH_' + String(pref).toUpperCase().replace(/-/g, '_');
-    const data = window[varName];
-    if(!data) continue;
-    try {
-      _mmWorker.postMessage({ type: 'loadGraph', pref: pref, graphData: data });
-    } catch(e){
-      console.warn('[MM] forward road-graph ' + pref + ' err:', e.message);
     }
   }
 }
@@ -1585,11 +1549,9 @@ function loadUserRegions(){
       // 失敗しても main 側の MM 動作には影響しない（fallback あり）
       _forwardRoadsToMmWorker(regions);
 
-      // Phase B runtime (2026-05-08): per-pref road-graph の auto-load を停止
-      // タイル経路（5km × 5km・LRU 25 個）に置き換えたため per-pref 全 graph 不要
-      // → Worker B RAM が hokkaido でも 60MB 以下に収まる
-      // backbone graph + タイル prefetch で routing 精度は維持
-      // 旧 per-pref _forwardRoadGraphToMmWorker は手動 trigger 用に残置（後方互換）
+      // Phase B (2026-05-08〜): per-pref road-graph の auto-load は廃止済み。
+      //   タイル経路（5km × 5km・LRU 25 個）+ backbone graph (cross-pref nearest-node)
+      //   で routing 精度を維持しつつ Worker B RAM を 60MB 以下に保つ。
     }).catch(e=>{
       console.error('活動エリアロードエラー:', e);
     });

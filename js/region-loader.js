@@ -36,35 +36,7 @@ const RegionLoader = (() => {
     kagoshima: [31.4, 130.6], okinawa:  [26.5, 128.0],
   };
 
-  // 互換用 region 判定（既存 getRegion を維持）
-  function getRegion(lat, lng) {
-    if (lat > 41.5) return 'hokkaido';
-    if (lat < 28) return 'kyushu-okinawa';
-    if (lat < 34 && lng < 132) return 'kyushu-okinawa';
-    if (32.5 <= lat && lat <= 34.5 && 132 <= lng && lng <= 134.7) return 'shikoku';
-    if (33 <= lat && lat <= 35.7 && 131 <= lng && lng <= 134.5) return 'chugoku';
-    if (33 <= lat && lat <= 35.8 && 134.5 <= lng && lng <= 136.5) return 'kinki';
-    if (33.5 <= lat && lat <= 35.5 && 136 <= lng && lng <= 137) return 'kinki';
-    if (34.5 <= lat && lat <= 37.5 && 136 <= lng && lng <= 139) return 'chubu';
-    if (36.5 <= lat && lat <= 38.5 && 137 <= lng && lng <= 139.8) return 'chubu';
-    if (34.5 <= lat && lat <= 37 && 138.5 <= lng && lng <= 141) return 'kanto';
-    if (lat >= 36.5) return 'tohoku';
-    return null;
-  }
-
-  function getPrefecture(lat, lng) {
-    let best = null, bestDist = Infinity;
-    for (const pref in PREFECTURES) {
-      const [pLat, pLng] = PREFECTURES[pref];
-      const dLat = lat - pLat;
-      const dLng = lng - pLng;
-      const d = dLat * dLat + dLng * dLng;
-      if (d < bestDist) { bestDist = d; best = pref; }
-    }
-    return best;
-  }
-
-  // 中心の県＋N 県（重心距離順）を返す
+  // 中心の県＋N 県（重心距離順）を返す・ensureLoaded 内部用
   function nearestPrefectures(lat, lng, n = 5) {
     const arr = [];
     for (const pref in PREFECTURES) {
@@ -168,28 +140,6 @@ const RegionLoader = (() => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   }
 
-  function getStats() {
-    let totalT = 0, totalB = 0;
-    for (const pref of loaded.tunnels) totalT += (tunnelsData[pref] || []).length;
-    for (const pref of loaded.bridges) totalB += (bridgesData[pref] || []).length;
-    let totalRoads = 0;
-    for (const pref of loadedRoads) {
-      const decoder = roadDecoders.get(pref);
-      if (decoder) totalRoads += decoder.numRoads;
-    }
-    return {
-      // 旧キー名は互換のため残しつつ、内訳は県別になっている
-      loadedTunnelRegions: Array.from(loaded.tunnels),
-      loadedBridgeRegions: Array.from(loaded.bridges),
-      loadedTunnelPrefectures: Array.from(loaded.tunnels),
-      loadedBridgePrefectures: Array.from(loaded.bridges),
-      totalTunnels: totalT,
-      totalBridges: totalB,
-      loadedRoadPrefectures: Array.from(loadedRoads),
-      totalRoads: totalRoads,
-    };
-  }
-
   // ════════════════════════════════════════════════════════════
   // roads-*.js（都道府県別道路データ）対応
   // ════════════════════════════════════════════════════════════
@@ -248,10 +198,6 @@ const RegionLoader = (() => {
     return Promise.all(prefectures.map(loadRoadFile));
   }
 
-  function getRoadDecoder(prefecture) {
-    return roadDecoders.get(prefecture) || null;
-  }
-
   function snapToNearestRoad(lat, lng, options) {
     if (loadedRoads.size === 0) return null;
     let best = null;
@@ -267,27 +213,6 @@ const RegionLoader = (() => {
     }
     if (best) best.prefecture = bestPref;
     return best;
-  }
-
-  // MM-2 (2026-05-08): 多候補化 API。loadedRoads 全 pref を横断し
-  // 距離昇順で上位 K 個（既定 8）を返す。emission scoring 入力用。
-  // maxM は呼び出し側で GPS accuracy × 1.5（最小30m・最大100m）として渡す想定。
-  function snapAllWithin(lat, lng, options) {
-    if (loadedRoads.size === 0) return [];
-    options = options || {};
-    const K = options.K != null ? options.K : 8;
-    const all = [];
-    for (const pref of loadedRoads) {
-      const decoder = roadDecoders.get(pref);
-      if (!decoder || !decoder.snapAllWithin) continue;
-      const cands = decoder.snapAllWithin(lat, lng, options);
-      for (const c of cands) {
-        c.prefecture = pref;
-        all.push(c);
-      }
-    }
-    all.sort(function(a, b){ return a.distanceM - b.distanceM; });
-    return all.slice(0, K);
   }
 
   function calcRoadDistance(snapA, snapB) {
@@ -309,11 +234,8 @@ const RegionLoader = (() => {
   }
 
   return {
-    // 公開 API（シグネチャ維持）
-    getRegion, ensureLoaded, findNearestTunnel, findNearestBridge, getStats,
-    getPrefecture, ensureRoadsLoaded, getRoadDecoder,
-    snapToNearestRoad, snapAllWithin, calcRoadDistance,
-    // 追加（参考）
-    nearestPrefectures,
+    ensureLoaded, findNearestTunnel, findNearestBridge,
+    ensureRoadsLoaded,
+    snapToNearestRoad, calcRoadDistance,
   };
 })();
