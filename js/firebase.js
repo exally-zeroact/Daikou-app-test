@@ -146,6 +146,39 @@ const FB = (() => {
     return function unsubscribe(){ ref.off('value', handler); };
   }
 
+  // Phase 3 (2026-05-10): 設定画面「過去データを削除」ボタン用
+  //   training-data/{deviceId}/* の全ファイルを Firebase Storage から削除
+  //   listAll() で全 ref 取得 → 各 ref delete を Promise.all で並列実行
+  function deleteAllTrainingData(deviceId) {
+    return new Promise(function(resolve, reject) {
+      if (typeof firebase === 'undefined' || !firebase.storage) {
+        return reject(new Error('Firebase Storage not initialized'));
+      }
+      if (!deviceId) {
+        return reject(new Error('deviceId required'));
+      }
+      try {
+        const folder = firebase.storage().ref('training-data/' + deviceId);
+        folder.listAll().then(function(result) {
+          const promises = (result.items || []).map(function(item) {
+            return item.delete().catch(function() {});
+          });
+          Promise.all(promises).then(function() {
+            resolve({ deleted: promises.length });
+          }).catch(reject);
+        }).catch(function(err) {
+          // 該当 folder が空 (= 過去送信なし) は成功扱い
+          if (err && err.code === 'storage/object-not-found') {
+            return resolve({ deleted: 0 });
+          }
+          reject(err);
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   // Phase 2.B (2026-05-10): training-uploader 用 Cloud Storage upload
   //   path: training-data/{deviceId}/{date}-{firstId}.json[.gz]
   //   blob: gzip 済 (CompressionStream) または raw JSON
@@ -180,5 +213,7 @@ const FB = (() => {
     markVisited, pushSessionAggregates, subscribeCrossUserPheromone,
     // Phase 2.B (2026-05-10)
     uploadTrainingBatch,
+    // Phase 3 (2026-05-10)
+    deleteAllTrainingData,
   };
 })();

@@ -50,9 +50,24 @@ const TrainingCollector = (() => {
   // 状態
   let _db = null;
   let _ready = false;
-  let _enabled = true;     // Phase 3 設定 UI で OFF 可能 (default ON)
   let _deviceId = null;
   let _initTime = Date.now();
+
+  // Phase 3 (2026-05-10): localStorage から _enabled を初期化
+  //   'daikome_training_enabled' 明示値があれば優先
+  //   なければ 'daikome_training_consent' 有無で判定 (consent あり = ON / なし = OFF)
+  //   未consent (banner pending) は OFF・consent 後に default ON
+  function _initEnabledState(){
+    try {
+      const explicit = localStorage.getItem('daikome_training_enabled');
+      if (explicit !== null) return explicit === 'true';
+      const consent = localStorage.getItem('daikome_training_consent');
+      return consent !== null;   // consent あり = ON / なし = OFF (banner pending)
+    } catch(_) {
+      return false;
+    }
+  }
+  let _enabled = _initEnabledState();
   let _accelBuffer = [];   // [{x, y, z}] (sliding window・最大 WINDOW_SAMPLES)
   let _gyroBuffer = [];    // [{a, b, g}] (任意・最大 WINDOW_SAMPLES)
   let _lastSampleT = 0;
@@ -271,15 +286,25 @@ const TrainingCollector = (() => {
     return 'unknown';
   }
 
-  // Phase 3 で設定画面トグルから呼ばれる
+  // Phase 3 で設定画面トグルから呼ばれる・localStorage に永続化
   function setEnabled(enabled) {
     _enabled = !!enabled;
+    try { localStorage.setItem('daikome_training_enabled', String(_enabled)); } catch(_){}
     if (typeof dlog === 'function') {
       dlog('[TrainingCollector] enabled=' + _enabled);
     }
   }
 
   function getEnabled() { return _enabled; }
+
+  // Phase 3 (2026-05-10): バナー OK / 設定画面トグル後に呼ばれる
+  //   localStorage の最新値で _enabled を再初期化
+  function refreshEnabledFromStorage() {
+    _enabled = _initEnabledState();
+    if (typeof dlog === 'function') {
+      dlog('[TrainingCollector] refreshed enabled=' + _enabled);
+    }
+  }
 
   // 設定画面の「過去データを削除」ボタンから呼ばれる
   function deleteAll() {
@@ -387,6 +412,8 @@ const TrainingCollector = (() => {
     getStats, getCount,
     // Phase 2.B 用
     readBatch, deleteUpToId,
+    // Phase 3 用
+    refreshEnabledFromStorage,
   };
 })();
 

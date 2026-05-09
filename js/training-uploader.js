@@ -44,7 +44,19 @@ const TrainingUploader = (() => {
   const UPLOAD_PERIODIC_MS = 30 * 60 * 1000;   // 30 分 periodic
   const LAST_UPLOAD_KEY = 'daikome_training_last_upload';
 
-  let _enabled = true;
+  // Phase 3 (2026-05-10): localStorage から _enabled を初期化
+  //   training-collector と同じロジック (consent 有無で初期判定)
+  function _initEnabledState(){
+    try {
+      const explicit = localStorage.getItem('daikome_training_enabled');
+      if (explicit !== null) return explicit === 'true';
+      const consent = localStorage.getItem('daikome_training_consent');
+      return consent !== null;
+    } catch(_) {
+      return false;
+    }
+  }
+  let _enabled = _initEnabledState();
   let _runningGuard = false;
   let _periodicTimer = null;
   let _initDone = false;
@@ -265,14 +277,22 @@ const TrainingUploader = (() => {
     }
   }
 
-  // Phase 3 設定 UI 用
+  // Phase 3 設定 UI 用・localStorage に永続化
   function setEnabled(enabled) {
     _enabled = !!enabled;
+    try { localStorage.setItem('daikome_training_enabled', String(_enabled)); } catch(_){}
     if (typeof dlog === 'function') {
       dlog('[TrainingUploader] enabled=' + _enabled);
     }
   }
   function getEnabled() { return _enabled; }
+
+  function refreshEnabledFromStorage() {
+    _enabled = _initEnabledState();
+    if (typeof dlog === 'function') {
+      dlog('[TrainingUploader] refreshed enabled=' + _enabled);
+    }
+  }
 
   // 手動トリガ (debug 用・Phase 3 設定 UI からも呼べる)
   function tryUploadNow() {
@@ -292,6 +312,8 @@ const TrainingUploader = (() => {
 
   return {
     init, setEnabled, getEnabled, tryUploadNow, getStats,
+    // Phase 3 用
+    refreshEnabledFromStorage,
   };
 })();
 

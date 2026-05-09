@@ -184,6 +184,40 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
+  <!-- Phase 3 (2026-05-10): 学習データ提供 設定 -->
+  <div class="section" id="training">
+    <div class="section-title">学習データ提供</div>
+    <div class="row">
+      <div class="row-label">学習データ提供</div>
+      <div class="toggle" id="trainingToggle" onclick="toggleTrainingEnabled()"></div>
+    </div>
+    <div style="padding:12px 16px;font-size:12px;color:#8E8E93;line-height:1.7;border-bottom:0.5px solid #f0f0f0;">
+      Map Matching の精度向上のため、加速度センサー値と速度を匿名で送信します。
+      <br>
+      <strong style="color:#34C759;">送信される</strong>: 加速度・速度・匿名識別子・アプリバージョン
+      <br>
+      <strong style="color:#FF3B30;">送信されない</strong>: 位置情報・出発地/目的地・お名前・連絡先
+    </div>
+    <div class="row" id="trainingDetailsToggle" onclick="toggleTrainingDetails()" style="cursor:pointer;">
+      <div class="row-label" style="font-size:13px;color:#007AFF;">利用規約を表示</div>
+      <div style="color:#8E8E93;font-size:13px;" id="trainingDetailsChevron">▼</div>
+    </div>
+    <div id="trainingDetailsBody" style="display:none;padding:14px 16px;font-size:12px;color:#444;line-height:1.8;background:#F0FAF4;border-bottom:0.5px solid #f0f0f0;">
+      <strong style="display:block;margin-bottom:6px;color:#1A4A2E;">学習データ提供に関するお知らせ</strong>
+      ダイコメは Map Matching の精度向上のため、お客様のスマートフォンの加速度センサー値と速度を匿名で送信します。
+      送信される: 加速度・速度・匿名識別子。
+      送信されない: 位置情報・出発地/目的地・お名前・連絡先。
+      設定画面でいつでも無効化できます。
+    </div>
+    <div style="padding:12px 16px;">
+      <button id="trainingDeleteBtn" onclick="deleteTrainingData()"
+              style="width:100%;padding:12px;background:#FF3B30;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;">
+        過去の学習データを削除
+      </button>
+      <div id="trainingDeleteStatus" style="margin-top:8px;font-size:12px;color:#8E8E93;text-align:center;min-height:18px;"></div>
+    </div>
+  </div>
+
   <!-- MM-6 (M-2 修正): 上級設定 collapsible・既定折りたたみ -->
   <div class="section" id="advancedSection">
     <div class="section-title" id="advancedToggle"
@@ -227,6 +261,8 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<!-- Phase 3 (2026-05-10): Firebase Storage SDK・「過去データを削除」で必要 -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="js/firebase-config.js"></script>
 <script src="js/firebase.js"></script>
 <script>
@@ -242,6 +278,110 @@ function toggleAdvanced(){
   const open = body.style.display !== 'none';
   body.style.display = open ? 'none' : 'block';
   if(chev) chev.textContent = open ? '▼' : '▲';
+}
+
+// ─── Phase 3 (2026-05-10): 学習データ提供 設定 ────────────────────
+function _trainingIsEnabled(){
+  try {
+    const explicit = localStorage.getItem('daikome_training_enabled');
+    if (explicit !== null) return explicit === 'true';
+    const consent = localStorage.getItem('daikome_training_consent');
+    return consent !== null;
+  } catch(_) { return false; }
+}
+
+function _refreshTrainingToggleUI(){
+  const tg = document.getElementById('trainingToggle');
+  if(!tg) return;
+  if(_trainingIsEnabled()){
+    tg.classList.add('on');
+  } else {
+    tg.classList.remove('on');
+  }
+}
+
+function toggleTrainingEnabled(){
+  const next = !_trainingIsEnabled();
+  try {
+    localStorage.setItem('daikome_training_enabled', String(next));
+    // OFF にする時も consent flag は維持・初回 banner は再表示しない
+    if(localStorage.getItem('daikome_training_consent') === null){
+      localStorage.setItem('daikome_training_consent', next ? 'agreed' : 'declined');
+    }
+  } catch(_){}
+  _refreshTrainingToggleUI();
+  showSettingsToast(next ? '学習データ提供を ON にしました' : '学習データ提供を OFF にしました');
+}
+
+function toggleTrainingDetails(){
+  const body = document.getElementById('trainingDetailsBody');
+  const chev = document.getElementById('trainingDetailsChevron');
+  if(!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if(chev) chev.textContent = open ? '▼' : '▲';
+}
+
+function _trainingGetDeviceId(){
+  try { return localStorage.getItem('daikome_anonymous_id') || null; }
+  catch(_) { return null; }
+}
+
+// IndexedDB クリア (training-collector.js なしで直接実行)
+function _trainingClearIndexedDB(){
+  return new Promise(function(resolve){
+    if(typeof indexedDB === 'undefined') return resolve(0);
+    try {
+      const req = indexedDB.open('daikome-training', 1);
+      req.onsuccess = function(e){
+        const db = e.target.result;
+        try {
+          if(!db.objectStoreNames.contains('samples')){
+            db.close();
+            return resolve(0);
+          }
+          const tx = db.transaction(['samples'], 'readwrite');
+          const store = tx.objectStore('samples');
+          const cnt = store.count();
+          let n = 0;
+          cnt.onsuccess = function(){ n = cnt.result; };
+          store.clear();
+          tx.oncomplete = function(){ db.close(); resolve(n); };
+          tx.onerror = function(){ db.close(); resolve(0); };
+        } catch(_){ db.close(); resolve(0); }
+      };
+      req.onerror = function(){ resolve(0); };
+    } catch(_) { resolve(0); }
+  });
+}
+
+function deleteTrainingData(){
+  if(!confirm('過去に蓄積された学習データを全て削除します。\nIndexedDB と Firebase の両方から削除されます。\nよろしいですか?')) return;
+  const btn = document.getElementById('trainingDeleteBtn');
+  const status = document.getElementById('trainingDeleteStatus');
+  if(btn) btn.disabled = true;
+  if(status) status.textContent = '削除中...';
+  const deviceId = _trainingGetDeviceId();
+  // IDB クリア + Firebase クリアを並列実行
+  const idbP = _trainingClearIndexedDB();
+  const fbP = (typeof FB !== 'undefined' && FB.deleteAllTrainingData && deviceId)
+    ? FB.deleteAllTrainingData(deviceId).catch(function(e){ return { error: e.message }; })
+    : Promise.resolve({ deleted: 0, skipped: 'no_fb_or_device_id' });
+  Promise.all([idbP, fbP]).then(function(results){
+    const idbN = results[0];
+    const fbR = results[1] || {};
+    let msg = 'IndexedDB ' + idbN + ' 件削除';
+    if(fbR.deleted != null) msg += '・Firebase ' + fbR.deleted + ' 件削除';
+    if(fbR.error) msg += ' (Firebase err: ' + fbR.error + ')';
+    if(status) status.textContent = msg;
+    if(btn) btn.disabled = false;
+    showSettingsToast('学習データを削除しました');
+    // localStorage の last upload もクリア
+    try { localStorage.removeItem('daikome_training_last_upload'); } catch(_){}
+  }).catch(function(e){
+    if(status) status.textContent = '削除エラー: ' + (e && e.message);
+    if(btn) btn.disabled = false;
+  });
 }
 
 // ─── ダウンロード状態（Phase 0a-3 設定画面拡張・2026/05/04追加） ───
@@ -653,6 +793,13 @@ function saveAll(){
 }
 
 load();
+// Phase 3 (2026-05-10): 学習データ提供 トグル状態を初期化
+_refreshTrainingToggleUI();
+// URL hash #training で training セクションへスクロール (banner からの遷移)
+if(location.hash === '#training'){
+  const el = document.getElementById('training');
+  if(el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 </script>
 </body>
 </html>
