@@ -45,106 +45,12 @@ let trafficJamSince = null;
 let isTrafficJam = false;
 let kalman = null;
 
-// ─── MM-1.5 (2026-05-08): Cellular Network Information API 監視 ─────────
-// navigator.connection を 1Hz でポーリングし「4G/3G → 2G/slow-2g/unknown」
-// 急変を tunnel layer hint として下流（map-matcher.js）に渡す。
-// 既存の Kalman・静止判定・異常スキップには絶対触らない（業務継続性最優先）。
-//
-// API 対応状況:
-//   - Android Chrome 67+ (Worker 内も含む): ✅ 利用可能
-//   - iOS Safari / iOS PWA: ❌ navigator.connection 自体が無い → graceful degrade
-//   - Firefox: navigator.connection 無し → graceful degrade
-// 非対応端末では tunnelHint = 'open' 固定で従来挙動に戻る（副作用ゼロ）。
+// 2026-05-09 (P4 廃止): cellular tunnel hint 完全削除
+//   理由: layer (v6 attribute) + tunnels-{pref}.js データで道路属性ベースに代替
+//   利点: iOS Safari/PWA でも同等動作・接続不安定時の偽陽性なし
+//   詳細: map-matcher.js の _computeLayerScore で prevLayer 連続性 boost に置換
 
 let _prevAccuracy = null;
-const _cellularState = {
-  effectiveType: null,        // '4g' | '3g' | '2g' | 'slow-2g' | undefined
-  downlink: null,             // Mbps
-  prevEffectiveType: null,    // 直前ポーリング値（変化検出用）
-  lastChangedAt: 0,
-};
-const _tunnelHint = {
-  active: false,
-  startedAt: 0,
-  confidence: 0,
-};
-const _CELL_TUNNEL_TIMEOUT_MS = 30000;   // 30 秒で hint 自動解除（stale 防止）
-let _cellularPollTimerId = null;
-
-function _isWeakConn(t){
-  return !t || t === 'slow-2g' || t === '2g';
-}
-function _isStrongConn(t){
-  return t === '3g' || t === '4g' || t === '5g';
-}
-
-function _pollCellular(){
-  if(typeof self.navigator === 'undefined' || !self.navigator.connection) return;
-  const conn = self.navigator.connection;
-  const t = conn.effectiveType;
-  const d = conn.downlink;
-  if(t !== _cellularState.effectiveType){
-    _cellularState.prevEffectiveType = _cellularState.effectiveType;
-    _cellularState.effectiveType = t;
-    _cellularState.lastChangedAt = Date.now();
-  }
-  _cellularState.downlink = d;
-}
-
-function _startCellularPolling(){
-  if(typeof self.navigator === 'undefined' || !self.navigator.connection) return;
-  if(_cellularPollTimerId) return;          // 二重起動防止
-  _pollCellular();                           // 即時 1 回
-  _cellularPollTimerId = setInterval(_pollCellular, 1000);  // 1Hz
-  wlog('[Cellular] polling started: ' + _cellularState.effectiveType);
-}
-
-// 現在の cellular layer hint を計算
-// hint = 'tunnel' | 'open'
-// confidence: GPS accuracy 急劣化と同時発火なら高（0.95）/ cellular のみなら中（0.7）
-function _computeCellularHint(currentAccuracy, now){
-  if(typeof self.navigator === 'undefined' || !self.navigator.connection){
-    return { hint: 'open', confidence: 0 };
-  }
-  const cs = _cellularState;
-
-  // GPS accuracy が直前比 2 倍超 かつ 30m 超 → 急劣化
-  const gpsRapidlyDegraded =
-    _prevAccuracy != null &&
-    currentAccuracy > _prevAccuracy * 2 &&
-    currentAccuracy > 30;
-
-  if(_tunnelHint.active){
-    // 既に hint=tunnel: 解除条件チェック
-    if(_isStrongConn(cs.effectiveType)){
-      _tunnelHint.active = false;
-      _tunnelHint.confidence = 0;
-      return { hint: 'open', confidence: 0 };
-    }
-    if(now - _tunnelHint.startedAt > _CELL_TUNNEL_TIMEOUT_MS){
-      // 30 秒経過で stale 解除（接続が永久に切れたケースを業務継続のため open に戻す）
-      _tunnelHint.active = false;
-      _tunnelHint.confidence = 0;
-      return { hint: 'open', confidence: 0 };
-    }
-    // GPS 急劣化が継続している間は確信度を上げ続ける
-    if(gpsRapidlyDegraded && _tunnelHint.confidence < 0.95){
-      _tunnelHint.confidence = 0.95;
-    }
-    return { hint: 'tunnel', confidence: _tunnelHint.confidence };
-  } else {
-    // hint=open: 進入条件
-    const wasStrong = _isStrongConn(cs.prevEffectiveType);
-    const nowWeak = _isWeakConn(cs.effectiveType);
-    if(wasStrong && nowWeak){
-      _tunnelHint.active = true;
-      _tunnelHint.startedAt = now;
-      _tunnelHint.confidence = gpsRapidlyDegraded ? 0.95 : 0.7;
-      return { hint: 'tunnel', confidence: _tunnelHint.confidence };
-    }
-    return { hint: 'open', confidence: 0 };
-  }
-}
 
 // ─── Kalmanフィルター（案D・2026/04/27） ───
 class KalmanGPS {
@@ -520,15 +426,9 @@ function processPosition(data) {
 
   lastPosition = { lat: filtered.lat, lng: filtered.lng, timestamp: now, speedKmh, altitude };
 
-  // MM-1.5 (2026-05-08): cellular layer hint を計算して結果に埋め込む
-  // 既存フィールド（Kalman 値・isStationary 等）は一切変更しない・追加のみ
-  const _cellHint = _computeCellularHint(accuracy, now);
   _prevAccuracy = accuracy;
-
-  // MM-5 (2026-05-08): 加速度路面セマンティクス hint
-  // accelLayerHint = 'bridge' | 'normal' （tunnel は accel 検出困難）
-  const _accelHint = calcAccelLayerHint(accelSamples, now);
-
+  // 2026-05-09 (P4/P5): cellularLayerHint / accelLayerHint 廃止
+  //   layer (v6 attribute) + tunnels-/bridges-{pref}.js データで完全代替
   return {
     lat: filtered.lat,
     lng: filtered.lng,
@@ -539,20 +439,10 @@ function processPosition(data) {
     timestamp: now,
     compassHeading: (compassHeading != null) ? compassHeading : null,
     _debugCompass: (compassHeading != null && CONFIG._compassDebug) ? CONFIG._compassDebug : null,
-    // 加速度センサー（案A・2026/04/29・取得確認用・C段階で活用）
     accelData: accelData || null,
     accelSampleCount: accelSamples ? accelSamples.length : 0,
-    // ジャイロセンサー（B段階・2026/04/29・取得確認用・C段階で活用）
     gyroData: gyroData || null,
     gyroSampleCount: gyroSamples ? gyroSamples.length : 0,
-    // MM-1.5: cellular layer hint（map-matcher.js が消費する）
-    cellularLayerHint: _cellHint.hint,           // 'tunnel' | 'open'
-    cellularConfidence: _cellHint.confidence,    // 0〜0.95
-    cellularEffectiveType: _cellularState.effectiveType,  // デバッグ用
-    // MM-5: 加速度由来の路面 hint（map-matcher.js の layer scorer が消費）
-    accelLayerHint: _accelHint ? _accelHint.hint : 'normal',  // 'bridge' | 'normal'
-    accelVibrationIndex: _accelHint ? _accelHint.vibrationIndex : 0,
-    accelMagRange: _accelHint ? _accelHint.magRange : 0,
   };
 }
 
@@ -570,8 +460,7 @@ self.onmessage = function(e) {
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;
-    // MM-1.5: cellular polling 起動（API 非対応端末では何もしない）
-    _startCellularPolling();
+    // 2026-05-09 (P4): cellular polling 廃止
     wlog('[Worker] 初期化完了');
     return;
   }

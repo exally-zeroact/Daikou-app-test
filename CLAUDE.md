@@ -127,3 +127,20 @@ Exallyのコードを触るときのみ適用。
 - `C:\Users\zeroa\zeroact-memory\projects\daikome\decisions.md`
 - `C:\Users\zeroa\zeroact-memory\projects\daikome\tasks.md`
 - `C:\Users\zeroa\zeroact-memory\projects\daikome\rules.md`
+
+-----
+
+## 絶対ルール（全セッション共通・例外なし）
+
+- 実装済みの機能は必ず全て課金・業務フローに接続すること
+- 「業務継続性」を理由に機能を参照値・dead codeにしないこと
+- 設計変更をした場合は必ずレポートに明記すること
+- 安全側への勝手な格下げ禁止
+- 距離計算はGoogleマップと同じようにGPSの座標を道路にスナップして道路に沿った距離で課金すること。GPS直線距離での課金は絶対に使わない
+
+## 設計方針
+
+- メーターの課金距離（state.distance_m）はMap Matching（mm）が主・GPS直線はMMが5秒以上沈黙した場合のfallbackのみ
+- Worker B（map-matcher.js）に道路データが届いていない状態は絶対に許容しない
+- distanceSourceは常にUI上で運転手が確認できるように表示すること
+- 実装した機能が動いているかどうかを常に確認してレポートに記載すること

@@ -95,23 +95,34 @@ const Meter = (() => {
 
   let timer = null;
 
-  function setFareConfig(config){ fareConfig = { ...fareConfig, ...config }; }
+  // F6 (2026-05-09): 業務中の fareConfig 変更を抑制
+  //   業務開始時に凍結・業務終了/idle で解凍
+  //   Firebase 側の非同期更新が走行中に降ってきても fare 計算には反映しない
+  //   (途中でメーターが急変するのを防ぐ)
+  let _fareConfigFrozen = false;
+  function setFareConfig(config){
+    if(_fareConfigFrozen){
+      if(typeof dlog === 'function') dlog('[Meter] setFareConfig ignored (frozen during business)');
+      return;
+    }
+    fareConfig = { ...fareConfig, ...config };
+  }
   function getFareConfig(){ return { ...fareConfig }; }
 
   // ─── MM-1: Worker B 連携 ───────────────────────────────
-  // index.html で new Worker('js/map-matcher.js') 後にこの関数で注入する。
-  // null を渡すと Worker 経路を無効化し既存インラインロジック（fallback）に戻す。
-  // M-1 修正 (2026-05-08): 古い worker のリスナーを除去してから新 worker を登録
-  // （複数回呼ばれる Worker 自動再起動 H-1 シナリオで listener leak を防止）
+  // B1 (2026-05-09): roadsLoaded ack を Set で track して MM ready 判定に使う
+  let _workerLoadedPrefs = new Set();
   function setMapMatcher(worker){
     if(mmWorker){
       try { mmWorker.removeEventListener('message', _onMmWorkerMessage); } catch(e){}
     }
     mmWorker = worker || null;
+    _workerLoadedPrefs = new Set();   // 新 Worker 起動で再カウント
     if(mmWorker){
       mmWorker.addEventListener('message', _onMmWorkerMessage);
     }
   }
+  function isMmReady(){ return mmWorker && _workerLoadedPrefs.size > 0; }
 
   // MM-7: 最新 MM-7 統計を保持（mmResult から間接取得）
   let _lastMcmN = 0;
@@ -121,7 +132,13 @@ const Meter = (() => {
   //   fare_yen を直接更新する。業務継続性は update() 側 GPS fallback で担保。
   function _onMmWorkerMessage(e){
     const m = e && e.data;
-    if(!m || m.type !== 'mmResult') return;
+    if(!m) return;
+    // B1 (2026-05-09): roadsLoaded ack を track
+    if(m.type === 'roadsLoaded'){
+      if(m.ok && m.pref) _workerLoadedPrefs.add(m.pref);
+      return;
+    }
+    if(m.type !== 'mmResult') return;
     if(typeof m.mmIncrementM === 'number' && m.mmIncrementM > 0){
       // MM 優先: 道路距離を課金距離に反映
       state.distance_m += m.mmIncrementM;
@@ -182,7 +199,13 @@ const Meter = (() => {
       mm_skip_count: 0,
     };
     prevSnap = null;  // Map Matching 連続性リセット（fallback 用）
-    lastMmUsefulAt = 0;  // 業務開始時に MM 健全性タイマーリセット (5s 後に GPS fallback 開始)
+    _fareConfigFrozen = true;  // F6: 業務開始時に凍結
+    // B2 (2026-05-09): 業務開始時 MM warmup grace
+    //   lastMmUsefulAt=0 だと mmHealthy=false で fallback 経路に入る
+    //   Date.now() に設定しておけば MM_SILENT_THRESHOLD_MS (5s) 分の待ち時間が確保され
+    //   その間に Worker B から最初の useful mmResult が届く想定
+    //   届かなければ自然に inline / gap fallback に移行
+    lastMmUsefulAt = Date.now();
     // MM-1: Worker 側 prevSnap も初期化（業務開始時の連続性リセット）
     if(mmWorker){
       try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
@@ -194,6 +217,20 @@ const Meter = (() => {
   function stop(){
     state.running = false;
     if(timer){ clearInterval(timer); timer = null; }
+    // 注: Worker への reset 送信はしない (F5 維持)
+    // 業務終了時の flush は businessEnd() で明示的に呼ぶ
+  }
+
+  // B7 (2026-05-09): 業務終了専用・Worker B の Viterbi 窓を flush して
+  //   未確定の N 秒分を mmResult で post 返却 → state.distance_m に最終加算
+  //   この後の getReport() で正確な合計距離を返す
+  function businessEnd(){
+    state.running = false;
+    if(timer){ clearInterval(timer); timer = null; }
+    _fareConfigFrozen = false;  // F6: 業務終了で解凍
+    if(mmWorker){
+      try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
+    }
   }
 
   function reset(){
@@ -218,9 +255,11 @@ const Meter = (() => {
     };
     prevSnap = null;
     lastMmUsefulAt = 0;
-    // MM-1: Worker 側 prevSnap も初期化
+    // F5 (2026-05-09): trip reset では Worker 'softReset' を送る
+    //   → lastCommittedSnap のみクリア・Viterbi 窓は維持
+    //   業務終了時の完全 flush + clear は businessEnd() で別途呼ぶ
     if(mmWorker){
-      try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
+      try { mmWorker.postMessage({ type: 'softReset' }); } catch(e){}
     }
     // 起動時warm up GPSもクリア（過剰課金リスク回避・2026/05/01）
     // GPS止まった状態で移動→次回代行開始時に古い座標と現在地で距離爆発するのを防ぐ
@@ -341,8 +380,22 @@ const Meter = (() => {
   }
 
   function update(gpsResult){
-    if(!state.running) return;
-    if(gpsResult.isStationary) return;
+    // P3 (2026-05-09): 業務外 (state.running=false) でも MM Worker B には GPS を流す
+    //   これにより業務開始ボタン押下時には Viterbi 窓が温まっており即 ready
+    //   state.running=false の間は距離加算 (state.distance_m) は行わない
+    if(!state.running){
+      if(gpsResult && !gpsResult.isStationary){
+        _updateMapMatching(gpsResult);
+      }
+      return;
+    }
+    if(gpsResult.isStationary){
+      // B5 (2026-05-09): 停車中でも Worker B にハートビートを送信
+      //   Viterbi 窓内の確定前候補が時間進行で commit される機会を作る
+      //   業務終了時の flush で観測時刻が古いまま commit されるのを防ぐ
+      _updateMapMatching(gpsResult);
+      return;
+    }
 
     // 2026-05-09 (絶対ルール準拠): 課金距離は MM (道路距離) のみ
     //   mmHealthy = MM Worker が直近 5 秒内に mmIncrementM>0 を返している
@@ -411,7 +464,8 @@ const Meter = (() => {
     // ── MM-1: Worker B 経路（優先） ────────────────────
     // mm_total_count は post タイミングで main 側がカウント（Worker と二重管理回避）
     // mm_snap_count / mm_skip_count / mm_distance_m は _onMmWorkerMessage で加算
-    if(mmWorker){
+    // B1 (2026-05-09): roadsLoaded ack を 1 件以上受領済の Worker にのみ post
+    if(mmWorker && _workerLoadedPrefs.size > 0){
       state.mm_total_count++;
       try {
         mmWorker.postMessage({
@@ -423,14 +477,9 @@ const Meter = (() => {
           accuracy: gpsResult.accuracy,
           speedKmh: gpsResult.speedKmh,
           headingDeg: (gpsResult.compassHeading != null) ? gpsResult.compassHeading : null,
-          // MM-1.5: cellular layer hint を Worker B に転送
-          // gps-worker.js（Worker A）が付与した値をそのまま渡す。
-          // 値がない（古い Worker A・非対応端末）場合は 'open' と 0 で安全側
-          cellularLayerHint: gpsResult.cellularLayerHint || 'open',
-          cellularConfidence: gpsResult.cellularConfidence || 0,
-          // MM-5: GPS altitude（DEM 比較用）と accel hint（layer 確信度向上用）を転送
+          // 2026-05-09 (P4/P5): cellularLayerHint / accelLayerHint 廃止・layer 連続性 boost で代替
+          // GPS altitude は DEM 比較用に維持
           altitude: (typeof gpsResult.altitude === 'number') ? gpsResult.altitude : null,
-          accelLayerHint: gpsResult.accelLayerHint || 'normal',
         });
       } catch(e) {
         // post 失敗時はメーター本体に影響を与えず inline fallback に進む
@@ -559,5 +608,5 @@ const Meter = (() => {
     };
   }
 
-  return { start, stop, reset, resume, update, updateGpsOnly, getState, getMMStats, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher };
+  return { start, stop, businessEnd, reset, resume, update, updateGpsOnly, getState, getMMStats, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher, isMmReady };
 })();

@@ -736,6 +736,13 @@ justify-content:center;
     <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
     <!-- 業務開始ボタン（中央配置・大ボタン） -->
     <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
+    <!-- P6 (2026-05-09): MM 準備状況インジケータ・常時表示 -->
+    <div id="mmReadyIndicator"
+         style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
+                padding:8px 16px;margin:6px 24px 0;border-radius:8px;
+                background:#FDECEA;color:#C0392B;line-height:1.4;">
+      ⚠ MM 準備中: 0/5 県読込待ち
+    </div>
     <!-- 続きから再開ボタン（直前の業務が3時間以内に終了してる場合のみ表示） -->
     <button class="btn-business-resume-start" id="btnResumeFromStart" onclick="onResumeFromStart()" style="display:none;">続きから再開</button>
     <div class="resume-note" id="resumeNote" style="display:none;">直前の業務（<span id="resumeNoteTime">--:--</span>終了）から3時間以内なら再開できます</div>
@@ -1622,6 +1629,40 @@ function loadSettings(){
   // 活動エリア（Map Matching・2026/04/30追加）
   // 設定画面で選択された都道府県の roads データを起動時に自動ロード
   loadUserRegions();
+
+  // P2 (2026-05-09): 起動時 last-GPS warm-up
+  //   localStorage から最後の GPS を復元 → 即時 _autoLoadNearbyRoads 発火
+  //   → センサー許可前 (= GPS 未取得) でも近隣 5 県の roads を script タグ load
+  //   → 業務開始ボタン押下時には Worker B に decoders 充填済み
+  try {
+    const lastDriving = localStorage.getItem('daikou_driving_state');
+    const lastBusiness = localStorage.getItem('daikou_business_state');
+    let lat = null, lng = null;
+    if(lastDriving){
+      const d = JSON.parse(lastDriving);
+      if(d && typeof d.last_lat === 'number' && typeof d.last_lng === 'number'){
+        lat = d.last_lat; lng = d.last_lng;
+      }
+    }
+    if((lat == null || lng == null) && lastBusiness){
+      const b = JSON.parse(lastBusiness);
+      if(b && b.last_gps && typeof b.last_gps.lat === 'number'){
+        lat = b.last_gps.lat; lng = b.last_gps.lng;
+      }
+    }
+    if(lat != null && lng != null){
+      // _autoLoadNearbyRoads は _mmWorker / RegionLoader 準備後に呼ぶ必要があるため遅延
+      setTimeout(function(){
+        if(typeof _autoLoadNearbyRoads === 'function'){
+          _autoLoadNearbyRoads(lat, lng);
+          if(typeof dlog === 'function') dlog('[boot] roads warm-up at last GPS ' +
+            lat.toFixed(4) + ',' + lng.toFixed(4));
+        }
+      }, 500);
+    }
+  } catch(e){
+    if(typeof dlog === 'function') dlog('[boot] warm-up error: ' + e.message);
+  }
 }
 
 // 活動エリア自動ロード（2026/04/30追加・Map Matching用）
@@ -1783,7 +1824,11 @@ function startGPS(){
         // 起動時warm up（2026/04/30追加）：常にGPSをMeterに渡す
         // 代行開始前でもlastWarmupGpsを保持・押した瞬間に即時計測開始
         if(typeof Meter.updateGpsOnly === 'function') Meter.updateGpsOnly(g);
-        if(appState==='driving' || appState==='fare') Meter.update(g);
+        // P3 (2026-05-09): 常時 Meter.update を呼出
+        //   Meter は state.running=false 中は加算しないので副作用なし。
+        //   業務外でも Worker B に GPS が流れて MM がウォームアップされる
+        //   (snap miss/skip カウントは加算されるが課金には影響しない)
+        Meter.update(g);
         // 業務中の総走行距離計測（2026/05/04 夜・修正）
         // business.js は onGps を公開しており state.active 中なら total_distance_m に加算する
         // 実車中・空車中問わず業務全体の距離を計測する設計
@@ -1896,6 +1941,7 @@ function startUiTimer(){
     }
     // 走行状態をlocalStorageに保存（リロード復元用）
     const ms = Meter.getState();
+    const mmStats = (typeof Meter.getMMStats === 'function') ? Meter.getMMStats() : null;
     localStorage.setItem('daikou_driving_state', JSON.stringify({
       distance_m:    s.distance_m,
       fare_yen:      total,
@@ -1905,6 +1951,10 @@ function startUiTimer(){
       last_altitude: ms.last_gps ? ms.last_gps.altitude : null,
       last_speed_kmh: ms.last_speed_kmh || 0,
       last_gps_at:   ms.last_timestamp || null,
+      // F2 (2026-05-09): MM stats を併せて保存・復元時の動作確認用
+      mm_distance_m: mmStats ? mmStats.mm_distance_m : 0,
+      distance_source: mmStats ? mmStats.distance_source : null,
+      mm_snap_rate: mmStats ? mmStats.snap_rate : 0,
     }));
   },500);
 }
@@ -2102,6 +2152,10 @@ function onBusinessEnd(){
     return;
   }
   try {
+    // B7 (2026-05-09): Worker B Viterbi 窓を flush して残値を distance_m に加算
+    if(typeof Meter !== 'undefined' && typeof Meter.businessEnd === 'function'){
+      Meter.businessEnd();
+    }
     Business.end();
     // GPS / センサー蓄積を停止（D案・2026/05/06）
     //   日報画面では位置・加速度・ジャイロを使わないので即停止
@@ -2664,6 +2718,7 @@ document.addEventListener('visibilitychange', function(){
       if(surchargeOn) fare = Math.round(fare * surchargeRate);
       const extraTotal = extras.reduce((a,b)=>a+b.amount, 0);
       const total = fare + extraTotal;
+      const mmStats2 = (typeof Meter.getMMStats === 'function') ? Meter.getMMStats() : null;
       localStorage.setItem('daikou_driving_state', JSON.stringify({
         distance_m:    s.distance_m,
         fare_yen:      total,
@@ -2673,6 +2728,10 @@ document.addEventListener('visibilitychange', function(){
         last_altitude: ms.last_gps ? ms.last_gps.altitude : null,
         last_speed_kmh: ms.last_speed_kmh || 0,
         last_gps_at:   ms.last_timestamp || null,
+        // F2: MM stats 同時保存
+        mm_distance_m: mmStats2 ? mmStats2.mm_distance_m : 0,
+        distance_source: mmStats2 ? mmStats2.distance_source : null,
+        mm_snap_rate: mmStats2 ? mmStats2.snap_rate : 0,
       }));
       dlog('[復元] 裏に回った瞬間を保存');
     } catch(e){ console.error('[復元] visibilitychange保存エラー:', e); }
@@ -3562,6 +3621,46 @@ if('serviceWorker' in navigator){
     dlog('[SW] 登録失敗（開発環境では正常）:', err.message);
   });
 }
+
+// P6 (2026-05-09): idle 画面 MM 準備状況インジケータ 1Hz 更新
+//   _forwardedPrefs Set のサイズを業務開始ボタン下に表示
+//   5 県以上 forward 済 + 直近 mmResult あれば「準備完了」緑表示
+setInterval(function(){
+  const ind = document.getElementById('mmReadyIndicator');
+  if(!ind) return;
+  // idle 画面のみ表示・他画面では非表示
+  if(appState !== 'idle' && appState !== 'businessStart'){
+    ind.style.display = 'none';
+    return;
+  }
+  ind.style.display = 'block';
+  const forwarded = (typeof _forwardedPrefs !== 'undefined') ? _forwardedPrefs.size : 0;
+  let mmHealthy = false;
+  let mmReady = false;
+  if(typeof Meter !== 'undefined' && Meter.getMMStats){
+    const s = Meter.getMMStats();
+    const silentMs = s.mm_silent_ms;
+    mmHealthy = silentMs != null && silentMs < 5000;
+    mmReady = (typeof Meter.isMmReady === 'function') ? Meter.isMmReady() : false;
+  }
+  if(mmReady && forwarded >= 5 && mmHealthy){
+    ind.textContent = '✅ MM 準備完了 (' + forwarded + ' 県・道路距離課金可)';
+    ind.style.background = '#E8F7EE';
+    ind.style.color = '#1A7340';
+  } else if(forwarded >= 5){
+    ind.textContent = '🟡 MM 準備完了・GPS 取得待ち (' + forwarded + ' 県)';
+    ind.style.background = '#FFF6E6';
+    ind.style.color = '#7A5A12';
+  } else if(forwarded > 0){
+    ind.textContent = '🟡 MM 準備中 (' + forwarded + '/5 県読込済)';
+    ind.style.background = '#FFF6E6';
+    ind.style.color = '#7A5A12';
+  } else {
+    ind.textContent = '⚠ MM 準備中: GPS 取得待ち (道路データ未読込)';
+    ind.style.background = '#FDECEA';
+    ind.style.color = '#C0392B';
+  }
+}, 1000);
 
 // ─── ストレージ永続化（2026/04/30追加：オフライン業務でデータ消失防止） ───
 // iOS のキャッシュ自動削除を防ぐ・道路データ等を永続的に保持

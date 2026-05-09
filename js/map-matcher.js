@@ -520,12 +520,11 @@ function _demLookup(lat, lng){
   return _demData.alt[y * _demData.numLng + x];
 }
 
-// MM-5: 候補の layer score を算出（v6 layer 属性 + DEM 高度差 + accel/cellular hint）
+// 2026-05-09 (P4/P5): cellular/accel hint 廃止・layer score を road 属性のみで算出
 //   c.layer: 0=平面 1=高架 2=地下 3=その他
 //   gpsAlt: GPS 高度 (m)・null なら DEM 比較スキップ
-//   accelLayerHint: 'bridge' | 'normal'
-//   cellularLayerHint: 'tunnel' | 'open'
-function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, accelLayerHint, cellularLayerHint){
+//   prevLayer: 直前 commit snap の layer (連続性 boost 用)
+function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, prevLayer){
   let score = 1.0;
 
   // DEM 高度差ベースのスコア（DEM ロード済かつ GPS alt あり）
@@ -534,17 +533,14 @@ function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, accelLayerHint, cellularL
     if(demAlt != null){
       const altDiff = gpsAlt - demAlt;
       if(c.layer === 1){
-        // 高架: alt 差 > 4m なら確信、小さいほどペナルティ、負方向は強ペナルティ
         if(altDiff > 4) score *= 1.0;
         else if(altDiff > 0) score *= Math.exp(-(4 - altDiff) / 3);
         else score *= _LAYER_WRONG_PENALTY;
       } else if(c.layer === 2){
-        // 地下: alt 差 < -2m なら確信、小さいほどペナルティ、正方向は強ペナルティ
         if(altDiff < -2) score *= 1.0;
         else if(altDiff < 0) score *= Math.exp(-(-altDiff - 2) / 3);
         else score *= _LAYER_WRONG_PENALTY;
       } else {
-        // 平面 / その他: |altDiff| が小さいほど確信
         const ad = Math.abs(altDiff);
         if(ad < 5) score *= 1.0;
         else score *= Math.exp(-ad / 5);
@@ -552,10 +548,12 @@ function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, accelLayerHint, cellularL
     }
   }
 
-  // accel hint と layer 一致でブースト
-  if(accelLayerHint === 'bridge' && c.layer === 1) score *= _LAYER_BOOST_FACTOR;
-  // cellular hint と layer 一致でブースト
-  if(cellularLayerHint === 'tunnel' && c.layer === 2) score *= _LAYER_BOOST_FACTOR;
+  // 2026-05-09 (P4/P5 代替): layer 連続性 boost
+  //   直前 snap が layer=1/2 (高架/地下) なら、同 layer 候補を ×1.3 boost
+  //   トンネル進入後の数 GPS step 中はトンネル候補を維持しやすくする
+  if((prevLayer === 1 || prevLayer === 2) && c.layer === prevLayer){
+    score *= _LAYER_BOOST_FACTOR;
+  }
 
   return score;
 }
@@ -565,7 +563,7 @@ function _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, accelLayerHint, cellularL
 //   MM-7: 地域別 GPS 誤差学習 (grid bias) で σ を補正
 //   MM-7: フェロモン boost を最終乗算（常用ルートを優先）
 function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeBucket,
-                         gpsAlt, accelLayerHint, cellularLayerHint){
+                         gpsAlt, prevLayer){
   // MM-7: grid bias 補正で σ を地域固有に調整
   const sigmaMult = _getGridSigmaMultiplier(gpsLat, gpsLng);
   const sigma = (4 + 0.5 * accuracy) * sigmaMult;
@@ -589,8 +587,7 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
     const currBucket = _roadTypeBucket(c.typeCode);
     const typeScore = _typeTransitionScore(prevTypeBucket, currBucket);
     // ⑤ MM-5: layer score（候補絞り込み後）
-    const layerScore = _computeLayerScore(c, gpsLat, gpsLng, gpsAlt,
-                                          accelLayerHint, cellularLayerHint);
+    const layerScore = _computeLayerScore(c, gpsLat, gpsLng, gpsAlt, prevLayer);
     // ⑥ MM-7: フェロモン boost（常用ルート優先）
     const phBoost = _getPheromoneBoost(c.prefecture, c.roadIndex);
     // 総合
@@ -1723,27 +1720,25 @@ self.onmessage = function(e){
     return;
   }
 
+  // F5 (2026-05-09): trip 終了時の soft reset
+  //   lastCommittedSnap / prevSnap のみクリア・Viterbi 窓は維持
+  //   次の trip 開始時に warmup 不要・走行データ連続性を保つ
+  if(msg.type === 'softReset'){
+    lastCommittedSnap = null;
+    prevSnap = null;
+    return;
+  }
+
   // GPS 更新
   if(msg.type === 'gps'){
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     if(_mmDebug) _dbg('gps', msg.lat.toFixed(6), msg.lng.toFixed(6),
       'acc=' + (msg.accuracy != null ? msg.accuracy : '?'),
-      'spd=' + (msg.speedKmh != null ? msg.speedKmh : '?') + 'km/h',
-      'cell=' + (msg.cellularLayerHint || 'open'));
+      'spd=' + (msg.speedKmh != null ? msg.speedKmh : '?') + 'km/h');
 
-    // MM-1.5: cellular tunnel hint = デッドレコニングモード
-    // Viterbi 窓は触らない（hint 解除後に自然復帰する）
-    if(msg.cellularLayerHint === 'tunnel'){
-      _pushGpsBuffer({ lat: msg.lat, lng: msg.lng, timestamp: msg.timestamp });
-      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      self.postMessage({
-        type: 'mmResult', mmIncrementM: 0, snap: null, confidence: 1.0,
-        snapped: 0, skipped: 0, latencyMs: t1 - t0, candidatesCount: 0,
-        windowSize: viterbi.size(),
-        _reason: 'cellular tunnel hint',
-      });
-      return;
-    }
+    // 2026-05-09 (P4/P5): cellular tunnel hint EARLY RETURN 廃止
+    //   トンネルでも MM を止めず・layer 連続性 boost で道路追従させる
+    //   トンネル道路が roads データにあれば snap は成功・課金継続
 
     _pushGpsBuffer({ lat: msg.lat, lng: msg.lng, timestamp: msg.timestamp });
 
@@ -1769,13 +1764,16 @@ self.onmessage = function(e){
         // 候補ゼロ = snap miss（窓状態は維持・skip カウントなし）
         reason = 'no candidates';
       } else {
-        // ② emission scoring（直前 commit 済 snap の type bucket を prev として渡す）
+        // ② emission scoring（直前 commit 済 snap の type bucket / layer を prev として渡す）
         const prevBucket = (lastCommittedSnap && lastCommittedSnap._typeBucket)
           ? lastCommittedSnap._typeBucket
           : ((prevSnap && prevSnap._typeBucket) ? prevSnap._typeBucket : null);
-        // MM-5: gps altitude / accelLayerHint / cellularLayerHint を layer scorer に渡す
+        const prevLayer = (lastCommittedSnap && lastCommittedSnap.layer != null)
+          ? lastCommittedSnap.layer
+          : ((prevSnap && prevSnap.layer != null) ? prevSnap.layer : null);
+        // P4/P5 (2026-05-09): cellular/accel hint 引数を廃止・prevLayer のみ
         _scoreCandidates(cands, msg.lat, msg.lng, msg.accuracy || 20, msg.headingDeg, prevBucket,
-                         msg.altitude, msg.accelLayerHint, msg.cellularLayerHint);
+                         msg.altitude, prevLayer);
 
         // 出力用に「最高 emission の 1 件」を選んでおく（diagnostic / mmResult.snap 用）
         let bestEmit = cands[0];
