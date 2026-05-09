@@ -73,6 +73,8 @@
   }
   
   // bitmap (v6, 16bit) → 属性オブジェクト
+  // D1 (2026-05-09): bit 14-15 を access (00=public/01=private/10=no_motor) として追加
+  //   既存 v6 build データ (bit 14-15 = 0) は access=0=public で同じ動作
   function unpackAttrBitmap(bits) {
     return {
       typeCode: bits & 0x0F,
@@ -81,6 +83,7 @@
       lanes:   (bits >> 7) & 0x07,
       width:   (bits >> 10) & 0x03,
       layer:   (bits >> 12) & 0x03,
+      access:  (bits >> 14) & 0x03,
     };
   }
 
@@ -498,6 +501,7 @@
               lanes: road.lanes != null ? road.lanes : 0,
               width: road.width != null ? road.width : 0,
               incline: road.incline != null ? road.incline : 0,
+              access: road.access != null ? road.access : 0,
               // segment bearing 計算用
               segLatA: segLatA, segLngA: segLngA,
               segLatB: segLatB, segLngB: segLngB,

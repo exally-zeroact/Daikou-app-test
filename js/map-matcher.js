@@ -39,6 +39,12 @@ const MM_GAP_RESET_SEC      = 5;
 const VITERBI_N_MAX        = 15;      // 通常運用の窓幅
 const VITERBI_N_MIN        = 10;      // 性能逼迫時の縮小値
 let   _viterbiN            = VITERBI_N_MAX;
+// G6 (2026-05-09): iOS Safari の GPS 最大 1Hz 制限への対応
+//   Android Chrome は最大 5Hz だが iOS は 1Hz 制限・Viterbi 窓が浅くなりがち
+//   iOS 検出時は N=10 (= MIN) を default にして warmup 短縮
+//   transitionFn は GPS 間隔関係なく動作するので問題なし
+//   Catmull-Rom 既存補間は _curveLength4 / fallback で機能維持
+let _platformIsIOS = false;
 const TRANSITION_BETA_M    = 30;      // exp(-|routeDist-chordDist|/β) の β
 const ONEWAY_PENALTY       = 0.05;    // 一方通行違反時の transition 乗数
 
@@ -85,10 +91,11 @@ function _maybeAdjustViterbiN(){
       _viterbiShrinkLogged = true;
       self.postMessage({ type: 'mcmShrink', from: oldN, to: _viterbiN, p99: p99 });
     }
-  } else if(_viterbiN < VITERBI_N_MAX && _viterbiShrunkAt > 0
+  } else if(!_platformIsIOS && _viterbiN < VITERBI_N_MAX && _viterbiShrunkAt > 0
             && (Date.now() - _viterbiShrunkAt) > VITERBI_RECOVERY_INTERVAL_MS
             && p99 < _MCM_LAT_THRESHOLD_MS * 0.6){
     // A6: 5 分経過 + p99 が閾値の 60% 以下なら N=15 復帰試行
+    // G6: iOS は N=10 維持 (1Hz GPS で N=15 にしてもメリット薄)
     const oldN = _viterbiN;
     _viterbiN = VITERBI_N_MAX;
     if(viterbi){ viterbi.N = _viterbiN; }
@@ -716,6 +723,12 @@ function _scoreCandidates(cands, gpsLat, gpsLng, accuracy, headingDeg, prevTypeB
       const emSet = _emergencyRoutesByPref.get(c.prefecture);
       if(emSet && emSet.has(c.roadIndex)) attrBoost *= 1.05;
     }
+    // D1 (2026-05-09): access フラグでペナルティ
+    //   public (0) → 通常
+    //   private (1) → ×0.5 (関係者用・代行で通常使わない)
+    //   no_motor (2) → ×0.05 (歩行者専用・絶対通らない)
+    if(c.access === 1) attrBoost *= 0.5;
+    else if(c.access === 2) attrBoost *= 0.05;
     // 総合
     c._distScore = distScore;
     c._headScore = headScore;
@@ -1660,6 +1673,31 @@ self.onmessage = function(e){
   if(msg.type === 'configDebug'){
     _mmDebug = !!msg.enabled;
     self.postMessage({ type: 'debugConfigured', enabled: _mmDebug });
+    return;
+  }
+
+  // G6 (2026-05-09): プラットフォーム情報受領 (iOS 検出時に Viterbi N を切替)
+  if(msg.type === 'configPlatform'){
+    if(msg.isIOS && !_platformIsIOS){
+      _platformIsIOS = true;
+      _viterbiN = VITERBI_N_MIN;     // iOS は最小窓幅で warmup 短縮
+      if(viterbi) viterbi.N = _viterbiN;
+      _viterbiShrunkAt = Date.now();
+      _viterbiShrinkLogged = true;   // 自動 shrink 検出を抑止 (既に MIN なので)
+      self.postMessage({
+        type: 'platformConfigured',
+        isIOS: true,
+        viterbiN: _viterbiN,
+        _reason: 'iOS 1Hz GPS detected → N=10 default'
+      });
+    } else if(!msg.isIOS && _platformIsIOS){
+      // iOS フラグ解除 (異例だが後方互換)
+      _platformIsIOS = false;
+      _viterbiN = VITERBI_N_MAX;
+      if(viterbi) viterbi.N = _viterbiN;
+      _viterbiShrunkAt = 0;
+      _viterbiShrinkLogged = false;
+    }
     return;
   }
 

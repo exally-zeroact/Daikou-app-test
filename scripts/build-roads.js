@@ -9,7 +9,7 @@
  *   bit 7-9   lanes   (0=不明, 1-6=本数, 7=7+)
  *   bit 10-11 width   (00=不明, 01=≤2m, 10=2-5m, 11=>5m)
  *   bit 12-13 layer   (00=平面, 01=高架, 10=地下, 11=その他)
- *   bit 14-15 reserved
+ *   bit 14-15 access  (D1 2026-05-09: 00=public, 01=private/customers, 10=no_motor)
  *
  * v5: per-prefecture, 全通過グリッド登録 (継続)
  * v4: per-prefecture
@@ -22,6 +22,7 @@
  *
  * 入力 GeoJSON properties で参照する OSM タグ:
  *   highway, oneway, incline, lanes, width, layer
+ *   access, motor_vehicle (D1 2026-05-09 追加)
  *
  * 使い方:
  *   node build-roads.js <input.geojson> <output_dir> <region> [--dem]
@@ -178,14 +179,34 @@ function parseLayer(raw) {
   return 3;
 }
 
-// 4ビット typeCode + 4ビット incline/oneway + 8ビット lanes/width/layer
+// D1 (2026-05-09): access フラグを bit 14-15 に追加
+//   00 = public (通行可・通常道路)
+//   01 = private (access=private/customers/destination・関係者用)
+//   10 = no_motor (motor_vehicle=no・歩行者/自転車専用)
+//   11 = reserved
+function parseAccessRestriction(props) {
+  // motor_vehicle=no が最強い制約 → no_motor
+  const mv = props.motor_vehicle != null ? String(props.motor_vehicle).trim().toLowerCase() : '';
+  if (mv === 'no' || mv === 'private') return 2;
+  // highway による歩行者専用判定
+  const hw = props.highway != null ? String(props.highway).trim().toLowerCase() : '';
+  if (hw === 'footway' || hw === 'cycleway' || hw === 'path' || hw === 'pedestrian' ||
+      hw === 'steps' || hw === 'bridleway') return 2;
+  // access タグでの制限
+  const ac = props.access != null ? String(props.access).trim().toLowerCase() : '';
+  if (ac === 'no' || ac === 'private' || ac === 'customers' || ac === 'destination' ||
+      ac === 'permissive') return 1;
+  return 0;
+}
+
+// 4ビット typeCode + 4ビット incline/oneway + 8ビット lanes/width/layer + access
 //   bit 0-3   typeCode
 //   bit 4     oneway
 //   bit 5-6   incline
 //   bit 7-9   lanes
 //   bit 10-11 width
 //   bit 12-13 layer
-//   bit 14-15 reserved
+//   bit 14-15 access (D1 2026-05-09・00=public/01=private/10=no_motor)
 function packAttrBitmap(typeCode, props, inclineCode) {
   let bits = typeCode & 0x0F;
   bits |= (parseOneway(props.oneway) & 0x01) << 4;
@@ -193,6 +214,7 @@ function packAttrBitmap(typeCode, props, inclineCode) {
   bits |= (parseLanes(props.lanes) & 0x07) << 7;
   bits |= (parseWidth(props.width) & 0x03) << 10;
   bits |= (parseLayer(props.layer) & 0x03) << 12;
+  bits |= (parseAccessRestriction(props) & 0x03) << 14;
   return bits & 0xFFFF;
 }
 
@@ -324,7 +346,7 @@ for (const p of targetPrefs) { buckets[p] = []; bboxByPref[p] = [Infinity, Infin
 
 // 属性充足率カウンタ
 const attrCounters = {};
-for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, track: 0, inclineFromOSM: 0, inclineFromDem: 0 };
+for (const p of targetPrefs) attrCounters[p] = { oneway: 0, incline: 0, lanes: 0, width: 0, layer: 0, access: 0, track: 0, inclineFromOSM: 0, inclineFromDem: 0 };
 
 for (const f of geo.features) {
   if (!f.geometry) continue;
@@ -385,6 +407,7 @@ for (const f of geo.features) {
     if ((bitmap >> 7) & 0x07) c.lanes++;
     if ((bitmap >> 10) & 0x03) c.width++;
     if ((bitmap >> 12) & 0x03) c.layer++;
+    if ((bitmap >> 14) & 0x03) c.access++;
     if (typeCode === 12) c.track++;
     if (inclineSource === 'osm') c.inclineFromOSM++;
     if (inclineSource === 'dem') c.inclineFromDem++;

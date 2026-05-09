@@ -1047,6 +1047,12 @@ function _mmReforwardAllState(){
     }
     _mmWorker.postMessage(cfg);
   } catch(e){}
+  // G6 (2026-05-09): iOS 検出して Viterbi N を MIN に設定
+  //   iOS Safari は GPS 最大 1Hz・浅い窓 (N=10) で warmup 短縮
+  try {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    _mmWorker.postMessage({ type: 'configPlatform', isIOS: isIOS });
+  } catch(e){}
   // Worker 再起動時は _forwardedPrefs を clear して全再 forward
   // (新 Worker の decoders Map は空・main 側で「forward 済」記憶のままでは再投入されない)
   if(typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.clear){
