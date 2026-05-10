@@ -2103,8 +2103,9 @@ function checkDrivingRestore(){
     window._restoreFareYen   = saved.fare_yen;
     showScreen('driving');
     document.getElementById('appbarTitle').textContent = '代行中';
-    // GPS・UIタイマー再起動
-    startGPS();
+    // ★設計変更宣言 (2026-05-10): 自動 startGPS() を削除
+    //   GPS は btnSensorPermission 押下経由でのみ起動する設計に変更
+    //   旧: startGPS();  ← 自動発火 (driving 復元時)
     startUiTimer();
     // 緑バナー表示（復元できたことを通知するだけ）
     document.getElementById('restoreBanner').classList.add('show');
@@ -2114,9 +2115,14 @@ function checkDrivingRestore(){
     //   司さんがボタン押下時に user gesture で全部復活させる
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     if(isIOS && window.navigator.standalone === true){
-      const sensorBanner = document.getElementById('sensorRestoreBanner');
-      if(sensorBanner) sensorBanner.style.display = 'block';
-      if(typeof dlog === 'function') dlog('[復元] センサー再起動バナー表示');
+      // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+      const _bs = document.getElementById('screenBusinessStart');
+      const _bsVisible = _bs && _bs.style.display !== 'none';
+      if(!_bsVisible){
+        const sensorBanner = document.getElementById('sensorRestoreBanner');
+        if(sensorBanner) sensorBanner.style.display = 'block';
+        if(typeof dlog === 'function') dlog('[復元] センサー再起動バナー表示');
+      }
     }
   } catch(e){
     console.error('[復元] エラー:', e);
@@ -2745,6 +2751,12 @@ function showSensorBannerIfNeeded(){
   }
   if(sessionStorage.getItem('dl_just_completed') === '1'){
     if(typeof dlog === 'function') dlog('[Sensor] DL 完了直後 → banner 抑制');
+    return;
+  }
+  // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は orange banner を出さない
+  const _bs = document.getElementById('screenBusinessStart');
+  if(_bs && _bs.style.display !== 'none'){
+    if(typeof dlog === 'function') dlog('[Sensor] screenBusinessStart 表示中 → banner 抑制');
     return;
   }
   const banner = document.getElementById('sensorRestoreBanner');
@@ -3564,7 +3576,9 @@ try {
         const _t = document.getElementById('appbarTitle');
         if(_t) _t.textContent = '空　車';
       }
-      startGPS(); // タスクキル後GPS再起動（許可は切れないがwatchPositionは再起動必要）
+      // ★設計変更宣言 (2026-05-10): 自動 startGPS() を削除
+      //   旧: startGPS();  ← bs.active 復元時の自動発火
+      //   新: btnSensorPermission 押下時のみ GPS 起動 (user gesture 必須)
       // ★設計変更宣言 (2026-05-10): 業務復元時は iOS PWA で permission lost の
       //   可能性が高い (タスクキルで失効) → orange banner を強制 overlay 表示し
       //   ユーザーに「センサー再起動」の導線を明示
@@ -3572,9 +3586,13 @@ try {
       try {
         if(_isIOS && window.navigator.standalone === true &&
            sessionStorage.getItem('sensor_permission_active') !== '1'){
-          const _b = document.getElementById('sensorRestoreBanner');
-          if(_b) _b.style.display = 'block';
-          if(typeof dlog === 'function') dlog('[Business] active 復元: orange banner 強制表示');
+          // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+          const _bs = document.getElementById('screenBusinessStart');
+          if(!_bs || _bs.style.display === 'none'){
+            const _b = document.getElementById('sensorRestoreBanner');
+            if(_b) _b.style.display = 'block';
+            if(typeof dlog === 'function') dlog('[Business] active 復元: orange banner 強制表示');
+          }
         }
       } catch(_){}
       if(typeof dlog === 'function') dlog('[Business] active 復元: appState=' + appState);
@@ -3603,16 +3621,10 @@ try {
 // （Business 未定義の場合や、active 業務中でも未許可ならバナー出す）
 try { showSensorBannerIfNeeded(); } catch(e){ console.error('[Sensor] init banner error:', e); }
 
-// ─── 起動時 GPS 自動起動（2026/05/04 夜・追加） ───
-// 司さん指示：「GPSは許可はずれんって分かったんやけんコードで常に作動するようにしろや」
-// sessionStorage='1' があれば（同session内・許可済み）起動時に即 startGPS()
-// → タスクキル後の再起動でも、設定画面遷移後でも、自動で GPS 動く
-try {
-  if(sessionStorage.getItem('sensor_permission_active') === '1'){
-    startGPS();
-    if(typeof dlog === 'function') dlog('[GPS] 起動時自動起動（許可済み）');
-  }
-} catch(e){ console.error('[GPS] 起動時自動起動エラー:', e); }
+// ★設計変更宣言 (2026-05-10): 起動時 GPS 自動起動を撤廃
+//   旧: sessionStorage active='1' なら起動時に即 startGPS()
+//   新: GPS は btnSensorPermission 押下経由でのみ起動する設計に統一
+//   user gesture 経由でのみ navigator.geolocation を呼ぶ厳格化
 
 // ─── PWAバナー（ホーム画面追加促進） ───
 (function(){
@@ -4185,11 +4197,17 @@ function requestSensorPermission(){
 
     } else {
       // 許可失敗（iOSキャンセル or user gesture 不足）：バナーをそのまま表示
-      const banner = document.getElementById('sensorRestoreBanner');
-      if(banner){
-        banner.style.display = 'block';
+      // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+      const _bs = document.getElementById('screenBusinessStart');
+      if(!_bs || _bs.style.display === 'none'){
+        const banner = document.getElementById('sensorRestoreBanner');
+        if(banner){
+          banner.style.display = 'block';
+        }
+        dlog('[GPS] センサー許可失敗・バナー表示');
+      } else {
+        dlog('[GPS] センサー許可失敗・businessStart 画面のため banner 抑制');
       }
-      dlog('[GPS] センサー許可失敗・バナー表示');
     }
   });
 }
@@ -4283,6 +4301,9 @@ function refreshSensorPermission(){
     const _dlO = document.getElementById('dlOverlay');
     if(_dlO && _dlO.style.display === 'flex') return;
     if(sessionStorage.getItem('dl_just_completed') === '1') return;
+    // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+    const _bs = document.getElementById('screenBusinessStart');
+    if(_bs && _bs.style.display !== 'none') return;
     document.getElementById('sensorRestoreBanner').style.display = 'block';
     return;
   }
@@ -4534,41 +4555,13 @@ setInterval(function(){
   }
 }, 1000);
 
-// ★設計変更宣言 (2026-05-10): businessStart 画面で MM データを先読み
-//   通常 onBusinessStart 内で startGPS() → GPS callback で _autoLoadNearbyRoads が
-//   走るが、それを待たずに businessStart 画面表示時に getCurrentPosition で
-//   一発だけ位置取得して _autoLoadNearbyRoads を起動する。
-//   sensor permission 済の iOS PWA であれば user gesture 不要で取得可能。
-//   失敗時は no-op (= 従来挙動)。業務開始 → startGPS で再試行される。
-function _preloadRoadsForBusinessStart(){
-  try {
-    // ★設計変更宣言 (2026-05-10): iOS の場合は PWA standalone のみ実行
-    //   iOS Safari (非 PWA) では getCurrentPosition skip
-    const _prIsIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    if(_prIsIOS && window.navigator.standalone !== true) return;
-    if(!navigator.geolocation || !navigator.geolocation.getCurrentPosition) return;
-    if(typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.size > 0) return;
-    navigator.geolocation.getCurrentPosition(function(pos){
-      try {
-        if(pos && pos.coords && typeof _autoLoadNearbyRoads === 'function'){
-          _autoLoadNearbyRoads(pos.coords.latitude, pos.coords.longitude);
-          if(typeof dlog === 'function') dlog('[MM] preload roads from businessStart 画面');
-        }
-      } catch(_){}
-    }, function(){
-      // 失敗時は静かに諦める (業務開始 → startGPS で再試行)
-    }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
-  } catch(_){}
-}
-// businessStart 画面に遷移したら一度だけ実行
-// (2026-05-10) _preloadDone は script 先頭に移動済
-setInterval(function(){
-  if(_preloadDone) return;
-  if(appState === 'businessStart' && typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.size === 0){
-    _preloadDone = true;
-    _preloadRoadsForBusinessStart();
-  }
-}, 2000);
+// ★設計変更宣言 (2026-05-10): _preloadRoadsForBusinessStart を全削除
+//   旧: businessStart 画面遷移時に getCurrentPosition() を自動発火して
+//       MM データを先読み
+//   新: 自動 GPS 発火を全廃する設計に従い getCurrentPosition 経路を撤廃
+//       (btnSensorPermission 押下経由でのみ navigator.geolocation を呼ぶ)
+//   先読み機能は失われるが、btnSensorPermission → startGPS → GPS callback
+//   → _autoLoadNearbyRoads という従来 path で MM データ load される
 
 // ─── ストレージ永続化（2026/04/30追加：オフライン業務でデータ消失防止） ───
 // iOS のキャッシュ自動削除を防ぐ・道路データ等を永続的に保持
