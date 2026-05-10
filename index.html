@@ -15,14 +15,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
 /* iOS Safari rubber-band 抑制（メーター画面の無限スクロール防止） */
-/* ★設計変更宣言 (2026-05-10): html/body 初期 background を #007AFF (青) に統一
-   旧: body=#fff (白) → PWA 起動直後 splash → body 描画 で白画面が数秒 visible
-   新: html/body=#007AFF (manifest.json background_color と同色) →
-       splash → body 描画 → dl-overlay (#007AFF) まで全て同色で連続化
-   appbar / 各 screen は子要素 background で上書きされるため UX 影響なし */
-html{height:100%;overscroll-behavior:none;background:#007AFF;}
+/* ★設計変更宣言 (2026-05-10 再修正): html/body の背景色変更を撤回
+   旧前修正: html/body=#007AFF → 全画面が青になってしまった
+   新: html/body=#fff (元に戻す)・白画面対策は dl-overlay の初期 display:flex で対応 */
+html{height:100%;overscroll-behavior:none;}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-body{font-family:'Noto Sans JP',sans-serif;background:#007AFF;color:#111;height:100vh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;}
+body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100vh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;}
 /* 画面内 scroll コンテナはバウンスを内側で完結させる（親への伝播禁止） */
 /* 2026-05-08: #screenDriving を追加。メーター画面で起きる Android rubber-band/iOS momentum 由来の
    「スクロールが無限に続く」バグの根本対策（業務中の誤タップ事故防止） */
@@ -852,7 +850,11 @@ setInterval(_checkTripLimit, 30000);
 <div class="dl-update-toast" id="dlUpdateToast" onclick="onDlToastTap()">✅ 最新の地図データに更新しました</div>
 
 <!-- 初回DL UI（IndexedDBの dl_completed=true で2回目以降は表示しない） -->
-<div class="dl-overlay" id="dlOverlay">
+<!-- ★設計変更宣言 (2026-05-10): 初期 .show 付与で起動直後から青オーバーレイ
+     描画。manifest splash (#007AFF) と同色のため白画面が一切挟まらない。
+     DL 不要時 (DakomeDL.init で completed=true) や非 standalone (browser) では
+     即時 hideOverlay() で .show を外して非表示化する。 -->
+<div class="dl-overlay show" id="dlOverlay">
   <!-- 状態1：DL中 -->
   <div class="dl-state-loading show" id="dlStateLoading">
     <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
@@ -3890,6 +3892,8 @@ const DakomeDL = (function(){
       if(completed){
         // 既存ユーザー：未DL県があればバックグラウンドで差分DL
         if(typeof dlog === 'function') dlog('[DL] 初回DL済み・差分DLチェック');
+        // ★設計変更宣言 (2026-05-10): 初期 .show 付き → DL 不要なので即時 hide
+        hideOverlay();
         checkAndUpdateExisting();
         return;
       }
@@ -4017,6 +4021,12 @@ function onDlToastTap(){
     DakomeDL.init();
     if(typeof dlog === 'function') dlog('[DL] standalone起動・DL判定実行');
   } else {
+    // ★設計変更宣言 (2026-05-10): 非 standalone (browser) は dl-overlay 不要
+    //   初期 .show 付きの状態 → 即時 hideOverlay で青オーバーレイを消す
+    try {
+      const _o = document.getElementById('dlOverlay');
+      if(_o) _o.classList.remove('show');
+    } catch(_){}
     if(typeof dlog === 'function') dlog('[DL] ブラウザ起動・DLスキップ（ホーム画面追加待ち）');
   }
 })();
