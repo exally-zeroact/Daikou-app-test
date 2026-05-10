@@ -836,7 +836,14 @@ setInterval(_checkTripLimit, 30000);
 <!-- センサー再起動バナー（全画面共通・appbar直下・2026/05/03 統一） -->
 <!-- iOS PWA で DeviceMotion/Orientation が session 毎に失効するため -->
 <!-- ボタン押下で user gesture 内で同期発火：許可ダイアログ → リスナー再登録 → NoSleep起動 -->
-<div id="sensorRestoreBanner" style="display:none;background:#FF9800;border-radius:12px;padding:14px;margin:8px 12px;text-align:center;">
+<!-- ★設計変更宣言 (2026-05-10 再修正): position:fixed + 高 z-index に変更
+     旧: 通常フロー (margin:8px 12px) のみ → body の flex layout で content 内
+         に紛れて視認できない位置に描画される問題
+     新: 他のバナー (multiTabGuard / businessForgot / tripLimit / trainingConsent)
+         と同じ position:fixed + z-index 9996 で必ず viewport 上に overlay
+         (z-index は trainingConsent 9999 / tripLimit 9997 より低く設定して優先順位を担保)
+     位置: appbar 下 (top: max(60px, safe-area-inset-top + 56px)) -->
+<div id="sensorRestoreBanner" style="display:none;position:fixed;left:8px;right:8px;top:max(60px,calc(env(safe-area-inset-top) + 56px));z-index:9996;background:#FF9800;border-radius:12px;padding:14px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,0.3);">
   <div style="color:#fff;font-size:14px;line-height:1.5;margin-bottom:10px;">
     <strong style="font-size:15px;">📡 センサー再起動が必要です</strong><br>
     <span style="font-size:12px;">下のボタンを押すと許可ダイアログが出ます</span>
