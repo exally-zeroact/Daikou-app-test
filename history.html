@@ -75,6 +75,21 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
 }
 .empty-icon{font-size:48px;opacity:0.2;}
 .empty-text{font-size:15px;color:#aaa;}
+
+/* ボトムナビ (4 タブ) */
+.wrap{padding-bottom:calc(70px + env(safe-area-inset-bottom)) !important;}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #C6C6C8;display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:100;}
+.bottom-nav .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;background:none;border:none;font-family:'Noto Sans JP',sans-serif;color:#8E8E93;}
+.bottom-nav .nav-item:active{background:#F2F2F7;}
+.bottom-nav .nav-item.active{color:#007AFF;}
+.bottom-nav .nav-icon{font-size:20px;line-height:1;margin-bottom:3px;font-weight:700;}
+.bottom-nav .nav-label{font-size:11px;font-weight:700;letter-spacing:0.5px;}
+@media (orientation: landscape) and (min-width: 700px){
+  body{display:flex;}
+  .bottom-nav{position:static;flex-direction:column;width:80px;border-top:none;border-right:1px solid #C6C6C8;padding-bottom:0;padding-top:env(safe-area-inset-top);flex-shrink:0;}
+  .bottom-nav .nav-item{flex:0 0 auto;padding:14px 4px;}
+  body > .appbar, body > .wrap{flex:1;}
+}
 </style>
 </head>
 <body ontouchstart="">
@@ -178,5 +193,12 @@ function load(){
 load();
 // TestMode 関連の loadTestStats 呼び出しは H-3 対応で削除
 </script>
+<!-- ボトムナビ (4 タブ) -->
+<nav class="bottom-nav">
+  <button class="nav-item" type="button" onclick="location.href='/'"><span class="nav-icon">●</span><span class="nav-label">業務</span></button>
+  <button class="nav-item active" type="button" onclick="location.href='history.html'"><span class="nav-icon">≡</span><span class="nav-label">履歴</span></button>
+  <button class="nav-item" type="button" onclick="location.href='help.html'"><span class="nav-icon">?</span><span class="nav-label">使い方</span></button>
+  <button class="nav-item" type="button" onclick="location.href='settings.html'"><span class="nav-icon">⚙</span><span class="nav-label">設定</span></button>
+</nav>
 </body>
 </html>

@@ -129,6 +129,21 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
   .surcharge-group{flex-wrap:nowrap;overflow-x:auto;}
   .surcharge-group::-webkit-scrollbar{display:none;}
 }
+/* ★設計変更宣言 (2026-05-10): ボトムナビ (4 タブ・iOS 標準スタイル) */
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #C6C6C8;display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:100;}
+.bottom-nav .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;background:none;border:none;font-family:'Noto Sans JP',sans-serif;color:#8E8E93;-webkit-tap-highlight-color:transparent;}
+.bottom-nav .nav-item:active{background:#F2F2F7;}
+.bottom-nav .nav-item.active{color:#007AFF;}
+.bottom-nav .nav-icon{font-size:20px;line-height:1;margin-bottom:3px;font-weight:700;}
+.bottom-nav .nav-label{font-size:11px;font-weight:700;letter-spacing:0.5px;}
+/* 縦画面：下端固定 + body padding */
+body{padding-bottom:calc(60px + env(safe-area-inset-bottom));}
+/* 横画面：左サイドナビに切替 */
+@media (orientation: landscape) and (min-width: 700px){
+  body{padding-bottom:0;padding-left:80px;}
+  .bottom-nav{position:fixed;top:0;left:0;right:auto;bottom:0;width:80px;flex-direction:column;border-top:none;border-right:1px solid #C6C6C8;padding-bottom:0;padding-top:env(safe-area-inset-top);}
+  .bottom-nav .nav-item{flex:0 0 auto;padding:14px 4px;}
+}
 .menu-btn{
 background:rgba(255,255,255,0.2);border:none;border-radius:8px;
 padding:4px 12px;cursor:pointer;
@@ -806,7 +821,9 @@ setInterval(_checkTripLimit, 30000);
 </div>
 
 <!-- fareConfig v2 (2026-05-10): 手動 surcharge ボタン群 + 倍率表示 -->
+<!-- ★設計変更宣言 (2026-05-10): 「割増」と「追加料金」を視覚的に分離 -->
 <div class="surcharge-group" id="surchargeGroup">
+  <span class="surcharge-section-label" style="font-size:11px;font-weight:700;color:#8E8E93;letter-spacing:1px;margin-right:8px;align-self:center;">割増</span>
   <span class="surcharge-mult" id="surchargeMult">×1.00</span>
 </div>
 
@@ -958,7 +975,7 @@ setInterval(_checkTripLimit, 30000);
 
   <!-- IDLE -->
 
-  <div id="screenIdle" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+  <div id="screenIdle" style="display:none;flex-direction:column;flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;">
     <!-- 日時（1行表示・絵文字なし・2026/05/01仕様） -->
     <div class="idle-datetime-line dateTimeLine" id="idleDateTime">2026年5月1日（金） 15:43</div>
     <!-- 業務管理ダッシュボード（5項目縦積み・絵文字なし） -->
@@ -989,9 +1006,13 @@ setInterval(_checkTripLimit, 30000);
   <!-- BUSINESS START（業務未開始時の専用画面・2026/05/01追加） -->
 
   <!-- 2026/05/01：画面のどこタップしても許可ダイアログ発火（未許可時）・onClick で blockIfSensorNotGranted を呼ぶ -->
-  <div id="screenBusinessStart" onclick="blockIfSensorNotGranted()" style="display:none;flex-direction:column;flex:1;min-height:0;justify-content:center;align-items:center;gap:24px;">
+  <div id="screenBusinessStart" onclick="blockIfSensorNotGranted()" style="display:flex;flex-direction:column;flex:1;min-height:0;justify-content:center;align-items:center;gap:24px;">
     <!-- 日時（全画面共通） -->
     <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
+    <!-- ★設計変更宣言 (2026-05-10): センサー許可明示ボタン -->
+    <!-- iOS PWA 未許可時のみ表示・押下で DeviceMotionEvent.requestPermission() を user gesture 経由で発火 -->
+    <button id="btnSensorPermission" onclick="event.stopPropagation();requestSensorPermission();" style="display:none;background:#007AFF;color:#fff;border:none;border-radius:10px;padding:14px 28px;font-size:16px;font-weight:700;letter-spacing:1px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;">センサーを許可する</button>
+    <div id="sensorPermissionNote" style="display:none;font-size:12px;color:#8E8E93;text-align:center;padding:0 24px;line-height:1.5;">業務開始前に位置・方位・加速度センサーの許可が必要です</div>
     <!-- 業務開始ボタン（中央配置・大ボタン） -->
     <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
     <!-- P6 (2026-05-09): MM 準備状況インジケータ・常時表示 -->
@@ -1058,6 +1079,8 @@ setInterval(_checkTripLimit, 30000);
            background:#FFF6E6;color:#7A5A12;border:1px solid #E0AC2F;line-height:1.5;">
         <span id="roadAttrLabel">⚠ 警告</span>
       </div>
+      <!-- ★設計変更宣言 (2026-05-10): 「追加料金」セクションラベル + 押下回数表示 -->
+      <div id="extrasSectionLabel" style="display:none;font-size:11px;font-weight:700;color:#8E8E93;letter-spacing:1px;margin:8px 12px 4px;">追加料金</div>
       <div class="extras-list" id="extrasList"></div>
     </div>
   </div>
@@ -2012,18 +2035,11 @@ function onSensorRestoreTap(){
 function loadSettings(){
   FB.loadFareConfig(cfg => { Meter.setFareConfig(cfg); });
 
-  // 初回起動時にデフォルトのクイック追加料金をセット
-  // (一度も保存されていない=null の場合のみ)
+  // ★設計変更宣言 (2026-05-10): デフォルト extras 全削除
+  //   旧: 外車/MT車/左ハンドル/深夜割増/迎車料金/キャンセル料 をプリセット
+  //   新: 空配列・ユーザーが fare.html や追加料金モーダルから自由に追加
   if(localStorage.getItem('daikou_extras') === null){
-    const defaultExtras = [
-      {name:'外車', amount:500},
-      {name:'MT車', amount:500},
-      {name:'左ハンドル', amount:1000},
-      {name:'深夜割増', amount:1000},
-      {name:'迎車料金', amount:1000},
-      {name:'キャンセル料', amount:2000}
-    ];
-    localStorage.setItem('daikou_extras', JSON.stringify(defaultExtras));
+    localStorage.setItem('daikou_extras', JSON.stringify([]));
   }
 
   const s = localStorage.getItem('daikou_settings');
@@ -2403,14 +2419,35 @@ function startUiTimer(){
   },500);
 }
 
+// ★設計変更宣言 (2026-05-10): 同名 extras をグループ化・押下回数 / 累計を表示
+//   旧: 1 加算 = 1 行、削除は ✕
+//   新: 同名+同金額をグループ化「{name} +¥{amount} ×{count} = ¥{total}」、削除はグループ末尾 1 件
 function renderExtras(){
   const el = document.getElementById('extrasList');
-  el.innerHTML = extras.map((e,i)=>
+  const lbl = document.getElementById('extrasSectionLabel');
+  if(!extras || extras.length === 0){
+    el.innerHTML = '';
+    if(lbl) lbl.style.display = 'none';
+    return;
+  }
+  if(lbl) lbl.style.display = 'block';
+  // name+amount でグループ化 + 最後の index を保持 (削除時に末尾を消す)
+  const groups = new Map();
+  extras.forEach((e, i) => {
+    const key = e.name + '|' + e.amount;
+    if(!groups.has(key)){
+      groups.set(key, { name: e.name, amount: e.amount, count: 0, lastIdx: i });
+    }
+    const g = groups.get(key);
+    g.count++;
+    g.lastIdx = i;
+  });
+  el.innerHTML = Array.from(groups.values()).map(g =>
     `<div class="extra-item" style="display:flex;justify-content:space-between;align-items:center;">
-      <span>${e.name}</span>
+      <span>${g.name}<span style="font-size:11px;color:#8E8E93;margin-left:6px;font-family:'DM Mono',monospace;">×${g.count}</span></span>
       <div style="display:flex;align-items:center;gap:6px;">
-        <span>+¥${e.amount.toLocaleString()}</span>
-        <button class="extra-del-btn" onclick="removeExtra(${i})">✕</button>
+        <span>+¥${(g.amount * g.count).toLocaleString()}</span>
+        <button class="extra-del-btn" onclick="removeExtra(${g.lastIdx})">✕</button>
       </div>
     </div>`
   ).join('');
@@ -2469,11 +2506,23 @@ function blockIfSensorNotGranted(){
 
 // バナー表示のみ（ダイアログは発火しない・起動時/画面遷移時用）
 function showSensorBannerIfNeeded(){
+  // ★設計変更宣言 (2026-05-10): screenBusinessStart 内の「センサーを許可する」ボタン表示制御も統合
+  //   iOS PWA 未許可時のみボタン+説明文を表示・許可後は非表示
+  const _btnSP = document.getElementById('btnSensorPermission');
+  const _noteSP = document.getElementById('sensorPermissionNote');
   // iOS PWA 以外は表示しない（他環境ではバナー出ない）
   // 2026/05/02：_isIOS が未定義の可能性（呼出順序問題）対策で直接判定
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  if(!isIOS) return;
-  if(window.navigator.standalone !== true) return;
+  if(!isIOS){
+    if(_btnSP) _btnSP.style.display = 'none';
+    if(_noteSP) _noteSP.style.display = 'none';
+    return;
+  }
+  if(window.navigator.standalone !== true){
+    if(_btnSP) _btnSP.style.display = 'none';
+    if(_noteSP) _noteSP.style.display = 'none';
+    return;
+  }
   // 2026/05/04 夜・修正：sessionStorage で同 session 内の permission 維持を判定
   //   sensor_permission_active='1' があれば同 session 内 → permission 維持されてる
   if(sessionStorage.getItem('sensor_permission_active') === '1'){
@@ -2484,6 +2533,8 @@ function showSensorBannerIfNeeded(){
       banner.style.display = 'none';
       if(typeof dlog === 'function') dlog('[Sensor] 同session内: バナー非表示');
     }
+    if(_btnSP) _btnSP.style.display = 'none';
+    if(_noteSP) _noteSP.style.display = 'none';
     return;
   }
   // 許可済みなら：既にバナー出てたら消す（2026/05/02追加・許可後の残留バナー対策）
@@ -2493,6 +2544,8 @@ function showSensorBannerIfNeeded(){
       banner.style.display = 'none';
       if(typeof dlog === 'function') dlog('[Sensor] 許可済み: バナー強制非表示');
     }
+    if(_btnSP) _btnSP.style.display = 'none';
+    if(_noteSP) _noteSP.style.display = 'none';
     return;
   }
   // バナー表示
@@ -2501,6 +2554,9 @@ function showSensorBannerIfNeeded(){
     banner.style.display = 'block';
     setTimeout(() => banner.scrollIntoView({behavior:'smooth', block:'end'}), 100);
   }
+  // 「センサーを許可する」ボタン表示
+  if(_btnSP) _btnSP.style.display = 'inline-block';
+  if(_noteSP) _noteSP.style.display = 'block';
   if(typeof dlog === 'function') dlog('[Sensor] banner shown');
 }
 
@@ -3257,6 +3313,13 @@ try { FB.setIdle(); } catch(e){ console.error('FB setIdle error:', e); }
 // 永続化された業務状態を復元 + 3時間経過チェック（自動 abandon）
 // Business.load() 内で checkAutoAbandon() も呼ばれるが、保険で明示呼出
 try {
+  // ★設計変更宣言 (2026-05-10): Business 未定義/未初期化でも screenBusinessStart に必ず遷移
+  //   旧: Business 未定義時は何も起こらず screenIdle (初期 display:flex) のまま → 業務開始ボタンが見えないバグ
+  //   新: Business 未定義 fallback で showScreen('businessStart') を呼ぶ
+  if(typeof Business === 'undefined'){
+    appState = 'businessStart';
+    if(typeof showScreen === 'function') showScreen('businessStart');
+  }
   if(typeof Business !== 'undefined'){
     Business.load();
     Business.checkAutoAbandon();
@@ -3839,6 +3902,11 @@ function requestSensorPermission(){
       if(banner && banner.style.display !== 'none'){
         banner.style.display = 'none';
       }
+      // ★設計変更宣言 (2026-05-10): screenBusinessStart の許可ボタンも非表示
+      const _btnSP = document.getElementById('btnSensorPermission');
+      const _noteSP = document.getElementById('sensorPermissionNote');
+      if(_btnSP) _btnSP.style.display = 'none';
+      if(_noteSP) _noteSP.style.display = 'none';
       const overlay = document.getElementById('tutorialOverlay');
       if(overlay && overlay.classList.contains('show')) tutorialNext();
 
@@ -4328,6 +4396,14 @@ if(navigator.storage && navigator.storage.persist){
   setTimeout(function(){ tryPush(false); }, 8000);
 })();
 </script>
+
+<!-- ★設計変更宣言 (2026-05-10): ボトムナビ (4 タブ) -->
+<nav class="bottom-nav">
+  <button class="nav-item active" type="button" onclick="location.href='/'"><span class="nav-icon">●</span><span class="nav-label">業務</span></button>
+  <button class="nav-item" type="button" onclick="location.href='history.html'"><span class="nav-icon">≡</span><span class="nav-label">履歴</span></button>
+  <button class="nav-item" type="button" onclick="location.href='help.html'"><span class="nav-icon">?</span><span class="nav-label">使い方</span></button>
+  <button class="nav-item" type="button" onclick="location.href='settings.html'"><span class="nav-icon">⚙</span><span class="nav-label">設定</span></button>
+</nav>
 
 </body>
 </html>

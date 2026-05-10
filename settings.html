@@ -10,8 +10,25 @@
 body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-height:100vh;}
 .appbar{background:#007AFF;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;}
 .appbar-back{color:#fff;font-size:16px;cursor:pointer;padding:4px 8px;}
-.appbar-title{font-size:17px;font-weight:700;color:#fff;}
-.wrap{padding:16px;padding-bottom:80px;display:flex;flex-direction:column;gap:16px;}
+.appbar-title{font-size:17px;font-weight:700;color:#fff;user-select:none;-webkit-user-select:none;}
+.wrap{padding:16px;padding-bottom:calc(80px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px;}
+/* ボトムナビ (4 タブ) */
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #C6C6C8;display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:100;}
+.bottom-nav .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;background:none;border:none;font-family:'Noto Sans JP',sans-serif;color:#8E8E93;}
+.bottom-nav .nav-item:active{background:#F2F2F7;}
+.bottom-nav .nav-item.active{color:#007AFF;}
+.bottom-nav .nav-icon{font-size:20px;line-height:1;margin-bottom:3px;font-weight:700;}
+.bottom-nav .nav-label{font-size:11px;font-weight:700;letter-spacing:0.5px;}
+@media (orientation: landscape) and (min-width: 700px){
+  body{display:flex;}
+  .bottom-nav{position:static;flex-direction:column;width:80px;border-top:none;border-right:1px solid #C6C6C8;padding-bottom:0;padding-top:env(safe-area-inset-top);flex-shrink:0;}
+  .bottom-nav .nav-item{flex:0 0 auto;padding:14px 4px;}
+  body > .wrap{flex:1;}
+  body > .appbar{display:none;}
+}
+/* 隠しセクション（dev モード時のみ表示） */
+body:not(.dev-mode) #devSection,
+body:not(.dev-mode) #devSection2{display:none !important;}
 .section{background:#fff;border-radius:12px;overflow:hidden;}
 .section-title{font-size:12px;color:#8E8E93;padding:12px 16px 4px;letter-spacing:1px;}
 .row{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0f0f0;}
@@ -65,12 +82,25 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
 
 <div class="appbar">
   <div class="appbar-back" onclick="location.href='index.html'">＜</div>
-  <div class="appbar-title">設定</div>
+  <div class="appbar-title" id="settingsTitle">設定</div>
 </div>
 
 <div class="wrap">
 
-  <!-- 自動リセット設定 -->
+  <!-- 料金設定 (2026-05-10: fareConfig v2 で fare.html へ独立) -->
+  <div class="section">
+    <div class="section-title">料金設定</div>
+    <div class="row" onclick="location.href='fare.html'" style="cursor:pointer;">
+      <div class="row-label">料金設定（基本・段階・割増・自動・車種・待機・区間）</div>
+      <div style="color:#8E8E93;font-size:13px;">›</div>
+    </div>
+  </div>
+
+  <!-- ★設計変更宣言 (2026-05-10): dev モード切替で隠しセクション開閉 -->
+  <!-- 設定画面タイトル「設定」を 5 秒長押しで dev モード切替 -->
+  <div id="devSection">
+
+  <!-- 自動リセット設定 (dev) -->
   <div class="section">
     <div class="section-title">自動リセット</div>
     <div class="row">
@@ -81,14 +111,6 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
-  <!-- 料金設定 (2026-05-10: fareConfig v2 で fare.html へ独立) -->
-  <div class="section">
-    <div class="section-title">料金設定</div>
-    <div class="row" onclick="location.href='fare.html'" style="cursor:pointer;">
-      <div class="row-label">料金設定（基本・段階・割増・自動・車種・待機・区間）</div>
-      <div style="color:#8E8E93;font-size:13px;">›</div>
-    </div>
-  </div>
   <!-- 旧 input は fare.html に移行・互換のため hidden で保持 (load 関数が参照する) -->
   <input type="hidden" id="baseFare" value="1300">
   <input type="hidden" id="baseDist" value="1000">
@@ -96,7 +118,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
   <input type="hidden" id="addFare" value="100">
   <div style="display:none;"><div class="preview" id="preview"></div></div>
 
-  <!-- 割増設定 -->
+  <!-- 割増設定 (dev) -->
   <div class="section">
     <div class="section-title">割増設定</div>
     <div class="row">
@@ -155,7 +177,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
-  <!-- 走行履歴リンク（TestMode 関連は H-3 対応で削除済） -->
+  <!-- 走行履歴リンク (dev) - 通常はボトムナビから遷移 -->
   <div class="section" id="historyLinkSection">
     <div class="row" onclick="location.href='history.html'" style="cursor:pointer;">
       <div class="row-label">📊 走行履歴</div>
@@ -163,7 +185,9 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
-  <!-- Phase 3 (2026-05-10): 学習データ提供 設定 -->
+  </div><!-- /#devSection -->
+
+  <!-- Phase 3 (2026-05-10): 学習データ提供 設定 (常時表示) -->
   <div class="section" id="training">
     <div class="section-title">学習データ提供</div>
     <div class="row">
@@ -197,7 +221,8 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
     </div>
   </div>
 
-  <!-- MM-6 (M-2 修正): 上級設定 collapsible・既定折りたたみ -->
+  <div id="devSection2">
+  <!-- MM-6 (M-2 修正): 上級設定 collapsible・既定折りたたみ (dev) -->
   <div class="section" id="advancedSection">
     <div class="section-title" id="advancedToggle"
          onclick="toggleAdvanced()"
@@ -224,6 +249,8 @@ body{font-family:'Noto Sans JP',sans-serif;background:#f5f5f5;color:#111;min-hei
       </div>
     </div>
   </div>
+
+  </div><!-- /#devSection2 -->
 
   <button class="btn-save" onclick="saveAll()">保　存</button>
   <div class="save-msg" id="saveMsg"></div>
@@ -779,6 +806,42 @@ if(location.hash === '#training'){
   const el = document.getElementById('training');
   if(el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+// ★設計変更宣言 (2026-05-10): dev モード切替（タイトル 5 秒長押し）
+// localStorage に状態保存・URL hash #dev でも開ける（隠しエントリ）
+(function(){
+  const KEY = 'daikome_dev_mode';
+  if(localStorage.getItem(KEY) === '1' || location.hash === '#dev'){
+    document.body.classList.add('dev-mode');
+    if(location.hash === '#dev') localStorage.setItem(KEY, '1');
+  }
+  const title = document.getElementById('settingsTitle');
+  if(!title) return;
+  let _pressTimer = null;
+  function _start(e){
+    if(_pressTimer) clearTimeout(_pressTimer);
+    _pressTimer = setTimeout(function(){
+      const on = document.body.classList.toggle('dev-mode');
+      localStorage.setItem(KEY, on ? '1' : '0');
+      const t = document.getElementById('settingsToast');
+      if(t){ t.textContent = on ? '🔧 開発者モードON' : '🔒 開発者モードOFF'; t.classList.add('show'); setTimeout(function(){ t.classList.remove('show'); }, 1500); }
+    }, 5000);
+  }
+  function _cancel(){ if(_pressTimer){ clearTimeout(_pressTimer); _pressTimer = null; } }
+  title.addEventListener('touchstart', _start, { passive: true });
+  title.addEventListener('touchend', _cancel);
+  title.addEventListener('touchcancel', _cancel);
+  title.addEventListener('mousedown', _start);
+  title.addEventListener('mouseup', _cancel);
+  title.addEventListener('mouseleave', _cancel);
+})();
 </script>
+<!-- ボトムナビ (4 タブ) -->
+<nav class="bottom-nav">
+  <button class="nav-item" type="button" onclick="location.href='/'"><span class="nav-icon">●</span><span class="nav-label">業務</span></button>
+  <button class="nav-item" type="button" onclick="location.href='history.html'"><span class="nav-icon">≡</span><span class="nav-label">履歴</span></button>
+  <button class="nav-item" type="button" onclick="location.href='help.html'"><span class="nav-icon">?</span><span class="nav-label">使い方</span></button>
+  <button class="nav-item active" type="button" onclick="location.href='settings.html'"><span class="nav-icon">⚙</span><span class="nav-label">設定</span></button>
+</nav>
 </body>
 </html>
