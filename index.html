@@ -2721,6 +2721,19 @@ function showSensorBannerIfNeeded(){
   // ★設計変更宣言 (2026-05-10): v2 flag check を削除し本番と同じシンプル仕様に統一
   //   iOS PWA 未許可時は orange banner を表示 + 青ボタンも表示
   //   (条件は呼出元で iOS/standalone/sessionStorage チェック済み)
+  // ★設計変更宣言 (2026-05-10): DL 中 / DL 完了直後は banner 抑制
+  //   - dl-overlay 表示中 (display:flex): DL UI 優先で banner 出さない
+  //   - sessionStorage.dl_just_completed='1': DL 完了直後の businessStart 画面で
+  //     orange banner が即座に出るのを防ぐ (許可後にクリアされる)
+  const _dlO2 = document.getElementById('dlOverlay');
+  if(_dlO2 && _dlO2.style.display === 'flex'){
+    if(typeof dlog === 'function') dlog('[Sensor] DL 中 → banner 抑制');
+    return;
+  }
+  if(sessionStorage.getItem('dl_just_completed') === '1'){
+    if(typeof dlog === 'function') dlog('[Sensor] DL 完了直後 → banner 抑制');
+    return;
+  }
   const banner = document.getElementById('sensorRestoreBanner');
   if(banner){
     banner.style.display = 'block';
@@ -3781,15 +3794,20 @@ const DakomeDL = (function(){
       //                   (画面遷移は onBusinessStart 内で行うため留まる方が安全)
       if(typeof dlog === 'function') dlog('[DL] 完了・businessStart 画面に留まる (自動遷移なし・user gesture 待ち)');
       // ② overlay フェードアウト → 完全 hide
-      // ★設計変更宣言 (2026-05-10): hideOverlay() を呼んで inline style.display も
-      //   'none' に戻す。前修正で showOverlay 時に inline style.display='flex' を
-      //   set したため、classList.remove('show') だけでは hide されず overlay が
-      //   再表示され続ける現象が発生していた。
+      // ★設計変更宣言 (2026-05-10 再修正): DL 完了 flag を set + hideOverlay 順序修正
+      //   問題: fade-out class 削除 → opacity:0→1 に戻る transition の最中に
+      //         hideOverlay が呼ばれていたが、iOS WebView の render order で
+      //         opacity:1 への遷移が一瞬視認されて DL 完了画面が再表示
+      //   解決: hideOverlay を先に呼んで display:none 化 (要素消滅) → その後
+      //         fade-out class 削除 (見えないので opacity 遷移しても影響なし)
+      //   sessionStorage.dl_just_completed='1' で「DL 完了直後」を marking し、
+      //   それ以降の orange banner 表示判定で skip するために使う
+      try { sessionStorage.setItem('dl_just_completed','1'); } catch(_){}
       if(overlay) overlay.classList.add('fade-out');
       setTimeout(() => {
         if(overlay){
-          overlay.classList.remove('fade-out');
-          hideOverlay();   // class + inline style 両方 reset
+          hideOverlay();   // display:none → 要素消滅を先に
+          overlay.classList.remove('fade-out');  // その後 fade-out 解除 (見えない)
         }
       }, 500);
     }, 1500);
@@ -4123,6 +4141,9 @@ function requestSensorPermission(){
       localStorage.setItem('motion_granted','1');
       // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
       sessionStorage.setItem('sensor_permission_active','1');
+      // ★設計変更宣言 (2026-05-10): 許可後は dl_just_completed flag を削除
+      //   (banner 抑制条件を解除・許可されれば banner も不要になる)
+      try { sessionStorage.removeItem('dl_just_completed'); } catch(_){}
       // 2026/05/02：バナーから許可ボタン削除済み・即座に非表示
       const banner = document.getElementById('sensorRestoreBanner');
       if(banner && banner.style.display !== 'none'){
@@ -4234,6 +4255,13 @@ function refreshSensorPermission(){
       // 同 session 内 (設定画面遷移後など)：バナー出さない
       return;
     }
+    // ★設計変更宣言 (2026-05-10): DL 中 / DL 完了直後は orange banner を出さない
+    //   - dl-overlay が表示中 (display:flex) なら DL UI が前面・banner 出すと醜悪
+    //   - sessionStorage.dl_just_completed='1' (showCompleteBanner 直後) なら
+    //     businessStart 画面遷移後でも一旦 banner 抑制 (許可後にクリアされる)
+    const _dlO = document.getElementById('dlOverlay');
+    if(_dlO && _dlO.style.display === 'flex') return;
+    if(sessionStorage.getItem('dl_just_completed') === '1') return;
     document.getElementById('sensorRestoreBanner').style.display = 'block';
     return;
   }
