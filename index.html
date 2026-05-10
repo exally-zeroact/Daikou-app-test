@@ -1018,13 +1018,12 @@ setInterval(_checkTripLimit, 30000);
     <div id="sensorPermissionNote" style="display:none;font-size:12px;color:#8E8E93;text-align:center;padding:0 24px;line-height:1.5;">業務開始前に位置・方位・加速度センサーの許可が必要です</div>
     <!-- 業務開始ボタン（中央配置・大ボタン） -->
     <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
-    <!-- P6 (2026-05-09): MM 準備状況インジケータ・常時表示 -->
+    <!-- P6 (2026-05-09): MM 準備状況インジケータ -->
+    <!-- ★設計変更宣言 (2026-05-10): 初期 display:none・JS が真の異常時のみ block にする -->
     <div id="mmReadyIndicator"
-         style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
+         style="display:none;text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
                 padding:8px 16px;margin:6px 24px 0;border-radius:8px;
-                background:#FDECEA;color:#C0392B;line-height:1.4;">
-      ⚠ MM 準備中: 0/5 県読込待ち
-    </div>
+                background:#FDECEA;color:#C0392B;line-height:1.4;"></div>
     <!-- 続きから再開ボタン（直前の業務が3時間以内に終了してる場合のみ表示） -->
     <button class="btn-business-resume-start" id="btnResumeFromStart" onclick="onResumeFromStart()" style="display:none;">続きから再開</button>
     <div class="resume-note" id="resumeNote" style="display:none;">直前の業務（<span id="resumeNoteTime">--:--</span>終了）から3時間以内なら再開できます</div>
@@ -1063,13 +1062,12 @@ setInterval(_checkTripLimit, 30000);
         <div class="meter-label">走行距離</div>
         <div class="meter-value"><span id="driveDist">0.00</span><span class="meter-unit">km</span></div>
       </div>
-      <!-- 課金距離ソース表示 (2026-05-09・M3/M4): 運転手が常時 MM 健全性を確認 -->
+      <!-- 距離ソース表示 (2026-05-09・M3/M4) -->
+      <!-- ★設計変更宣言 (2026-05-10): 初期 display:none・JS が真の異常時のみ block -->
       <div id="driveSource" class="drive-source"
-           style="text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
+           style="display:none;text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
                   padding:8px 16px;margin:6px 12px 0;border-radius:8px;
-                  background:#E8F7EE;color:#1A7340;line-height:1.4;">
-        MM 課金中 (道路距離)
-      </div>
+                  background:#FDECEA;color:#C0392B;line-height:1.4;"></div>
       <!-- P13 (2026-05-09): 停車 5 分以上で実車終了候補バナー -->
       <div id="stopCandidateBanner" style="display:none;text-align:center;font-size:13px;
            font-weight:700;padding:10px 14px;margin:6px 12px 0;border-radius:8px;
@@ -1347,6 +1345,22 @@ let _preloadDone = false;
 //   ↓ 旧フラグ migration (一度だけ・以降は v2 のみ参照)
 try { localStorage.removeItem('sensor_denied_once'); } catch(_){}
 
+// ★設計変更宣言 (2026-05-10): orange バナー表示を script 先頭で fast-path
+//   旧: 該当 IIFE が line 4108 付近・宣言や関数定義 3000 行を経由して実行
+//       → sensor_denied_v2='1' でも banner 表示が visibly 遅延
+//   新: declarations 直後に同等の判定 + display='block' を実行
+//       下流の IIFE は idempotent なのでそのまま残す (defensive)
+//   ※ 該当 banner 要素は HTML line 836 で既に DOM 上にあるため取得可能
+try {
+  if(_isIOS && window.navigator.standalone === true){
+    if(sessionStorage.getItem('sensor_permission_active') !== '1' &&
+       localStorage.getItem('sensor_denied_v2') === '1'){
+      const __b = document.getElementById('sensorRestoreBanner');
+      if(__b) __b.style.display = 'block';
+    }
+  }
+} catch(_){}
+
 // ★設計変更宣言 (2026-05-10): user gesture 直近時刻を記録
 //   blockIfSensorNotGranted が「user gesture 起因」かを判定するため
 //   document への click listener で _lastUserGestureAt を更新
@@ -1583,6 +1597,42 @@ function _mmWorkerOnMessage(e){
 
 // 起動（H-1: 失敗しても自動再起動が回るので例外で止めない）
 _setupMmWorker('init');
+
+// ★設計変更宣言 (2026-05-10): 起動直後の last-GPS warm-up を Worker B 初期化
+//   直後 (line ~1600) に移動して再起動後の道路データ load を高速化。
+//   旧: loadSettings 内 (line ~3357) → setTimeout 500ms → _autoLoadNearbyRoads
+//       script 末尾近くで呼ばれるため起動直後の表示遅延に直結
+//   新: Worker B init 直後に即時実行 (~1.7 秒早い・setTimeout 0)
+//       sw.js キャッシュヒットなら roads-{pref}.js が ms 単位で load 完了
+//       loadSettings 内の旧 warm-up は idempotent な fallback として残置
+//   絶対ルール準拠: 道路距離課金担保のための高速化・安全側格下げではない
+try {
+  const _bootRaw = localStorage.getItem('daikou_driving_state')
+                || localStorage.getItem('daikou_business_state');
+  if(_bootRaw){
+    const _b = JSON.parse(_bootRaw);
+    let _bootLat = null, _bootLng = null;
+    if(_b){
+      if(typeof _b.last_lat === 'number' && typeof _b.last_lng === 'number'){
+        _bootLat = _b.last_lat; _bootLng = _b.last_lng;
+      } else if(_b.last_gps && typeof _b.last_gps.lat === 'number'){
+        _bootLat = _b.last_gps.lat; _bootLng = _b.last_gps.lng;
+      }
+    }
+    if(_bootLat != null && _bootLng != null){
+      // 0ms setTimeout で current task を抜けてから (Worker creation の microtask 後)
+      setTimeout(function(){
+        try {
+          if(typeof _autoLoadNearbyRoads === 'function'){
+            _autoLoadNearbyRoads(_bootLat, _bootLng);
+            if(typeof dlog === 'function') dlog('[boot-fast] roads warm-up at ' +
+              _bootLat.toFixed(4) + ',' + _bootLng.toFixed(4));
+          }
+        } catch(_){}
+      }, 0);
+    }
+  }
+} catch(_){}
 
 // ─── M-3: Page Visibility 復帰時 Worker B 生存確認 ───
 // document.visibilityState が visible になったら ping を送り、
@@ -2198,14 +2248,18 @@ function loadSettings(){
       }
     }
     if(lat != null && lng != null){
-      // _autoLoadNearbyRoads は _mmWorker / RegionLoader 準備後に呼ぶ必要があるため遅延
+      // ★設計変更宣言 (2026-05-10): 旧 setTimeout 500ms → 0ms に短縮
+      //   _mmWorker は line 1599 _setupMmWorker で初期化済・RegionLoader は
+      //   src 経由 load 済 → 500ms 待つ理由なし
+      //   _autoLoadNearbyRoads は _forwardedPrefs.has で重複防止しているので
+      //   line 1600 fast-path との二重呼出も safe
       setTimeout(function(){
         if(typeof _autoLoadNearbyRoads === 'function'){
           _autoLoadNearbyRoads(lat, lng);
           if(typeof dlog === 'function') dlog('[boot] roads warm-up at last GPS ' +
             lat.toFixed(4) + ',' + lng.toFixed(4));
         }
-      }, 500);
+      }, 0);
     }
   } catch(e){
     if(typeof dlog === 'function') dlog('[boot] warm-up error: ' + e.message);
@@ -2440,32 +2494,31 @@ function startUiTimer(){
     document.getElementById('driveDist').textContent = (s.distance_m/1000).toFixed(2);
     document.getElementById('driveFare').textContent = total.toLocaleString();
 
-    // M3/M4 (2026-05-09): 課金距離ソース + MM 健全性インジケータ
+    // ★設計変更宣言 (2026-05-10): driveSource を全面見直し
+    //   旧: 通常 (mm/inline/gap/gps 各状態) を逐一テキスト表示・「課金」単語あり
+    //   新: 通常時は完全非表示・「⚠ 位置情報の精度が低下しています」のみ
+    //       表示条件: _forwardedPrefs.size === 0 が 30 秒継続のとき (= 真のエラー)
+    //   「課金」ワードは UX 不安要因のため全削除 (絶対ルール「道路距離課金」は
+    //   コード側で担保済み・表示は要らない)
     try {
       const src = document.getElementById('driveSource');
-      if(src && Meter.getMMStats){
-        const stats = Meter.getMMStats();
-        const source = stats.distance_source || 'gps';
-        const silentMs = stats.mm_silent_ms;
-        let label, bg, fg;
-        if(source === 'mm'){
-          label = '✅ MM 課金中 (道路距離)';
-          bg = '#E8F7EE'; fg = '#1A7340';
-        } else if(source === 'inline'){
-          label = '🟡 inline 道路スナップ課金中 (Worker B 不調)';
-          bg = '#FFF6E6'; fg = '#7A5A12';
-        } else if(source === 'gap'){
-          label = '🟡 GPS 消失補完中 (速度×時間)';
-          bg = '#FFF6E6'; fg = '#7A5A12';
+      if(src){
+        const forwarded = (typeof _forwardedPrefs !== 'undefined') ? _forwardedPrefs.size : 0;
+        const now = Date.now();
+        if(forwarded > 0){
+          window._mmZeroSince = null;
+          src.style.display = 'none';
         } else {
-          // 'gps' or undefined: 未稼働状態 (起動直後 or roads 未 load)
-          const t = silentMs != null ? Math.floor(silentMs / 1000) + 's' : '初期化中';
-          label = '⚠ MM 不調 (' + t + ') · 道路データ読込待ち';
-          bg = '#FDECEA'; fg = '#C0392B';
+          if(window._mmZeroSince == null) window._mmZeroSince = now;
+          if(now - window._mmZeroSince >= 30000){
+            src.textContent = '⚠ 位置情報の精度が低下しています';
+            src.style.background = '#FDECEA';
+            src.style.color = '#C0392B';
+            src.style.display = 'block';
+          } else {
+            src.style.display = 'none';
+          }
         }
-        src.textContent = label;
-        src.style.background = bg;
-        src.style.color = fg;
       }
     } catch(_){}
 
@@ -4349,37 +4402,30 @@ setInterval(function(){
 setInterval(function(){
   const ind = document.getElementById('mmReadyIndicator');
   if(!ind) return;
-  // idle 画面のみ表示・他画面では非表示
+  // ★設計変更宣言 (2026-05-10): mmReadyIndicator も全面見直し
+  //   旧: MM 準備完了 / 準備中 / 0/5 等を常時表示
+  //   新: 通常時は完全非表示・「⚠ 位置情報の精度が低下しています」のみ
+  //       表示条件: forwarded === 0 が 30 秒継続のとき
+  //   「課金」ワードは UX 不安要因のため全削除
   if(appState !== 'idle' && appState !== 'businessStart'){
     ind.style.display = 'none';
     return;
   }
-  ind.style.display = 'block';
   const forwarded = (typeof _forwardedPrefs !== 'undefined') ? _forwardedPrefs.size : 0;
-  let mmHealthy = false;
-  let mmReady = false;
-  if(typeof Meter !== 'undefined' && Meter.getMMStats){
-    const s = Meter.getMMStats();
-    const silentMs = s.mm_silent_ms;
-    mmHealthy = silentMs != null && silentMs < 5000;
-    mmReady = (typeof Meter.isMmReady === 'function') ? Meter.isMmReady() : false;
-  }
-  if(mmReady && forwarded >= 5 && mmHealthy){
-    ind.textContent = '✅ MM 準備完了 (' + forwarded + ' 県・道路距離課金可)';
-    ind.style.background = '#E8F7EE';
-    ind.style.color = '#1A7340';
-  } else if(forwarded >= 5){
-    ind.textContent = '🟡 MM 準備完了・GPS 取得待ち (' + forwarded + ' 県)';
-    ind.style.background = '#FFF6E6';
-    ind.style.color = '#7A5A12';
-  } else if(forwarded > 0){
-    ind.textContent = '🟡 MM 準備中 (' + forwarded + '/5 県読込済)';
-    ind.style.background = '#FFF6E6';
-    ind.style.color = '#7A5A12';
+  const now = Date.now();
+  if(forwarded > 0){
+    window._mmReadyZeroSince = null;
+    ind.style.display = 'none';
   } else {
-    ind.textContent = '⚠ データ読み込み中です (0/5 県)';
-    ind.style.background = '#FDECEA';
-    ind.style.color = '#C0392B';
+    if(window._mmReadyZeroSince == null) window._mmReadyZeroSince = now;
+    if(now - window._mmReadyZeroSince >= 30000){
+      ind.textContent = '⚠ 位置情報の精度が低下しています';
+      ind.style.background = '#FDECEA';
+      ind.style.color = '#C0392B';
+      ind.style.display = 'block';
+    } else {
+      ind.style.display = 'none';
+    }
   }
   // 業務開始ボタンの enable/disable
   const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
