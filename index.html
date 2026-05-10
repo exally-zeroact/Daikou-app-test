@@ -1357,6 +1357,26 @@ let _preloadDone = false;
 //       orange banner を表示 (本番 Daikou-app と完全一致)
 //   起動時 banner 表示は line ~4218 の iOS PWA boot IIFE で行う
 
+// ★設計変更宣言 (2026-05-10): fresh load 判定で stale sensor_permission_active をクリア
+//   問題: iOS PWA 1 回目のタスクキル後、iOS の snapshot 機構で sessionStorage が
+//        保持されてしまい、orange banner が出ない (showSensorBannerIfNeeded が
+//        sessionStorage='1' を見て banner hide してしまう)
+//   解決: document.referrer が同一 origin でなければ fresh load (= task kill 起動)
+//        と判定し、sensor_permission_active を強制 removeItem する
+//   navigation (settings.html → index.html) では referrer が同 origin → 維持
+//   task kill → home icon 起動では referrer empty → 強制 clear → banner 表示
+//   この処理を script 先頭に置くことで全 showSensorBannerIfNeeded 呼出より先に実行
+try {
+  const _sameOriginRef = document.referrer &&
+                          document.referrer.indexOf(location.origin) === 0;
+  if(!_sameOriginRef){
+    sessionStorage.removeItem('sensor_permission_active');
+    if(typeof dlog === 'function'){
+      dlog('[Sensor] fresh load 検知 (referrer empty) → sensor_permission_active クリア');
+    }
+  }
+} catch(_){}
+
 // ★設計変更宣言 (2026-05-10): user gesture 直近時刻を記録
 //   blockIfSensorNotGranted が「user gesture 起因」かを判定するため
 //   document への click listener で _lastUserGestureAt を更新
@@ -3760,12 +3780,16 @@ const DakomeDL = (function(){
       //   絶対ルール準拠: 業務継続性を理由に user gesture 違反するのは NG・
       //                   (画面遷移は onBusinessStart 内で行うため留まる方が安全)
       if(typeof dlog === 'function') dlog('[DL] 完了・businessStart 画面に留まる (自動遷移なし・user gesture 待ち)');
-      // ② overlay フェードアウト（裏で screen が idle に切り替わってから消える）
+      // ② overlay フェードアウト → 完全 hide
+      // ★設計変更宣言 (2026-05-10): hideOverlay() を呼んで inline style.display も
+      //   'none' に戻す。前修正で showOverlay 時に inline style.display='flex' を
+      //   set したため、classList.remove('show') だけでは hide されず overlay が
+      //   再表示され続ける現象が発生していた。
       if(overlay) overlay.classList.add('fade-out');
       setTimeout(() => {
         if(overlay){
-          overlay.classList.remove('show');
           overlay.classList.remove('fade-out');
+          hideOverlay();   // class + inline style 両方 reset
         }
       }, 500);
     }, 1500);
@@ -4204,7 +4228,8 @@ function refreshSensorPermission(){
   if(_isIOS){
     // ★設計変更宣言 (2026-05-10): 本番 (Daikou-app) と同じシンプル仕様に統一
     //   iOS PWA + sessionStorage.sensor_permission_active !== '1' なら orange 表示
-    //   (sessionStorage はタスクキルで消える・ページ遷移で残る性質)
+    //   fresh load 判定 + sensor_permission_active のクリアは script 先頭で
+    //   済んでいる (showSensorBannerIfNeeded より早く実行する必要があるため)
     if(sessionStorage.getItem('sensor_permission_active') === '1'){
       // 同 session 内 (設定画面遷移後など)：バナー出さない
       return;
