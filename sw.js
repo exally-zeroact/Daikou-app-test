@@ -20,7 +20,7 @@
 //   ✅ 業務中に急にバージョン変わらない（安全）
 // ===========================================
 
-const CACHE_NAME = 'daikome-62e27a4';
+const CACHE_NAME = 'daikome-0c70543';
 
 // アイコン・manifest・start_url（"/"）をキャッシュ
 // "/"のキャッシュは Chrome の installability 要件で必須
