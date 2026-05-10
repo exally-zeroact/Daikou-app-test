@@ -272,22 +272,35 @@ const RegionLoader = (() => {
       script.onload = () => {
         const varName = 'ROADS_' + prefecture.toUpperCase().replace(/-/g, '_');
         const data = window[varName];
-        if (data && (data.v === 4 || data.v === 5)) {
+        // ★設計変更宣言 (2026-05-10): v6/v7 受入れ追加
+        //   旧: v === 4 || v === 5 のみ → 47 県 v7 build 後は全件 warn 出力
+        //   新: 4-7 を全て受入・将来 v8 が来ても roads-decoder 互換ならそのまま動く
+        //   data.v が無い (= window 変数未設定) ケースのみ silent dlog に降格
+        //   (script は load 成功・MM は worker B 側で別 path で稼働中)
+        if (data && typeof data.v === 'number' && data.v >= 4 && data.v <= 7) {
           try {
             const decoder = new window.RoadDecoder(data);
             const result = decoder.buildOffsetTable();
             roadDecoders.set(prefecture, decoder);
             loadedRoads.add(prefecture);
             if (typeof dlog === 'function') {
-              dlog(`[Region] roads/${prefecture}: ${data.numRoads}本 (build ${result.ms.toFixed(0)}ms)`);
+              dlog(`[Region] roads/${prefecture}: ${data.numRoads}本 v${data.v} (build ${result.ms.toFixed(0)}ms)`);
             }
             resolve(decoder);
           } catch (e) {
             console.warn(`[Region] roads/${prefecture} デコーダー構築失敗:`, e.message);
             resolve(null);
           }
+        } else if (data && typeof data.v === 'number') {
+          // 既知の data あるが version 範囲外 → 真の警告
+          console.warn(`[Region] roads/${prefecture} 未対応バージョン v${data.v}`);
+          resolve(null);
         } else {
-          console.warn(`[Region] roads/${prefecture} 変数なし or 未対応バージョン`);
+          // window 変数未設定 = 別 path (Worker B forward) で稼働中の可能性
+          // dlog (DEBUG 限定) に降格して prod console を汚さない
+          if (typeof dlog === 'function') {
+            dlog(`[Region] roads/${prefecture} 変数未設定 (Worker B path で稼働の可能性)`);
+          }
           resolve(null);
         }
         loadingRoads.delete(prefecture);
