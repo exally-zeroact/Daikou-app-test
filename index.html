@@ -1269,6 +1269,14 @@ class NoSleep {
 <!-- ★business.js：業務管理スーパー機能（2026/05/01追加）-->
 
 <script>
+// ★設計変更宣言 (2026-05-10): デバイス判定 const を script 先頭に移動
+//   旧: line 3973 付近で const _isIOS / _isAndroid 宣言
+//       → 上流のトップレベル文が throw すると TDZ のまま onBusinessStart 等で
+//         ReferenceError: Cannot access '_isIOS' before initialization が発生
+//   新: script 先頭で初期化・TDZ リスク排除
+const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+const _isAndroid = /Android/.test(navigator.userAgent);
+
 // ─── MM-1 + H-1 修正 (2026-05-08): Map Matching Worker B 起動 + 自動再起動 ───
 // js/map-matcher.js を Worker として起動し Meter.setMapMatcher で注入。
 // H-1: Worker B が死んだら 5 秒後に自動再生成し state を再 forward する。
@@ -2618,6 +2626,7 @@ function onBusinessStart(){
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined'){
     console.error('[Business] not loaded');
+    showToast('業務開始に失敗しました (Business 未ロード)');
     return;
   }
   try {
@@ -2630,7 +2639,7 @@ function onBusinessStart(){
     Business.start();
     // NoSleep 起動（画面消灯防止）
     if(!noSleep){ noSleep = new NoSleep(); }
-    noSleep.enable().catch(e=>dlog('NoSleep error:', e));
+    noSleep.enable().catch(e => { if(typeof dlog === 'function') dlog('NoSleep error:', e); });
     // 暗転タイマーリセット
     if(dimTimer){ clearTimeout(dimTimer); dimTimer = null; }
     document.documentElement.style.filter = '';
@@ -2639,11 +2648,17 @@ function onBusinessStart(){
     // 画面遷移
     appState = 'idle';
     showScreen('idle');
-    document.getElementById('appbarTitle').textContent = '空　車';
+    const _appbarEl = document.getElementById('appbarTitle');
+    if(_appbarEl) _appbarEl.textContent = '空　車';
     updateBusinessDashboard();
     if(typeof dlog === 'function') dlog('[Business] start (GPS/NoSleep activated)');
   } catch(e){
-    console.error('[Business] start error:', e);
+    // ★設計変更宣言 (2026-05-10): エラー詳細を Eruda に出るように改善
+    //   旧: console.error('[Business] start error:', e) → Eruda は "ReferenceError {}" のみ表示
+    //   新: e.message と e.stack を文字列で出力 → 実際の変数名/行番号が見える
+    console.error('[Business] start error:',
+      (e && e.message) || String(e),
+      (e && e.stack) || '(no stack)');
     showToast('業務開始に失敗しました');
   }
 }
@@ -3306,7 +3321,11 @@ document.addEventListener('visibilitychange', function(){
 // 起動時センサーバナー表示は「センサー未許可バナー（PWA起動時）」ロジックに統合（2026/04/30）
 // drivingState の有無に関係なく、未許可なら起動のたびにバナー表示
 
-loadSettings();
+// ★設計変更宣言 (2026-05-10): loadSettings() を try/catch で防御
+//   旧: 素裸で呼出・JSON.parse 失敗等で script 全体が halt
+//       → 後続 const (_isIOS 等) が TDZ → onBusinessStart で ReferenceError
+//   新: try/catch で守り、上流 halt を防止
+try { loadSettings(); } catch(e){ console.error('[loadSettings] error:', e && e.message, e && e.stack); }
 try { FB.setIdle(); } catch(e){ console.error('FB setIdle error:', e); }
 
 // ─── 業務管理スーパー機能の初期化（2026/05/01追加） ───
@@ -3970,8 +3989,7 @@ function refreshSensorPermission(){
 }
 
 // ─── デバイス判定 ───
-const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-const _isAndroid = /Android/.test(navigator.userAgent);
+// (2026-05-10) const _isIOS / _isAndroid は script 先頭に移動済 (TDZ 対策)
 
 // 2026/05/02：confirmAndroidSensor 削除（バナーから呼出ボタン削除済み・未使用関数）
 
@@ -4217,6 +4235,14 @@ setInterval(function(){
 // P6 (2026-05-09): idle 画面 MM 準備状況インジケータ 1Hz 更新
 //   _forwardedPrefs Set のサイズを業務開始ボタン下に表示
 //   5 県以上 forward 済 + 直近 mmResult あれば「準備完了」緑表示
+//
+// ★設計変更宣言 (2026-05-10): MM データ読込前の業務開始ガード追加
+//   businessStart 画面で _forwardedPrefs.size === 0 の間は
+//   業務開始ボタンを disabled にして「データ読み込み中です (X/5県)」表示。
+//   1 県以上 forward 済になり次第 enabled に戻す。
+//   理由: MM 道路データが 0 件のまま業務開始すると、Worker B に snap 候補が
+//         無く inline fallback (= GPS 直線距離禁止ルールの境界) に依存してしまう。
+//         絶対ルール「道路距離課金」を担保するため、最低 1 県の forward を待つ。
 setInterval(function(){
   const ind = document.getElementById('mmReadyIndicator');
   if(!ind) return;
@@ -4248,11 +4274,58 @@ setInterval(function(){
     ind.style.background = '#FFF6E6';
     ind.style.color = '#7A5A12';
   } else {
-    ind.textContent = '⚠ MM 準備中: GPS 取得待ち (道路データ未読込)';
+    ind.textContent = '⚠ データ読み込み中です (0/5 県)';
     ind.style.background = '#FDECEA';
     ind.style.color = '#C0392B';
   }
+  // 業務開始ボタンの enable/disable
+  const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
+  if(btnStart){
+    if(forwarded === 0 && appState === 'businessStart'){
+      btnStart.disabled = true;
+      btnStart.style.opacity = '0.4';
+      btnStart.style.cursor = 'not-allowed';
+      btnStart.style.pointerEvents = 'none';
+    } else {
+      btnStart.disabled = false;
+      btnStart.style.opacity = '';
+      btnStart.style.cursor = '';
+      btnStart.style.pointerEvents = '';
+    }
+  }
 }, 1000);
+
+// ★設計変更宣言 (2026-05-10): businessStart 画面で MM データを先読み
+//   通常 onBusinessStart 内で startGPS() → GPS callback で _autoLoadNearbyRoads が
+//   走るが、それを待たずに businessStart 画面表示時に getCurrentPosition で
+//   一発だけ位置取得して _autoLoadNearbyRoads を起動する。
+//   sensor permission 済の iOS PWA であれば user gesture 不要で取得可能。
+//   失敗時は no-op (= 従来挙動)。業務開始 → startGPS で再試行される。
+function _preloadRoadsForBusinessStart(){
+  try {
+    if(!navigator.geolocation || !navigator.geolocation.getCurrentPosition) return;
+    if(typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.size > 0) return;
+    navigator.geolocation.getCurrentPosition(function(pos){
+      try {
+        if(pos && pos.coords && typeof _autoLoadNearbyRoads === 'function'){
+          _autoLoadNearbyRoads(pos.coords.latitude, pos.coords.longitude);
+          if(typeof dlog === 'function') dlog('[MM] preload roads from businessStart 画面');
+        }
+      } catch(_){}
+    }, function(){
+      // 失敗時は静かに諦める (業務開始 → startGPS で再試行)
+    }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+  } catch(_){}
+}
+// businessStart 画面に遷移したら一度だけ実行
+let _preloadDone = false;
+setInterval(function(){
+  if(_preloadDone) return;
+  if(appState === 'businessStart' && typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.size === 0){
+    _preloadDone = true;
+    _preloadRoadsForBusinessStart();
+  }
+}, 2000);
 
 // ─── ストレージ永続化（2026/04/30追加：オフライン業務でデータ消失防止） ───
 // iOS のキャッシュ自動削除を防ぐ・道路データ等を永続的に保持
