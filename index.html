@@ -4252,9 +4252,11 @@ function refreshSensorPermission(){
     return;
   }
 
-  if(_isIOS){
-    // ★設計変更宣言 (2026-05-10): 本番 (Daikou-app) と同じシンプル仕様に統一
-    //   iOS PWA + sessionStorage.sensor_permission_active !== '1' なら orange 表示
+  if(_isIOS && window.navigator.standalone === true){
+    // ★設計変更宣言 (2026-05-10): standalone === true 条件を追加し iOS PWA 限定化
+    //   旧: if(_isIOS) のみで Safari 通常モードでも banner 出ていた
+    //   新: PWA standalone のみで banner 表示・Safari 通常モードは出さない
+    //   本番 (Daikou-app) と同じシンプル仕様に統一
     //   fresh load 判定 + sensor_permission_active のクリアは script 先頭で
     //   済んでいる (showSensorBannerIfNeeded より早く実行する必要があるため)
     if(sessionStorage.getItem('sensor_permission_active') === '1'){
