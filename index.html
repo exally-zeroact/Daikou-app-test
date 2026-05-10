@@ -3423,7 +3423,13 @@ function showScreen(name){
   }
   // businessStart は btn-area のボタン全部非表示（リセットだけ）
 }
-// 起動直後の初期状態（idle）にも上記表示制御を即適用
+// 起動直後の初期状態にも上記表示制御を即適用
+// ★設計変更宣言 (2026-05-10): btnMain (代行開始) を無条件で .show する処理を削除
+//   旧: 起動時に btnMain.classList.add('show') を呼ぶ
+//       → businessStart 画面表示中も 代行開始 ボタンが見えてしまうバグ
+//   新: btnMain の表示制御は showScreen('idle') のみが管理
+//       (showScreen は Business init で適切な画面に対して必ず呼ばれる)
+//   row/back ボタンの reset は initial state として残す
 (function _initBtnVisibility(){
   const btnMain      = document.getElementById('btnMain');
   const btnRow       = document.getElementById('btnRow');
@@ -3432,7 +3438,8 @@ function showScreen(name){
   if(btnRow)   btnRow.classList.remove('show');
   if(btnBackP) btnBackP.classList.remove('show');
   if(btnBackL) btnBackL.classList.remove('show');
-  if(btnMain){ btnMain.textContent = '代行開始'; btnMain.classList.add('show'); }
+  // 念のため btnMain のテキストを「代行開始」に揃え・.show は付与しない
+  if(btnMain){ btnMain.textContent = '代行開始'; btnMain.classList.remove('show'); }
 })();
 
 // ─── VisibilityChange：裏に回った瞬間を確実に保存（層2） ───
@@ -3509,9 +3516,34 @@ try {
     //     ※ 直前の履歴が3時間以内なら「続きから再開」ボタン表示
     const bs = Business.getState();
     if(bs.active){
-      // 既に業務中・既存の appState ロジックに委ねる（idle / driving / fare の復元処理が後続にある）
+      // ★設計変更宣言 (2026-05-10): 業務中タスクキルからの復元フロー
+      //   旧: appState ロジック委ね だけで showScreen 呼ばず
+      //       → screenIdle (display:none) のまま businessStart (display:flex) が
+      //         残って「業務中なのにセンサー許可画面」と表示されるバグ
+      //   新: appState が driving/fare に既に復元されてなければ idle に遷移
+      //       (driving/fare は checkDrivingRestore (loadSettings 内) で先に復元される)
+      //       sensor 未許可なら orange banner で許可導線 (画面は idle のまま)
       updateBusinessDashboard();
+      if(appState !== 'driving' && appState !== 'fare'){
+        appState = 'idle';
+        showScreen('idle');
+        const _t = document.getElementById('appbarTitle');
+        if(_t) _t.textContent = '空　車';
+      }
       startGPS(); // タスクキル後GPS再起動（許可は切れないがwatchPositionは再起動必要）
+      // ★設計変更宣言 (2026-05-10): 業務復元時は iOS PWA で permission lost の
+      //   可能性が高い (タスクキルで失効) → orange banner を強制 overlay 表示し
+      //   ユーザーに「センサー再起動」の導線を明示
+      //   sessionStorage active が '1' なら同 session 内 (= GPS 稼働中) なので skip
+      try {
+        if(_isIOS && window.navigator.standalone === true &&
+           sessionStorage.getItem('sensor_permission_active') !== '1'){
+          const _b = document.getElementById('sensorRestoreBanner');
+          if(_b) _b.style.display = 'block';
+          if(typeof dlog === 'function') dlog('[Business] active 復元: orange banner 強制表示');
+        }
+      } catch(_){}
+      if(typeof dlog === 'function') dlog('[Business] active 復元: appState=' + appState);
     } else if(bs.ended && Business.canResume()){
       // 業務終了済みかつ3時間以内 → 日報画面表示
       appState = 'businessReport';
