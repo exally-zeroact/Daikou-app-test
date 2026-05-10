@@ -96,6 +96,15 @@ body:not(.dev-mode) #devSection2{display:none !important;}
     </div>
   </div>
 
+  <!-- ★設計変更宣言 (2026-05-10): 道路データ最終更新日表示 (常時表示・1 行のみ) -->
+  <!-- IndexedDB 'daikome'/'prefectures' から max(timestamp) を取得して YYYY年M月D日 表示 -->
+  <div class="section">
+    <div class="row" style="justify-content:space-between;">
+      <div class="row-label" style="color:#8E8E93;">道路データ最終更新</div>
+      <div id="dataLastUpdateLine" style="color:#1c1c1e;font-size:14px;font-weight:600;">読込中...</div>
+    </div>
+  </div>
+
   <!-- ★設計変更宣言 (2026-05-10): dev モード切替で隠しセクション開閉 -->
   <!-- 設定画面タイトル「設定」を 5 秒長押しで dev モード切替 -->
   <div id="devSection">
@@ -539,34 +548,44 @@ function markPrefDoneInStore(pref, size){
 }
 
 // DL状態を読み込んで設定画面に表示
+// ★設計変更宣言 (2026-05-10): 常時表示の dataLastUpdateLine も同関数で更新
+//   旧: dlLastUpdate (dev 限定) のみ・dev OFF だと最終更新日が分からなかった
+//   新: dataLastUpdateLine (常時表示・1 行) も同じ値で更新
 async function loadDlStatus(){
-  const updateEl = document.getElementById('dlLastUpdate');
-  const statusEl = document.getElementById('dlPrefStatus');
-  if(!updateEl || !statusEl) return;
+  const updateEl = document.getElementById('dlLastUpdate');           // dev 用
+  const statusEl = document.getElementById('dlPrefStatus');           // dev 用
+  const visibleLineEl = document.getElementById('dataLastUpdateLine'); // 常時表示
+  // dev 用が無くても常時表示用があれば処理を続ける
+  if(!updateEl && !statusEl && !visibleLineEl) return;
+  function setText(el, txt){ if(el) el.textContent = txt; }
   try {
     const all = await getAllPrefectures();
     if(all.length === 0){
-      updateEl.textContent = '未取得';
-      statusEl.textContent = '0県';
+      setText(updateEl, '未取得');
+      setText(statusEl, '0県');
+      setText(visibleLineEl, '未取得');
       return;
     }
     // 最新更新日（max timestamp・index.html の DakomeDL と同じ field 名）
     const maxTs = Math.max.apply(null, all.map(r => r.timestamp || 0));
+    let dateStr;
     if(maxTs > 0){
       const d = new Date(maxTs);
-      const dateStr = d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
-      updateEl.textContent = dateStr;
+      dateStr = d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日';
     } else {
-      updateEl.textContent = '不明';
+      dateStr = '不明';
     }
+    setText(updateEl, dateStr);
+    setText(visibleLineEl, dateStr);
     // 県数とサイズ
     const totalSize = all.reduce((sum, r) => sum + (r.size || 0), 0);
     const sizeMB = (totalSize / (1024*1024)).toFixed(0);
-    statusEl.textContent = all.length + '県 / 約' + sizeMB + 'MB';
+    setText(statusEl, all.length + '県 / 約' + sizeMB + 'MB');
   } catch(e){
     console.error('DL状態読込失敗:', e);
-    updateEl.textContent = '取得失敗';
-    statusEl.textContent = '-';
+    setText(updateEl, '取得失敗');
+    setText(statusEl, '-');
+    setText(visibleLineEl, '取得失敗');
   }
 }
 

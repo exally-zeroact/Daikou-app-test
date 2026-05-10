@@ -1269,11 +1269,13 @@ class NoSleep {
 <!-- ★business.js：業務管理スーパー機能（2026/05/01追加）-->
 
 <script>
-// ★設計変更宣言 (2026-05-10): デバイス判定 const を script 先頭に移動
-//   旧: line 3973 付近で const _isIOS / _isAndroid 宣言
-//       → 上流のトップレベル文が throw すると TDZ のまま onBusinessStart 等で
-//         ReferenceError: Cannot access '_isIOS' before initialization が発生
-//   新: script 先頭で初期化・TDZ リスク排除
+// ★設計変更宣言 (2026-05-10): TDZ 撲滅のため全 let/const を script 先頭に集約
+//   旧: line 1906/2254/3843/4214 等に分散・script 中盤の throw で halt すると
+//       後続宣言が TDZ → startGPS 内 appState 参照, onBusinessStart 内 noSleep
+//       参照, MM guard setInterval 内 _forwardedPrefs 参照で全て ReferenceError
+//   新: script 先頭で初期化・script 中盤に halt があっても TDZ は発生しない
+//
+// デバイス判定
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 const _isAndroid = /Android/.test(navigator.userAgent);
 
@@ -1284,6 +1286,81 @@ const _isAndroid = /Android/.test(navigator.userAgent);
 let _mmWorker = null;
 let _mmWorkerRestartTimer = null;
 const _MM_WORKER_RESTART_DELAY_MS = 5000;
+
+// MM-3 health check 状態 (旧 line 1485-1487)
+let _mmHealthPongAt = 0;
+let _mmHealthPingAt = 0;
+const _MM_HEALTH_TIMEOUT_MS = 3000;
+
+// MM forward 状態・guard setInterval / Worker 通信が参照 (旧 line 1740-1753)
+const _crossUserSubscribedPrefs = new Set();
+const _forwardedPrefs = new Set();
+const _attrsLoadedPrefs = new Set();
+const _attrsSchoolZoneByPref = new Map();
+const _attrsRoadFloodByPref = new Map();
+const _attrsRoadJizenByPref = new Map();
+const _attrsRoadYoboByPref = new Map();
+const _attrsEmergencyByPref = new Map();
+let _autoRoadLoadInflight = null;
+
+// アプリ全体状態 (旧 line 1906-1918・startGPS / onBusinessStart 等が参照)
+let appState = 'idle'; // idle / driving / fare
+let histSaved = false; // 確定時の履歴保存済みフラグ
+let noSleep = null;       // NoSleepインスタンス
+let dimTimer = null;      // 空車時の画面暗転タイマー
+const DIM_MINUTES = 300;  // 空車5時間(300分)で暗転
+let surchargeOn = false;
+let surchargeRate = 1.2;
+let surchargeEnabled = false;
+let extras = [];
+let todayDist = 0;
+let todayCount = 0;
+let uiTimer = null;
+let vehicleId = 'v1';
+
+// GPS 状態 (旧 line 2254-2257)
+let gpsStarted = false;
+let _lastGpsLogAt = 0;
+let _gpsCallbackCount = 0;
+
+// チュートリアル状態 (旧 line 3843)
+let _tutorialPage = 0;
+
+// 停車検出 (旧 line 4214-4215)
+let _stopStartedAt = 0;
+const STOP_CANDIDATE_THRESHOLD_MS = 5 * 60 * 1000;
+
+// MM 先読み 1 回限定フラグ (旧 line 4321)
+let _preloadDone = false;
+
+// ★設計変更宣言 (2026-05-10): 業務開始ボタンの bottom-line safety guard
+//   旧: P6 setInterval (script 末尾) のみで disable/enable を制御
+//       → script 中盤で halt すると setInterval が register されず
+//         MM 0/5 でもボタンが押せて ReferenceError 発生
+//   新: 宣言直後に最小限の guard setInterval を register
+//       → script 中盤の halt があっても確実に動作
+//   絶対ルール準拠: 道路距離 0 件で業務開始 = inline fallback で
+//                   GPS 直線距離課金リスク → MM 1 県以上を gate に
+setInterval(function(){
+  try {
+    if(appState !== 'businessStart') return;
+    const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
+    if(!btnStart) return;
+    if(_forwardedPrefs.size === 0){
+      btnStart.disabled = true;
+      btnStart.style.opacity = '0.4';
+      btnStart.style.cursor = 'not-allowed';
+      btnStart.style.pointerEvents = 'none';
+      btnStart.setAttribute('aria-disabled', 'true');
+    } else {
+      btnStart.disabled = false;
+      btnStart.style.opacity = '';
+      btnStart.style.cursor = '';
+      btnStart.style.pointerEvents = '';
+      btnStart.removeAttribute('aria-disabled');
+    }
+  } catch(_){}
+}, 1000);
 
 function _setupMmWorker(reason){
   try {
@@ -1482,9 +1559,8 @@ _setupMmWorker('init');
 // ─── M-3: Page Visibility 復帰時 Worker B 生存確認 ───
 // document.visibilityState が visible になったら ping を送り、
 // 一定時間（3 秒）応答がなければ Worker を再起動する。
-let _mmHealthPongAt = 0;
-let _mmHealthPingAt = 0;
-const _MM_HEALTH_TIMEOUT_MS = 3000;
+// (2026-05-10) _mmHealthPongAt / _mmHealthPingAt / _MM_HEALTH_TIMEOUT_MS は
+// script 先頭に移動済 (TDZ 対策)
 function _mmHealthCheck(){
   if(!_mmWorker) {
     if(typeof dlog === 'function') dlog('[MM] visibility 復帰: worker 不在 → 再起動');
@@ -1737,20 +1813,14 @@ function _forwardRoadsToMmWorker(prefs){
   }
 }
 // T8 (2026-05-09): cross-user pheromone 購読済 pref (重複防止)
-const _crossUserSubscribedPrefs = new Set();
 // 既に Worker B に forward 済みの pref を記録 (重複 postMessage 抑制)
-const _forwardedPrefs = new Set();
+// (2026-05-10) _crossUserSubscribedPrefs / _forwardedPrefs / _attrs* は
+// script 先頭に移動済 (TDZ 対策)
 
 // P11/P12 (2026-05-09): road-attrs / road-flood/jizen/yobo の動的 load
 //   roads-{pref}.js と並行で同 pref のメタデータを script タグ load
 //   schoolZone / 冠水 / 通行規制 を運転手警告 UI に活用 (Tier B 範囲)
 //   delta-varint-base64 デコードはシンプル実装で Set<roadIdx> 化
-const _attrsLoadedPrefs = new Set();
-const _attrsSchoolZoneByPref = new Map();      // pref → Set<roadIdx>
-const _attrsRoadFloodByPref = new Map();
-const _attrsRoadJizenByPref = new Map();
-const _attrsRoadYoboByPref  = new Map();
-const _attrsEmergencyByPref = new Map();       // D3 (2026-05-09): 緊急輸送道路指定
 function _decodeDeltaVarintB64(b64){
   if(!b64) return new Set();
   try {
@@ -1827,7 +1897,7 @@ function _autoLoadNearbyAttrs(prefs){
 //   → 完了後 Worker B に forward。県境を跨ぐと自動拡張・重複は skip。
 //   絶対ルール: 「課金距離は道路距離」のため Worker B に roads が届く前は MM が
 //   稼働しない。GPS callback で常時呼び出し続ければ走行中も追加 load 可能。
-let _autoRoadLoadInflight = null;
+// (2026-05-10) _autoRoadLoadInflight は script 先頭に移動済 (TDZ 対策)
 function _autoLoadNearbyRoads(lat, lng){
   if(typeof RegionLoader === 'undefined' || !RegionLoader.nearestPrefectures) return;
   if(_autoRoadLoadInflight) return;               // 1 リクエストずつ直列化
@@ -1903,19 +1973,7 @@ function _forwardBackboneToMmWorker(){
 })();
 
 // ─── 状態 ───
-let appState = 'idle'; // idle / driving / fare
-let histSaved = false; // 確定時の履歴保存済みフラグ
-let noSleep = null;       // NoSleepインスタンス
-let dimTimer = null;      // 空車時の画面暗転タイマー
-const DIM_MINUTES = 300;  // 空車5時間(300分)で暗転
-let surchargeOn = false;
-let surchargeRate = 1.2;
-let surchargeEnabled = false;
-let extras = [];
-let todayDist = 0;
-let todayCount = 0;
-let uiTimer = null;
-let vehicleId = 'v1';
+// (2026-05-10) appState 〜 vehicleId は script 先頭に移動済 (TDZ 対策)
 
 // ─── リロード復元 ───
 function checkDrivingRestore(){
@@ -2251,10 +2309,8 @@ setInterval(updateBusinessDashboard, 1000);
 updateBusinessDashboard();
 
 // ─── GPS（代行開始時に初めて起動） ───
-let gpsStarted = false;
-// 2026/05/02：GPS動作確認用ログ（5秒間隔・スパム防止）
-let _lastGpsLogAt = 0;
-let _gpsCallbackCount = 0;
+// (2026-05-10) gpsStarted / _lastGpsLogAt / _gpsCallbackCount は
+// script 先頭に移動済 (TDZ 対策・startGPS が appState 等を参照する前に確実に初期化)
 function startGPS(){
   if(gpsStarted){
     if(typeof dlog === 'function') dlog('[GPS] startGPS: 既に起動済（スキップ）');
@@ -3840,7 +3896,7 @@ function onDlToastTap(){
   document.getElementById('tutorialOverlay').classList.add('show');
 })();
 
-let _tutorialPage = 0;
+// (2026-05-10) _tutorialPage は script 先頭に移動済 (TDZ 対策)
 
 function tutorialNext(){
   const pages = document.querySelectorAll('.tutorial-page');
@@ -4211,8 +4267,7 @@ if('serviceWorker' in navigator){
 // P13 (2026-05-09): 停車 5 分以上で実車終了候補バナー
 //   driving 画面で isStationary 状態の連続秒数を track
 //   5 分超で stopCandidateBanner を表示・走行再開で隠す
-let _stopStartedAt = 0;
-const STOP_CANDIDATE_THRESHOLD_MS = 5 * 60 * 1000;
+// (2026-05-10) _stopStartedAt / STOP_CANDIDATE_THRESHOLD_MS は script 先頭に移動済
 setInterval(function(){
   if(appState !== 'driving'){ _stopStartedAt = 0; return; }
   const banner = document.getElementById('stopCandidateBanner');
@@ -4318,7 +4373,7 @@ function _preloadRoadsForBusinessStart(){
   } catch(_){}
 }
 // businessStart 画面に遷移したら一度だけ実行
-let _preloadDone = false;
+// (2026-05-10) _preloadDone は script 先頭に移動済
 setInterval(function(){
   if(_preloadDone) return;
   if(appState === 'businessStart' && typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.size === 0){
