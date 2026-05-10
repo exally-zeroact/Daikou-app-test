@@ -4206,6 +4206,23 @@ function requestSensorPermission(){
         if(typeof dlog === 'function') dlog('[GPS] requestSensorPermission後に起動');
       } catch(e){ console.error('[GPS] 起動エラー:', e); }
 
+      // ★設計変更宣言 (2026-05-10): センサー許可後に近隣道路データを先読み
+      //   getCurrentPosition で 1 回だけ位置取得 → _autoLoadNearbyRoads で
+      //   roads-{pref}.js 5 県分を Worker B に forward
+      //   user gesture 経由 (btnSensorPermission 押下) なので iOS PWA でも動作
+      try {
+        if(navigator.geolocation){
+          navigator.geolocation.getCurrentPosition(function(pos){
+            try {
+              if(pos && pos.coords && typeof _autoLoadNearbyRoads === 'function'){
+                _autoLoadNearbyRoads(pos.coords.latitude, pos.coords.longitude);
+                if(typeof dlog === 'function') dlog('[MM] preload roads after permission grant');
+              }
+            } catch(_){}
+          }, function(){}, {enableHighAccuracy:true, timeout:10000});
+        }
+      } catch(_){}
+
     } else {
       // 許可失敗（iOSキャンセル or user gesture 不足）：バナーをそのまま表示
       // ★設計変更宣言 (2026-05-10): businessStart 画面では青ボタン表示・orange 抑制
