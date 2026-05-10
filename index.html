@@ -1349,47 +1349,13 @@ const STOP_CANDIDATE_THRESHOLD_MS = 5 * 60 * 1000;
 // MM 先読み 1 回限定フラグ (旧 line 4321)
 let _preloadDone = false;
 
-// ★設計変更宣言 (2026-05-10): センサー拒否フラグを sensor_denied_once → sensor_denied_v2 に rename
-//   旧 sensor_denied_once: 前バージョンの「自動センサー要求 → 失敗 → setItem」
-//     連鎖で全環境に汚染状態で残った → flag 名ごと捨てる migration を実施
-//   v2 仕様:
-//     ・起動時に v2 はクリアしない (拒否履歴は session を跨いで保持)
-//     ・ユーザーが許可ダイアログで Deny → setItem('sensor_denied_v2','1')
-//     ・ユーザーが許可ダイアログで Granted → removeItem('sensor_denied_v2')
-//     ・orange バナー表示条件: sensor_denied_v2 === '1' のときのみ
-//   ↓ 旧フラグ migration (一度だけ・以降は v2 のみ参照)
-try { localStorage.removeItem('sensor_denied_once'); } catch(_){}
-
-// ★設計変更宣言 (2026-05-10 再修正): orange バナー fast-path に DOMContentLoaded retry を追加
-//   旧: script 先頭の 1 回 try ブロック・getElementById が null だと永久に出ない
-//       → 1 回目のタスクキル後再起動で「タップしないと banner が出ない」現象
-//   新: 関数化 + 即時呼出 + DOMContentLoaded + load の 3 段保険で確実に表示
-//       関数は idempotent (条件チェック後 display='block' するだけ・複数回呼んでも害なし)
-function _showSensorBannerIfDeniedV2(){
-  try {
-    if(!_isIOS || window.navigator.standalone !== true) return;
-    if(sessionStorage.getItem('sensor_permission_active') === '1') return;
-    if(localStorage.getItem('sensor_denied_v2') !== '1') return;
-    const __b = document.getElementById('sensorRestoreBanner');
-    if(__b) __b.style.display = 'block';
-  } catch(_){}
-}
-// ★設計変更宣言 (2026-05-10): retry 戦略を強化 (前修正の readyState 分岐は
-//   タイミング次第で listener が登録されないケースがあったため常時登録に変更)
-// ① 即時 (DOM parse 済みなら成功)
-_showSensorBannerIfDeniedV2();
-// ② microtask キューで再実行 (現在の sync 処理直後)
-if(typeof queueMicrotask === 'function'){
-  queueMicrotask(_showSensorBannerIfDeniedV2);
-}
-// ③ 0ms / 100ms / 500ms の setTimeout retry (短期保険)
-setTimeout(_showSensorBannerIfDeniedV2, 0);
-setTimeout(_showSensorBannerIfDeniedV2, 100);
-setTimeout(_showSensorBannerIfDeniedV2, 500);
-// ④ DOMContentLoaded を常時登録 (readyState に関わらず・複数登録 safe)
-document.addEventListener('DOMContentLoaded', _showSensorBannerIfDeniedV2);
-// ⑤ window load で最後の保険 (画像/SW 含む全 resource load 完了)
-window.addEventListener('load', _showSensorBannerIfDeniedV2);
+// ★設計変更宣言 (2026-05-10): sensor_denied_v2 / _showSensorBannerIfDeniedV2 /
+//   sensor_denied_once migration を全削除し、本番 (Daikou-app) と同じシンプル
+//   仕様に戻す。
+//   旧: localStorage.sensor_denied_v2 で拒否履歴を gate して banner 表示
+//   新: 「iOS PWA + sessionStorage.sensor_permission_active !== '1'」だけで
+//       orange banner を表示 (本番 Daikou-app と完全一致)
+//   起動時 banner 表示は line ~4218 の iOS PWA boot IIFE で行う
 
 // ★設計変更宣言 (2026-05-10): user gesture 直近時刻を記録
 //   blockIfSensorNotGranted が「user gesture 起因」かを判定するため
@@ -2732,26 +2698,18 @@ function showSensorBannerIfNeeded(){
     if(_noteSP) _noteSP.style.display = 'none';
     return;
   }
-  // ★設計変更宣言 (2026-05-10 再修正 v2): orange バナー表示条件を v2 flag に統一
-  //   旧: iOS PWA 未許可時 = sensorRestoreBanner (orange) を即時表示 → 初回 NG
-  //   旧 (前修正): orange バナー完全廃止 → 拒否ユーザーへの再リクエスト導線消失
-  //   新 (v2): localStorage.sensor_denied_v2 === '1' のときだけ orange 表示
-  //           それ以外 (起動時/初回/DL完了後) は青ボタン btnSensorPermission のみ
+  // ★設計変更宣言 (2026-05-10): v2 flag check を削除し本番と同じシンプル仕様に統一
+  //   iOS PWA 未許可時は orange banner を表示 + 青ボタンも表示
+  //   (条件は呼出元で iOS/standalone/sessionStorage チェック済み)
   const banner = document.getElementById('sensorRestoreBanner');
-  if(localStorage.getItem('sensor_denied_v2') === '1'){
-    if(banner){
-      banner.style.display = 'block';
-      setTimeout(() => banner.scrollIntoView({behavior:'smooth', block:'end'}), 100);
-    }
-    if(typeof dlog === 'function') dlog('[Sensor] v2 拒否歴あり → orange バナー表示');
-  } else {
-    // 拒否歴なし: orange バナーは出さない (既に出てたら消す = 前バージョン残留対策)
-    if(banner && banner.style.display !== 'none') banner.style.display = 'none';
-    if(typeof dlog === 'function') dlog('[Sensor] 青ボタン表示 (orange なし)');
+  if(banner){
+    banner.style.display = 'block';
+    setTimeout(() => banner.scrollIntoView({behavior:'smooth', block:'end'}), 100);
   }
-  // 「センサーを許可する」青ボタンは未許可なら常に表示
+  // 「センサーを許可する」青ボタンも未許可なら常に表示
   if(_btnSP) _btnSP.style.display = 'inline-block';
   if(_noteSP) _noteSP.style.display = 'block';
+  if(typeof dlog === 'function') dlog('[Sensor] banner shown');
 }
 
 // ─── メインボタン ───
@@ -4141,10 +4099,6 @@ function requestSensorPermission(){
       localStorage.setItem('motion_granted','1');
       // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
       sessionStorage.setItem('sensor_permission_active','1');
-      // ★設計変更宣言 (2026-05-10): 許可成功時は v2 拒否履歴をクリア
-      //   → 次回起動時に orange バナーが出ないようにする
-      try { localStorage.removeItem('sensor_denied_v2'); } catch(_){}
-
       // 2026/05/02：バナーから許可ボタン削除済み・即座に非表示
       const banner = document.getElementById('sensorRestoreBanner');
       if(banner && banner.style.display !== 'none'){
@@ -4166,16 +4120,12 @@ function requestSensorPermission(){
       } catch(e){ console.error('[GPS] 起動エラー:', e); }
 
     } else {
-      // 許可失敗（iOSキャンセル or user gesture 不足）
-      // ★設計変更宣言 (2026-05-10): v2 拒否歴を localStorage に永続化
-      //   → 次回起動時に orange バナー自動表示の根拠フラグになる
-      //   sensor_denied_v2: ユーザーが Deny ボタンを押した場合のみ '1'
-      try { localStorage.setItem('sensor_denied_v2','1'); } catch(_){}
+      // 許可失敗（iOSキャンセル or user gesture 不足）：バナーをそのまま表示
       const banner = document.getElementById('sensorRestoreBanner');
       if(banner){
         banner.style.display = 'block';
       }
-      dlog('[GPS] センサー許可失敗・v2 拒否歴記録 + バナー表示');
+      dlog('[GPS] センサー許可失敗・バナー表示');
     }
   });
 }
@@ -4252,21 +4202,14 @@ function refreshSensorPermission(){
   }
 
   if(_isIOS){
-    // ★設計変更宣言 (2026-05-10 再修正 v2): orange バナーの表示条件を v2 flag に統一
-    //   旧 (壊れた): sensor_denied_once が前バージョンの自動要求失敗で残留 → 誤発火
-    //   旧 (前修正): 起動時 orange バナー完全廃止 → 拒否ユーザーへの導線消失
-    //   新 (v2): localStorage.sensor_denied_v2 === '1' のときだけ起動時 orange 表示
-    //           v2 は granted で removeItem・denied で setItem される
-    //           (詳細は script 先頭 migration コメント参照)
-    //   sessionStorage.sensor_permission_active は同 session 内 permission
-    //   維持判定にのみ使用 (banner 出すかどうかとは無関係に)
+    // ★設計変更宣言 (2026-05-10): 本番 (Daikou-app) と同じシンプル仕様に統一
+    //   iOS PWA + sessionStorage.sensor_permission_active !== '1' なら orange 表示
+    //   (sessionStorage はタスクキルで消える・ページ遷移で残る性質)
     if(sessionStorage.getItem('sensor_permission_active') === '1'){
+      // 同 session 内 (設定画面遷移後など)：バナー出さない
       return;
     }
-    if(localStorage.getItem('sensor_denied_v2') === '1'){
-      const banner = document.getElementById('sensorRestoreBanner');
-      if(banner) banner.style.display = 'block';
-    }
+    document.getElementById('sensorRestoreBanner').style.display = 'block';
     return;
   }
 
