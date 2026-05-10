@@ -1622,30 +1622,37 @@ _setupMmWorker('init');
 //       sw.js キャッシュヒットなら roads-{pref}.js が ms 単位で load 完了
 //       loadSettings 内の旧 warm-up は idempotent な fallback として残置
 //   絶対ルール準拠: 道路距離課金担保のための高速化・安全側格下げではない
+// ★設計変更宣言 (2026-05-10): iOS の場合は PWA standalone のみ実行
+//   iOS Safari (非 PWA) で起動時に GPS 関連処理が動くと不適切なため
+//   iOS 以外 (Android 等) は従来通り無条件実行
 try {
-  const _bootRaw = localStorage.getItem('daikou_driving_state')
-                || localStorage.getItem('daikou_business_state');
-  if(_bootRaw){
-    const _b = JSON.parse(_bootRaw);
-    let _bootLat = null, _bootLng = null;
-    if(_b){
-      if(typeof _b.last_lat === 'number' && typeof _b.last_lng === 'number'){
-        _bootLat = _b.last_lat; _bootLng = _b.last_lng;
-      } else if(_b.last_gps && typeof _b.last_gps.lat === 'number'){
-        _bootLat = _b.last_gps.lat; _bootLng = _b.last_gps.lng;
+  const _bootIsIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const _bootGpsAllowed = !_bootIsIOS || window.navigator.standalone === true;
+  if(_bootGpsAllowed){
+    const _bootRaw = localStorage.getItem('daikou_driving_state')
+                  || localStorage.getItem('daikou_business_state');
+    if(_bootRaw){
+      const _b = JSON.parse(_bootRaw);
+      let _bootLat = null, _bootLng = null;
+      if(_b){
+        if(typeof _b.last_lat === 'number' && typeof _b.last_lng === 'number'){
+          _bootLat = _b.last_lat; _bootLng = _b.last_lng;
+        } else if(_b.last_gps && typeof _b.last_gps.lat === 'number'){
+          _bootLat = _b.last_gps.lat; _bootLng = _b.last_gps.lng;
+        }
       }
-    }
-    if(_bootLat != null && _bootLng != null){
-      // 0ms setTimeout で current task を抜けてから (Worker creation の microtask 後)
-      setTimeout(function(){
-        try {
-          if(typeof _autoLoadNearbyRoads === 'function'){
-            _autoLoadNearbyRoads(_bootLat, _bootLng);
-            if(typeof dlog === 'function') dlog('[boot-fast] roads warm-up at ' +
-              _bootLat.toFixed(4) + ',' + _bootLng.toFixed(4));
-          }
-        } catch(_){}
-      }, 0);
+      if(_bootLat != null && _bootLng != null){
+        // 0ms setTimeout で current task を抜けてから (Worker creation の microtask 後)
+        setTimeout(function(){
+          try {
+            if(typeof _autoLoadNearbyRoads === 'function'){
+              _autoLoadNearbyRoads(_bootLat, _bootLng);
+              if(typeof dlog === 'function') dlog('[boot-fast] roads warm-up at ' +
+                _bootLat.toFixed(4) + ',' + _bootLng.toFixed(4));
+            }
+          } catch(_){}
+        }, 0);
+      }
     }
   }
 } catch(_){}
@@ -2269,13 +2276,19 @@ function loadSettings(){
       //   src 経由 load 済 → 500ms 待つ理由なし
       //   _autoLoadNearbyRoads は _forwardedPrefs.has で重複防止しているので
       //   line 1600 fast-path との二重呼出も safe
-      setTimeout(function(){
-        if(typeof _autoLoadNearbyRoads === 'function'){
-          _autoLoadNearbyRoads(lat, lng);
-          if(typeof dlog === 'function') dlog('[boot] roads warm-up at last GPS ' +
-            lat.toFixed(4) + ',' + lng.toFixed(4));
-        }
-      }, 0);
+      // ★設計変更宣言 (2026-05-10): iOS の場合は PWA standalone のみ実行
+      //   iOS Safari (非 PWA) では GPS 関連処理 skip
+      const _ls_isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const _ls_gpsAllowed = !_ls_isIOS || window.navigator.standalone === true;
+      if(_ls_gpsAllowed){
+        setTimeout(function(){
+          if(typeof _autoLoadNearbyRoads === 'function'){
+            _autoLoadNearbyRoads(lat, lng);
+            if(typeof dlog === 'function') dlog('[boot] roads warm-up at last GPS ' +
+              lat.toFixed(4) + ',' + lng.toFixed(4));
+          }
+        }, 0);
+      }
     }
   } catch(e){
     if(typeof dlog === 'function') dlog('[boot] warm-up error: ' + e.message);
@@ -4529,6 +4542,10 @@ setInterval(function(){
 //   失敗時は no-op (= 従来挙動)。業務開始 → startGPS で再試行される。
 function _preloadRoadsForBusinessStart(){
   try {
+    // ★設計変更宣言 (2026-05-10): iOS の場合は PWA standalone のみ実行
+    //   iOS Safari (非 PWA) では getCurrentPosition skip
+    const _prIsIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if(_prIsIOS && window.navigator.standalone !== true) return;
     if(!navigator.geolocation || !navigator.geolocation.getCurrentPosition) return;
     if(typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.size > 0) return;
     navigator.geolocation.getCurrentPosition(function(pos){
