@@ -850,7 +850,12 @@ setInterval(_checkTripLimit, 30000);
 <div class="dl-update-toast" id="dlUpdateToast" onclick="onDlToastTap()">✅ 最新の地図データに更新しました</div>
 
 <!-- 初回DL UI（IndexedDBの dl_completed=true で2回目以降は表示しない） -->
-<div class="dl-overlay" id="dlOverlay">
+<!-- ★設計変更宣言 (2026-05-10): inline style="display:none" を追加
+     CSS .dl-overlay { display:none } と二重で hide。FOUC や stale cache で
+     .show class が残留しても inline style がより優先 (同 specificity だが
+     後勝ち) で hide 状態を維持。showOverlay/hideOverlay は inline style を
+     明示的に書き換える方式に変更。 -->
+<div class="dl-overlay" id="dlOverlay" style="display:none;">
   <!-- 状態1：DL中 -->
   <div class="dl-state-loading show" id="dlStateLoading">
     <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
@@ -1362,13 +1367,21 @@ function _showSensorBannerIfDeniedV2(){
     if(__b) __b.style.display = 'block';
   } catch(_){}
 }
-// ① 即時 (DOM が既に parse 済みなら成功)
+// ★設計変更宣言 (2026-05-10): retry 戦略を強化 (前修正の readyState 分岐は
+//   タイミング次第で listener が登録されないケースがあったため常時登録に変更)
+// ① 即時 (DOM parse 済みなら成功)
 _showSensorBannerIfDeniedV2();
-// ② DOMContentLoaded で再実行 (DOM 確実 ready・主な fallback)
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', _showSensorBannerIfDeniedV2);
+// ② microtask キューで再実行 (現在の sync 処理直後)
+if(typeof queueMicrotask === 'function'){
+  queueMicrotask(_showSensorBannerIfDeniedV2);
 }
-// ③ load イベントで最後の保険 (画像/SW 含む全 resource load 完了)
+// ③ 0ms / 100ms / 500ms の setTimeout retry (短期保険)
+setTimeout(_showSensorBannerIfDeniedV2, 0);
+setTimeout(_showSensorBannerIfDeniedV2, 100);
+setTimeout(_showSensorBannerIfDeniedV2, 500);
+// ④ DOMContentLoaded を常時登録 (readyState に関わらず・複数登録 safe)
+document.addEventListener('DOMContentLoaded', _showSensorBannerIfDeniedV2);
+// ⑤ window load で最後の保険 (画像/SW 含む全 resource load 完了)
 window.addEventListener('load', _showSensorBannerIfDeniedV2);
 
 // ★設計変更宣言 (2026-05-10): user gesture 直近時刻を記録
@@ -3733,13 +3746,24 @@ const DakomeDL = (function(){
   }
 
   // ── UI制御 ──
+  // ★設計変更宣言 (2026-05-10): inline style.display を明示的に書き換える方式に変更
+  //   旧: classList.add/remove('show') のみ → 要素に inline style="display:none"
+  //       が付与されると class は negate されてしまう (inline 優先)
+  //   新: o.style.display を明示的に 'flex' / 'none' に切り替え + class も同期
+  //       inline style を書き換えるので必ず効く
   function showOverlay(){
     const o = document.getElementById('dlOverlay');
-    if(o) o.classList.add('show');
+    if(o){
+      o.style.display = 'flex';
+      o.classList.add('show');
+    }
   }
   function hideOverlay(){
     const o = document.getElementById('dlOverlay');
-    if(o) o.classList.remove('show');
+    if(o){
+      o.style.display = 'none';
+      o.classList.remove('show');
+    }
   }
   // 完了バナー表示 → 1.5秒後に dl_completed=true を保存し
   //  ① 業務未開始ならメイン画面（idle）へ自動遷移（業務開始押下と等価）
