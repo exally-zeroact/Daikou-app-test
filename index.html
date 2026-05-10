@@ -2115,10 +2115,14 @@ function checkDrivingRestore(){
     //   司さんがボタン押下時に user gesture で全部復活させる
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     if(isIOS && window.navigator.standalone === true){
-      // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+      // ★設計変更宣言 (2026-05-10): businessStart 画面では青ボタンを表示・orange banner のみ抑制
       const _bs = document.getElementById('screenBusinessStart');
-      const _bsVisible = _bs && _bs.style.display !== 'none';
-      if(!_bsVisible){
+      const _onBsScreen = _bs && _bs.style.display !== 'none';
+      if(_onBsScreen){
+        const _btn = document.getElementById('btnSensorPermission');
+        if(_btn) _btn.style.display = 'block';
+        if(typeof dlog === 'function') dlog('[復元] businessStart 中 → 青ボタン表示・orange 抑制');
+      } else {
         const sensorBanner = document.getElementById('sensorRestoreBanner');
         if(sensorBanner) sensorBanner.style.display = 'block';
         if(typeof dlog === 'function') dlog('[復元] センサー再起動バナー表示');
@@ -2753,10 +2757,12 @@ function showSensorBannerIfNeeded(){
     if(typeof dlog === 'function') dlog('[Sensor] DL 完了直後 → banner 抑制');
     return;
   }
-  // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は orange banner を出さない
+  // ★設計変更宣言 (2026-05-10): businessStart 画面では青ボタンを表示・orange banner のみ抑制
   const _bs = document.getElementById('screenBusinessStart');
   if(_bs && _bs.style.display !== 'none'){
-    if(typeof dlog === 'function') dlog('[Sensor] screenBusinessStart 表示中 → banner 抑制');
+    const _btn = document.getElementById('btnSensorPermission');
+    if(_btn) _btn.style.display = 'block';
+    if(typeof dlog === 'function') dlog('[Sensor] businessStart 中 → 青ボタン表示・orange 抑制');
     return;
   }
   const banner = document.getElementById('sensorRestoreBanner');
@@ -3586,9 +3592,14 @@ try {
       try {
         if(_isIOS && window.navigator.standalone === true &&
            sessionStorage.getItem('sensor_permission_active') !== '1'){
-          // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+          // ★設計変更宣言 (2026-05-10): businessStart 画面では青ボタン表示・orange 抑制
           const _bs = document.getElementById('screenBusinessStart');
-          if(!_bs || _bs.style.display === 'none'){
+          const _onBs = _bs && _bs.style.display !== 'none';
+          if(_onBs){
+            const _btn = document.getElementById('btnSensorPermission');
+            if(_btn) _btn.style.display = 'block';
+            if(typeof dlog === 'function') dlog('[Business] active 復元: businessStart 中 → 青ボタン表示');
+          } else {
             const _b = document.getElementById('sensorRestoreBanner');
             if(_b) _b.style.display = 'block';
             if(typeof dlog === 'function') dlog('[Business] active 復元: orange banner 強制表示');
@@ -4197,16 +4208,19 @@ function requestSensorPermission(){
 
     } else {
       // 許可失敗（iOSキャンセル or user gesture 不足）：バナーをそのまま表示
-      // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+      // ★設計変更宣言 (2026-05-10): businessStart 画面では青ボタン表示・orange 抑制
       const _bs = document.getElementById('screenBusinessStart');
-      if(!_bs || _bs.style.display === 'none'){
+      const _onBs = _bs && _bs.style.display !== 'none';
+      if(_onBs){
+        const _btn = document.getElementById('btnSensorPermission');
+        if(_btn) _btn.style.display = 'block';
+        dlog('[GPS] センサー許可失敗・businessStart 中 → 青ボタン表示');
+      } else {
         const banner = document.getElementById('sensorRestoreBanner');
         if(banner){
           banner.style.display = 'block';
         }
         dlog('[GPS] センサー許可失敗・バナー表示');
-      } else {
-        dlog('[GPS] センサー許可失敗・businessStart 画面のため banner 抑制');
       }
     }
   });
@@ -4301,9 +4315,13 @@ function refreshSensorPermission(){
     const _dlO = document.getElementById('dlOverlay');
     if(_dlO && _dlO.style.display === 'flex') return;
     if(sessionStorage.getItem('dl_just_completed') === '1') return;
-    // ★設計変更宣言 (2026-05-10): screenBusinessStart 表示中は banner 出さない
+    // ★設計変更宣言 (2026-05-10): businessStart 画面では青ボタンを表示・orange のみ抑制
     const _bs = document.getElementById('screenBusinessStart');
-    if(_bs && _bs.style.display !== 'none') return;
+    if(_bs && _bs.style.display !== 'none'){
+      const _btn = document.getElementById('btnSensorPermission');
+      if(_btn) _btn.style.display = 'block';
+      return;
+    }
     document.getElementById('sensorRestoreBanner').style.display = 'block';
     return;
   }
