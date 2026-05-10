@@ -3755,6 +3755,12 @@ const DakomeDL = (function(){
       o.style.display = 'flex';
       o.classList.add('show');
     }
+    // ★設計変更宣言 (2026-05-10): showOverlay 時に orange banner を強制非表示
+    //   DL UI 表示中は orange banner を画面に出さない (DL 画面に重畳防止)
+    try {
+      const _b = document.getElementById('sensorRestoreBanner');
+      if(_b) _b.style.display = 'none';
+    } catch(_){}
   }
   function hideOverlay(){
     const o = document.getElementById('dlOverlay');
