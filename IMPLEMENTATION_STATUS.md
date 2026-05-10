@@ -1,9 +1,9 @@
-# ダイコメ Map Matching 実装状況
+# ダイコメ 実装状況
 
 最終更新: 2026-05-10
 管理: 司さん + Claude
 
-このファイルはダイコメの Map Matching / 距離計測関連の実装状況を一元管理する。
+このファイルはダイコメの Map Matching / 距離計測 / 課金 / UI / リリース準備の実装状況を一元管理する。
 セッション間で継続してメンテナンスする。
 
 ────────────────────────────────────────────────────────────────────
@@ -60,30 +60,101 @@
 
 ### Map Matching 拡張 (T1-T12・全完了)
 
+commit a5eec56a で T1+T2+T3+T8+T10+T11+T12 を一括実装し、
+T4-T7・T9 と合わせて全 12 機能完了。
+
 | ID | 機能 | 場所 | 状態 |
 |----|------|------|------|
-| T1 | DEM 3D 距離補正 (急坂対応) | map-matcher.js _apply3DCorrection | 実装済 |
-| T2 | タイル間 border node 接続 (multi-tile Dijkstra) | map-matcher.js _runTileDijkstraMulti | 実装済 |
-| T3 | POI proximity prior +5% | map-matcher.js (framework) | framework のみ・実 POI データ未投入 |
-| T4 | turn:restriction 違反ペナルティ ×0.05 | map-matcher.js + roads-decoder.js | framework のみ・実 restrictions データ未投入 |
-| T5 | Adaptive Kalman Q (道路種別連動) | gps-worker.js + gps.js + meter.js | 実装済 |
-| T6 | maxspeed σ_perp チューニング (8 段階) | map-matcher.js + roads-decoder.js + build-roads.js | 実装済・47 県 v7 build 済 |
-| T7 | 道路曲率による σ_perp 動的化 | map-matcher.js | 実装済 |
-| T8 | Cross-user pheromone (Firebase) | map-matcher.js + firebase.js + meter.js | framework のみ・Firebase 本番運用未開始 |
-| T9 | GPS jump 検出 + 確率ベース判定 | map-matcher.js | 実装済 |
-| T10 | Lane-level matching (dual carriageway) | map-matcher.js | 実装済 |
-| T11 | 時間帯条件付き oneway / 通行制限 | map-matcher.js (framework) | framework のみ・実データ未投入 |
-| T12 | DeviceMotion 拡大活用 (急ブレーキ・慣性 quality) | gps-worker.js | 実装済 (急ブレーキのみ・慣性は quality check 止まり) |
+| T1 | DEM 3D 距離補正 (急坂対応) | map-matcher.js _apply3DCorrection | ✅ 実装済 (commit a5eec56a) |
+| T2 | タイル間 border node 接続 (multi-tile Dijkstra) | map-matcher.js _runTileDijkstraMulti | ✅ 実装済 (commit a5eec56a) |
+| T3 | POI proximity prior +5% | map-matcher.js (framework) | ✅ framework のみ・実 POI データ未投入 |
+| T4 | turn:restriction 違反ペナルティ ×0.05 | map-matcher.js + roads-decoder.js | ✅ framework のみ・実 restrictions データ未投入 |
+| T5 | Adaptive Kalman Q (道路種別連動) | gps-worker.js + gps.js + meter.js | ✅ 実装済 |
+| T6 | maxspeed σ_perp チューニング (8 段階) | map-matcher.js + roads-decoder.js + build-roads.js | ✅ 実装済・47 県 v7 build 済 |
+| T7 | 道路曲率による σ_perp 動的化 | map-matcher.js | ✅ 実装済 |
+| T8 | Cross-user pheromone (Firebase) | map-matcher.js + firebase.js + meter.js | ✅ framework のみ・Firebase 本番運用未開始 |
+| T9 | GPS jump 検出 + 確率ベース判定 | map-matcher.js | ✅ 実装済 |
+| T10 | Lane-level matching (dual carriageway) | map-matcher.js | ✅ 実装済 (commit a5eec56a) |
+| T11 | 時間帯条件付き oneway / 通行制限 | map-matcher.js (framework) | ✅ framework のみ・実データ未投入 |
+| T12 | DeviceMotion 拡大活用 (急ブレーキ・慣性 quality) | gps-worker.js | ✅ 実装済 (急ブレーキのみ・慣性は quality check 止まり) |
+
+### Phase 1: フォールバック強化 (全完了・2026-05-10)
+
+| ID | 機能 | 詳細 | 場所 |
+|----|------|------|------|
+| Phase1.B | トンネル A→B polyline 精緻化 | ✅ 実装完了 (commit c18b2c57)。region-loader.js に findTunnelByPosition / findBridgeByPosition / calcInfraPolylineDistance を追加。meter.js calculateGapFill が A・B 両方が同じ infra 上にあれば polyline 距離で計算・Math.max(polylineDist, naive) で過少課金防止 | meter.js + region-loader.js |
+| Phase1.C | Off-Road Mode (GPS polyline 累積) | ✅ 実装完了 (commit fa11e75f)。snap 連続失敗 5 回検出で起動・retroactive add で取り漏れ補填・Worker B 復帰で二重課金回避し終了。state.offroad_distance_m / offroad_count を追加 | meter.js + map-matcher.js |
+| Phase1.ZUPT | Zero Velocity Update | ✅ 実装完了 (commit 00a12687)。KalmanGPS class に setZuptActive 追加・ZUPT active 時 Q=0.01 (≒vx/vy=0) で位置共分散維持。直前 frame の isStationary を carry し 1 frame lag で適用 | gps-worker.js |
+
+### Phase 2: AI 訓練データ蓄積 framework (全完了・2026-05-10)
+
+| ID | 機能 | 詳細 | 場所 |
+|----|------|------|------|
+| Phase2.A | training-collector | ✅ 実装完了 (commit ce7e4c93)。js/training-collector.js 新規・IndexedDB 'daikome-training'/'samples'・80 sample×3 軸 (20Hz 4 秒)・FIFO 50,000 件・位置情報非保存 | js/training-collector.js + meter.js + index.html |
+| Phase2.B | training-uploader | ✅ 実装完了 (commit 46964bc4)。js/training-uploader.js 新規・WiFi+充電+1日gate+500sample threshold・CompressionStream gzip best-effort・SW Background Sync (Android Chrome) + visibilitychange/online (iOS) | js/training-uploader.js + firebase.js + sw.js + index.html |
+| Phase2.C | 蓄積データの仕様 | 1 サンプル ≈ 2KB・1 trip 約 300KB・gzip 50KB・最大 100MB ローカル保持 | spec |
+
+### Phase 3: 同意 UI + 利用規約 (全完了・2026-05-10)
+
+| ID | 機能 | 詳細 | 場所 |
+|----|------|------|------|
+| Phase3.UI | 注意書き表示 | ✅ 実装完了 (commit 87f878c2)。初回起動時オーバーレイバナー (緑系・1 回限り)・OK/閉じるで consent 確定・即時 refreshEnabledFromStorage | index.html |
+| Phase3.Settings | 設定画面 | ✅ 実装完了。settings.html の「学習データ提供」セクション・トグル/詳細 collapsible/過去データ削除ボタン | settings.html |
+| Phase3.Terms | 利用規約改定 | ✅ 実装完了。settings.html 内に inline 段落 (送信される/されない の明示) | settings.html (inline) |
+
+### fareConfig v2 (commit 62e27a4b・2026-05-10)
+
+旧 v1 (base/add 単一倍率) を v2 (tiers + surcharges[] + autoSurcharges + vehicles + wait + minFare/maxFare + rounding) に拡張。
+calcFare を 7-step pipeline 化 (tiers/fallback → vehicle → manual → auto → wait → clamp → rounding)。
+
+| 項目 | 詳細 | 場所 |
+|------|------|------|
+| fare.html 新規 | 8 タブ (基本/段階/割増/自動割増/車種/待機/区間/確認)・portrait/landscape 自動切替・mint カラー・DM Mono/Noto Sans JP | fare.html (785 行) |
+| tiers 段階料金 | 距離区切りで段階的に単価変更可能 | js/meter.js calcFare |
+| vehicle 車種別倍率 | 軽/普通/ワゴン等の係数 | js/meter.js + js/firebase.js |
+| 手動 surcharges[] | 任意数の割増を ID 管理・トグル制御 | js/meter.js |
+| autoSurcharges | 時間帯/曜日条件で自動付与 | js/meter.js calcFare |
+| wait 料金 | 待機時間課金 | js/meter.js calcFare |
+| min/max clamp + rounding | 下限/上限/丸め | js/meter.js calcFare |
+| Firebase v1→v2 自動 migration | loadFareConfig 内で書き戻し (surchargeRate → surcharges[0]='legacy') | js/firebase.js |
+| 追加 API | toggleSurcharge / setSurchargeActive / getActiveSurcharges / getSurchargeMultiplier / setVehicleType / getVehicleType | js/meter.js |
+
+絶対ルール準拠: 全実装は calcFare 内で実倍率として消費・参照値や dead code 化なし。
+
+### リリース前保護機能 (commit d30d7290・2026-05-10)
+
+| ID | 機能 | 詳細 | 場所 |
+|----|------|------|------|
+| S1 | 複数タブ guard (BroadcastChannel) | チャンネル名 'daikome-tab-guard'・他タブ検出時に閲覧専用化 (赤バナー + ボタン disabled + window._tabReadOnly)・onBusinessStart でも block+toast | index.html |
+| S2 | 業務開始忘れ警告 | GPS 5km/h+ × accuracy<=50m × Meter.state.running=false が 10 秒継続で橙バナー・[業務開始する] / [閉じる] (5 分抑制) | index.html |
+| S3 | 業務終了 confirm + 1 trip 上限警告 | onBusinessEnd 冒頭で confirm dialog・setInterval 30 秒で distance>500km なら赤警告バナー・running=false で自動非表示 | index.html |
+| M1 | DAIKOME_APP_VERSION 設定 | index.html `<head>` 冒頭に `<script>window.DAIKOME_APP_VERSION='1.0.0';</script>`・training-collector が deviceId と一緒に記録 | index.html + js/training-collector.js |
+| M2 | sw.js firebase-sync dead handler 削除 | 旧 'firebase-sync' tag は誰も register していなかった・'training-upload' のみ残す | sw.js |
+
+### UI 大改修 (commit 0c705436・2026-05-10)
+
+| 項目 | 詳細 | 場所 |
+|------|------|------|
+| 走行開始ボタン非表示 bug 修正 | screenIdle 初期 display:flex→none・screenBusinessStart 初期 display:none→flex・Business 未定義時も showScreen('businessStart') を強制呼出 | index.html |
+| センサー許可ダイアログ修正 | screenBusinessStart に「センサーを許可する」明示ボタン (#btnSensorPermission)・iOS PWA 未許可時のみ表示・user gesture 経由で requestSensorPermission() 発火 | index.html |
+| ボトムナビ 4 タブ追加 | 業務/履歴/使い方/設定・縦画面: 下端固定 + safe-area-inset-bottom・横画面 ≥700px: 左サイドナビに切替・iOS 標準色 (#007AFF / #fff / #8E8E93) | index.html / history.html / help.html / settings.html / fare.html |
+| help.html 新規 | 操作手順 7 + FAQ 6 アコーディオン形式・縦 1 列/横 2 列 grid | help.html (125 行) |
+| history.html 新規 | 走行履歴ページ | history.html |
+| settings.html シンプル化 | 通常: 料金設定リンク・学習データ提供 ON/OFF・過去データ削除のみ。隠し: 自動リセット・OSRM・精度テスト・走行履歴リンク (#devSection / #devSection2)。切替: タイトル「設定」5 秒長押し or URL hash #dev・localStorage に状態保存 | settings.html |
+| 割増/追加料金 UI 分離 | surcharge-group に「割増」セクションラベル追加・extras-list 上に「追加料金」セクションラベル追加・renderExtras() 同名グループ化 ({name} ×{count} 累計表示)・デフォルト extras 配列を空に変更 (旧プリセット 6 件削除) | index.html |
+| 縦横レスポンシブ | landscape 2 カラム/サイドナビ切替 (≥700px) | 全 HTML |
 
 ### データ・フォーマット
 
 | 項目 | 状態 |
 |------|------|
-| roads-{pref}.js v7 (24-bit bitmap・maxspeed bit 16-18) | 47 県全 build 済・合計 213 MB |
-| DP_TOLERANCE = 3m | 採択済・47 県 build 反映済 |
+| roads-{pref}.js v7 (24-bit bitmap・maxspeed bit 16-18) | 47 県全 build 済・**実測 203.94 MB / 47 ファイル** (commit 0949ddde) |
+| DP_TOLERANCE = 3m | 採択済 (DP=5→3 で 1.7 倍精度化)・47 県 build 反映済・基準 200MB を 6.5% 超過もユーザ判断で採択 = MM 精度優先 (commit 0949ddde) |
 | tunnels-{region}.js / bridges-{region}.js | 既存・8 region 合計 9,644 トンネル / 6,309 km |
 | DEM (5m mesh) tiles | 既存・47 県全カバー |
 | backbone graph (cross-pref routing) | 既存・31 MB |
+| Phase E (国土地理院 1/2,500) | ARCHIVED コメント追加・不採用確定 (測量法申請リスク)・スクリプト温存 |
+| Overture Maps 不採用確定 | Japan は 100% OSM source・TomTom 寄与ゼロ・size 1.89x の 3 重不採用理由 |
 
 ### Firebase 連携
 
@@ -91,38 +162,54 @@
 |------|------|
 | sessions_log (走行履歴) | 既存稼働 |
 | vehicles ステータス | 既存稼働 |
-| fareConfig (料金設定) | 既存稼働 |
+| fareConfig (料金設定 v2) | 稼働中・v1→v2 自動 migration あり |
 | pheromone (T8 cross-user・markVisited / pushSessionAggregates) | framework のみ・本番運用未開始 |
+| training data (Phase 2.B) | uploader 実装済・WiFi+充電 gate で送信 |
 
 ────────────────────────────────────────────────────────────────────
 
-## ❌ 未実装機能 (リリース前に実装する)
+## ❌ 未完了・残タスク
 
-### Phase 1: フォールバック強化 (1-2 日工数・最優先)
+### 実機テスト (最優先・コードは全完了)
 
-| ID | 機能 | 詳細 | 場所 |
-|----|------|------|------|
-| Phase1.B | トンネル A→B polyline 精緻化 | ✅ 実装完了 (2026-05-10・commit c18b2c57)。region-loader.js に findTunnelByPosition / findBridgeByPosition / calcInfraPolylineDistance を追加。meter.js calculateGapFill が A・B 両方が同じ infra 上にあれば polyline 距離で計算・Math.max(polylineDist, naive) で過少課金防止 | meter.js + region-loader.js |
-| Phase1.C | Off-Road Mode (GPS polyline 累積) | ✅ 実装完了 (2026-05-10・commit fa11e75f)。snap 連続失敗 5 回検出で起動・retroactive add で取り漏れ補填・Worker B 復帰で二重課金回避し終了。state.offroad_distance_m / offroad_count を追加 | meter.js + map-matcher.js |
-| Phase1.ZUPT | Zero Velocity Update | ✅ 実装完了 (2026-05-10・commit 00a12687)。KalmanGPS class に setZuptActive 追加・ZUPT active 時 Q=0.01 (≒vx/vy=0) で位置共分散維持。直前 frame の isStationary を carry し 1 frame lag で適用 | gps-worker.js |
+- [ ] 走行開始ボタン表示確認 (screenBusinessStart 初期表示)
+- [ ] センサー許可動作確認 (iOS PWA・user gesture 経由)
+- [ ] ボトムナビ 4 タブ動作確認 (業務/履歴/使い方/設定)
+- [ ] 縦横レイアウト切替確認 (landscape 2 カラム・サイドナビ)
+- [ ] Phase 1.B トンネル polyline 計算確認 (実トンネルでの A→B 距離)
+- [ ] Phase 1.C Off-Road Mode 確認 (snap 連続失敗 5 回・retroactive add・二重課金回避)
+- [ ] Phase 1.ZUPT 停車中位置 frozen 確認 (信号停車・駐車中の Kalman ドリフト抑制)
+- [ ] fareConfig v2 料金計算確認 (tiers/surcharge/vehicle/wait の 7-step pipeline)
 
-### Phase 2: AI 訓練データ収集 framework (2 日工数)
+### リリース必須
 
-| ID | 機能 | 詳細 | 場所 |
-|----|------|------|------|
-| Phase2.A | training-collector | ✅ 実装完了 (2026-05-10・commit ce7e4c93)。js/training-collector.js 新規・IndexedDB 'daikome-training'/'samples'・80 sample×3 軸 (20Hz 4 秒)・FIFO 50,000 件・位置情報非保存 | js/training-collector.js + meter.js + index.html |
-| Phase2.B | training-uploader | ✅ 実装完了 (2026-05-10・commit 46964bc4)。js/training-uploader.js 新規・WiFi+充電+1日gate+500sample threshold・CompressionStream gzip best-effort・SW Background Sync (Android Chrome) + visibilitychange/online (iOS) | js/training-uploader.js + firebase.js + sw.js + index.html |
-| Phase2.C | 蓄積データの仕様 | 1 サンプル ≈ 2KB・1 trip 約 300KB・gzip 50KB・最大 100MB ローカル保持 | spec |
+- [ ] iOS 実機 RAM 検証
+- [ ] 本番リポジトリ (Daikou-app) へのマージ
+- [ ] 法的ページ作成 (特商法・PP・利用規約)
+- [ ] Vercel Pro アップグレード
+- [ ] Stripe 統合
+- [ ] PWA WebAPK 問題解決
+- [ ] Oracle Cloud OSRM サーバー
+- [ ] .gitignore に .env 系追加
 
-### Phase 3: 同意 UI + 利用規約 (0.5 日工数)
+### 運用作業 (データ投入・別途必要)
 
-| ID | 機能 | 詳細 | 場所 |
-|----|------|------|------|
-| Phase3.UI | 注意書き表示 | ✅ 実装完了 (2026-05-10・commit 87f878c2)。初回起動時オーバーレイバナー (緑系・1 回限り)・OK/閉じるで consent 確定・即時 refreshEnabledFromStorage | index.html |
-| Phase3.Settings | 設定画面 | ✅ 実装完了。settings.html の '学習データ提供' セクション・トグル/詳細 collapsible/過去データ削除ボタン | settings.html |
-| Phase3.Terms | 利用規約改定 | ✅ 実装完了。settings.html 内に inline 段落 (送信される/されない の明示) | settings.html (inline) |
+- [ ] T3 47 県 POI データ収集
+- [ ] T4 turn:restriction 実データ投入
+- [ ] T11 oneway:conditional 実データ投入
+- [ ] T8 Firebase RTDB pheromone path 設計・運用
 
-### Phase 4: AI 推論統合 (将来・データ蓄積後・2-4 週間工数)
+### 業務品質 (未着手)
+
+| ID | 機能 | 詳細 |
+|----|------|------|
+| B7 | 決済種別記録 | 現金 / PayPay / クレカ |
+| B10 | 車両管理 | 複数車両切替 |
+| P1 | iOS Web Push 通知 | - |
+| P7 | Brotli 圧縮 | - |
+| V2 | 距離証明書発行 | - |
+
+### Phase 4: AI 推論統合 (将来・リリース後・データ蓄積後・2-4 週間工数)
 
 | ID | 機能 | 詳細 | 場所 |
 |----|------|------|------|
@@ -139,13 +226,14 @@
 | 項目 | 不採用理由 | 再評価条件 |
 |------|----------|----------|
 | 国土地理院 1/2,500 (Phase E) | 測量法承認申請リスク | 国土地理院がオープンデータ化した時 |
-| Overture Maps Transportation | Japan は 100% OSM source・size 1.89x | TomTom Japan 寄与が顕著になった時 |
+| Overture Maps Transportation | Japan は 100% OSM source・size 1.89x・寄与なし | TomTom Japan 寄与が顕著になった時 |
 | OBD-II / Web Bluetooth | ユーザー判断 (スマホ単体哲学) | (再評価予定なし) |
 | DP_TOLERANCE = 4 (格下げ) | 安全側格下げ禁止ルール | (再評価予定なし) |
 | Federated Learning | 実装コスト過大・ダイコメ規模で overkill | 1000+ driver 規模になった時 |
 | 国土数値情報 道路ライン | 1/25,000 精度・OSM より低精度 | (再評価予定なし) |
 | DRM / MMS 商用ライセンス | 年額数百万-数千万・予算規模 | 大手参入時 |
 | VICS / JARTIC | 絶対ルール「リアルタイム交通流対象外」 | (除外確定) |
+| GPS 直線距離課金 | 絶対ルール禁止 | (再評価予定なし) |
 
 不採用スクリプト (温存・ARCHIVED コメント付き):
 - scripts/parse-gsi-2500-gml.js
@@ -159,9 +247,9 @@
 
 | 段階 | DER 想定 | 状態 |
 |------|---------|------|
-| baseline (現状・Phase A-E + T1-T12 + DP=3) | 0.3-1.0% | 達成済 |
-| Phase 1 完了後 | 0.2-0.7% | 未実装 |
-| Phase 2-3 完了後 (蓄積 framework・推論なし) | 0.2-0.7% | 未実装・効果は推論時 |
+| baseline (現状・Phase A-E + T1-T12 + DP=3) | 0.3-1.0% | ✅ 達成済 |
+| Phase 1 完了後 | 0.2-0.7% | ✅ コード完了・実機検証待ち |
+| Phase 2-3 完了後 (蓄積 framework・推論なし) | 0.2-0.7% | ✅ コード完了・効果は推論時 |
 | Phase 4 完了後 (AI 推論統合) | 0.1-0.5% | 将来 |
 | Google Maps (推定) | 0.5-1.5% | 比較対象 |
 
@@ -184,19 +272,20 @@
 
 ────────────────────────────────────────────────────────────────────
 
-## 実装ロードマップ (リリース前に全部完了)
+## 実装ロードマップ (リリース前コードは全完了)
 
-| 順序 | フェーズ | 工数 | 累計 |
-|------|--------|------|------|
-| 1 | Phase 1.B トンネル精緻化 | 1 日 | 1 日 |
-| 2 | Phase 1.C Off-Road Mode | 4-8 時間 | 1.5-1.8 日 |
-| 3 | Phase 1.ZUPT | 4-8 時間 | 2-2.3 日 |
-| 4 | Phase 2.A 訓練データ収集 | 1 日 | 3-3.3 日 |
-| 5 | Phase 2.B 送信 framework | 1 日 | 4-4.3 日 |
-| 6 | Phase 3.UI + Terms | 0.5 日 | 4.5-4.8 日 |
-| 7 | 統合テスト + commit/push | 0.5 日 | 5-5.3 日 |
-
-合計: 約 5 日工数 (リリース前に全部実装)
+| 順序 | フェーズ | 状態 |
+|------|--------|------|
+| 1 | Phase 1.B トンネル精緻化 | ✅ 完了 (c18b2c57) |
+| 2 | Phase 1.C Off-Road Mode | ✅ 完了 (fa11e75f) |
+| 3 | Phase 1.ZUPT | ✅ 完了 (00a12687) |
+| 4 | Phase 2.A 訓練データ収集 | ✅ 完了 (ce7e4c93) |
+| 5 | Phase 2.B 送信 framework | ✅ 完了 (46964bc4) |
+| 6 | Phase 3.UI + Terms | ✅ 完了 (87f878c2) |
+| 7 | fareConfig v2 + fare.html | ✅ 完了 (62e27a4b) |
+| 8 | リリース前保護機能 S1+S2+S3+M1+M2 | ✅ 完了 (d30d7290) |
+| 9 | UI 大改修 + ボトムナビ + help.html | ✅ 完了 (0c705436) |
+| 10 | 統合テスト + 実機検証 + 本番マージ | 🔲 残タスク |
 
 Phase 4 (AI 推論) は データ蓄積後に判断・別フェーズ
 
@@ -208,6 +297,7 @@ Phase 4 (AI 推論) は データ蓄積後に判断・別フェーズ
 - tests/meter-mm-priority.js (16 アサーション)
 - tests/compare-baseline.js
 - 実機テスト: トンネル・地下駐車場・私道・農道のシナリオ別計測 (リリース前)
+- fareConfig v2: tiers/surcharge/vehicle/wait の組み合わせ料金計算実機確認
 
 ────────────────────────────────────────────────────────────────────
 
