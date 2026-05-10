@@ -15,9 +15,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
 /* iOS Safari rubber-band 抑制（メーター画面の無限スクロール防止） */
-html{height:100%;overscroll-behavior:none;}
+/* ★設計変更宣言 (2026-05-10): html/body 初期 background を #007AFF (青) に統一
+   旧: body=#fff (白) → PWA 起動直後 splash → body 描画 で白画面が数秒 visible
+   新: html/body=#007AFF (manifest.json background_color と同色) →
+       splash → body 描画 → dl-overlay (#007AFF) まで全て同色で連続化
+   appbar / 各 screen は子要素 background で上書きされるため UX 影響なし */
+html{height:100%;overscroll-behavior:none;background:#007AFF;}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100vh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;}
+body{font-family:'Noto Sans JP',sans-serif;background:#007AFF;color:#111;height:100vh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;}
 /* 画面内 scroll コンテナはバウンスを内側で完結させる（親への伝播禁止） */
 /* 2026-05-08: #screenDriving を追加。メーター画面で起きる Android rubber-band/iOS momentum 由来の
    「スクロールが無限に続く」バグの根本対策（業務中の誤タップ事故防止） */
@@ -1345,21 +1350,28 @@ let _preloadDone = false;
 //   ↓ 旧フラグ migration (一度だけ・以降は v2 のみ参照)
 try { localStorage.removeItem('sensor_denied_once'); } catch(_){}
 
-// ★設計変更宣言 (2026-05-10): orange バナー表示を script 先頭で fast-path
-//   旧: 該当 IIFE が line 4108 付近・宣言や関数定義 3000 行を経由して実行
-//       → sensor_denied_v2='1' でも banner 表示が visibly 遅延
-//   新: declarations 直後に同等の判定 + display='block' を実行
-//       下流の IIFE は idempotent なのでそのまま残す (defensive)
-//   ※ 該当 banner 要素は HTML line 836 で既に DOM 上にあるため取得可能
-try {
-  if(_isIOS && window.navigator.standalone === true){
-    if(sessionStorage.getItem('sensor_permission_active') !== '1' &&
-       localStorage.getItem('sensor_denied_v2') === '1'){
-      const __b = document.getElementById('sensorRestoreBanner');
-      if(__b) __b.style.display = 'block';
-    }
-  }
-} catch(_){}
+// ★設計変更宣言 (2026-05-10 再修正): orange バナー fast-path に DOMContentLoaded retry を追加
+//   旧: script 先頭の 1 回 try ブロック・getElementById が null だと永久に出ない
+//       → 1 回目のタスクキル後再起動で「タップしないと banner が出ない」現象
+//   新: 関数化 + 即時呼出 + DOMContentLoaded + load の 3 段保険で確実に表示
+//       関数は idempotent (条件チェック後 display='block' するだけ・複数回呼んでも害なし)
+function _showSensorBannerIfDeniedV2(){
+  try {
+    if(!_isIOS || window.navigator.standalone !== true) return;
+    if(sessionStorage.getItem('sensor_permission_active') === '1') return;
+    if(localStorage.getItem('sensor_denied_v2') !== '1') return;
+    const __b = document.getElementById('sensorRestoreBanner');
+    if(__b) __b.style.display = 'block';
+  } catch(_){}
+}
+// ① 即時 (DOM が既に parse 済みなら成功)
+_showSensorBannerIfDeniedV2();
+// ② DOMContentLoaded で再実行 (DOM 確実 ready・主な fallback)
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', _showSensorBannerIfDeniedV2);
+}
+// ③ load イベントで最後の保険 (画像/SW 含む全 resource load 完了)
+window.addEventListener('load', _showSensorBannerIfDeniedV2);
 
 // ★設計変更宣言 (2026-05-10): user gesture 直近時刻を記録
 //   blockIfSensorNotGranted が「user gesture 起因」かを判定するため
