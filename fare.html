@@ -153,14 +153,18 @@ body{display:flex;flex-direction:column;overflow:hidden;}
         <div class="form-row"><div class="form-label">加算料金</div><div><input class="form-input" type="number" id="addFare" min="0"><span class="form-unit">円</span></div></div>
         <div class="form-row"><div class="form-label">加算距離</div><div><input class="form-input" type="number" id="addDistance" min="0"><span class="form-unit">m</span></div></div>
       </div>
+      <!-- ★設計変更宣言 (2026-05-11): 最低/上限料金 と 丸め単位 のラベル・説明を改善
+           旧: 「最低 / 上限料金」「空欄=制限なし」「丸め単位」だけで意味が伝わらず
+           新: 用途と動作例を併記してドライバーが見て分かるように -->
       <div class="card">
-        <div class="card-title">最低 / 上限料金</div>
-        <div class="card-desc">空欄=制限なし</div>
-        <div class="form-row"><div class="form-label">最低料金</div><div><input class="form-input" type="number" id="minFare" min="0" placeholder="なし"><span class="form-unit">円</span></div></div>
-        <div class="form-row"><div class="form-label">上限料金</div><div><input class="form-input" type="number" id="maxFare" min="0" placeholder="なし"><span class="form-unit">円</span></div></div>
+        <div class="card-title">請求の下限・上限 (任意)</div>
+        <div class="card-desc">自動計算後の料金がこの範囲を外れたら、強制的にこの金額にします。空欄なら制限なし。</div>
+        <div class="form-row"><div class="form-label">下限 (これ未満なら切り上げ)</div><div><input class="form-input" type="number" id="minFare" min="0" placeholder="なし"><span class="form-unit">円</span></div></div>
+        <div class="form-row"><div class="form-label">上限 (これ超なら切り下げ)</div><div><input class="form-input" type="number" id="maxFare" min="0" placeholder="なし"><span class="form-unit">円</span></div></div>
       </div>
       <div class="card">
-        <div class="card-title">丸め単位</div>
+        <div class="card-title">請求金額の丸め</div>
+        <div class="card-desc">合計料金をこの単位で切り上げます (例: 10円 単位なら 1,387円 → 1,390円)。</div>
         <div class="pill-group" id="roundingPills">
           <div class="pill" data-val="1">1円</div>
           <div class="pill" data-val="10">10円</div>
