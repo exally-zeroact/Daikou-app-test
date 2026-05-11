@@ -25,12 +25,10 @@ body{display:flex;flex-direction:column;}
 .tab-btn.active{color:#1A4A2E;border-bottom-color:#52B788;background:#F0FAF4;}
 
 /* Content area */
-/* ★設計変更宣言 (2026-05-11): bottom-nav (~60px) 分の padding-bottom を追加
-   旧: padding-bottom:calc(140px + env(safe-area-inset-bottom))
-   新: padding-bottom:calc(200px + env(safe-area-inset-bottom))   ← +60px
-   bottom-nav (固定フッター) が保存ボタンに被さって押せない問題を解消
-   bottom-nav 自体は変更なし */
-.tab-content{flex:1;overflow-y:auto;padding:16px;padding-bottom:calc(200px + env(safe-area-inset-bottom));}
+/* ★設計変更宣言 (2026-05-11): padding-bottom を元の 140px に戻す
+   保存ボタン被り問題は btn-save 側 (bottom + z-index) で対応するため
+   padding 過大によるスクロール過剰を解消 */
+.tab-content{flex:1;overflow-y:auto;padding:16px;padding-bottom:calc(140px + env(safe-area-inset-bottom));}
 /* ボトムナビ (4 タブ・iOS 標準スタイル) */
 .bottom-nav{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #C6C6C8;display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:100;}
 .bottom-nav .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;background:none;border:none;font-family:'Noto Sans JP',sans-serif;color:#8E8E93;-webkit-tap-highlight-color:transparent;}
@@ -71,7 +69,11 @@ body{display:flex;flex-direction:column;}
 .btn-add{display:block;width:100%;padding:12px;background:#F0FAF4;border:1.5px dashed #52B788;border-radius:10px;color:#3D9E72;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:8px;}
 .btn-add:active{background:#C8ECD8;}
 .btn-del{padding:6px 12px;background:#fff;border:1px solid #FF3B30;border-radius:6px;color:#FF3B30;font-size:12px;cursor:pointer;font-family:inherit;}
-.btn-save{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));padding:14px;background:#52B788;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 12px rgba(82,183,136,0.4);z-index:10;}
+/* ★設計変更宣言 (2026-05-11): bottom 値を bottom-nav 高さ分 (60px) 上げる + z-index を bottom-nav (100) より上にする
+   旧: bottom:max(16px,env(safe-area-inset-bottom)) / z-index:10
+   新: bottom:calc(60px + max(16px, env(safe-area-inset-bottom))) / z-index:110
+   ボトムナビが btn-save に被さる問題を解消 (ボトムナビ自体は変更なし) */
+.btn-save{position:fixed;left:16px;right:16px;bottom:calc(60px + max(16px, env(safe-area-inset-bottom)));padding:14px;background:#52B788;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 12px rgba(82,183,136,0.4);z-index:110;}
 .btn-save:active{transform:scale(0.97);filter:brightness(0.9);}
 
 /* Tier / surcharge / vehicle row card */
