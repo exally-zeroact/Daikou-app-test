@@ -141,21 +141,22 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 <div class="layout">
 
   <nav class="tab-nav" id="tabNav">
-    <button class="tab-btn active" data-tab="basic">基本</button>
+    <!-- ★設計変更宣言 (2026-05-11): 追加料金を最左に配置 (一番よく使うため) -->
+    <button class="tab-btn active" data-tab="extras">追加料金</button>
+    <button class="tab-btn" data-tab="basic">基本</button>
     <button class="tab-btn" data-tab="tiers">段階</button>
     <button class="tab-btn" data-tab="surcharges">割増</button>
     <button class="tab-btn" data-tab="auto">自動割増</button>
     <button class="tab-btn" data-tab="vehicles">車種</button>
     <button class="tab-btn" data-tab="wait">待機</button>
     <button class="tab-btn" data-tab="zones">区間</button>
-    <button class="tab-btn" data-tab="extras">追加料金</button>
     <button class="tab-btn" data-tab="preview">確認</button>
   </nav>
 
   <div class="tab-content">
 
-    <!-- タブ 1 基本 -->
-    <section class="tab-pane active" data-pane="basic">
+    <!-- タブ 1 基本 (★ active class は extras タブへ移動) -->
+    <section class="tab-pane" data-pane="basic">
       <div class="card">
         <div class="card-title">基本料金</div>
         <div class="form-row"><div class="form-label">初乗り料金</div><div><input class="form-input" type="number" id="baseFare" min="0"><span class="form-unit">円</span></div></div>
@@ -264,9 +265,8 @@ body{display:flex;flex-direction:column;overflow:hidden;}
       <button class="btn-add" onclick="addZone()">＋ 区間追加</button>
     </section>
 
-    <!-- タブ 8 追加料金 -->
-    <!-- ★設計変更宣言 (2026-05-11): settings.html から「追加料金項目」機能を移行 -->
-    <section class="tab-pane" data-pane="extras">
+    <!-- タブ 0 追加料金 (★ 2026-05-11 一番左に移動・初期 active) -->
+    <section class="tab-pane active" data-pane="extras">
       <div class="card">
         <div class="card-title">追加料金項目 (迎車料金・キャンセル料など)</div>
         <div class="card-desc">業務画面でワンタップ加算できる項目を登録します。例: 迎車料金 1,000円 / キャンセル料 2,000円 / 高速料金など。</div>
@@ -275,7 +275,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
       </div>
     </section>
 
-    <!-- タブ 9 確認 -->
+    <!-- タブ 9 確認 (★ 2026-05-11 詳細表示拡張: 設定全項目をまとめて確認) -->
     <section class="tab-pane" data-pane="preview">
       <div class="card">
         <div class="card-title">割増シミュレーション</div>
@@ -290,6 +290,43 @@ body{display:flex;flex-direction:column;overflow:hidden;}
           <thead><tr><th>距離</th><th>料金</th></tr></thead>
           <tbody id="previewTbody"></tbody>
         </table>
+      </div>
+      <!-- ★設計変更宣言 (2026-05-11): 全タブの設定値を確認タブで一覧表示 -->
+      <div class="card">
+        <div class="card-title">基本料金</div>
+        <div id="previewBasic" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">段階料金</div>
+        <div id="previewTiers" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">手動割増</div>
+        <div id="previewSurchargesList" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">自動割増</div>
+        <div id="previewAutoList" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">車種</div>
+        <div id="previewVehicles" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">待機料金</div>
+        <div id="previewWait" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">区間料金</div>
+        <div id="previewZones" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">追加料金項目</div>
+        <div id="previewExtras" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">下限・上限・丸め</div>
+        <div id="previewLimits" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
       </div>
     </section>
 
@@ -735,6 +772,121 @@ function updatePreview(){
     ps.style.color = items.length ? '#52B788' : '#999';
     ps.style.fontFamily = 'DM Mono,monospace';
     ps.style.fontSize = '12px';
+  }
+
+  // ★設計変更宣言 (2026-05-11): 全タブの設定値を一覧表示
+  _renderPreviewDetails();
+}
+
+// 設定全体を確認タブにダンプ表示
+function _renderPreviewDetails(){
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  const yen = (n) => '¥' + (Number(n)||0).toLocaleString();
+  const m   = (n) => (Number(n)||0).toLocaleString() + 'm';
+
+  // 基本料金
+  const elBasic = document.getElementById('previewBasic');
+  if(elBasic){
+    elBasic.innerHTML =
+      '初乗り: ' + yen(fc.base_fare) + ' / ' + m(fc.base_distance_m) + '<br>' +
+      '加算: ' + yen(fc.add_fare) + ' / ' + m(fc.add_distance_m);
+  }
+
+  // 段階料金
+  const elTiers = document.getElementById('previewTiers');
+  if(elTiers){
+    if(!fc.tiersEnabled || !Array.isArray(fc.tiers) || fc.tiers.length === 0){
+      elTiers.innerHTML = '<span style="color:#999;">使用しない</span>';
+    } else {
+      elTiers.innerHTML = fc.tiers.map((t,i) => {
+        const range = (t.from_m||0) + 'm 〜 ' + (t.to_m == null ? '∞' : t.to_m + 'm');
+        return (i+1) + '. ' + range + ' : ' + yen(t.add_fare) + ' / ' + m(t.add_distance_m);
+      }).join('<br>');
+    }
+  }
+
+  // 手動割増
+  const elSur = document.getElementById('previewSurchargesList');
+  if(elSur){
+    if(!Array.isArray(fc.surcharges) || fc.surcharges.length === 0){
+      elSur.innerHTML = '<span style="color:#999;">未設定</span>';
+    } else {
+      elSur.innerHTML = fc.surcharges.map(s => {
+        return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(s.color||'#52B788')+';vertical-align:middle;margin-right:6px;"></span>'
+             + esc(s.name) + ' ×' + (s.rate || 1.0) + (s.defaultOn ? ' <span style="color:#52B788;">(デフォルトON)</span>' : '');
+      }).join('<br>');
+    }
+  }
+
+  // 自動割増
+  const elAuto = document.getElementById('previewAutoList');
+  if(elAuto){
+    const a = fc.autoSurcharges || {};
+    const lines = [];
+    if(a.night)  lines.push('深夜: ' + (a.night.enabled  ? ('×'+a.night.rate+' ('+a.night.from+'時〜'+a.night.to+'時)') : '<span style="color:#999;">OFF</span>'));
+    if(a.weekend)lines.push('週末: ' + (a.weekend.enabled? ('×'+a.weekend.rate+' (土日)') : '<span style="color:#999;">OFF</span>'));
+    if(a.winter) lines.push('冬季: ' + (a.winter.enabled ? ('×'+a.winter.rate+' ('+a.winter.from+' 〜 '+a.winter.to+')') : '<span style="color:#999;">OFF</span>'));
+    elAuto.innerHTML = lines.length ? lines.join('<br>') : '<span style="color:#999;">未設定</span>';
+  }
+
+  // 車種
+  const elVeh = document.getElementById('previewVehicles');
+  if(elVeh){
+    if(!fc.vehiclesEnabled || !Array.isArray(fc.vehicles) || fc.vehicles.length === 0){
+      elVeh.innerHTML = '<span style="color:#999;">使用しない</span>';
+    } else {
+      elVeh.innerHTML = fc.vehicles.map(v => {
+        const tag = v.default ? ' <span style="color:#52B788;">(デフォルト)</span>' : '';
+        const addon = v.addon ? (' +' + yen(v.addon)) : '';
+        return esc(v.name) + ' ×' + (v.multiplier || 1.0) + addon + tag;
+      }).join('<br>');
+    }
+  }
+
+  // 待機
+  const elWait = document.getElementById('previewWait');
+  if(elWait){
+    const w = fc.wait || {};
+    if(!w.enabled){
+      elWait.innerHTML = '<span style="color:#999;">使用しない</span>';
+    } else {
+      elWait.innerHTML = '無料: 最初の ' + (w.freeMins||0) + ' 分<br>' +
+                        '料金: ' + yen(w.ratePerMin||0) + ' / 分';
+    }
+  }
+
+  // 区間
+  const elZones = document.getElementById('previewZones');
+  if(elZones){
+    if(!fc.zonesEnabled || !Array.isArray(fc.zones) || fc.zones.length === 0){
+      elZones.innerHTML = '<span style="color:#999;">使用しない</span>';
+    } else {
+      elZones.innerHTML = fc.zones.map(z => {
+        return esc(z.from || '?') + ' → ' + esc(z.to || '?') + ' : ' + yen(z.fare || 0);
+      }).join('<br>');
+    }
+  }
+
+  // 追加料金
+  const elEx = document.getElementById('previewExtras');
+  if(elEx){
+    if(!Array.isArray(extraItems) || extraItems.length === 0){
+      elEx.innerHTML = '<span style="color:#999;">未設定</span>';
+    } else {
+      elEx.innerHTML = extraItems
+        .filter(x => x && x.name)
+        .map(x => esc(x.name) + ' : ' + yen(x.amount||0))
+        .join('<br>') || '<span style="color:#999;">未設定</span>';
+    }
+  }
+
+  // 下限・上限・丸め
+  const elLim = document.getElementById('previewLimits');
+  if(elLim){
+    const minF = (typeof fc.minFare === 'number' && fc.minFare > 0) ? yen(fc.minFare) : '<span style="color:#999;">なし</span>';
+    const maxF = (typeof fc.maxFare === 'number' && fc.maxFare > 0) ? yen(fc.maxFare) : '<span style="color:#999;">なし</span>';
+    const rnd = (typeof fc.rounding === 'number' && fc.rounding > 0) ? (fc.rounding + '円' + (fc.rounding === 1 ? ' (丸めなし)' : ' 単位で切り上げ')) : '1円 (丸めなし)';
+    elLim.innerHTML = '下限: ' + minF + '<br>上限: ' + maxF + '<br>丸め: ' + rnd;
   }
 }
 // プレビュー専用 calcFare (Step 1 のみ・Step 2 vehicle は除外)
