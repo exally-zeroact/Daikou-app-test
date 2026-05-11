@@ -20,6 +20,11 @@
    新: html/body=#fff (元に戻す)・白画面対策は dl-overlay の初期 display:flex で対応 */
 html{height:100%;overscroll-behavior:none;}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+/* ★設計変更宣言 (2026-05-11): 走行検知バナーを UI 上は完全非表示
+   検知ロジック (S2 _checkBusinessForgot 等) は無変更のまま動作継続。
+   JS が banner.style.display='block' をセットしても CSS !important で
+   常に display:none が勝つ。ロジック側のログ・state 更新は引き続き行う。 */
+#businessForgotBanner{display:none !important;}
 body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100vh;display:flex;flex-direction:column;overflow:hidden;overscroll-behavior:none;}
 /* 画面内 scroll コンテナはバウンスを内側で完結させる（親への伝播禁止） */
 /* 2026-05-08: #screenDriving を追加。メーター画面で起きる Android rubber-band/iOS momentum 由来の
