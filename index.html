@@ -549,6 +549,20 @@ justify-content:center;
 .breakdown{max-width:50%;width:100%;margin-left:auto;margin-right:auto;box-sizing:border-box;}
 #screenFare button{margin-top:10px;display:block;margin-left:auto;margin-right:auto;}
 }
+
+/* ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 7 日経過時のみ flow 表示) */
+.data-update-banner-wrap{flex-shrink:0;max-height:0;overflow:hidden;transition:max-height 0.35s ease-out;}
+.data-update-banner-wrap.show{max-height:120px;}
+.data-update-banner{margin:8px 12px;background:#E8F4FD;border:1px solid #B8D9FF;border-left:4px solid #007AFF;border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px;font-size:13px;line-height:1.5;color:#1c1c1e;box-shadow:0 1px 4px rgba(0,122,255,0.08);}
+.data-update-banner .icon{font-size:18px;flex-shrink:0;color:#007AFF;line-height:1;}
+.data-update-banner .text{flex:1;font-weight:500;color:#1c1c1e;}
+.data-update-banner .text strong{color:#0056B3;font-weight:700;}
+.data-update-banner .close-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:#0056B3;font-size:18px;font-weight:700;cursor:pointer;border-radius:50%;flex-shrink:0;}
+.data-update-banner .close-btn:active{background:rgba(0,122,255,0.08);}
+.data-update-banner.downloading .icon{animation:spin 1.2s linear infinite;display:inline-block;}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+.data-update-banner.downloading .close-btn{display:none;}
+.data-update-banner .progress-text{font-family:'DM Mono',monospace;font-size:11px;color:#0056B3;font-weight:600;}
 </style>
 
 <!-- ─── SEO・ブランディング（2026/04/26実装・復元）─── -->
@@ -836,6 +850,16 @@ setInterval(_checkTripLimit, 30000);
 <div class="surcharge-group" id="surchargeGroup">
   <span class="surcharge-section-label" style="font-size:11px;font-weight:700;color:#8E8E93;letter-spacing:1px;margin-right:8px;align-self:center;">割増</span>
   <span class="surcharge-mult" id="surchargeMult">×1.00</span>
+</div>
+
+<!-- ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 画面で 7 日経過時のみ表示) -->
+<!-- position:fixed ではなく flow 要素・appbar 直下に flex item として配置・コンテンツが自然に下ずれ -->
+<div class="data-update-banner-wrap" id="dataUpdateBannerWrap">
+  <div class="data-update-banner" id="dataUpdateBanner" role="alert">
+    <span class="icon">📡</span>
+    <div class="text">道路データが古くなっています。<strong>WiFiに繋いで</strong>更新してください。</div>
+    <button class="close-btn" onclick="hideDataUpdateBanner()" aria-label="閉じる">×</button>
+  </div>
 </div>
 
 <!-- センサー再起動バナー（全画面共通・appbar直下・2026/05/03 統一） -->
@@ -2850,6 +2874,9 @@ function onBusinessStart(){
     }
     // Business 状態を active に
     Business.start();
+    // ★設計変更宣言 (2026-05-11): 業務開始押下でデータ更新バナーを自動非表示
+    //   snooze 記録なし (= 翌業務サイクルで再判定・古いデータ未更新を忘れさせない)
+    try { if(typeof DataUpdateBanner !== 'undefined') DataUpdateBanner.hide(false); } catch(_){}
     // NoSleep 起動（画面消灯防止）
     if(!noSleep){ noSleep = new NoSleep(); }
     noSleep.enable().catch(e => { if(typeof dlog === 'function') dlog('NoSleep error:', e); });
@@ -3627,6 +3654,9 @@ try {
       updateResumeFromStartVisibility();
       // 2026/05/01：未許可ならバナー表示（許可済みなら何もしない）
       showSensorBannerIfNeeded();
+      // ★設計変更宣言 (2026-05-11): データ更新バナー表示判定
+      //   businessStart 表示直後・7 日経過 + snooze 期限切れなら表示
+      try { if(typeof DataUpdateBanner !== 'undefined') DataUpdateBanner.checkAndShow(); } catch(_){}
     }
   }
 } catch(e){
@@ -3768,6 +3798,31 @@ const DakomeDL = (function(){
       req.onsuccess = () => resolve(new Set(req.result || []));
       req.onerror = () => resolve(new Set());
     })).catch(() => new Set());
+  }
+
+  // ★設計変更宣言 (2026-05-11): 全 pref レコードを {pref, downloaded, size, timestamp} で取得
+  //   データ更新バナーの「最古 timestamp 判定」用
+  function getAllPrefectures(){
+    return openDb().then(db => new Promise((resolve) => {
+      const tx = db.transaction(STORE_PREF, 'readonly');
+      const store = tx.objectStore(STORE_PREF);
+      const valuesReq = store.getAll();
+      const keysReq = store.getAllKeys();
+      let values = null, keys = null;
+      function done(){
+        if(values === null || keys === null) return;
+        const result = [];
+        for(let i = 0; i < keys.length; i++){
+          const v = values[i] || {};
+          result.push({ pref: keys[i], downloaded: !!v.downloaded, size: v.size||0, timestamp: v.timestamp||0 });
+        }
+        resolve(result);
+      }
+      valuesReq.onsuccess = () => { values = valuesReq.result || []; done(); };
+      keysReq.onsuccess = () => { keys = keysReq.result || []; done(); };
+      valuesReq.onerror = () => resolve([]);
+      keysReq.onerror = () => resolve([]);
+    })).catch(() => []);
   }
 
   // 県の完了をマーク（out-of-line key）
@@ -4044,8 +4099,179 @@ const DakomeDL = (function(){
     });
   }
 
-  return { init, setDlCompleted, hideOverlay, getPrefStatus, checkAndUpdateExisting };
+  return { init, setDlCompleted, hideOverlay, getPrefStatus, checkAndUpdateExisting,
+           getAllPrefectures, downloadWithRetry, markPrefDone, PREFECTURES };
 })();
+
+// ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 7 日経過時のみ表示)
+//   仕様:
+//   - 表示条件: appState='businessStart' AND iOS PWA AND oldest pref >7日前
+//                AND snooze 24h 経過済
+//   - WiFi 検出 (navigator.connection.type==='wifi' or downlink>5Mbps) で自動 DL
+//   - × タップで 24h スヌーズ
+//   - 業務開始ボタン押下で自動非表示 (snooze なし)
+//   - 業務中 (idle/driving/fare) は絶対表示しない
+//   - 完了で自動消滅・snooze 記録なし
+const DataUpdateBanner = (function(){
+  const STALE_MS  = 7 * 24 * 60 * 60 * 1000;
+  const SNOOZE_MS = 24 * 60 * 60 * 1000;
+  const SNOOZE_KEY = 'daikou_update_snooze';
+  let _downloading = false;
+  let _autoTriggered = false;  // wifi 自動 DL の重複防止
+
+  // IndexedDB から全 pref レコードを取得 (DakomeDL 公開 API 経由)
+  function _getAllPrefs(){
+    return DakomeDL.getAllPrefectures ? DakomeDL.getAllPrefectures() : Promise.resolve([]);
+  }
+
+  async function _getOldestPrefTimestamp(){
+    try {
+      const all = await _getAllPrefs();
+      if(!all || all.length === 0) return null;
+      // pref キー数が 47 未満なら「未 DL 県あり」= 古いとみなす
+      if(all.length < 47) return 0;
+      return Math.min.apply(null, all.map(r => r.timestamp || Date.now()));
+    } catch(_) { return null; }
+  }
+
+  async function _shouldShow(){
+    if(appState !== 'businessStart') return false;
+    if(!_isIOS || window.navigator.standalone !== true) return false;
+    const snooze = parseInt(localStorage.getItem(SNOOZE_KEY) || '0', 10);
+    if(Date.now() - snooze < SNOOZE_MS) return false;
+    const oldest = await _getOldestPrefTimestamp();
+    if(oldest === null) return false;
+    return (Date.now() - oldest) > STALE_MS;
+  }
+
+  function _isOnWifi(){
+    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if(!c) return navigator.onLine;
+    return c.type === 'wifi' || (c.downlink && c.downlink > 5);
+  }
+
+  function _resetText(){
+    const banner = document.getElementById('dataUpdateBanner');
+    if(!banner) return;
+    banner.classList.remove('downloading');
+    const icon = banner.querySelector('.icon');
+    const text = banner.querySelector('.text');
+    if(icon) icon.textContent = '📡';
+    if(text) text.innerHTML = '道路データが古くなっています。<strong>WiFiに繋いで</strong>更新してください。';
+  }
+
+  function show(){
+    _resetText();
+    const wrap = document.getElementById('dataUpdateBannerWrap');
+    if(wrap) wrap.classList.add('show');
+    // 既に WiFi なら 3 秒後に自動 DL (重複防止 _autoTriggered)
+    if(!_autoTriggered && !_downloading && _isOnWifi()){
+      _autoTriggered = true;
+      setTimeout(() => { if(!_downloading) startDownload(); }, 3000);
+    }
+  }
+
+  function hide(snooze){
+    const wrap = document.getElementById('dataUpdateBannerWrap');
+    if(wrap) wrap.classList.remove('show');
+    if(snooze){
+      try { localStorage.setItem(SNOOZE_KEY, Date.now().toString()); } catch(_){}
+    }
+  }
+
+  function _setProgress(done, total){
+    const banner = document.getElementById('dataUpdateBanner');
+    if(!banner) return;
+    const text = banner.querySelector('.text');
+    if(text) text.innerHTML = '<strong>地図データ更新中</strong> <span class="progress-text">' + done + '/' + total + ' 県</span>';
+  }
+
+  async function startDownload(){
+    if(_downloading) return;
+    _downloading = true;
+    const wrap = document.getElementById('dataUpdateBannerWrap');
+    const banner = document.getElementById('dataUpdateBanner');
+    const icon = banner.querySelector('.icon');
+    if(wrap) wrap.classList.add('show');
+    banner.classList.add('downloading');
+    if(icon) icon.textContent = '⟳';
+    const total = (DakomeDL.PREFECTURES || []).length || 47;
+    _setProgress(0, total);
+    try {
+      // 全 47 県を強制再 fetch (settings.html の onCheckUpdate と同等・cache busting)
+      const stamp = Date.now();
+      const PARALLEL = 2;
+      const MAX_RETRY = 3;
+      const queue = (DakomeDL.PREFECTURES || []).slice();
+      let done = 0;
+      async function worker(){
+        while(queue.length > 0){
+          const pref = queue.shift();
+          for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
+            try {
+              const url = '/data/roads-' + pref + '.js?_v=' + stamp;
+              const res = await fetch(url, { cache: 'no-store' });
+              if(!res.ok) throw new Error('HTTP ' + res.status);
+              const blob = await res.blob();
+              await DakomeDL.markPrefDone(pref, blob.size);
+              break;
+            } catch(e){
+              if(attempt < MAX_RETRY) await new Promise(r => setTimeout(r, 1000 * attempt));
+            }
+          }
+          done++;
+          _setProgress(done, total);
+        }
+      }
+      const workers = [];
+      for(let i = 0; i < PARALLEL; i++) workers.push(worker());
+      await Promise.all(workers);
+      _finish(true);
+    } catch(e){
+      console.warn('[DataUpdate] 失敗:', e && e.message);
+      _finish(false);
+    }
+  }
+
+  function _finish(ok){
+    const banner = document.getElementById('dataUpdateBanner');
+    const icon = banner.querySelector('.icon');
+    const text = banner.querySelector('.text');
+    banner.classList.remove('downloading');
+    if(ok){
+      if(icon) icon.textContent = '✅';
+      if(text) text.innerHTML = '<strong>地図データを更新しました</strong>';
+    } else {
+      if(icon) icon.textContent = '⚠️';
+      if(text) text.innerHTML = '<strong>更新失敗・また後で試してください</strong>';
+    }
+    setTimeout(() => {
+      hide(false);  // snooze 記録しない (正常終了)
+      _downloading = false;
+      _autoTriggered = false;
+    }, 1800);
+  }
+
+  async function checkAndShow(){
+    if(await _shouldShow()) show();
+  }
+
+  return { show, hide, startDownload, checkAndShow, _isOnWifi };
+})();
+
+// グローバル関数として close-btn onclick から呼べるよう公開
+function hideDataUpdateBanner(){ DataUpdateBanner.hide(true); }
+
+// visibility 復帰 + online で WiFi 自動 DL を再評価
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible'){
+    DataUpdateBanner.checkAndShow();
+  }
+});
+window.addEventListener('online', function(){
+  // online になったら WiFi 経由の可能性ありなので再判定
+  DataUpdateBanner.checkAndShow();
+});
 
 // ─── 月次更新トースト UI 制御 ───
 const DakomeUpdateToast = (function(){
