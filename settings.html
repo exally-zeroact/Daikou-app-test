@@ -45,15 +45,7 @@ body:not(.dev-mode) #devSection2{display:none !important;}
 .btn-save{width:100%;padding:16px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;-webkit-transition:transform 0.1s,-webkit-filter 0.1s;transition:transform 0.1s,filter 0.1s;} .btn-save:active{-webkit-transform:scale(0.97);transform:scale(0.97);-webkit-filter:brightness(0.85);filter:brightness(0.85);}
 .save-msg{text-align:center;color:#34C759;font-size:13px;min-height:20px;margin-top:4px;}
 
-/* 追加料金リスト */
-.extra-item{padding:12px 16px;display:flex;flex-direction:column;gap:8px;border-bottom:0.5px solid #f0f0f0;}
-.extra-item:last-child{border-bottom:none;}
-.extra-item-row{display:flex;align-items:center;gap:8px;}
-.extra-name{flex:1;border:0.5px solid #ddd;border-radius:8px;padding:10px 12px;font-size:15px;font-family:'Noto Sans JP',sans-serif;}
-.extra-amount{width:110px;border:0.5px solid #ddd;border-radius:8px;padding:10px 12px;font-size:15px;text-align:right;font-family:'Noto Sans JP',sans-serif;}
-.extra-unit{font-size:13px;color:#8E8E93;white-space:nowrap;}
-.extra-del{background:#FF3B30;border:none;border-radius:8px;padding:8px 14px;color:#fff;font-size:13px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;white-space:nowrap;}
-.btn-add{width:100%;padding:12px;background:#f5f5f5;border:0.5px solid #ddd;border-radius:10px;color:#007AFF;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:8px;}
+/* ★設計変更宣言 (2026-05-11): 「追加料金リスト」CSS は fare.html へ移行 (mint テーマで再定義) */
 
 /* 車両選択 */
 .vehicle-select{width:100%;border:0.5px solid #ddd;border-radius:8px;padding:10px 12px;font-size:15px;background:#f9f9f9;font-family:'Noto Sans JP',sans-serif;}
@@ -159,14 +151,8 @@ body:not(.dev-mode) #devSection2{display:none !important;}
     </div>
   </div>
 
-  <!-- 追加料金項目 -->
-  <div class="section">
-    <div class="section-title">追加料金項目</div>
-    <div id="extraItems"></div>
-    <div style="padding:8px 16px 16px;">
-      <button class="btn-add" onclick="addExtraItem()">＋ 項目を追加</button>
-    </div>
-  </div>
+  <!-- ★設計変更宣言 (2026-05-11): 「追加料金項目」を fare.html「追加料金」タブへ移行
+       旧 HTML/CSS/JS は削除。localStorage 'daikou_extras' は変更なし。 -->
 
   <!-- 活動エリア（Map Matching・2026/04/30追加） -->
   <!-- ─── ダウンロード状態（Phase 0a-3 設定画面拡張・2026/05/04追加） ─────────── -->
@@ -283,7 +269,7 @@ body:not(.dev-mode) #devSection2{display:none !important;}
 <script>
 let surchargeEnabled = false;
 let timeEnabled = false;
-let extraItems = [];
+// ★設計変更宣言 (2026-05-11): extraItems / 関連関数は fare.html へ移行
 
 // M-2 修正: 上級設定 collapsible toggle
 function toggleAdvanced(){
@@ -446,20 +432,7 @@ function load(){
   updateSurchargeUI();
   updateTimeUI();
 
-  extraItems = JSON.parse(localStorage.getItem('daikou_extras')||'[]');
-  // 初回起動時にデフォルトのクイック追加料金をセット
-  if(localStorage.getItem('daikou_extras') === null){
-    extraItems = [
-      {name:'外車', amount:500},
-      {name:'MT車', amount:500},
-      {name:'左ハンドル', amount:1000},
-      {name:'深夜割増', amount:1000},
-      {name:'迎車料金', amount:1000},
-      {name:'キャンセル料', amount:2000}
-    ];
-    localStorage.setItem('daikou_extras', JSON.stringify(extraItems));
-  }
-  renderExtraItems();
+  // ★設計変更宣言 (2026-05-11): 追加料金項目の load/init は fare.html「追加料金」タブへ移行
   updatePreview();
 
   // ダウンロード状態を読み込み（Phase 0a-3・2026/05/04 追加）
@@ -744,32 +717,8 @@ function updateTimeUI(){
   document.getElementById('timeRateRow').style.display=timeEnabled?'flex':'none';
 }
 
-function renderExtraItems(){
-  const el=document.getElementById('extraItems');
-  el.innerHTML=extraItems.map((item,i)=>`
-    <div class="extra-item">
-      <input class="extra-name" type="text" value="${item.name}" placeholder="項目名（例：高速料金A）"
-        oninput="extraItems[${i}].name=this.value">
-      <div class="extra-item-row">
-        <input class="extra-amount" type="number" value="${item.amount||''}" placeholder="0"
-          inputmode="numeric"
-          oninput="extraItems[${i}].amount=parseInt(this.value)||0">
-        <span class="extra-unit">円</span>
-        <button class="extra-del" onclick="removeExtra(${i})">削除</button>
-      </div>
-    </div>
-  `).join('');
-}
-
-function addExtraItem(){
-  extraItems.push({name:'',amount:0});
-  renderExtraItems();
-}
-
-function removeExtra(i){
-  extraItems.splice(i,1);
-  renderExtraItems();
-}
+// ★設計変更宣言 (2026-05-11): renderExtraItems / addExtraItem / removeExtra は
+//   fare.html「追加料金」タブへ移行 (本ファイルからは削除)
 
 function saveAll(){
   try {
@@ -794,7 +743,7 @@ function saveAll(){
     };
     settings.resetTime = document.getElementById('resetTime').value || '12:00';
     localStorage.setItem('daikou_settings', JSON.stringify(settings));
-    localStorage.setItem('daikou_extras',   JSON.stringify(extraItems));
+    // ★設計変更宣言 (2026-05-11): daikou_extras 保存は fare.html「追加料金」タブの保存処理へ移行
 
     // MM-6: OSRM endpoint 保存（trim+ trailing slash 削除）・空欄で校正 OFF
     const elOsrm = document.getElementById('osrmEndpoint');

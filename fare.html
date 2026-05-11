@@ -81,6 +81,15 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .btn-save{position:fixed;left:16px;right:16px;bottom:calc(60px + max(16px, env(safe-area-inset-bottom)));padding:14px;background:#52B788;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 12px rgba(82,183,136,0.4);z-index:110;}
 .btn-save:active{transform:scale(0.97);filter:brightness(0.9);}
 
+/* ★設計変更宣言 (2026-05-11): settings.html から「追加料金項目」CSS を移行 (mint テーマに調整) */
+.extra-item{padding:10px 0;display:flex;flex-direction:column;gap:6px;border-bottom:0.5px solid #C8ECD8;}
+.extra-item:last-child{border-bottom:none;}
+.extra-item-row{display:flex;align-items:center;gap:8px;}
+.extra-name{flex:1;border:1px solid #C8ECD8;border-radius:8px;padding:8px 10px;font-size:14px;font-family:'Noto Sans JP',sans-serif;background:#F0FAF4;color:#1A4A2E;}
+.extra-amount{width:110px;border:1px solid #C8ECD8;border-radius:8px;padding:8px 10px;font-size:14px;text-align:right;font-family:'DM Mono',monospace;background:#F0FAF4;color:#1A4A2E;}
+.extra-unit{font-size:12px;color:#3D9E72;white-space:nowrap;font-family:'DM Mono',monospace;}
+.extra-del{background:#fff;border:1px solid #FF3B30;border-radius:6px;padding:6px 12px;color:#FF3B30;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+
 /* Tier / surcharge / vehicle row card */
 .item-card{border:1px solid #C8ECD8;border-radius:10px;padding:12px;margin-bottom:10px;background:#F0FAF4;}
 .item-card-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
@@ -139,6 +148,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
     <button class="tab-btn" data-tab="vehicles">車種</button>
     <button class="tab-btn" data-tab="wait">待機</button>
     <button class="tab-btn" data-tab="zones">区間</button>
+    <button class="tab-btn" data-tab="extras">追加料金</button>
     <button class="tab-btn" data-tab="preview">確認</button>
   </nav>
 
@@ -254,7 +264,18 @@ body{display:flex;flex-direction:column;overflow:hidden;}
       <button class="btn-add" onclick="addZone()">＋ 区間追加</button>
     </section>
 
-    <!-- タブ 8 確認 -->
+    <!-- タブ 8 追加料金 -->
+    <!-- ★設計変更宣言 (2026-05-11): settings.html から「追加料金項目」機能を移行 -->
+    <section class="tab-pane" data-pane="extras">
+      <div class="card">
+        <div class="card-title">追加料金項目 (迎車料金・キャンセル料など)</div>
+        <div class="card-desc">業務画面でワンタップ加算できる項目を登録します。例: 迎車料金 1,000円 / キャンセル料 2,000円 / 高速料金など。</div>
+        <div id="extraItems"></div>
+        <button class="btn-add" onclick="addExtraItem()">＋ 項目を追加</button>
+      </div>
+    </section>
+
+    <!-- タブ 9 確認 -->
     <section class="tab-pane" data-pane="preview">
       <div class="card">
         <div class="card-title">割増シミュレーション</div>
@@ -770,6 +791,45 @@ function load(){
     _initAll();
   }
 }
+// ━━ Tab 8 追加料金 (settings.html から 2026-05-11 移行) ━━
+// localStorage 'daikou_extras' を直接管理 (fc 配下に置かず既存 key を維持)
+let extraItems = [];
+function loadExtras(){
+  try {
+    const raw = localStorage.getItem('daikou_extras');
+    extraItems = raw ? (JSON.parse(raw) || []) : [];
+  } catch(_) { extraItems = []; }
+  renderExtraItems();
+}
+function renderExtraItems(){
+  const el = document.getElementById('extraItems');
+  if(!el) return;
+  el.innerHTML = extraItems.map((item, i) => `
+    <div class="extra-item">
+      <input class="extra-name" type="text" value="${(item.name||'').replace(/"/g,'&quot;')}" placeholder="項目名（例：迎車料金）"
+        oninput="extraItems[${i}].name=this.value">
+      <div class="extra-item-row">
+        <input class="extra-amount" type="number" value="${item.amount||''}" placeholder="0"
+          inputmode="numeric"
+          oninput="extraItems[${i}].amount=parseInt(this.value)||0">
+        <span class="extra-unit">円</span>
+        <button class="extra-del" onclick="removeExtra(${i})">削除</button>
+      </div>
+    </div>
+  `).join('');
+}
+function addExtraItem(){
+  extraItems.push({ name:'', amount:0 });
+  renderExtraItems();
+}
+function removeExtra(i){
+  extraItems.splice(i, 1);
+  renderExtraItems();
+}
+function saveExtras(){
+  try { localStorage.setItem('daikou_extras', JSON.stringify(extraItems)); } catch(_){}
+}
+
 function _initAll(){
   loadBasic();
   renderTiers();
@@ -778,6 +838,7 @@ function _initAll(){
   renderVehicles();
   loadWait();
   renderZones();
+  loadExtras();
   bindToggle('tiersEnabledToggle', () => fc.tiersEnabled, (v) => fc.tiersEnabled = v);
   bindToggle('autoNightToggle', () => fc.autoSurcharges.night.enabled, (v) => fc.autoSurcharges.night.enabled = v);
   bindToggle('autoWeekendToggle', () => fc.autoSurcharges.weekend.enabled, (v) => fc.autoSurcharges.weekend.enabled = v);
@@ -797,6 +858,8 @@ function saveAll(){
   if(typeof FB !== 'undefined' && FB.saveFareConfig){
     FB.saveFareConfig(fc);
   }
+  // ★設計変更宣言 (2026-05-11): 追加料金項目も同時に保存 (localStorage 'daikou_extras')
+  saveExtras();
   showToast('保存しました');
 }
 function showToast(msg){
