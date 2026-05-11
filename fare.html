@@ -7,8 +7,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{font-family:'Noto Sans JP',sans-serif;background:#F0FAF4;color:#1A4A2E;min-height:100vh;}
-body{display:flex;flex-direction:column;}
+/* ★設計変更宣言 (2026-05-11): body を viewport 固定 + overflow:hidden で
+   rubber-band を抑制。スクロールは .tab-content 内に閉じ込めて、
+   body 全体がスクロールして appbar 上に空白が出たり btn-save が画面中央に
+   浮いて見える現象を解消する。 */
+html,body{font-family:'Noto Sans JP',sans-serif;background:#F0FAF4;color:#1A4A2E;height:100vh;overscroll-behavior:none;}
+body{display:flex;flex-direction:column;overflow:hidden;}
+.tab-content{overscroll-behavior-y:contain;}
 
 /* AppBar (mint) */
 .appbar{background:#52B788;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;}
