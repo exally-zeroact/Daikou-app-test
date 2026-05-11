@@ -31,3 +31,8 @@ input/*/poi.geojson
 # scripts/fetch-*.js で再取得可能・最終 data/*.js のみ追跡する方針
 # （既にtrack済みのファイルは git rm --cached で個別対応）
 input/
+
+# 環境変数ファイル (シークレット流出防止・2026-05-11 追加)
+.env
+.env.local
+.env.*.local
