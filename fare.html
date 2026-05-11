@@ -736,15 +736,26 @@ function updatePreview(){
   }
   document.getElementById('previewMultiplier').textContent = '適用倍率 ×' + mul.toFixed(2);
 
-  // 距離別計算
-  const distances = [1000, 3000, 5000, 10000, 20000];
+  // ★設計変更宣言 (2026-05-11): 固定距離 [1,3,5,10,20km] → ユーザー設定の加算距離ステップに変更
+  //   旧: 任意の固定 5 距離だけ表示してユーザー設定 (加算距離 420m 等) が反映されない
+  //   新: base_distance_m を起点に add_distance_m ごとの段で表示 (0/1/2/3/5/10/15/20/30/50 段)
+  //   → 例: 初乗り 1000m+加算 420m なら 1000m / 1420m / 1840m / 2260m / 3100m / 5200m ...
+  //   tiers (段階料金) 有効時は _calcFareForPreview が自動で tiers 経由計算
+  const baseD = (typeof fc.base_distance_m === 'number' && fc.base_distance_m > 0) ? fc.base_distance_m : 1000;
+  const addD  = (typeof fc.add_distance_m === 'number' && fc.add_distance_m > 0) ? fc.add_distance_m : 420;
+  const stepsToShow = [0, 1, 2, 3, 5, 10, 15, 20, 30, 50];
+  const distances = stepsToShow.map(n => baseD + n * addD);
   const tbody = document.getElementById('previewTbody');
   tbody.innerHTML = '';
-  distances.forEach(d => {
+  distances.forEach((d, idx) => {
     const fare = _calcFareForPreview(d) * mul;
     const rounded = _roundFare(fare);
+    const n = stepsToShow[idx];
+    const label = (n === 0)
+      ? '初乗り (' + d.toLocaleString() + 'm)'
+      : (d >= 1000 ? (d/1000).toFixed(2) + 'km' : d + 'm') + ' (+' + n + '段)';
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td>' + (d/1000) + 'km</td><td>¥' + rounded.toLocaleString() + '</td>';
+    tr.innerHTML = '<td>' + label + '</td><td>¥' + rounded.toLocaleString() + '</td>';
     tbody.appendChild(tr);
   });
 
