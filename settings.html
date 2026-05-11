@@ -56,14 +56,14 @@ body:not(.dev-mode) #devSection2{display:none !important;}
 /* 5/3 final仕様の mint カラー使用 */
 .dl-info{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0f0f0;}
 .dl-info-label{font-size:15px;color:#111;}
-.dl-info-value{font-size:14px;color:#52B788;font-weight:700;font-family:'DM Mono',monospace;}
+.dl-info-value{font-size:14px;color:#007AFF;font-weight:700;font-family:'DM Mono',monospace;}
 .dl-update-btn-wrap{padding:12px 16px;}
-.dl-update-btn{width:100%;padding:14px;background:#52B788;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;letter-spacing:1px;transition:transform 0.1s,filter 0.1s;-webkit-tap-highlight-color:transparent;}
+.dl-update-btn{width:100%;padding:14px;background:#007AFF;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;letter-spacing:1px;transition:transform 0.1s,filter 0.1s;-webkit-tap-highlight-color:transparent;}
 .dl-update-btn:active{transform:scale(0.97);filter:brightness(0.9);}
 .dl-update-btn:disabled{background:#aaa;cursor:not-allowed;}
 .dl-update-btn:disabled:active{transform:none;filter:none;}
 /* 設定画面用トースト */
-.settings-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#F0FAF4;border:1.5px solid #52B788;border-radius:10px;padding:10px 16px;font-size:13px;color:#1A4A2E;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;}
+.settings-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#E8F4FD;border:1.5px solid #007AFF;border-radius:10px;padding:10px 16px;font-size:13px;color:#1c1c1e;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;}
 .settings-toast.show{display:block;animation:settings-toast-in 0.3s ease-out;}
 .settings-toast.fade-out{animation:settings-toast-out 0.3s ease-in forwards;}
 @keyframes settings-toast-in{from{opacity:0;transform:translate(-50%,-10px);}to{opacity:1;transform:translate(-50%,0);}}
@@ -200,8 +200,8 @@ body:not(.dev-mode) #devSection2{display:none !important;}
       <div class="row-label" style="font-size:13px;color:#007AFF;">利用規約を表示</div>
       <div style="color:#8E8E93;font-size:13px;" id="trainingDetailsChevron">▼</div>
     </div>
-    <div id="trainingDetailsBody" style="display:none;padding:14px 16px;font-size:12px;color:#444;line-height:1.8;background:#F0FAF4;border-bottom:0.5px solid #f0f0f0;">
-      <strong style="display:block;margin-bottom:6px;color:#1A4A2E;">学習データ提供に関するお知らせ</strong>
+    <div id="trainingDetailsBody" style="display:none;padding:14px 16px;font-size:12px;color:#444;line-height:1.8;background:#E8F4FD;border-bottom:0.5px solid #f0f0f0;">
+      <strong style="display:block;margin-bottom:6px;color:#1c1c1e;">学習データ提供に関するお知らせ</strong>
       ダイコメは Map Matching の精度向上のため、お客様のスマートフォンの加速度センサー値と速度を匿名で送信します。
       送信される: 加速度・速度・匿名識別子。
       送信されない: 位置情報・出発地/目的地・お名前・連絡先。

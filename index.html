@@ -76,7 +76,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 .dl-state-complete{display:none;}
 .dl-state-complete.show{display:block;}
 /* ─── 月次更新トースト ─── */
-.dl-update-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#F0FAF4;border:1.5px solid #52B788;border-radius:10px;padding:10px 16px;font-size:13px;color:#1A4A2E;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;cursor:pointer;}
+.dl-update-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#E8F4FD;border:1.5px solid #007AFF;border-radius:10px;padding:10px 16px;font-size:13px;color:#1c1c1e;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;cursor:pointer;}
 .dl-update-toast.show{display:block;animation:dl-toast-in 0.3s ease-out;}
 .dl-update-toast.fade-out{animation:dl-toast-out 0.3s ease-in forwards;}
 @keyframes dl-toast-in{from{opacity:0;transform:translate(-50%,-10px);}to{opacity:1;transform:translate(-50%,0);}}
@@ -123,11 +123,11 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 .gps-acc{font-size:11px;color:#fff;opacity:0.8;}
 .surcharge-badge{background:#FF3B30;border-radius:8px;padding:4px 10px;cursor:pointer;}
 /* fareConfig v2 (2026-05-10): 動的 surcharge ボタン群 */
-.surcharge-group{display:none;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:#F0FAF4;border-bottom:1px solid #C8ECD8;}
+.surcharge-group{display:none;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:#E8F4FD;border-bottom:1px solid #B8D9FF;}
 .surcharge-group.show{display:flex;}
 .surcharge-btn{padding:6px 10px;border-radius:18px;border:1.5px solid;font-size:12px;font-weight:700;font-family:'DM Mono',monospace;cursor:pointer;background:#fff;color:#999;border-color:#ccc;-webkit-tap-highlight-color:transparent;}
 .surcharge-btn.on{color:#fff;}
-.surcharge-mult{margin-left:auto;font-size:13px;color:#1A4A2E;font-weight:700;font-family:'DM Mono',monospace;}
+.surcharge-mult{margin-left:auto;font-size:13px;color:#1c1c1e;font-weight:700;font-family:'DM Mono',monospace;}
 @media (orientation: landscape){
   .surcharge-group{flex-wrap:nowrap;overflow-x:auto;}
   .surcharge-group::-webkit-scrollbar{display:none;}
@@ -747,20 +747,20 @@ setInterval(_checkTripLimit, 30000);
 <!-- Phase 3 (2026-05-10): 初回起動時バナー (データ収集についての注意) -->
 <!-- 表示条件: localStorage 'daikome_training_consent' が null (= 初回 or 未consent) -->
 <!-- OK / 閉じる いずれもデフォルト ON で開始・閉じるは「dismissed」記録のみ -->
-<div id="trainingConsentBanner" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#1A4A2E;color:#fff;padding:16px 20px;padding-bottom:max(16px,env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,0.3);font-family:'Noto Sans JP',sans-serif;">
+<div id="trainingConsentBanner" style="display:none;position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#1c1c1e;color:#fff;padding:16px 20px;padding-bottom:max(16px,env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,0.3);font-family:'Noto Sans JP',sans-serif;">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;">
     <div style="font-size:14px;font-weight:700;">📊 データ収集について</div>
-    <div onclick="dismissTrainingBanner()" style="cursor:pointer;font-size:18px;line-height:1;color:#C8ECD8;padding:0 4px;" aria-label="閉じる">✕</div>
+    <div onclick="dismissTrainingBanner()" style="cursor:pointer;font-size:18px;line-height:1;color:#B8D9FF;padding:0 4px;" aria-label="閉じる">✕</div>
   </div>
-  <div style="font-size:12px;line-height:1.6;color:#C8ECD8;margin-bottom:12px;">
+  <div style="font-size:12px;line-height:1.6;color:#B8D9FF;margin-bottom:12px;">
     Map Matching の精度向上のため、加速度センサー値と速度を匿名で送信します。<br>
     <strong style="color:#fff;">送信される</strong>: 加速度・速度・匿名識別子<br>
     <strong style="color:#fff;">送信されない</strong>: 位置情報・出発地/目的地・お名前・連絡先<br>
     設定画面でいつでも無効化できます。
   </div>
   <div style="display:flex;gap:8px;">
-    <button onclick="location.href='settings.html#training'" style="flex:1;padding:10px;background:transparent;border:1px solid #52B788;border-radius:8px;color:#C8ECD8;font-size:13px;cursor:pointer;font-family:inherit;">詳しく見る</button>
-    <button onclick="agreeTrainingBanner()" style="flex:1;padding:10px;background:#52B788;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">OK</button>
+    <button onclick="location.href='settings.html#training'" style="flex:1;padding:10px;background:transparent;border:1px solid #007AFF;border-radius:8px;color:#B8D9FF;font-size:13px;cursor:pointer;font-family:inherit;">詳しく見る</button>
+    <button onclick="agreeTrainingBanner()" style="flex:1;padding:10px;background:#007AFF;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">OK</button>
   </div>
 </div>
 <script>
@@ -3373,8 +3373,8 @@ function renderSurchargeButtons(){
     btn.className = 'surcharge-btn' + (active.has(s.id) ? ' on' : '');
     btn.textContent = (s.name || '割増') + ' ×' + s.rate;
     if(active.has(s.id)){
-      btn.style.background = s.color || '#52B788';
-      btn.style.borderColor = s.color || '#52B788';
+      btn.style.background = s.color || '#007AFF';
+      btn.style.borderColor = s.color || '#007AFF';
     }
     btn.onclick = function(){
       if(typeof Meter.toggleSurcharge === 'function') Meter.toggleSurcharge(s.id);

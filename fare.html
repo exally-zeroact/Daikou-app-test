@@ -11,12 +11,12 @@
    rubber-band を抑制。スクロールは .tab-content 内に閉じ込めて、
    body 全体がスクロールして appbar 上に空白が出たり btn-save が画面中央に
    浮いて見える現象を解消する。 */
-html,body{font-family:'Noto Sans JP',sans-serif;background:#F0FAF4;color:#1A4A2E;height:100vh;overscroll-behavior:none;}
+html,body{font-family:'Noto Sans JP',sans-serif;background:#E8F4FD;color:#1c1c1e;height:100vh;overscroll-behavior:none;}
 body{display:flex;flex-direction:column;overflow:hidden;}
 .tab-content{overscroll-behavior-y:contain;}
 
 /* AppBar (mint) */
-.appbar{background:#52B788;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.appbar{background:#007AFF;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;}
 .appbar-back{color:#fff;font-size:16px;cursor:pointer;padding:4px 8px;}
 .appbar-title{font-size:17px;font-weight:700;color:#fff;font-family:'DM Mono',monospace;letter-spacing:1px;}
 
@@ -24,10 +24,10 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .layout{display:flex;flex-direction:column;flex:1;min-height:0;}
 
 /* Tab nav - portrait: horizontal scroll, landscape: left vertical */
-.tab-nav{display:flex;background:#fff;border-bottom:1.5px solid #C8ECD8;overflow-x:auto;flex-shrink:0;}
+.tab-nav{display:flex;background:#fff;border-bottom:1.5px solid #B8D9FF;overflow-x:auto;flex-shrink:0;}
 .tab-nav::-webkit-scrollbar{display:none;}
-.tab-btn{padding:14px 16px;font-size:13px;color:#3D9E72;font-weight:700;cursor:pointer;white-space:nowrap;border:none;background:transparent;font-family:'Noto Sans JP',sans-serif;border-bottom:3px solid transparent;}
-.tab-btn.active{color:#1A4A2E;border-bottom-color:#52B788;background:#F0FAF4;}
+.tab-btn{padding:14px 16px;font-size:13px;color:#0056B3;font-weight:700;cursor:pointer;white-space:nowrap;border:none;background:transparent;font-family:'Noto Sans JP',sans-serif;border-bottom:3px solid transparent;}
+.tab-btn.active{color:#1c1c1e;border-bottom-color:#007AFF;background:#E8F4FD;}
 
 /* Content area */
 /* ★設計変更宣言 (2026-05-11): padding-bottom を元の 140px に戻す
@@ -50,82 +50,82 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .tab-pane.active{display:block;}
 
 /* Section card */
-.card{background:#fff;border:1.5px solid #C8ECD8;border-radius:12px;padding:14px 16px;margin-bottom:12px;}
-.card-title{font-size:13px;color:#3D9E72;font-weight:700;margin-bottom:8px;letter-spacing:1px;font-family:'DM Mono',monospace;}
-.card-desc{font-size:12px;color:#3D9E72;line-height:1.6;margin-bottom:8px;}
+.card{background:#fff;border:1.5px solid #B8D9FF;border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+.card-title{font-size:13px;color:#0056B3;font-weight:700;margin-bottom:8px;letter-spacing:1px;font-family:'DM Mono',monospace;}
+.card-desc{font-size:12px;color:#0056B3;line-height:1.6;margin-bottom:8px;}
 
 /* Form rows */
-.form-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #C8ECD8;gap:8px;}
+.form-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid #B8D9FF;gap:8px;}
 .form-row:last-child{border-bottom:none;}
-.form-label{font-size:14px;color:#1A4A2E;flex:1;}
-.form-input{width:120px;padding:8px 10px;border:1px solid #C8ECD8;border-radius:8px;font-size:15px;font-family:'DM Mono',monospace;text-align:right;background:#F0FAF4;color:#1A4A2E;}
+.form-label{font-size:14px;color:#1c1c1e;flex:1;}
+.form-input{width:120px;padding:8px 10px;border:1px solid #B8D9FF;border-radius:8px;font-size:15px;font-family:'DM Mono',monospace;text-align:right;background:#E8F4FD;color:#1c1c1e;}
 .form-input.text{font-family:'Noto Sans JP',sans-serif;text-align:left;}
 .form-input.wide{width:160px;}
 .form-input.fullwidth{width:100%;}
-.form-unit{font-size:12px;color:#3D9E72;font-family:'DM Mono',monospace;margin-left:4px;}
+.form-unit{font-size:12px;color:#0056B3;font-family:'DM Mono',monospace;margin-left:4px;}
 
 /* Toggle (mint) */
-.toggle{width:44px;height:26px;background:#C8ECD8;border-radius:13px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;}
-.toggle.on{background:#52B788;}
+.toggle{width:44px;height:26px;background:#B8D9FF;border-radius:13px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;}
+.toggle.on{background:#007AFF;}
 .toggle::after{content:'';position:absolute;top:2px;left:2px;width:22px;height:22px;background:#fff;border-radius:50%;transition:left 0.2s;}
 .toggle.on::after{left:20px;}
 
 /* Buttons */
-.btn-add{display:block;width:100%;padding:12px;background:#F0FAF4;border:1.5px dashed #52B788;border-radius:10px;color:#3D9E72;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:8px;}
-.btn-add:active{background:#C8ECD8;}
+.btn-add{display:block;width:100%;padding:12px;background:#E8F4FD;border:1.5px dashed #007AFF;border-radius:10px;color:#0056B3;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;margin-top:8px;}
+.btn-add:active{background:#B8D9FF;}
 .btn-del{padding:6px 12px;background:#fff;border:1px solid #FF3B30;border-radius:6px;color:#FF3B30;font-size:12px;cursor:pointer;font-family:inherit;}
 /* ★設計変更宣言 (2026-05-11): bottom 値を bottom-nav 高さ分 (60px) 上げる + z-index を bottom-nav (100) より上にする
    旧: bottom:max(16px,env(safe-area-inset-bottom)) / z-index:10
    新: bottom:calc(60px + max(16px, env(safe-area-inset-bottom))) / z-index:110
    ボトムナビが btn-save に被さる問題を解消 (ボトムナビ自体は変更なし) */
-.btn-save{position:fixed;left:16px;right:16px;bottom:calc(60px + max(16px, env(safe-area-inset-bottom)));padding:14px;background:#52B788;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 12px rgba(82,183,136,0.4);z-index:110;}
+.btn-save{position:fixed;left:16px;right:16px;bottom:calc(60px + max(16px, env(safe-area-inset-bottom)));padding:14px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;box-shadow:0 4px 12px rgba(0,122,255,0.4);z-index:110;}
 .btn-save:active{transform:scale(0.97);filter:brightness(0.9);}
 
 /* ★設計変更宣言 (2026-05-11): settings.html から「追加料金項目」CSS を移行 (mint テーマに調整) */
-.extra-item{padding:10px 0;display:flex;flex-direction:column;gap:6px;border-bottom:0.5px solid #C8ECD8;}
+.extra-item{padding:10px 0;display:flex;flex-direction:column;gap:6px;border-bottom:0.5px solid #B8D9FF;}
 .extra-item:last-child{border-bottom:none;}
 .extra-item-row{display:flex;align-items:center;gap:8px;}
-.extra-name{flex:1;border:1px solid #C8ECD8;border-radius:8px;padding:8px 10px;font-size:14px;font-family:'Noto Sans JP',sans-serif;background:#F0FAF4;color:#1A4A2E;}
-.extra-amount{width:110px;border:1px solid #C8ECD8;border-radius:8px;padding:8px 10px;font-size:14px;text-align:right;font-family:'DM Mono',monospace;background:#F0FAF4;color:#1A4A2E;}
-.extra-unit{font-size:12px;color:#3D9E72;white-space:nowrap;font-family:'DM Mono',monospace;}
+.extra-name{flex:1;border:1px solid #B8D9FF;border-radius:8px;padding:8px 10px;font-size:14px;font-family:'Noto Sans JP',sans-serif;background:#E8F4FD;color:#1c1c1e;}
+.extra-amount{width:110px;border:1px solid #B8D9FF;border-radius:8px;padding:8px 10px;font-size:14px;text-align:right;font-family:'DM Mono',monospace;background:#E8F4FD;color:#1c1c1e;}
+.extra-unit{font-size:12px;color:#0056B3;white-space:nowrap;font-family:'DM Mono',monospace;}
 .extra-del{background:#fff;border:1px solid #FF3B30;border-radius:6px;padding:6px 12px;color:#FF3B30;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
 
 /* Tier / surcharge / vehicle row card */
-.item-card{border:1px solid #C8ECD8;border-radius:10px;padding:12px;margin-bottom:10px;background:#F0FAF4;}
+.item-card{border:1px solid #B8D9FF;border-radius:10px;padding:12px;margin-bottom:10px;background:#E8F4FD;}
 .item-card-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .item-card-row:last-child{margin-bottom:0;}
 
 /* Color picker */
 .color-picker{display:flex;gap:6px;flex-wrap:wrap;}
-.color-swatch{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 1px #C8ECD8;}
-.color-swatch.selected{box-shadow:0 0 0 2px #1A4A2E;}
+.color-swatch{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 1px #B8D9FF;}
+.color-swatch.selected{box-shadow:0 0 0 2px #1c1c1e;}
 
 /* Rounding pills */
 .pill-group{display:flex;gap:6px;flex-wrap:wrap;}
-.pill{padding:6px 12px;border:1.5px solid #C8ECD8;border-radius:16px;background:#fff;color:#3D9E72;font-size:13px;font-family:'DM Mono',monospace;cursor:pointer;}
-.pill.selected{background:#52B788;color:#fff;border-color:#52B788;}
+.pill{padding:6px 12px;border:1.5px solid #B8D9FF;border-radius:16px;background:#fff;color:#0056B3;font-size:13px;font-family:'DM Mono',monospace;cursor:pointer;}
+.pill.selected{background:#007AFF;color:#fff;border-color:#007AFF;}
 
 /* Preview table */
-.preview-table{width:100%;border-collapse:collapse;font-family:'DM Mono',monospace;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #C8ECD8;}
-.preview-table th,.preview-table td{padding:10px;font-size:13px;text-align:right;border-bottom:0.5px solid #C8ECD8;}
-.preview-table th{background:#C8ECD8;color:#1A4A2E;font-weight:700;}
-.preview-table td{color:#1A4A2E;}
-.preview-multiplier{padding:10px;background:#1A4A2E;color:#C8ECD8;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;text-align:center;margin-bottom:10px;}
+.preview-table{width:100%;border-collapse:collapse;font-family:'DM Mono',monospace;background:#fff;border-radius:8px;overflow:hidden;border:1px solid #B8D9FF;}
+.preview-table th,.preview-table td{padding:10px;font-size:13px;text-align:right;border-bottom:0.5px solid #B8D9FF;}
+.preview-table th{background:#B8D9FF;color:#1c1c1e;font-weight:700;}
+.preview-table td{color:#1c1c1e;}
+.preview-multiplier{padding:10px;background:#1c1c1e;color:#B8D9FF;border-radius:8px;font-family:'DM Mono',monospace;font-size:14px;text-align:center;margin-bottom:10px;}
 
 /* Auto surcharge active indicator */
-.auto-status{font-size:12px;color:#52B788;font-family:'DM Mono',monospace;font-weight:700;margin-top:4px;}
+.auto-status{font-size:12px;color:#007AFF;font-family:'DM Mono',monospace;font-weight:700;margin-top:4px;}
 .auto-status.inactive{color:#999;}
 
 /* Toast */
-.fare-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#1A4A2E;color:#C8ECD8;border-radius:10px;padding:10px 16px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:700;display:none;font-family:'Noto Sans JP',sans-serif;}
+.fare-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#1c1c1e;color:#B8D9FF;border-radius:10px;padding:10px 16px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:700;display:none;font-family:'Noto Sans JP',sans-serif;}
 .fare-toast.show{display:block;}
 
 /* Landscape: 2 column layout */
 @media (orientation: landscape) and (min-width: 700px){
   .layout{flex-direction:row;}
-  .tab-nav{flex-direction:column;width:160px;border-right:1.5px solid #C8ECD8;border-bottom:none;overflow-y:auto;overflow-x:hidden;}
-  .tab-btn{text-align:left;padding:14px 16px;border-bottom:0.5px solid #C8ECD8;border-left:3px solid transparent;}
-  .tab-btn.active{border-left-color:#52B788;border-bottom-color:#C8ECD8;}
+  .tab-nav{flex-direction:column;width:160px;border-right:1.5px solid #B8D9FF;border-bottom:none;overflow-y:auto;overflow-x:hidden;}
+  .tab-btn{text-align:left;padding:14px 16px;border-bottom:0.5px solid #B8D9FF;border-left:3px solid transparent;}
+  .tab-btn.active{border-left-color:#007AFF;border-bottom-color:#B8D9FF;}
   .tab-content{padding:24px;padding-bottom:100px;}
   .btn-save{left:auto;right:24px;width:200px;}
 }
@@ -294,39 +294,39 @@ body{display:flex;flex-direction:column;overflow:hidden;}
       <!-- ★設計変更宣言 (2026-05-11): 全タブの設定値を確認タブで一覧表示 -->
       <div class="card">
         <div class="card-title">基本料金</div>
-        <div id="previewBasic" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewBasic" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">段階料金</div>
-        <div id="previewTiers" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewTiers" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">手動割増</div>
-        <div id="previewSurchargesList" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewSurchargesList" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">自動割増</div>
-        <div id="previewAutoList" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewAutoList" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">車種</div>
-        <div id="previewVehicles" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewVehicles" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">待機料金</div>
-        <div id="previewWait" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewWait" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">区間料金</div>
-        <div id="previewZones" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewZones" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">追加料金項目</div>
-        <div id="previewExtras" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewExtras" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
       <div class="card">
         <div class="card-title">下限・上限・丸め</div>
-        <div id="previewLimits" style="font-size:13px;line-height:1.8;color:#1A4A2E;"></div>
+        <div id="previewLimits" style="font-size:13px;line-height:1.8;color:#1c1c1e;"></div>
       </div>
     </section>
 
@@ -367,7 +367,7 @@ let fc = {
   zonesEnabled: false,
 };
 
-const COLOR_PRESETS = ['#52B788','#1A4A2E','#FF9500','#FF3B30','#A0287A','#007AFF','#FFCC00','#FF6B9D'];
+const COLOR_PRESETS = ['#007AFF','#1c1c1e','#FF9500','#FF3B30','#A0287A','#007AFF','#FFCC00','#FF6B9D'];
 
 // ━━ Tab switching ━━
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -698,7 +698,7 @@ function renderPreviewSurcharges(){
       updatePreview();
     };
     const dot = document.createElement('span');
-    dot.style.cssText = 'display:inline-block;width:14px;height:14px;border-radius:50%;background:' + (s.color||'#52B788') + ';';
+    dot.style.cssText = 'display:inline-block;width:14px;height:14px;border-radius:50%;background:' + (s.color||'#007AFF') + ';';
     const txt = document.createElement('span');
     txt.textContent = s.name + ' ×' + s.rate;
     wrap.appendChild(cb);
@@ -769,7 +769,7 @@ function updatePreview(){
       if(inRange) items.push('冬季 ×' + a.winter.rate);
     }
     ps.textContent = items.length ? ('自動適用中: ' + items.join(' / ')) : '自動適用なし';
-    ps.style.color = items.length ? '#52B788' : '#999';
+    ps.style.color = items.length ? '#007AFF' : '#999';
     ps.style.fontFamily = 'DM Mono,monospace';
     ps.style.fontSize = '12px';
   }
@@ -812,8 +812,8 @@ function _renderPreviewDetails(){
       elSur.innerHTML = '<span style="color:#999;">未設定</span>';
     } else {
       elSur.innerHTML = fc.surcharges.map(s => {
-        return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(s.color||'#52B788')+';vertical-align:middle;margin-right:6px;"></span>'
-             + esc(s.name) + ' ×' + (s.rate || 1.0) + (s.defaultOn ? ' <span style="color:#52B788;">(デフォルトON)</span>' : '');
+        return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(s.color||'#007AFF')+';vertical-align:middle;margin-right:6px;"></span>'
+             + esc(s.name) + ' ×' + (s.rate || 1.0) + (s.defaultOn ? ' <span style="color:#007AFF;">(デフォルトON)</span>' : '');
       }).join('<br>');
     }
   }
@@ -836,7 +836,7 @@ function _renderPreviewDetails(){
       elVeh.innerHTML = '<span style="color:#999;">使用しない</span>';
     } else {
       elVeh.innerHTML = fc.vehicles.map(v => {
-        const tag = v.default ? ' <span style="color:#52B788;">(デフォルト)</span>' : '';
+        const tag = v.default ? ' <span style="color:#007AFF;">(デフォルト)</span>' : '';
         const addon = v.addon ? (' +' + yen(v.addon)) : '';
         return esc(v.name) + ' ×' + (v.multiplier || 1.0) + addon + tag;
       }).join('<br>');
