@@ -550,6 +550,11 @@ justify-content:center;
 #screenFare button{margin-top:10px;display:block;margin-left:auto;margin-right:auto;}
 }
 
+/* ★設計変更宣言 (2026-05-11): Eruda DevTools floating ボタン保険的非表示
+   debug-config.js で load 自体スキップしているが、過去 cache から残った場合も非表示にする
+   ?debug=eruda 付き時のみ debug-config.js が load する */
+.eruda-dev-tools,[class*="eruda-entry"],[class*="eruda-container"]{display:none !important;}
+
 /* ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 7 日経過時のみ flow 表示) */
 .data-update-banner-wrap{flex-shrink:0;max-height:0;overflow:hidden;transition:max-height 0.35s ease-out;}
 .data-update-banner-wrap.show{max-height:120px;}

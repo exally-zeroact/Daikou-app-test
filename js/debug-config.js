@@ -49,9 +49,19 @@ const DEBUG = (() => {
 // ===========================================
 // Eruda 組み込み（条件付き）
 // スマホで F12 Console が見れる神ツール
+// ★設計変更宣言 (2026-05-11): ユーザー UI 上は非表示化
+//   - idle 画面右下に出ていた ⚙️ フローティングボタンを削除 (ユーザー要望)
+//   - 設定はボトムナビ「設定」タブで代替済
+//   - 開発者は ?debug=eruda クエリ追加で復活可能
 // ===========================================
 (function loadEruda(){
   if(!DEBUG.showEruda) return;
+  // ★ Eruda は明示的に ?debug=eruda が付いた時だけ起動
+  const hasErudaFlag = location.search.includes('debug=eruda');
+  if(!hasErudaFlag){
+    console.log('[DEBUG] Eruda 非表示 (?debug=eruda で復活可)');
+    return;
+  }
 
   const s = document.createElement('script');
   s.src = 'https://cdn.jsdelivr.net/npm/eruda';
