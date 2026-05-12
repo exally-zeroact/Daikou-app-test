@@ -4314,14 +4314,17 @@ const DakomeDL = (function(){
             const cacheUrl = '/data/roads-' + pref + '.js';
             const res = await fetch(fetchUrl, { cache: 'no-store' });
             if(!res.ok) throw new Error('HTTP ' + res.status);
-            // 明示的 cache.put で SW SWR の沈黙失敗を回避
-            if(cache){
-              const resClone = res.clone();
-              await cache.put(cacheUrl, resClone);
-            }
+            // ★設計変更宣言 (2026-05-13): cache 取得不可なら復旧失敗扱い
+            //   旧: if(cache){ cache.put(...) } で skip し markPrefDone のみ実行
+            //       → cache に入っていないのに完了マークだけ立つ整合性破れ
+            //       → 次回 _detectCacheEviction で再び欠落判定される無限ループ
+            //   新: cache===null なら throw → attempt 再試行・最終的に failed リスト入り
+            //       cache.put 成功時のみ markPrefDone (整合性担保)
+            if(!cache) throw new Error('cache unavailable');
+            const resClone = res.clone();
+            await cache.put(cacheUrl, resClone);
             const blob = await res.blob();
             blobSize = blob.size;
-            // cache.put 成功後 (cache===null なら markPrefDone のみ) prefStatus を再 mark
             await markPrefDone(pref, blobSize);
             success = true;
             break;
