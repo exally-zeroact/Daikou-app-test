@@ -4374,26 +4374,41 @@ const DataUpdateBanner = (function(){
     const total = (DakomeDL.PREFECTURES || []).length || 47;
     _setProgress(0, total);
     try {
+      // ★設計変更宣言 (2026-05-12): 全 47 県 fetch 時に size 差で「実更新数」をカウント
+      //   settings.html onCheckUpdate と同じ判定方式 (size 差 = 実コンテンツ更新)
+      //   _finish に updated 件数を渡してメッセージに含める
+      const existing = await (DakomeDL.getAllPrefectures
+        ? DakomeDL.getAllPrefectures() : Promise.resolve([]));
+      const sizeMap = new Map((existing || []).map(r => [r.pref, r.size || 0]));
       // 全 47 県を強制再 fetch (settings.html の onCheckUpdate と同等・cache busting)
       const stamp = Date.now();
       const PARALLEL = 2;
       const MAX_RETRY = 3;
       const queue = (DakomeDL.PREFECTURES || []).slice();
       let done = 0;
+      let updated = 0;
       async function worker(){
         while(queue.length > 0){
           const pref = queue.shift();
+          let newSize = 0;
+          let success = false;
           for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
             try {
               const url = '/data/roads-' + pref + '.js?_v=' + stamp;
               const res = await fetch(url, { cache: 'no-store' });
               if(!res.ok) throw new Error('HTTP ' + res.status);
               const blob = await res.blob();
-              await DakomeDL.markPrefDone(pref, blob.size);
+              newSize = blob.size;
+              await DakomeDL.markPrefDone(pref, newSize);
+              success = true;
               break;
             } catch(e){
               if(attempt < MAX_RETRY) await new Promise(r => setTimeout(r, 1000 * attempt));
             }
+          }
+          if(success){
+            const prev = sizeMap.get(pref) || 0;
+            if(prev !== newSize) updated++;
           }
           done++;
           _setProgress(done, total);
@@ -4402,21 +4417,30 @@ const DataUpdateBanner = (function(){
       const workers = [];
       for(let i = 0; i < PARALLEL; i++) workers.push(worker());
       await Promise.all(workers);
-      _finish(true);
+      _finish(true, updated, total);
     } catch(e){
       console.warn('[DataUpdate] 失敗:', e && e.message);
-      _finish(false);
+      _finish(false, 0, total);
     }
   }
 
-  function _finish(ok){
+  function _finish(ok, updated, total){
     const banner = document.getElementById('dataUpdateBanner');
     const icon = banner.querySelector('.icon');
     const text = banner.querySelector('.text');
     banner.classList.remove('downloading');
     if(ok){
       if(icon) icon.textContent = '✅';
-      if(text) text.innerHTML = '<strong>地図データを更新しました</strong>';
+      if(text){
+        // ★設計変更宣言 (2026-05-12): 実更新数を明示
+        //   updated > 0: "X 県の地図データを更新しました"
+        //   updated === 0: "すべて最新でした (全 N 県確認)"
+        if(updated > 0){
+          text.innerHTML = '<strong>' + updated + ' 県の地図データを更新しました</strong>';
+        } else {
+          text.innerHTML = '<strong>すべて最新でした</strong> (全 ' + total + ' 県確認)';
+        }
+      }
     } else {
       if(icon) icon.textContent = '⚠️';
       if(text) text.innerHTML = '<strong>更新失敗・また後で試してください</strong>';
