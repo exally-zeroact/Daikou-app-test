@@ -4051,6 +4051,10 @@ const DakomeDL = (function(){
         // 既存ユーザー：未DL県があればバックグラウンドで差分DL
         if(typeof dlog === 'function') dlog('[DL] 初回DL済み・差分DLチェック');
         checkAndUpdateExisting();
+        // ★設計変更宣言 (2026-05-13): 既存ユーザー (差分DLパス) では
+        //   showCompleteBanner が呼ばれず flag が true のまま残り
+        //   _detectCacheEviction が永続的に skip されるため、return 直前で false にリセット
+        window._dakomeDLInProgress = false;
         return;
       }
       if(typeof dlog === 'function') dlog('[DL] 初回起動・47県DL開始');
