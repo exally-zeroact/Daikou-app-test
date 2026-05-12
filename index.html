@@ -4208,8 +4208,9 @@ const DakomeDL = (function(){
       } catch(_){}
 
       // B. キャッシュ存在チェック (修正: DL 完了済みの県のみ確認)
-      //    sw.js の CACHE_NAME は CI で auto-update される動的値のため、
-      //    caches.keys() から daikome- prefix のキャッシュを動的に取得
+      //    ★設計変更宣言 (2026-05-13): roads cache を固定名 'daikome-roads-v1' へ分離
+      //       旧: caches.keys().find(daikome-) で動的取得
+      //       新: 'daikome-roads-v1' を直接参照
       try {
         // ★修正 A: getPrefStatus() で DL 完了済みの県セットを取得
         //   未 DL 県 (まだ一度も DL してない / 初回起動直後等) は欠落扱いしない
@@ -4217,15 +4218,14 @@ const DakomeDL = (function(){
         const doneSet = await getPrefStatus();
         if(!doneSet || doneSet.size === 0){
           if(typeof dlog === 'function') dlog('[CacheCheck] DL 完了県 0 件 → 欠落判定スキップ');
-        } else if(typeof caches !== 'undefined' && typeof caches.keys === 'function'){
-          const cacheNames = await caches.keys();
-          const daikomeCacheName = cacheNames.find(n => n.indexOf('daikome-') === 0);
-          if(!daikomeCacheName){
-            // 'daikome-' プレフィックスのキャッシュが存在しない = 全 evict 想定
+        } else if(typeof caches !== 'undefined' && typeof caches.has === 'function'){
+          const exists = await caches.has('daikome-roads-v1');
+          if(!exists){
+            // 'daikome-roads-v1' キャッシュが存在しない = 全 evict 想定 (新規 install 直後等)
             missingFiles = true;
-            if(typeof dlog === 'function') dlog('[CacheCheck] daikome-* キャッシュなし (全 evict 想定)');
+            if(typeof dlog === 'function') dlog('[CacheCheck] daikome-roads-v1 キャッシュなし (全 evict 想定)');
           } else {
-            const cache = await caches.open(daikomeCacheName);
+            const cache = await caches.open('daikome-roads-v1');
             // ★設計変更宣言 (2026-05-13): 旧 break で 1 件で抜けていたが、
             //   欠落県のみ復旧するため全件 scan して missingPrefs に蓄積する
             for(const pref of doneSet){
@@ -4294,13 +4294,13 @@ const DakomeDL = (function(){
     let ok = 0;
     const failed = [];
     try {
-      // 復旧対象 cache (daikome- prefix)
+      // ★設計変更宣言 (2026-05-13): 復旧対象 cache を固定名 'daikome-roads-v1' に直接参照
+      //   旧: caches.keys().find(daikome-) で動的取得 (アプリコード cache を間違って参照する可能性)
+      //   新: roads データ専用の 'daikome-roads-v1' を直接 open
       let cache = null;
       try {
-        if(typeof caches !== 'undefined' && typeof caches.keys === 'function'){
-          const cacheNames = await caches.keys();
-          const daikomeCacheName = cacheNames.find(n => n.indexOf('daikome-') === 0);
-          if(daikomeCacheName) cache = await caches.open(daikomeCacheName);
+        if(typeof caches !== 'undefined'){
+          cache = await caches.open('daikome-roads-v1');
         }
       } catch(_){}
       const MAX_RETRY = 3;

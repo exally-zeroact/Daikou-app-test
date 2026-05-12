@@ -21,6 +21,13 @@
 // ===========================================
 
 const CACHE_NAME = 'daikome-e933a5d';
+// ★設計変更宣言 (2026-05-13): 47県データを固定名 cache に分離
+//   旧: アプリコード CACHE_NAME が hash で毎デプロイ更新 → 旧 cache 全削除 →
+//       47県データ (/data/roads-*.js) も全削除 → 全欠落・204MB 再 DL
+//   新: /data/roads-*.js は CACHE_NAME_ROADS (固定名) に保存
+//       アプリコード CACHE_NAME 更新は roads cache に影響しない
+//       スキーマ変更時のみ v1→v2 にバンプ (cache-buster)
+const CACHE_NAME_ROADS = 'daikome-roads-v1';
 
 // アイコン・manifest・start_url（"/"）をキャッシュ
 // "/"のキャッシュは Chrome の installability 要件で必須
@@ -67,24 +74,54 @@ self.addEventListener('install', function(e){
   );
 });
 
+// ★設計変更宣言 (2026-05-13): activate handler を migration 対応に変更
+//   旧: CACHE_NAME 以外を全削除 → 47県データも消滅
+//   新: 旧 daikome-{hash} cache 内の /data/roads-*.js を CACHE_NAME_ROADS へ
+//       1 件ずつ try/catch で migrate してから旧 cache 削除
+//       CACHE_NAME / CACHE_NAME_ROADS は保護対象 (削除しない)
 self.addEventListener('activate', function(e){
-  e.waitUntil(
-    caches.keys().then(function(keys){
-      // 古いキャッシュ（旧 CACHE_NAME のもの）を全削除
-      return Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+  e.waitUntil((async function(){
+    try {
+      const keys = await caches.keys();
+      const newRoadsCache = await caches.open(CACHE_NAME_ROADS);
+      // 旧 daikome-{hash} cache から /data/roads-*.js を migrate
+      for(const oldName of keys){
+        // 保護対象: 新 CACHE_NAME と CACHE_NAME_ROADS は触らない
+        if(oldName === CACHE_NAME) continue;
+        if(oldName === CACHE_NAME_ROADS) continue;
+        // 旧 daikome-* prefix のみ migrate 対象 (他オリジン無関係 cache は触らない)
+        if(oldName.indexOf('daikome-') !== 0) continue;
+        try {
+          const oldCache = await caches.open(oldName);
+          const reqs = await oldCache.keys();
+          for(const req of reqs){
+            if(req.url.indexOf('/data/roads-') === -1) continue;
+            // 1 件失敗で全体止めないよう個別 try/catch
+            try {
+              const res = await oldCache.match(req);
+              if(res) await newRoadsCache.put(req, res);
+            } catch(_){}
+          }
+        } catch(_){}
+      }
+      // migrate 後に旧 cache (CACHE_NAME / CACHE_NAME_ROADS 以外) を削除
+      await Promise.all(
+        keys.filter(k => k !== CACHE_NAME && k !== CACHE_NAME_ROADS)
+            .map(k => caches.delete(k).catch(function(){}))
       );
-    }).then(function(){
-      return self.clients.claim();
-    })
-  );
+    } catch(_){}
+    await self.clients.claim();
+  })());
 });
 
 // SWR（Stale-While-Revalidate）共通関数
 // キャッシュから即時返しつつ、裏でネット取得＆キャッシュ更新
 // ★必ず Response を返す（undefined を返すと "null FetchEvent" エラーになる）
-function staleWhileRevalidate(request){
-  return caches.open(CACHE_NAME).then(function(cache){
+// ★設計変更宣言 (2026-05-13): 第2引数 cacheName 受入 (省略時は CACHE_NAME)
+//   /data/roads-*.js は CACHE_NAME_ROADS を渡して固定名 cache に保存・読込
+function staleWhileRevalidate(request, cacheName){
+  cacheName = cacheName || CACHE_NAME;
+  return caches.open(cacheName).then(function(cache){
     return cache.match(request).then(function(cached){
       const fetchPromise = fetch(request).then(function(response){
         if(response && response.ok && request.method === 'GET'){
@@ -175,6 +212,13 @@ self.addEventListener('fetch', function(e){
   //   → /history.html?foo=bar でも /history.html のキャッシュにヒット
   if(req.mode === 'navigate'){
     e.respondWith(navigationHandler(req));
+    return;
+  }
+
+  // ★設計変更宣言 (2026-05-13): /data/roads-*.js は CACHE_NAME_ROADS (固定名) に分離
+  //   アプリコード CACHE_NAME が hash 更新されても 47 県キャッシュは保持される
+  if(req.url.includes('/data/roads-')){
+    e.respondWith(staleWhileRevalidate(req, CACHE_NAME_ROADS));
     return;
   }
 
