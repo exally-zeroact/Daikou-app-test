@@ -30,6 +30,13 @@
 (function(global){
   'use strict';
 
+  // ★設計変更宣言 (2026-05-12): Web Worker 内で動作するため main thread の
+  //   OSRM_ENDPOINT 定数 (debug-config.js) は直接参照不可。
+  //   実運用では index.html の configOsrm postMessage で起動直後に setEndpoint() が
+  //   呼ばれる (worker 起動の数 ms 以内) ため、この初期値は実質的には使われない fallback。
+  //   何らかの理由で configOsrm 未受信のまま matchBatch が呼ばれた場合の保険として
+  //   最小限の値を保持。Step 5 サーバー構築後は configOsrm 経由で自動切替されるため
+  //   ここを書き換える必要はない (main 側 OSRM_ENDPOINT を 1 行直すだけ)。
   let _endpoint = 'https://router.project-osrm.org';
   const TIMEOUT_MS = 8000;
   const MIN_COORDS = 2;

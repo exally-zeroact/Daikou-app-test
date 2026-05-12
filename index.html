@@ -1504,7 +1504,8 @@ function _mmReforwardAllState(){
     const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
     const cfg = { type: 'configOsrm' };
     if(osrmEp == null){
-      cfg.endpoint = 'https://router.project-osrm.org';
+      // ★設計変更宣言 (2026-05-12): hardcoded URL → debug-config.js の OSRM_ENDPOINT 経由
+      cfg.endpoint = (typeof OSRM_ENDPOINT !== 'undefined') ? OSRM_ENDPOINT : 'https://router.project-osrm.org';
       cfg.enabled = true;
     } else if(osrmEp.length === 0){
       cfg.enabled = false;

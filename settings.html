@@ -231,9 +231,10 @@ body:not(.dev-mode) #devSection2{display:none !important;}
           Map Matching 校正サーバー（OSRM）<br>
           オンライン時のみ・30 秒ごとに後追い校正します。空欄で校正無効。
         </div>
+        <!-- ★設計変更宣言 (2026-05-12): value / placeholder の hardcoded URL を削除
+             起動 JS で OSRM_ENDPOINT (debug-config.js) から動的に注入 -->
         <input class="row-input" type="url" id="osrmEndpoint"
-               value="https://router.project-osrm.org"
-               placeholder="例: https://router.project-osrm.org"
+               placeholder="(自動設定)"
                style="width:100%;font-size:12px;">
       </div>
       <!-- 精度テスト dashboard へ遷移 (2026-05-09 追加) -->
@@ -271,6 +272,8 @@ body:not(.dev-mode) #devSection2{display:none !important;}
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <!-- Phase 3 (2026-05-10): Firebase Storage SDK・「過去データを削除」で必要 -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+<!-- ★設計変更宣言 (2026-05-12): OSRM_ENDPOINT 定数を debug-config.js から参照するため読込追加 -->
+<script src="js/debug-config.js"></script>
 <script src="js/firebase-config.js"></script>
 <script src="js/firebase.js"></script>
 <script>
@@ -430,11 +433,15 @@ function load(){
     if(obj.timeRate)      document.getElementById('timeRate').value      = obj.timeRate;
     if(obj.resetTime)     document.getElementById('resetTime').value      = obj.resetTime;
   }
-  // MM-6: OSRM endpoint をロード（既定 router.project-osrm.org）
+  // MM-6: OSRM endpoint をロード
+  // ★設計変更宣言 (2026-05-12): hardcoded URL → debug-config.js の OSRM_ENDPOINT 経由
+  //   localStorage 値があれば優先・無ければ環境別 OSRM_ENDPOINT を表示
   const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
-  if(osrmEp != null){
-    const elOsrm = document.getElementById('osrmEndpoint');
-    if(elOsrm) elOsrm.value = osrmEp;
+  const elOsrm = document.getElementById('osrmEndpoint');
+  if(elOsrm){
+    const fallback = (typeof OSRM_ENDPOINT !== 'undefined') ? OSRM_ENDPOINT : 'https://router.project-osrm.org';
+    elOsrm.value = (osrmEp != null) ? osrmEp : fallback;
+    elOsrm.placeholder = '例: ' + fallback;
   }
   updateSurchargeUI();
   updateTimeUI();
