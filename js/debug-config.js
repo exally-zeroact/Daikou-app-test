@@ -49,38 +49,91 @@ const DEBUG = (() => {
 // ===========================================
 // Eruda 組み込み（条件付き）
 // スマホで F12 Console が見れる神ツール
-// ★設計変更宣言 (2026-05-11): ユーザー UI 上は非表示化
-//   - idle 画面右下に出ていた ⚙️ フローティングボタンを削除 (ユーザー要望)
-//   - 設定はボトムナビ「設定」タブで代替済
-//   - 開発者は ?debug=eruda クエリ追加で復活可能
+// ★設計変更宣言 (2026-05-12): フローティング 🐛 ボタンで開閉トグル化
+//   旧: ?debug=eruda パラメータ必須・常時表示なし
+//   新: DEBUG.showEruda=true (vercel preview / localhost / ?debug=1) なら
+//       画面左下に 🐛 ボタンを常時表示
+//       初回タップで lazy load → 表示・再タップで非表示トグル
+//       PRODUCTION_HOSTS (本番) では DEBUG.showEruda=false → ボタンも非表示
+//   旧設計 (2026-05-11) との関係:
+//       idle 画面右下の ⚙️ ボタンは削除済 (ユーザー UI からは別)
+//       本 🐛 ボタンは「開発者向け debug 環境のみ」表示なので両立する
 // ===========================================
-(function loadEruda(){
+(function initErudaToggle(){
   if(!DEBUG.showEruda) return;
-  // ★ Eruda は明示的に ?debug=eruda が付いた時だけ起動
-  const hasErudaFlag = location.search.includes('debug=eruda');
-  if(!hasErudaFlag){
-    console.log('[DEBUG] Eruda 非表示 (?debug=eruda で復活可)');
-    return;
-  }
+  let _erudaLoaded = false;
+  let _erudaVisible = false;
+  let _loading = false;
 
-  const s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/npm/eruda';
-  s.onload = function(){
-    if(typeof eruda !== 'undefined'){
-      eruda.init();
-      console.log('[DEBUG] Eruda 起動完了');
-      console.log('[DEBUG] 環境:', {
-        vercelPreview: DEBUG.isVercelPreview,
-        localhost: DEBUG.isLocalhost,
-        production: DEBUG.isProduction,
-        debugParam: DEBUG.hasDebugParam,
+  const btn = document.createElement('button');
+  btn.id = 'erudaToggleBtn';
+  btn.type = 'button';
+  btn.textContent = '🐛';
+  btn.setAttribute('aria-label', 'Toggle Eruda console');
+  btn.style.cssText =
+    'position:fixed;left:8px;bottom:8px;z-index:9001;' +
+    'width:44px;height:44px;border-radius:50%;border:none;' +
+    'background:rgba(0,0,0,0.72);color:#fff;font-size:22px;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:pointer;' +
+    'display:flex;align-items:center;justify-content:center;' +
+    'padding:0;line-height:1;-webkit-tap-highlight-color:transparent;';
+
+  function _attach(){
+    if(document.body){
+      document.body.appendChild(btn);
+    } else {
+      document.addEventListener('DOMContentLoaded', function(){
+        document.body.appendChild(btn);
       });
     }
-  };
-  s.onerror = function(){
-    console.warn('[DEBUG] Eruda 読み込み失敗（オフライン or CDN問題）');
-  };
-  document.head.appendChild(s);
+  }
+  _attach();
+
+  function _loadEruda(cb){
+    if(_erudaLoaded){ cb(); return; }
+    if(_loading) return;   // 連打防止 (load 完了前)
+    _loading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+    s.onload = function(){
+      _loading = false;
+      if(typeof eruda !== 'undefined'){
+        try { eruda.init(); } catch(e){ console.warn('[DEBUG] eruda.init error:', e && e.message); }
+        // Eruda 標準の entry button は隠す (本 🐛 ボタンが代替)
+        try {
+          const entry = document.querySelector('.eruda-entry-btn');
+          if(entry) entry.style.display = 'none';
+        } catch(_){}
+        _erudaLoaded = true;
+        console.log('[DEBUG] Eruda 起動完了');
+        console.log('[DEBUG] 環境:', {
+          vercelPreview: DEBUG.isVercelPreview,
+          localhost: DEBUG.isLocalhost,
+          production: DEBUG.isProduction,
+          debugParam: DEBUG.hasDebugParam,
+        });
+        cb();
+      }
+    };
+    s.onerror = function(){
+      _loading = false;
+      console.warn('[DEBUG] Eruda 読み込み失敗（オフライン or CDN問題）');
+    };
+    document.head.appendChild(s);
+  }
+
+  btn.addEventListener('click', function(){
+    _loadEruda(function(){
+      if(typeof eruda === 'undefined') return;
+      if(_erudaVisible){
+        try { eruda.hide(); } catch(_){}
+        _erudaVisible = false;
+      } else {
+        try { eruda.show(); } catch(_){}
+        _erudaVisible = true;
+      }
+    });
+  });
 })();
 
 // 起動ログ（テスト環境のみ）

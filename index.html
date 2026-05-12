@@ -2865,6 +2865,25 @@ function onBusinessStart(){
     showToast('別のタブで業務中です');
     return;
   }
+  // ★設計変更宣言 (2026-05-12): 全 OS で PWA standalone 必須化
+  //   理由: 非 PWA (iOS Safari ブラウザ・Android Chrome ブラウザ) では
+  //         道路データ DL (47県/204MB) が DakomeDL.init() 起動時の
+  //         standalone ガードにより未実行
+  //         → MM 不可・GPS 直線距離課金に劣化 → 絶対ルール
+  //         「道路ジオメトリに沿った距離で課金」違反
+  //   判定:
+  //     iOS Safari PWA      → navigator.standalone === true
+  //     Android Chrome PWA  → matchMedia('(display-mode: standalone)').matches
+  //   非 standalone → ホーム画面追加を促してブロック
+  try {
+    const _bsIsStandalone = window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    if(!_bsIsStandalone){
+      showToast('ホーム画面に追加してから業務開始してください');
+      if(typeof dlog === 'function') dlog('[Business] start blocked: not PWA standalone');
+      return;
+    }
+  } catch(_){}
   // 全ボタン共通：センサー未許可ならバナー表示してブロック（2026/05/01）
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined'){
@@ -4122,8 +4141,22 @@ const DakomeDL = (function(){
   //     文言を「データが不足しています。再ダウンロードしてください」に override
   //
   //   多重実行防止: _cacheCheckInProgress フラグ + try/finally
+  //
+  // ★設計変更宣言 (2026-05-12): false positive 対策 3 点修正
+  //   旧: PREFECTURES 47 件全件チェック・visibilitychange 即時・1 回欠落で即バナー
+  //       → SW 更新中/DL 途中で誤検知発生
+  //   新:
+  //     A. DL 完了済みの県のみ確認 (getPrefStatus() の doneSet を参照)
+  //        → 未 DL 県は最初から欠落扱いしない (DL 未着手の県でバナー出ない)
+  //     B. visibilitychange に 5 秒 debounce (タブ往復連打で連続検知しない)
+  //     C. 欠落検知時は 3 秒後に 1 回だけ再確認・両方欠落で初めてバナー表示
+  //        (SW 更新中/cache addAll 途中の transient な欠落を吸収)
   let _cacheCheckInProgress = false;
-  async function _detectCacheEviction(){
+  let _lastVisibilityCheckAt = 0;
+  const _VISIBILITY_DEBOUNCE_MS = 5000;
+  const _CONFIRM_RECHECK_DELAY_MS = 3000;
+
+  async function _detectCacheEviction(isConfirm){
     if(_cacheCheckInProgress) return;
     _cacheCheckInProgress = true;
     try {
@@ -4147,11 +4180,17 @@ const DakomeDL = (function(){
         }
       } catch(_){}
 
-      // B. 47 県道路データのキャッシュ存在チェック
+      // B. キャッシュ存在チェック (修正: DL 完了済みの県のみ確認)
       //    sw.js の CACHE_NAME は CI で auto-update される動的値のため、
       //    caches.keys() から daikome- prefix のキャッシュを動的に取得
       try {
-        if(typeof caches !== 'undefined' && typeof caches.keys === 'function'){
+        // ★修正 A: getPrefStatus() で DL 完了済みの県セットを取得
+        //   未 DL 県 (まだ一度も DL してない / 初回起動直後等) は欠落扱いしない
+        //   doneSet.size === 0 (一切 DL 未完了) なら check 全体を skip
+        const doneSet = await getPrefStatus();
+        if(!doneSet || doneSet.size === 0){
+          if(typeof dlog === 'function') dlog('[CacheCheck] DL 完了県 0 件 → 欠落判定スキップ');
+        } else if(typeof caches !== 'undefined' && typeof caches.keys === 'function'){
           const cacheNames = await caches.keys();
           const daikomeCacheName = cacheNames.find(n => n.indexOf('daikome-') === 0);
           if(!daikomeCacheName){
@@ -4160,12 +4199,12 @@ const DakomeDL = (function(){
             if(typeof dlog === 'function') dlog('[CacheCheck] daikome-* キャッシュなし (全 evict 想定)');
           } else {
             const cache = await caches.open(daikomeCacheName);
-            for(const pref of PREFECTURES){
+            for(const pref of doneSet){
               const url = '/data/roads-' + pref + '.js';
               const match = await cache.match(url);
               if(!match){
                 missingFiles = true;
-                if(typeof dlog === 'function') dlog('[CacheCheck] 欠落検知: ' + pref);
+                if(typeof dlog === 'function') dlog('[CacheCheck] 欠落検知 (DL 完了済): ' + pref);
                 break;  // 1 件検出すれば十分・全件 scan で時間消費しない
               }
             }
@@ -4173,8 +4212,19 @@ const DakomeDL = (function(){
         }
       } catch(_){}
 
-      // C. バナー強制表示 + 文言上書き
+      // C. 欠落検知時の処理 (修正: 1 回目疑い → 3 秒後再確認 → 両方欠落で初バナー表示)
       if(lowStorage || missingFiles){
+        if(!isConfirm){
+          // 1 回目: バナー表示せず・3 秒後に再確認
+          //   SW activate 中・cache addAll 途中等の transient な欠落を吸収
+          if(typeof dlog === 'function'){
+            dlog('[CacheCheck] 欠落疑い (lowStorage=' + lowStorage +
+                 ' missing=' + missingFiles + ') → 3 秒後に再確認');
+          }
+          setTimeout(() => _detectCacheEviction(true), _CONFIRM_RECHECK_DELAY_MS);
+          return;  // 1 回目は何もせず exit (finally で _cacheCheckInProgress リセット)
+        }
+        // 2 回目 (確認モード) でも欠落 → バナー表示
         try {
           if(typeof DataUpdateBanner !== 'undefined' && DataUpdateBanner.show){
             DataUpdateBanner.show();  // snooze 無視で強制表示
@@ -4185,11 +4235,14 @@ const DakomeDL = (function(){
           }
         } catch(_){}
         if(typeof dlog === 'function'){
-          dlog('[CacheCheck] エビクション検知: lowStorage=' + lowStorage +
-               ' missing=' + missingFiles + ' → バナー強制表示');
+          dlog('[CacheCheck] 再確認でも欠落 → バナー強制表示: lowStorage=' + lowStorage +
+               ' missing=' + missingFiles);
         }
       } else {
-        if(typeof dlog === 'function') dlog('[CacheCheck] OK (47 県揃い・残量 10% 以上)');
+        if(typeof dlog === 'function'){
+          dlog('[CacheCheck] OK (' + (isConfirm ? '再確認 ' : '') +
+               'DL 完了県揃い・残量 10% 以上)');
+        }
       }
     } catch(e){
       console.error('[CacheCheck] error:', e && e.message);
@@ -4208,11 +4261,17 @@ const DakomeDL = (function(){
       setTimeout(() => _detectCacheEviction(), 1000);
     }
 
-    // トリガ 2: visibilitychange (タブ復帰時に再チェック)
+    // トリガ 2: visibilitychange (タブ復帰時に再チェック・5 秒 debounce)
+    //   ★修正 B: タブ往復連打 / 短時間の visibility 変化で連続検知させない
     document.addEventListener('visibilitychange', function(){
-      if(document.visibilityState === 'visible'){
-        _detectCacheEviction();
+      if(document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if(now - _lastVisibilityCheckAt < _VISIBILITY_DEBOUNCE_MS){
+        if(typeof dlog === 'function') dlog('[CacheCheck] visibility debounce skip');
+        return;
       }
+      _lastVisibilityCheckAt = now;
+      _detectCacheEviction();
     });
   }
 
