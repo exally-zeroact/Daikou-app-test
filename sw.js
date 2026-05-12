@@ -119,10 +119,23 @@ self.addEventListener('activate', function(e){
 // ★必ず Response を返す（undefined を返すと "null FetchEvent" エラーになる）
 // ★設計変更宣言 (2026-05-13): 第2引数 cacheName 受入 (省略時は CACHE_NAME)
 //   /data/roads-*.js は CACHE_NAME_ROADS を渡して固定名 cache に保存・読込
+// ★設計変更宣言 (2026-05-13): CACHE_NAME_ROADS への put/match は URL の search
+//   params を除去した正規化 URL を cache キーとして使う
+//   旧: ?_v={timestamp} 等のクエリ付き URL がそのまま別エントリとして cache に
+//       残り、no-query 版と二重化していた (10 県の ?_v= 付き残存問題)
+//   新: cacheKey = normalizedRequest (query 除去) で put/match → 1 県 1 エントリに統一
 function staleWhileRevalidate(request, cacheName){
   cacheName = cacheName || CACHE_NAME;
+  let cacheKey = request;
+  if(cacheName === CACHE_NAME_ROADS){
+    try {
+      const normalizedUrl = new URL(request.url);
+      normalizedUrl.search = '';
+      cacheKey = new Request(normalizedUrl.toString(), { headers: request.headers });
+    } catch(_){}
+  }
   return caches.open(cacheName).then(function(cache){
-    return cache.match(request).then(function(cached){
+    return cache.match(cacheKey).then(function(cached){
       const fetchPromise = fetch(request).then(function(response){
         if(response && response.ok && request.method === 'GET'){
           // 同一オリジンの正常レスポンスのみキャッシュ（opaque は除外）
@@ -132,7 +145,7 @@ function staleWhileRevalidate(request, cacheName){
             //       Cache の整合性破れ (47/47 完了マーク済なのに 1 県だけ cache 欠落)
             //   新: cache.put 失敗時に postMessage({type:'cachePutFailed', url})
             //       main thread 側 (index.html) で受信し prefStatus を未完了に戻す
-            cache.put(request, response.clone()).catch(function(err){
+            cache.put(cacheKey, response.clone()).catch(function(err){
               return self.clients.matchAll({ type: 'window' }).then(function(clients){
                 for(var i = 0; i < clients.length; i++){
                   try { clients[i].postMessage({ type: 'cachePutFailed', url: request.url }); } catch(_) {}
