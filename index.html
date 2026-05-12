@@ -4104,8 +4104,121 @@ const DakomeDL = (function(){
     });
   }
 
+  // ★設計変更宣言 (2026-05-12): Cache Storage エビクション検知 + 強制復旧導線 (P0 Step 3)
+  //   目的: iOS Safari の自動エビクションで Cache Storage から
+  //         /data/roads-{pref}.js が部分的/全件削除された場合に検知し、
+  //         ユーザーに再 DL を促す (データ更新バナー強制表示)
+  //
+  //   検知条件 (どちらか満たせばエビクション扱い):
+  //     A. navigator.storage.estimate() の (quota - usage) / quota < 0.1
+  //        = 残量 10% 未満 → 自動 evict が始まる前に警告
+  //     B. caches API で daikome- prefix のキャッシュを open し、
+  //        47 県の /data/roads-{pref}.js を cache.match() で確認
+  //        1 件でも欠落していれば evict 発生済
+  //
+  //   復旧導線:
+  //     既存 DataUpdateBanner.show() を呼出 (snooze 無視で表示) +
+  //     文言を「データが不足しています。再ダウンロードしてください」に override
+  //
+  //   多重実行防止: _cacheCheckInProgress フラグ + try/finally
+  let _cacheCheckInProgress = false;
+  async function _detectCacheEviction(){
+    if(_cacheCheckInProgress) return;
+    _cacheCheckInProgress = true;
+    try {
+      let lowStorage = false;
+      let missingFiles = false;
+
+      // A. ストレージ残量チェック (未サポート環境では skip・エラー化しない)
+      try {
+        if(navigator.storage && typeof navigator.storage.estimate === 'function'){
+          const est = await navigator.storage.estimate();
+          if(est && typeof est.quota === 'number' && typeof est.usage === 'number'){
+            const remaining = est.quota - est.usage;
+            if(est.quota > 0 && remaining < est.quota * 0.1){
+              lowStorage = true;
+              if(typeof dlog === 'function'){
+                dlog('[CacheCheck] 残量不足: ' + (remaining/1024/1024).toFixed(0) + 'MB / ' +
+                     (est.quota/1024/1024).toFixed(0) + 'MB (10% 未満)');
+              }
+            }
+          }
+        }
+      } catch(_){}
+
+      // B. 47 県道路データのキャッシュ存在チェック
+      //    sw.js の CACHE_NAME は CI で auto-update される動的値のため、
+      //    caches.keys() から daikome- prefix のキャッシュを動的に取得
+      try {
+        if(typeof caches !== 'undefined' && typeof caches.keys === 'function'){
+          const cacheNames = await caches.keys();
+          const daikomeCacheName = cacheNames.find(n => n.indexOf('daikome-') === 0);
+          if(!daikomeCacheName){
+            // 'daikome-' プレフィックスのキャッシュが存在しない = 全 evict 想定
+            missingFiles = true;
+            if(typeof dlog === 'function') dlog('[CacheCheck] daikome-* キャッシュなし (全 evict 想定)');
+          } else {
+            const cache = await caches.open(daikomeCacheName);
+            for(const pref of PREFECTURES){
+              const url = '/data/roads-' + pref + '.js';
+              const match = await cache.match(url);
+              if(!match){
+                missingFiles = true;
+                if(typeof dlog === 'function') dlog('[CacheCheck] 欠落検知: ' + pref);
+                break;  // 1 件検出すれば十分・全件 scan で時間消費しない
+              }
+            }
+          }
+        }
+      } catch(_){}
+
+      // C. バナー強制表示 + 文言上書き
+      if(lowStorage || missingFiles){
+        try {
+          if(typeof DataUpdateBanner !== 'undefined' && DataUpdateBanner.show){
+            DataUpdateBanner.show();  // snooze 無視で強制表示
+            const textEl = document.querySelector('#dataUpdateBanner .text');
+            if(textEl){
+              textEl.innerHTML = 'データが不足しています。<strong>再ダウンロードしてください</strong>';
+            }
+          }
+        } catch(_){}
+        if(typeof dlog === 'function'){
+          dlog('[CacheCheck] エビクション検知: lowStorage=' + lowStorage +
+               ' missing=' + missingFiles + ' → バナー強制表示');
+        }
+      } else {
+        if(typeof dlog === 'function') dlog('[CacheCheck] OK (47 県揃い・残量 10% 以上)');
+      }
+    } catch(e){
+      console.error('[CacheCheck] error:', e && e.message);
+    } finally {
+      _cacheCheckInProgress = false;
+    }
+  }
+
+  // トリガ 1: DOMContentLoaded 後 (初回起動時の検知)
+  if(typeof document !== 'undefined'){
+    if(document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => _detectCacheEviction(), 1000);  // SW activate 完了を少し待つ
+      });
+    } else {
+      setTimeout(() => _detectCacheEviction(), 1000);
+    }
+
+    // トリガ 2: visibilitychange (タブ復帰時に再チェック)
+    document.addEventListener('visibilitychange', function(){
+      if(document.visibilityState === 'visible'){
+        _detectCacheEviction();
+      }
+    });
+  }
+
   return { init, setDlCompleted, hideOverlay, getPrefStatus, checkAndUpdateExisting,
-           getAllPrefectures, downloadWithRetry, markPrefDone, PREFECTURES };
+           getAllPrefectures, downloadWithRetry, markPrefDone, PREFECTURES,
+           // P0 Step 3 (2026-05-12) - debug / 手動チェック用 export
+           _detectCacheEviction };
 })();
 
 // ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 7 日経過時のみ表示)
