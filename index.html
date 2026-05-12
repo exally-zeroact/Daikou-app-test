@@ -5089,6 +5089,67 @@ if(navigator.storage && navigator.storage.persist){
   // 初回起動時にも 1 回チェック
   setTimeout(function(){ tryPush(false); }, 8000);
 })();
+
+// ★設計変更宣言 (2026-05-12): ライフサイクル heartbeat 実装 (P0 - iOS RAM 検証代替)
+//   目的: Mac なし環境で iOS PWA の OOM kill / 予期せぬ終了を間接検知
+//   仕組み:
+//     1. 5 秒ごとに localStorage に Date.now() を書込
+//     2. 起動時に前回の値と現在時刻を比較
+//     3. gap が 30 秒 〜 24 時間の範囲 = 想定外終了 (OOM 疑い) と判定
+//     4. Firebase の 'crash_reports/{sessionId}' に statistics を記録
+//   UI 影響: なし (サイレント動作)
+//   業務状態に関わらず常時稼働 (idle/driving/fare 全て)
+(function _initLifecycleHeartbeat(){
+  const HEARTBEAT_KEY = 'daikou_last_alive_at';
+  const HEARTBEAT_INTERVAL_MS = 5000;
+  const GAP_MIN_MS = 30 * 1000;             // 30 秒以上の gap で疑い
+  const GAP_MAX_MS = 24 * 60 * 60 * 1000;   // 24 時間以上は除外 (通常の長期未起動)
+
+  // 5 秒ごと heartbeat 書込 (DOMContentLoaded を待たない・即座に開始)
+  function _writeHeartbeat(){
+    try { localStorage.setItem(HEARTBEAT_KEY, Date.now().toString()); } catch(_){}
+  }
+  setInterval(_writeHeartbeat, HEARTBEAT_INTERVAL_MS);
+  // 初回も即座に 1 回書込 (起動直後 → 5 秒以内終了でも痕跡を残す)
+  _writeHeartbeat();
+
+  // 起動時クラッシュ検知 (DOMContentLoaded 後・FB 初期化を少し待ってから記録)
+  function _checkCrashAndReport(){
+    let lastAlive = 0;
+    try { lastAlive = parseInt(localStorage.getItem(HEARTBEAT_KEY) || '0', 10); } catch(_){}
+    if(!lastAlive) return;
+    const gap = Date.now() - lastAlive;
+    if(gap <= GAP_MIN_MS || gap >= GAP_MAX_MS) return;
+
+    const gapSec = Math.round(gap / 1000);
+    if(typeof dlog === 'function'){
+      dlog('[Lifecycle] 想定外の終了検知: gap=' + gapSec + 's');
+    }
+
+    // Firebase 'crash_reports/{sessionId}' に記録 (失敗しても無視)
+    try {
+      const sid = (typeof FB !== 'undefined' && typeof FB.getSessionId === 'function')
+        ? (FB.getSessionId() || ('crash_' + Date.now()))
+        : ('crash_' + Date.now());
+      if(typeof firebase !== 'undefined' && firebase.database){
+        firebase.database().ref('crash_reports/' + sid).set({
+          timestamp: Date.now(),
+          gap_sec: gapSec,
+          user_agent: navigator.userAgent,
+          device_memory: navigator.deviceMemory || 0,
+        }).catch(function(){});
+      }
+    } catch(_){}
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', function(){
+      setTimeout(_checkCrashAndReport, 2000);  // FB init 安定化を 2 秒待つ
+    });
+  } else {
+    setTimeout(_checkCrashAndReport, 2000);
+  }
+})();
 </script>
 
 <!-- ★設計変更宣言 (2026-05-10): ボトムナビ (4 タブ) -->
