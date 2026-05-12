@@ -4305,9 +4305,7 @@ const DataUpdateBanner = (function(){
   async function _getOldestPrefTimestamp(){
     try {
       const all = await _getAllPrefs();
-      if(!all || all.length === 0) return null;
-      // pref キー数が 47 未満なら「未 DL 県あり」= 古いとみなす
-      if(all.length < 47) return 0;
+      if(all.length === 0) return null;
       return Math.min.apply(null, all.map(r => r.timestamp || Date.now()));
     } catch(_) { return null; }
   }
