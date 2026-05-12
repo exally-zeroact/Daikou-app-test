@@ -4341,10 +4341,13 @@ const DakomeDL = (function(){
         let blobSize = 0;
         for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
           try {
-            // cache-busting で network から確実に取得
-            const fetchUrl = '/data/roads-' + pref + '.js?_v=' + Date.now();
+            // ★設計変更宣言 (2026-05-13): ?_v= cache-busting を撤廃し {cache:'reload'} に変更
+            //   旧 SW (cacheKey 正規化前) が ?_v= 付き URL で別エントリを put する
+            //   重複生成事故を防ぐため、URL は canonical (no-query) で fetch
+            //   {cache:'reload'} で HTTP cache をバイパス (cache-busting 効果は維持)
+            const fetchUrl = '/data/roads-' + pref + '.js';
             const cacheUrl = '/data/roads-' + pref + '.js';
-            const res = await fetch(fetchUrl, { cache: 'no-store' });
+            const res = await fetch(fetchUrl, { cache: 'reload' });
             if(!res.ok) throw new Error('HTTP ' + res.status);
             // ★設計変更宣言 (2026-05-13): cache 取得不可なら復旧失敗扱い
             //   旧: if(cache){ cache.put(...) } で skip し markPrefDone のみ実行
@@ -4536,8 +4539,10 @@ const DataUpdateBanner = (function(){
           let success = false;
           for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
             try {
-              const url = '/data/roads-' + pref + '.js?_v=' + stamp;
-              const res = await fetch(url, { cache: 'no-store' });
+              // ★設計変更宣言 (2026-05-13): ?_v= cache-busting を撤廃し {cache:'reload'} に変更
+              //   旧 SW が ?_v= 付き URL で別エントリ put する重複事故を防ぐ
+              const url = '/data/roads-' + pref + '.js';
+              const res = await fetch(url, { cache: 'reload' });
               if(!res.ok) throw new Error('HTTP ' + res.status);
               const blob = await res.blob();
               newSize = blob.size;

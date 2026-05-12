@@ -659,9 +659,12 @@ async function onCheckUpdate(){
         let success = false, lastErr = null, newSize = 0;
         for(let attempt = 1; attempt <= MAX_RETRY && !success; attempt++){
           try {
-            // ① cache-busting query  ② cache:'no-store' で HTTP cache も無効
-            const url = '/data/roads-' + pref + '.js?_v=' + stamp;
-            const res = await fetch(url, { cache: 'no-store' });
+            // ★設計変更宣言 (2026-05-13): ?_v= cache-busting を撤廃し {cache:'reload'} に変更
+            //   旧 SW (cacheKey 正規化前) が ?_v= 付き URL で別エントリを put する
+            //   重複生成事故を防ぐため、URL は canonical (no-query) で fetch
+            //   {cache:'reload'} で HTTP cache をバイパス (cache-busting 効果は維持)
+            const url = '/data/roads-' + pref + '.js';
+            const res = await fetch(url, { cache: 'reload' });
             if(!res.ok) throw new Error('HTTP ' + res.status);
             const blob = await res.blob();
             newSize = blob.size;
