@@ -4052,12 +4052,44 @@ const DakomeDL = (function(){
     });
   }
 
+  // ★設計変更宣言 (2026-05-13): ?_v= 付き重複エントリの起動時 cleanup
+  //   過去の SW staleWhileRevalidate が request.url (?_v={timestamp} 付き) で
+  //   cache.put していたため、同一 pref が "no-query" と "?_v= 付き" の 2 件
+  //   重複して残っているケースを 1 度だけ削除する。
+  //   現在の SW は normalized URL で put するため、新規には重複は発生しない。
+  //   起動時 1 回 (init() 冒頭から fire-and-forget) のみ実行。
+  async function _cleanupQueriedRoadsCacheEntries(){
+    try {
+      if(typeof caches === 'undefined' || typeof caches.has !== 'function') return;
+      const exists = await caches.has('daikome-roads-v1');
+      if(!exists) return;
+      const c = await caches.open('daikome-roads-v1');
+      const reqs = await c.keys();
+      let removed = 0;
+      for(const req of reqs){
+        if(req.url.indexOf('?') === -1) continue;
+        try {
+          await c.delete(req);
+          removed++;
+        } catch(_){}
+      }
+      if(removed > 0 && typeof dlog === 'function'){
+        dlog('[CacheCleanup] ?_v= 付き重複エントリ ' + removed + ' 件削除');
+      }
+    } catch(e){
+      if(typeof dlog === 'function') dlog('[CacheCleanup] error: ' + (e && e.message));
+    }
+  }
+
   // ── 起動時実行 ──
   function init(){
     // ★設計変更宣言 (2026-05-12): DL 進行中フラグ
     //   _detectCacheEviction が初回 DL 中の transient な cache 欠落を誤検知し
     //   DataUpdateBanner.show() 経由で並列自動 DL を起動する事故を防ぐ
     window._dakomeDLInProgress = true;
+    // ★設計変更宣言 (2026-05-13): 起動時 1 回だけ ?_v= 付き重複エントリ削除
+    //   fire-and-forget (失敗しても DL フローを止めない)
+    _cleanupQueriedRoadsCacheEntries();
     getDlCompleted().then(completed => {
       if(completed){
         // 既存ユーザー：未DL県があればバックグラウンドで差分DL
