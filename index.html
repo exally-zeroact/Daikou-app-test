@@ -4042,6 +4042,10 @@ const DakomeDL = (function(){
 
   // ── 起動時実行 ──
   function init(){
+    // ★設計変更宣言 (2026-05-12): DL 進行中フラグ
+    //   _detectCacheEviction が初回 DL 中の transient な cache 欠落を誤検知し
+    //   DataUpdateBanner.show() 経由で並列自動 DL を起動する事故を防ぐ
+    window._dakomeDLInProgress = true;
     getDlCompleted().then(completed => {
       if(completed){
         // 既存ユーザー：未DL県があればバックグラウンドで差分DL
@@ -4054,7 +4058,7 @@ const DakomeDL = (function(){
       startDownload().then(result => {
         if(result.failed.length === 0){
           updateProgress(PREFECTURES.length, PREFECTURES.length);
-          setTimeout(showCompleteBanner, 400);
+          setTimeout(() => { window._dakomeDLInProgress = false; showCompleteBanner(); }, 400);
         } else {
           showRetryHint(result.failed.length);
           if(typeof dlog === 'function') dlog('[DL] ' + result.failed.length + '県失敗・3秒後再試行');
@@ -4062,12 +4066,12 @@ const DakomeDL = (function(){
             startDownload().then(r2 => {
               if(r2.failed.length === 0){
                 updateProgress(PREFECTURES.length, PREFECTURES.length);
-                setTimeout(showCompleteBanner, 400);
+                setTimeout(() => { window._dakomeDLInProgress = false; showCompleteBanner(); }, 400);
               } else {
                 showRetryHint(r2.failed.length);
                 if(typeof dlog === 'function') dlog('[DL] 再試行も失敗・次回起動で再開');
                 // 業務継続可能にするためバナーは出す
-                setTimeout(showCompleteBanner, 1000);
+                setTimeout(() => { window._dakomeDLInProgress = false; showCompleteBanner(); }, 1000);
               }
             });
           }, 3000);
@@ -4157,6 +4161,10 @@ const DakomeDL = (function(){
   const _CONFIRM_RECHECK_DELAY_MS = 3000;
 
   async function _detectCacheEviction(isConfirm){
+    // ★設計変更宣言 (2026-05-12): DL 進行中はキャッシュ欠落判定を skip
+    //   初回 DL の SW cache.put が非同期完了する前に cache.match=null と判定し
+    //   DataUpdateBanner.show() を強制呼出 → 並列自動 DL が起動する事故を防ぐ
+    if(window._dakomeDLInProgress) return;
     if(_cacheCheckInProgress) return;
     _cacheCheckInProgress = true;
     try {
