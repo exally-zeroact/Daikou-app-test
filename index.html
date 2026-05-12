@@ -4090,10 +4090,14 @@ const DakomeDL = (function(){
     // ★設計変更宣言 (2026-05-13): 起動時 1 回だけ ?_v= 付き重複エントリ削除
     //   fire-and-forget (失敗しても DL フローを止めない)
     _cleanupQueriedRoadsCacheEntries();
-    getDlCompleted().then(completed => {
+    getDlCompleted().then(async (completed) => {
       if(completed){
         // 既存ユーザー：未DL県があればバックグラウンドで差分DL
         if(typeof dlog === 'function') dlog('[DL] 初回DL済み・差分DLチェック');
+        // ★設計変更宣言 (2026-05-13): Cache Storage 実態確認 + 欠落復旧
+        //   完了済 (IndexedDB dl_completed=true) でも Cache に 47 県揃っていない
+        //   可能性があるため、await で検証・復旧してから checkAndUpdateExisting へ
+        await _verifyAndRecoverRoadsCache();
         checkAndUpdateExisting();
         // ★設計変更宣言 (2026-05-13): 既存ユーザー (差分DLパス) では
         //   showCompleteBanner が呼ばれず flag が true のまま残り
@@ -4391,6 +4395,56 @@ const DakomeDL = (function(){
       console.error('[Recover] error:', e && e.message);
     } finally {
       _recoveryInProgress = false;
+    }
+  }
+
+  // ★設計変更宣言 (2026-05-13): DL 完了判定を IndexedDB + Cache Storage 両方で検証
+  //   旧: getDlCompleted=true で即 businessStart 遷移 (Cache 実態未確認)
+  //   新: completed=true 経路で Cache Storage に 47 県 canonical URL が全て存在するか
+  //       を確認し、欠落があれば _recoverMissingPrefs を await で実行してから先に進む
+  //   recovery 中は DL オーバーレイを維持 (ユーザーに「準備中」状態を可視化)
+  async function _verifyAndRecoverRoadsCache(){
+    try {
+      if(typeof caches === 'undefined') return;
+      const exists = await caches.has('daikome-roads-v1');
+      let missing = [];
+      if(!exists){
+        // daikome-roads-v1 が無い = 全 evict 想定 (デプロイ migration 失敗等)
+        missing = PREFECTURES.slice();
+        if(typeof dlog === 'function'){
+          dlog('[Verify] daikome-roads-v1 なし → 全 ' + missing.length + ' 県復旧');
+        }
+      } else {
+        const cache = await caches.open('daikome-roads-v1');
+        const reqs = await cache.keys();
+        const cachedPaths = new Set();
+        for(const req of reqs){
+          try {
+            const u = new URL(req.url);
+            cachedPaths.add(u.pathname);   // canonical pathname (no query)
+          } catch(_){}
+        }
+        for(const pref of PREFECTURES){
+          if(!cachedPaths.has('/data/roads-' + pref + '.js')) missing.push(pref);
+        }
+      }
+      if(missing.length === 0){
+        if(typeof dlog === 'function') dlog('[Verify] 47 県全て cache OK');
+        return;
+      }
+      if(typeof dlog === 'function'){
+        dlog('[Verify] cache 欠落 ' + missing.length + ' 県 → 復旧開始: ' + missing.join(','));
+      }
+      // recovery 中は DL オーバーレイを表示してユーザーに「準備中」を可視化
+      try { showOverlay(); } catch(_){}
+      try {
+        await _recoverMissingPrefs(missing);
+      } finally {
+        try { hideOverlay(); } catch(_){}
+      }
+    } catch(e){
+      if(typeof dlog === 'function') dlog('[Verify] error: ' + (e && e.message));
+      try { hideOverlay(); } catch(_){}
     }
   }
 
