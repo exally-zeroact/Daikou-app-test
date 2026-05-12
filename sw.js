@@ -90,7 +90,18 @@ function staleWhileRevalidate(request){
         if(response && response.ok && request.method === 'GET'){
           // 同一オリジンの正常レスポンスのみキャッシュ（opaque は除外）
           if(response.type === 'basic' || response.type === 'default'){
-            cache.put(request, response.clone()).catch(function(){});
+            // ★設計変更宣言 (2026-05-13): cache.put 失敗を main thread に通知
+            //   旧: .catch(()=>{}) で黙って握りつぶし → IndexedDB prefStatus と
+            //       Cache の整合性破れ (47/47 完了マーク済なのに 1 県だけ cache 欠落)
+            //   新: cache.put 失敗時に postMessage({type:'cachePutFailed', url})
+            //       main thread 側 (index.html) で受信し prefStatus を未完了に戻す
+            cache.put(request, response.clone()).catch(function(err){
+              return self.clients.matchAll({ type: 'window' }).then(function(clients){
+                for(var i = 0; i < clients.length; i++){
+                  try { clients[i].postMessage({ type: 'cachePutFailed', url: request.url }); } catch(_) {}
+                }
+              }).catch(function(){});
+            });
           }
         }
         return response;

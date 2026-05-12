@@ -3864,6 +3864,18 @@ const DakomeDL = (function(){
     }));
   }
 
+  // ★設計変更宣言 (2026-05-13): pref を「未完了」に戻す (delete from STORE_PREF)
+  //   SW の cache.put が失敗した際に main thread から呼出され、
+  //   IndexedDB prefStatus と Cache Storage の整合性を回復する
+  function markPrefUndone(pref){
+    return openDb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_PREF, 'readwrite');
+      const req = tx.objectStore(STORE_PREF).delete(pref);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    }));
+  }
+
   // ── UI制御 ──
   // ★設計変更宣言 (2026-05-10): inline style.display を明示的に書き換える方式に変更
   //   旧: classList.add/remove('show') のみ → 要素に inline style="display:none"
@@ -4174,6 +4186,9 @@ const DakomeDL = (function(){
     try {
       let lowStorage = false;
       let missingFiles = false;
+      // ★設計変更宣言 (2026-05-13): 欠落県リストを収集 (全 47 県再 DL ではなく
+      //   欠落県のみ復旧するため・空配列なら復旧対象なし)
+      let missingPrefs = [];
 
       // A. ストレージ残量チェック (未サポート環境では skip・エラー化しない)
       try {
@@ -4211,44 +4226,45 @@ const DakomeDL = (function(){
             if(typeof dlog === 'function') dlog('[CacheCheck] daikome-* キャッシュなし (全 evict 想定)');
           } else {
             const cache = await caches.open(daikomeCacheName);
+            // ★設計変更宣言 (2026-05-13): 旧 break で 1 件で抜けていたが、
+            //   欠落県のみ復旧するため全件 scan して missingPrefs に蓄積する
             for(const pref of doneSet){
               const url = '/data/roads-' + pref + '.js';
               const match = await cache.match(url);
               if(!match){
                 missingFiles = true;
+                missingPrefs.push(pref);
                 if(typeof dlog === 'function') dlog('[CacheCheck] 欠落検知 (DL 完了済): ' + pref);
-                break;  // 1 件検出すれば十分・全件 scan で時間消費しない
               }
             }
           }
         }
       } catch(_){}
 
-      // C. 欠落検知時の処理 (修正: 1 回目疑い → 3 秒後再確認 → 両方欠落で初バナー表示)
+      // C. 欠落検知時の処理 (修正: 1 回目疑い → 3 秒後再確認 → 両方欠落で復旧)
       if(lowStorage || missingFiles){
         if(!isConfirm){
-          // 1 回目: バナー表示せず・3 秒後に再確認
+          // 1 回目: 復旧せず・3 秒後に再確認
           //   SW activate 中・cache addAll 途中等の transient な欠落を吸収
           if(typeof dlog === 'function'){
             dlog('[CacheCheck] 欠落疑い (lowStorage=' + lowStorage +
-                 ' missing=' + missingFiles + ') → 3 秒後に再確認');
+                 ' missing=' + missingFiles + ' prefs=' + missingPrefs.length +
+                 ') → 3 秒後に再確認');
           }
           setTimeout(() => _detectCacheEviction(true), _CONFIRM_RECHECK_DELAY_MS);
           return;  // 1 回目は何もせず exit (finally で _cacheCheckInProgress リセット)
         }
-        // 2 回目 (確認モード) でも欠落 → バナー表示
-        try {
-          if(typeof DataUpdateBanner !== 'undefined' && DataUpdateBanner.show){
-            DataUpdateBanner.show();  // snooze 無視で強制表示
-            const textEl = document.querySelector('#dataUpdateBanner .text');
-            if(textEl){
-              textEl.innerHTML = 'データが不足しています。<strong>再ダウンロードしてください</strong>';
-            }
-          }
-        } catch(_){}
+        // ★設計変更宣言 (2026-05-13): 2 回目 (確認モード) でも欠落 → 欠落県のみ復旧
+        //   旧: DataUpdateBanner.show() 強制呼出 → 全 47 県再 DL (204MB の無駄)
+        //   新: _recoverMissingPrefs(missingPrefs) → 欠落県のみ fetch + cache.put + markPrefDone
         if(typeof dlog === 'function'){
-          dlog('[CacheCheck] 再確認でも欠落 → バナー強制表示: lowStorage=' + lowStorage +
-               ' missing=' + missingFiles);
+          dlog('[CacheCheck] 再確認でも欠落 → 復旧開始: lowStorage=' + lowStorage +
+               ' missing=' + missingFiles + ' prefs=[' + missingPrefs.join(',') + ']');
+        }
+        // 確認モードで finally に到達する前に復旧を kick (await しない・
+        // _cacheCheckInProgress を早く解放するため)
+        if(missingPrefs.length > 0){
+          _recoverMissingPrefs(missingPrefs);
         }
       } else {
         if(typeof dlog === 'function'){
@@ -4260,6 +4276,83 @@ const DakomeDL = (function(){
       console.error('[CacheCheck] error:', e && e.message);
     } finally {
       _cacheCheckInProgress = false;
+    }
+  }
+
+  // ★設計変更宣言 (2026-05-13): 欠落県のみ再 DL する復旧専用関数
+  //   旧: DataUpdateBanner.startDownload() (全 47 県・204MB 再 fetch) を強制呼出
+  //   新: missingList の県のみ fetch + 明示的 cache.put + markPrefDone
+  //       (SW SWR の暗黙 cache.put は失敗時の通知経路があるが、復旧時は確実性を
+  //        優先し main thread で直接 cache.put して結果を await・成功時のみ
+  //        markPrefDone することで cache と prefStatus の整合性を担保)
+  let _recoveryInProgress = false;
+  async function _recoverMissingPrefs(missingList){
+    if(_recoveryInProgress) return;
+    if(!Array.isArray(missingList) || missingList.length === 0) return;
+    _recoveryInProgress = true;
+    if(typeof dlog === 'function') dlog('[Recover] 開始: ' + missingList.length + ' 県');
+    let ok = 0;
+    const failed = [];
+    try {
+      // 復旧対象 cache (daikome- prefix)
+      let cache = null;
+      try {
+        if(typeof caches !== 'undefined' && typeof caches.keys === 'function'){
+          const cacheNames = await caches.keys();
+          const daikomeCacheName = cacheNames.find(n => n.indexOf('daikome-') === 0);
+          if(daikomeCacheName) cache = await caches.open(daikomeCacheName);
+        }
+      } catch(_){}
+      const MAX_RETRY = 3;
+      for(const pref of missingList){
+        let success = false;
+        let blobSize = 0;
+        for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
+          try {
+            // cache-busting で network から確実に取得
+            const fetchUrl = '/data/roads-' + pref + '.js?_v=' + Date.now();
+            const cacheUrl = '/data/roads-' + pref + '.js';
+            const res = await fetch(fetchUrl, { cache: 'no-store' });
+            if(!res.ok) throw new Error('HTTP ' + res.status);
+            // 明示的 cache.put で SW SWR の沈黙失敗を回避
+            if(cache){
+              const resClone = res.clone();
+              await cache.put(cacheUrl, resClone);
+            }
+            const blob = await res.blob();
+            blobSize = blob.size;
+            // cache.put 成功後 (cache===null なら markPrefDone のみ) prefStatus を再 mark
+            await markPrefDone(pref, blobSize);
+            success = true;
+            break;
+          } catch(e){
+            if(typeof dlog === 'function'){
+              dlog('[Recover] ' + pref + ' attempt ' + attempt + ' 失敗: ' + (e && e.message));
+            }
+            if(attempt < MAX_RETRY) await new Promise(r => setTimeout(r, 1000 * attempt));
+          }
+        }
+        if(success){ ok++; }
+        else { failed.push(pref); }
+      }
+      // 完了通知 (showToast はグローバル関数・無ければ何もしない)
+      try {
+        if(ok > 0 && failed.length === 0){
+          if(typeof showToast === 'function') showToast(ok + ' 県のデータを復旧しました');
+        } else if(ok > 0){
+          if(typeof showToast === 'function') showToast(ok + ' 県復旧・' + failed.length + ' 県失敗');
+        } else {
+          if(typeof showToast === 'function') showToast('データ復旧に失敗しました');
+        }
+      } catch(_){}
+      if(typeof dlog === 'function'){
+        dlog('[Recover] 完了: ok=' + ok + ' failed=' + failed.length +
+             (failed.length > 0 ? ' [' + failed.join(',') + ']' : ''));
+      }
+    } catch(e){
+      console.error('[Recover] error:', e && e.message);
+    } finally {
+      _recoveryInProgress = false;
     }
   }
 
@@ -4288,9 +4381,11 @@ const DakomeDL = (function(){
   }
 
   return { init, setDlCompleted, hideOverlay, getPrefStatus, checkAndUpdateExisting,
-           getAllPrefectures, downloadWithRetry, markPrefDone, PREFECTURES,
+           getAllPrefectures, downloadWithRetry, markPrefDone, markPrefUndone, PREFECTURES,
            // P0 Step 3 (2026-05-12) - debug / 手動チェック用 export
-           _detectCacheEviction };
+           _detectCacheEviction,
+           // 2026-05-13: 欠落復旧 (SW cache.put 失敗時の整合性回復)
+           _recoverMissingPrefs };
 })();
 
 // ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 7 日経過時のみ表示)
@@ -4951,6 +5046,25 @@ if('serviceWorker' in navigator){
     dlog('[SW] 登録完了:', reg.scope);
   }).catch(function(err){
     dlog('[SW] 登録失敗（開発環境では正常）:', err.message);
+  });
+  // ★設計変更宣言 (2026-05-13): sw.js の cache.put 失敗通知を受信
+  //   IndexedDB prefStatus と Cache Storage の整合性を回復するため、
+  //   該当 pref を STORE_PREF から削除 (markPrefUndone) して未完了に戻す
+  navigator.serviceWorker.addEventListener('message', function(ev){
+    try {
+      const m = ev && ev.data;
+      if(!m || m.type !== 'cachePutFailed' || !m.url) return;
+      const match = /\/data\/roads-([^./?]+)\.js/.exec(m.url);
+      if(!match) return;
+      const pref = match[1];
+      if(typeof DakomeDL !== 'undefined' && DakomeDL.markPrefUndone){
+        DakomeDL.markPrefUndone(pref).then(function(){
+          if(typeof dlog === 'function') dlog('[SW] cachePutFailed → prefStatus 削除: ' + pref);
+        }).catch(function(e){
+          console.warn('[SW] markPrefUndone 失敗:', pref, e && e.message);
+        });
+      }
+    } catch(_){}
   });
 }
 
