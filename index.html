@@ -1287,22 +1287,12 @@ class NoSleep {
 
 <!-- ★roads-decoder.js：道路データデコーダー・Map Matching用（2026/04/30追加） -->
 
-<script src="js/region-loader.js"></script>
-
-<!-- ★road-graph-tile-loader.js: Phase B タイル road-graph 遅延ロード（main 側）-->
-<script src="js/road-graph-tile-loader.js"></script>
-
-<!-- ★設計変更宣言 (2026-05-13・大改修 C4): 新パイプライン基盤 3 ファイル
-     - data-loader.js: cache 直接読出 + sandbox eval (window 汚染なし)
-     - data-registry.js: 全データ metadata (47 県 + 全国共通 20 件)
-     - mm-data-pipeline.js: 段階的ロード制御 (Phase A-E)
-     現状は読み込みのみで起動は別 commit で配線 -->
+<!-- ★設計変更宣言 (2026-05-13・大改修 C11): 旧 region-loader.js / road-graph-tile-loader.js
+     / dem-loader.js の script タグを削除。新パイプライン (data-loader.js +
+     data-registry.js + mm-data-pipeline.js) が役割を引き継ぐ。 -->
 <script src="js/data-loader.js"></script>
 <script src="js/data-registry.js"></script>
 <script src="js/mm-data-pipeline.js"></script>
-
-<!-- ★dem-loader.js: MM-5 DEM データ遅延ロード -->
-<script src="js/dem-loader.js"></script>
 
 <script src="js/gps.js"></script>
 
@@ -1351,16 +1341,11 @@ let _mmHealthPongAt = 0;
 let _mmHealthPingAt = 0;
 const _MM_HEALTH_TIMEOUT_MS = 3000;
 
-// MM forward 状態・guard setInterval / Worker 通信が参照 (旧 line 1740-1753)
-const _crossUserSubscribedPrefs = new Set();
-const _forwardedPrefs = new Set();
-const _attrsLoadedPrefs = new Set();
-const _attrsSchoolZoneByPref = new Map();
-const _attrsRoadFloodByPref = new Map();
-const _attrsRoadJizenByPref = new Map();
-const _attrsRoadYoboByPref = new Map();
-const _attrsEmergencyByPref = new Map();
-let _autoRoadLoadInflight = null;
+// ★設計変更宣言 (2026-05-13・大改修 C11): 旧 MM forward 関連変数を全削除
+//   _crossUserSubscribedPrefs / _forwardedPrefs / _attrsLoadedPrefs /
+//   _attrs*ByPref / _autoRoadLoadInflight は新パイプライン (MMDataPipeline)
+//   に置き換え。旧 _forwardRoadsToMmWorker / _autoLoadNearbyRoads /
+//   _autoLoadNearbyAttrs が使っていた状態管理は不要。
 
 // アプリ全体状態 (旧 line 1906-1918・startGPS / onBusinessStart 等が参照)
 let appState = 'idle'; // idle / driving / fare
@@ -1492,73 +1477,18 @@ function _setupMmWorker(reason){
   if(typeof Meter !== 'undefined' && Meter.setMapMatcher){
     Meter.setMapMatcher(_mmWorker);
   }
-  // H-1: 再起動時は state（OSRM/graph/dem）を全て再 forward
-  _mmReforwardAllState();
+  // ★設計変更宣言 (2026-05-13・大改修 C11): 旧 _mmReforwardAllState() 呼出を削除
+  //   再起動時の state 再 forward は新パイプライン (MMDataPipeline) の責務に移譲予定
   window._mmWorker = _mmWorker;
   if(typeof dlog === 'function'){
     dlog('[MM] worker B ' + (reason === 'init' ? '起動' : '再起動') + '・Meter 注入完了');
   }
 }
 
-// H-1: Worker B 再起動時に状態を全て再 forward
-function _mmReforwardAllState(){
-  if(!_mmWorker) return;
-  // 実機デバッグログ ON/OFF (test-dashboard.html から localStorage で操作)
-  try {
-    const flag = localStorage.getItem('daikou_mm_debug') === '1';
-    _mmWorker.postMessage({ type: 'configDebug', enabled: flag });
-  } catch(e){}
-  // OSRM 設定
-  try {
-    const osrmEp = localStorage.getItem('daikou_osrm_endpoint');
-    const cfg = { type: 'configOsrm' };
-    if(osrmEp == null){
-      // ★設計変更宣言 (2026-05-12): hardcoded URL → debug-config.js の OSRM_ENDPOINT 経由
-      cfg.endpoint = (typeof OSRM_ENDPOINT !== 'undefined') ? OSRM_ENDPOINT : 'https://router.project-osrm.org';
-      cfg.enabled = true;
-    } else if(osrmEp.length === 0){
-      cfg.enabled = false;
-    } else {
-      cfg.endpoint = osrmEp;
-      cfg.enabled = true;
-    }
-    _mmWorker.postMessage(cfg);
-  } catch(e){}
-  // G6 (2026-05-09): iOS 検出して Viterbi N を MIN に設定
-  //   iOS Safari は GPS 最大 1Hz・浅い窓 (N=10) で warmup 短縮
-  try {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    _mmWorker.postMessage({ type: 'configPlatform', isIOS: isIOS });
-  } catch(e){}
-  // Worker 再起動時は _forwardedPrefs を clear して全再 forward
-  // (新 Worker の decoders Map は空・main 側で「forward 済」記憶のままでは再投入されない)
-  if(typeof _forwardedPrefs !== 'undefined' && _forwardedPrefs.clear){
-    _forwardedPrefs.clear();
-  }
-  // 既ロード済 roads (window.ROADS_<PREF>) を全て再 forward
-  // M1 設計: roads は GPS callback の _autoLoadNearbyRoads で動的に load される
-  // ため、Worker 再起動時点で window.ROADS_* がある県を全部送り直す
-  try {
-    const PREF_LIST = [
-      'hokkaido','aomori','iwate','miyagi','akita','yamagata','fukushima',
-      'ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa',
-      'niigata','toyama','ishikawa','fukui','yamanashi','nagano',
-      'gifu','shizuoka','aichi','mie',
-      'shiga','kyoto','osaka','hyogo','nara','wakayama',
-      'tottori','shimane','okayama','hiroshima','yamaguchi',
-      'tokushima','kagawa','ehime','kochi',
-      'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa',
-    ];
-    const loaded = PREF_LIST.filter(function(p){
-      return !!window['ROADS_' + p.toUpperCase().replace(/-/g, '_')];
-    });
-    if(loaded.length > 0) _forwardRoadsToMmWorker(loaded);
-  } catch(e){}
-  // DEM 再 forward
-  try { if(typeof _forwardDemToMmWorker === 'function') _forwardDemToMmWorker(); } catch(e){}
-  // Backbone 再 forward (Worker 自動再起動時)
-  try { if(typeof _forwardBackboneToMmWorker === 'function') _forwardBackboneToMmWorker(); } catch(e){}
-}
+// ★設計変更宣言 (2026-05-13・大改修 C11): _mmReforwardAllState 関数を全削除
+//   旧経路 (_forwardRoadsToMmWorker / _forwardDemToMmWorker /
+//   _forwardBackboneToMmWorker / _forwardedPrefs) と一緒に削除。
+//   再起動時の state 再 forward は新パイプライン (MMDataPipeline) の責務へ。
 
 // メッセージハンドラを別関数に分離（addEventListener / removeEventListener 整合性）
 function _mmWorkerOnMessage(e){
@@ -1575,31 +1505,6 @@ function _mmWorkerOnMessage(e){
     if(m.type === 'roadsLoaded'){
       dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
-    } else if(m.type === 'mmResult' && m.snap && appState === 'driving'){
-      // P11/P12 (2026-05-09): 道路属性警告 UI 更新
-      try {
-        const pref = m.snap.prefecture;
-        const roadIdx = m.snap.roadIndex;
-        const banner = document.getElementById('roadAttrBanner');
-        const label = document.getElementById('roadAttrLabel');
-        if(banner && label && pref != null && roadIdx != null){
-          const sz = _attrsSchoolZoneByPref.get(pref);
-          const fl = _attrsRoadFloodByPref.get(pref);
-          const ji = _attrsRoadJizenByPref.get(pref);
-          const yo = _attrsRoadYoboByPref.get(pref);
-          let warn = null;
-          if(sz && sz.has(roadIdx)) warn = '⚠ スクールゾーン (30km/h 制限)';
-          else if(fl && fl.has(roadIdx)) warn = '🌊 冠水履歴のある区間';
-          else if(ji && ji.has(roadIdx)) warn = '⚠ 事前通行規制 区間';
-          else if(yo && yo.has(roadIdx)) warn = '⚠ 予防的通行規制 区間';
-          if(warn){
-            label.textContent = warn;
-            banner.style.display = 'block';
-          } else {
-            banner.style.display = 'none';
-          }
-        }
-      } catch(_){}
     } else if(m.type === 'demLoaded'){
       // MM-5: DEM 受信ログ
       dlog('[MM] worker DEM ' + (m.ok ? 'loaded' : 'fail') +
@@ -1697,48 +1602,11 @@ try {
   console.warn('[Pipeline] init err:', e && e.message);
 }
 
-// ★設計変更宣言 (2026-05-10): 起動直後の last-GPS warm-up を Worker B 初期化
-//   直後 (line ~1600) に移動して再起動後の道路データ load を高速化。
-//   旧: loadSettings 内 (line ~3357) → setTimeout 500ms → _autoLoadNearbyRoads
-//       script 末尾近くで呼ばれるため起動直後の表示遅延に直結
-//   新: Worker B init 直後に即時実行 (~1.7 秒早い・setTimeout 0)
-//       sw.js キャッシュヒットなら roads-{pref}.js が ms 単位で load 完了
-//       loadSettings 内の旧 warm-up は idempotent な fallback として残置
-//   絶対ルール準拠: 道路距離課金担保のための高速化・安全側格下げではない
-// ★設計変更宣言 (2026-05-10): iOS の場合は PWA standalone のみ実行
-//   iOS Safari (非 PWA) で起動時に GPS 関連処理が動くと不適切なため
-//   iOS 以外 (Android 等) は従来通り無条件実行
-try {
-  const _bootIsIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const _bootGpsAllowed = !_bootIsIOS || window.navigator.standalone === true;
-  if(_bootGpsAllowed){
-    const _bootRaw = localStorage.getItem('daikou_driving_state')
-                  || localStorage.getItem('daikou_business_state');
-    if(_bootRaw){
-      const _b = JSON.parse(_bootRaw);
-      let _bootLat = null, _bootLng = null;
-      if(_b){
-        if(typeof _b.last_lat === 'number' && typeof _b.last_lng === 'number'){
-          _bootLat = _b.last_lat; _bootLng = _b.last_lng;
-        } else if(_b.last_gps && typeof _b.last_gps.lat === 'number'){
-          _bootLat = _b.last_gps.lat; _bootLng = _b.last_gps.lng;
-        }
-      }
-      if(_bootLat != null && _bootLng != null){
-        // 0ms setTimeout で current task を抜けてから (Worker creation の microtask 後)
-        setTimeout(function(){
-          try {
-            if(typeof _autoLoadNearbyRoads === 'function'){
-              _autoLoadNearbyRoads(_bootLat, _bootLng);
-              if(typeof dlog === 'function') dlog('[boot-fast] roads warm-up at ' +
-                _bootLat.toFixed(4) + ',' + _bootLng.toFixed(4));
-            }
-          } catch(_){}
-        }, 0);
-      }
-    }
-  }
-} catch(_){}
+// ★設計変更宣言 (2026-05-13・大改修 C11): boot-fast IIFE を全削除
+//   last_gps ベースの roads warm-up は MMDataPipeline (C10) で代替。
+//   起動時に全 47 県を新パイプラインがロードするため、位置依存の
+//   早期 warm-up は不要。_bootRaw / _bootLat / _bootLng 等の関連
+//   変数も全廃。
 
 // ─── M-3: Page Visibility 復帰時 Worker B 生存確認 ───
 // document.visibilityState が visible になったら ping を送り、
@@ -1953,242 +1821,18 @@ document.addEventListener('visibilitychange', function(){
   }, 5000);
 })();
 
-// 既ロード済 roads-{pref}.js があれば Worker に転送する関数
-// loadUserRegions / 設定画面からの追加ロード両方から呼べる共通化
-function _forwardRoadsToMmWorker(prefs){
-  if(!_mmWorker || !Array.isArray(prefs)) return;
-  for(const pref of prefs){
-    const varName = 'ROADS_' + String(pref).toUpperCase().replace(/-/g, '_');
-    const data = window[varName];
-    if(!data) continue;
-    if(_forwardedPrefs.has(pref)) continue;       // 重複 forward 防止
-    try {
-      _mmWorker.postMessage({ type: 'loadRoads', pref: pref, roadsData: data });
-      _forwardedPrefs.add(pref);
-      // T3 (2026-05-09): POI proximity prior データを Worker B に転送
-      if(Array.isArray(data.pois) && data.pois.length > 0){
-        _mmWorker.postMessage({ type: 'loadPois', pref: pref, points: data.pois });
-      }
-      // T11 (2026-05-09): 時間帯条件付き oneway/通行制限を Worker B に転送
-      if(Array.isArray(data.conditionalRestrictions) && data.conditionalRestrictions.length > 0){
-        _mmWorker.postMessage({
-          type: 'loadConditionalRestrictions',
-          pref: pref,
-          list: data.conditionalRestrictions,
-        });
-      }
-      // T8 (2026-05-09): cross-user pheromone 購読開始 → Worker B に転送
-      if(typeof FB !== 'undefined' && typeof FB.subscribeCrossUserPheromone === 'function'
-         && !_crossUserSubscribedPrefs.has(pref)){
-        _crossUserSubscribedPrefs.add(pref);
-        try {
-          FB.subscribeCrossUserPheromone(pref, function(list){
-            if(_mmWorker){
-              _mmWorker.postMessage({ type: 'updateCrossUserPheromone', pref: pref, list: list });
-            }
-          });
-        } catch(e){
-          console.warn('[T8] cross-user pheromone 購読失敗 ' + pref + ': ' + e.message);
-        }
-      }
-    } catch(e){
-      console.warn('[MM] forward roads ' + pref + ' err:', e.message);
-    }
-  }
-}
-// T8 (2026-05-09): cross-user pheromone 購読済 pref (重複防止)
-// 既に Worker B に forward 済みの pref を記録 (重複 postMessage 抑制)
-// (2026-05-10) _crossUserSubscribedPrefs / _forwardedPrefs / _attrs* は
-// script 先頭に移動済 (TDZ 対策)
-
-// P11/P12 (2026-05-09): road-attrs / road-flood/jizen/yobo の動的 load
-//   roads-{pref}.js と並行で同 pref のメタデータを script タグ load
-//   schoolZone / 冠水 / 通行規制 を運転手警告 UI に活用 (Tier B 範囲)
-//   delta-varint-base64 デコードはシンプル実装で Set<roadIdx> 化
-function _decodeDeltaVarintB64(b64){
-  if(!b64) return new Set();
-  try {
-    const bin = atob(b64);
-    const set = new Set();
-    let acc = 0, shift = 0, idx = 0;
-    for(let i = 0; i < bin.length; i++){
-      const b = bin.charCodeAt(i);
-      acc |= (b & 0x7f) << shift;
-      if((b & 0x80) === 0){
-        idx += acc;
-        set.add(idx);
-        acc = 0; shift = 0;
-      } else {
-        shift += 7;
-      }
-    }
-    return set;
-  } catch(_){ return new Set(); }
-}
-function _loadOneAttrFile(pref, base, varName, targetMap, fieldKey){
-  return new Promise(function(resolve){
-    const s = document.createElement('script');
-    s.src = 'data/' + base + '-' + pref + '.js';
-    s.async = true;
-    s.onload = function(){
-      try {
-        const data = window[varName];
-        if(data){
-          const b64 = fieldKey ? data[fieldKey] : data.roadIdxB64;
-          targetMap.set(pref, _decodeDeltaVarintB64(b64));
-        }
-      } catch(_){}
-      resolve();
-    };
-    s.onerror = function(){ resolve(); };
-    document.head.appendChild(s);
-  });
-}
-function _autoLoadNearbyAttrs(prefs){
-  if(!Array.isArray(prefs)) return;
-  for(const pref of prefs){
-    if(_attrsLoadedPrefs.has(pref)) continue;
-    _attrsLoadedPrefs.add(pref);
-    const PREF_UC = pref.toUpperCase().replace(/-/g, '_');
-    _loadOneAttrFile(pref, 'road-attrs', 'ROAD_ATTRS_' + PREF_UC, _attrsSchoolZoneByPref, 'schoolZoneB64');
-    _loadOneAttrFile(pref, 'road-flood', 'ROAD_FLOOD_' + PREF_UC, _attrsRoadFloodByPref, 'roadIdxB64');
-    _loadOneAttrFile(pref, 'road-jizen', 'ROAD_JIZEN_' + PREF_UC, _attrsRoadJizenByPref, 'roadIdxB64');
-    _loadOneAttrFile(pref, 'road-yobo',  'ROAD_YOBO_'  + PREF_UC, _attrsRoadYoboByPref,  'roadIdxB64');
-    // D3 (2026-05-09): emergencyRoute も同 road-attrs ファイルから抽出して
-    //   Worker B に forward (scoring boost に活用)
-    //   road-attrs file に emergencyRouteB64 と schoolZoneB64 が共存しているので
-    //   1 回 load で両方取れる - schoolZone load 完了後に処理
-    setTimeout(function(){
-      const data = window['ROAD_ATTRS_' + PREF_UC];
-      if(!data || !data.emergencyRouteB64) return;
-      const set = _decodeDeltaVarintB64(data.emergencyRouteB64);
-      _attrsEmergencyByPref.set(pref, set);
-      // Worker B に forward (Set は postMessage で送れないので Array 化)
-      if(_mmWorker && set.size > 0){
-        try {
-          _mmWorker.postMessage({
-            type: 'loadEmergencyAttrs',
-            pref: pref,
-            roadIndices: Array.from(set),
-          });
-        } catch(_){}
-      }
-    }, 1500);   // road-attrs ファイル load 完了想定で 1.5 秒後
-  }
-}
-
-// ★設計変更宣言 (2026-05-13): 起動時に全 47 県を MM worker に常時ロード化
-//   旧: GPS callback で近隣 5 県を lazy-load (位置依存・GPS 待ち)
-//   新: 起動直後に全 47 県を並列度 4 で worker 送信 (位置非依存)
-//   理由: ダイコメ設計思想「全 47 県データを内包」を体現・どこから業務開始
-//        しても MM 即稼働・GPS 取得待ちで「roads (0 prefs)」事故を排除
-//   絶対ルール: 「課金距離は道路距離」のため Worker B に全国データが常時
-//              揃った状態を確立する (直線距離 fallback を排除)
-//   _forwardedPrefs Set で重複防止・GPS callback 等の既存呼出は dedupe で no-op
-//   引数 (lat, lng) は後方互換のため保持・実際は無視する (位置非依存)
-// (2026-05-10) _autoRoadLoadInflight は script 先頭に移動済 (TDZ 対策)
-function _autoLoadNearbyRoads(lat, lng){
-  if(typeof RegionLoader === 'undefined' || !RegionLoader.ensureRoadsLoaded) return;
-  if(_autoRoadLoadInflight) return;               // 1 起動につき 1 回だけ
-  // 全 47 県リスト (DakomeDL.PREFECTURES と同一順序・TDZ 回避のため hardcoded)
-  const ALL_PREFS = [
-    'hokkaido','aomori','iwate','miyagi','akita','yamagata','fukushima',
-    'ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa',
-    'niigata','toyama','ishikawa','fukui','yamanashi','nagano','gifu',
-    'shizuoka','aichi','mie','shiga','kyoto','osaka','hyogo','nara',
-    'wakayama','tottori','shimane','okayama','hiroshima','yamaguchi',
-    'tokushima','kagawa','ehime','kochi','fukuoka','saga','nagasaki',
-    'kumamoto','oita','miyazaki','kagoshima','okinawa',
-  ];
-  const pending = ALL_PREFS.filter(function(p){ return !_forwardedPrefs.has(p); });
-  if(pending.length === 0) return;
-  if(typeof dlog === 'function') dlog('[MM] 全 47 県ロード開始: ' + pending.length + ' 県');
-  // 並列度 4 の worker pool で順次 ensureRoadsLoaded → forward → attrs ロード
-  const CONCURRENCY = 4;
-  const queue = pending.slice();
-  async function _loadWorker(){
-    while(queue.length > 0){
-      const p = queue.shift();
-      try {
-        await RegionLoader.ensureRoadsLoaded([p]);
-        _forwardRoadsToMmWorker([p]);
-        if(typeof _autoLoadNearbyAttrs === 'function') _autoLoadNearbyAttrs([p]);
-      } catch(e){
-        if(typeof dlog === 'function') dlog('[MM] load ' + p + ' err: ' + (e && e.message || e));
-      }
-    }
-  }
-  const workers = [];
-  for(let i = 0; i < CONCURRENCY; i++) workers.push(_loadWorker());
-  _autoRoadLoadInflight = Promise.all(workers).then(function(){
-    if(typeof dlog === 'function') dlog('[MM] 全 47 県ロード完了');
-  }).catch(function(e){
-    if(typeof dlog === 'function') dlog('[MM] 全 47 県ロード err: ' + (e && e.message || e));
-  }).then(function(){ _autoRoadLoadInflight = null; });
-}
-
-// ★設計変更宣言 (2026-05-13): 起動直後に全 47 県ロードを kick
-//   GPS 取得・boot-fast の last_gps 履歴を待たずに即起動
-//   setTimeout 0 で current script task を抜けてから (RegionLoader 評価後)
-setTimeout(function(){
-  try { _autoLoadNearbyRoads(); } catch(_){}
-}, 0);
-
-// MM-5 (2026-05-08): DEM データを Worker B に転送する関数
-// data/dem-jp.js (window.DEM_JP) が未ビルドなら no-op（layer scorer は roads v6 + accel hint で稼働）
-function _forwardDemToMmWorker(){
-  if(!_mmWorker) return;
-  const data = window.DEM_JP;
-  if(!data || !data.altB64) return;
-  try {
-    _mmWorker.postMessage({
-      type: 'loadDem',
-      bbox: data.bbox,
-      gridSize: data.gridSize,
-      numLat: data.numLat,
-      numLng: data.numLng,
-      altB64: data.altB64,
-    });
-  } catch(e){
-    console.warn('[MM] forward dem err:', e.message);
-  }
-}
-
-// MM-5: 起動時に DEM を試行ロード（あれば Worker B に転送）
-if(typeof DemLoader !== 'undefined' && DemLoader.load){
-  DemLoader.load().then((data) => {
-    if(data) _forwardDemToMmWorker();
-  }).catch(e => {
-    console.warn('[DEM] load error:', e.message);
-  });
-}
-
-// Phase B: 起動時にバックボーン graph を試行ロード（全国 motorway/trunk 常駐）
-function _forwardBackboneToMmWorker(){
-  if(!_mmWorker) return;
-  const data = window.ROAD_GRAPH_BACKBONE_JP;
-  if(!data) return;
-  try {
-    _mmWorker.postMessage({ type: 'loadBackbone', graphData: data });
-  } catch(e){
-    console.warn('[MM] forward backbone err:', e.message);
-  }
-}
-(function _loadBackbone(){
-  const script = document.createElement('script');
-  script.src = 'data/road-graph-backbone-jp.js';
-  script.async = true;
-  script.onload = function(){
-    if(typeof dlog === 'function' && window.ROAD_GRAPH_BACKBONE_JP){
-      dlog('[Backbone] loaded ' + window.ROAD_GRAPH_BACKBONE_JP.numNodes + ' nodes');
-    }
-    _forwardBackboneToMmWorker();
-  };
-  script.onerror = function(){
-    if(typeof dlog === 'function') dlog('[Backbone] not found（任意機能・無くても稼働）');
-  };
-  document.head.appendChild(script);
-})();
+// ★設計変更宣言 (2026-05-13・大改修 C11): 旧読み込みコード一括削除
+//   削除対象:
+//   - _forwardRoadsToMmWorker (window.ROADS_{PREF} 経由 worker forward)
+//   - _decodeDeltaVarintB64 / _loadOneAttrFile / _autoLoadNearbyAttrs
+//     (road-attrs / road-flood / road-jizen / road-yobo の script タグ load)
+//   - _autoLoadNearbyRoads (関数定義・全 47 県常時ロード版)
+//   - _forwardDemToMmWorker + DemLoader.load IIFE
+//   - _forwardBackboneToMmWorker + _loadBackbone IIFE
+//   これらは新パイプライン (MMDataPipeline.warmup・C10) に役割を移譲。
+//   data-loader.js が cache 直接読出、data-registry.js が宣言的 metadata、
+//   mm-data-pipeline.js が段階的ロード制御を担う。
+//   consumer 側 (RegionLoader 利用箇所等) は後 commit で書き直す前提。
 
 // ─── 状態 ───
 // (2026-05-10) appState 〜 vehicleId は script 先頭に移動済 (TDZ 対策)
@@ -2616,9 +2260,9 @@ function startGPS(){
         }
         // RegionLoader：トンネル/橋データを動的読込（meter.jsの補完で使用）
         if(typeof RegionLoader !== 'undefined') RegionLoader.ensureLoaded(g.lat, g.lng);
-        // M1 (2026-05-09): roads-{pref}.js も動的 load → Worker B に forward
-        //   絶対ルール: 課金距離は道路距離 = MM が常時動くために必要
-        _autoLoadNearbyRoads(g.lat, g.lng);
+        // ★設計変更宣言 (2026-05-13・大改修 C11): GPS callback 内の旧経路呼出を削除
+        //   MMDataPipeline (C10) が起動時に全 47 県ロード済のため、走行中の追加 load は不要。
+        //   旧 M1: _autoLoadNearbyRoads(g.lat, g.lng);  ← 削除済
         // TestMode 走行中位置記録は H-3 対応で削除済
       } catch(e){ console.error('GPS callback error:', e); }
     });
