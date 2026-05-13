@@ -1432,7 +1432,12 @@ setInterval(function(){
     if(appState !== 'businessStart') return;
     const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
     if(!btnStart) return;
-    if(_forwardedPrefs.size === 0){
+    // ★設計変更宣言 (2026-05-13・gate 修正): 旧 _forwardedPrefs.size から
+    //   新パイプライン (MMDataPipeline.stats.roadsOk) 参照に書換。
+    //   C11+ で _forwardedPrefs を削除した影響で永久 disable していた問題を解消。
+    const forwarded = (window._mmPipeline && window._mmPipeline.stats)
+                      ? window._mmPipeline.stats.roadsOk : 0;
+    if(forwarded === 0){
       btnStart.disabled = true;
       btnStart.style.opacity = '0.4';
       btnStart.style.cursor = 'not-allowed';
@@ -2308,7 +2313,10 @@ function startUiTimer(){
     try {
       const src = document.getElementById('driveSource');
       if(src){
-        const forwarded = (typeof _forwardedPrefs !== 'undefined') ? _forwardedPrefs.size : 0;
+        // ★設計変更宣言 (2026-05-13・gate 修正): 旧 _forwardedPrefs.size から
+        //   新パイプライン参照に書換 (driving 画面 driveSource warning)
+        const forwarded = (window._mmPipeline && window._mmPipeline.stats)
+                          ? window._mmPipeline.stats.roadsOk : 0;
         const now = Date.now();
         if(forwarded > 0){
           window._mmZeroSince = null;
@@ -4939,7 +4947,10 @@ setInterval(function(){
     ind.style.display = 'none';
     return;
   }
-  const forwarded = (typeof _forwardedPrefs !== 'undefined') ? _forwardedPrefs.size : 0;
+  // ★設計変更宣言 (2026-05-13・gate 修正): 旧 _forwardedPrefs.size から
+  //   新パイプライン参照に書換 (mmReadyIndicator + business start button)
+  const forwarded = (window._mmPipeline && window._mmPipeline.stats)
+                    ? window._mmPipeline.stats.roadsOk : 0;
   const now = Date.now();
   if(forwarded > 0){
     window._mmReadyZeroSince = null;
