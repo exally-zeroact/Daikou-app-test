@@ -4117,8 +4117,26 @@ function playSensorRecover(){
 
 // ─── ServiceWorker登録（PWA化・オフライン対応） ───
 if('serviceWorker' in navigator){
+  // ★設計変更宣言 (2026-05-13・SW update 時の自動 reload):
+  //   問題: 新 SW が install → activate → claim しても、起動中の page は
+  //   古い JS を memory 上で持ち続け、reload しないと新 code が反映されない。
+  //   iOS PWA で「履歴→戻る」レベルの navigation では強制 reload にならず、
+  //   ユーザーは古い code を見続ける (実機スクショで Phase D/E 表示が出ない例)。
+  //   対策: controllerchange event で新 SW が controller を取った瞬間に reload。
+  //   初回登録 (controller=null → SW) では reload しない (無限 loop 防止)。
+  const _hadSWController = !!navigator.serviceWorker.controller;
+  let _swReloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    if(_swReloaded) return;
+    if(!_hadSWController) return;   // 初回登録は reload skip
+    _swReloaded = true;
+    if(typeof dlog === 'function') dlog('[SW] controllerchange → reload (新 code 適用)');
+    window.location.reload();
+  });
   navigator.serviceWorker.register('/sw.js').then(function(reg){
     dlog('[SW] 登録完了:', reg.scope);
+    // 起動時に明示的に update check (新 SW があれば即 install 開始)
+    try { reg.update(); } catch(_){}
   }).catch(function(err){
     dlog('[SW] 登録失敗（開発環境では正常）:', err.message);
   });
