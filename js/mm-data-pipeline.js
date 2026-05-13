@@ -235,6 +235,51 @@
       }
     }
 
+    // ★設計変更宣言 (2026-05-13・Phase 1 修正1-B): retry queue API
+    //   SW から cachePutFailed 通知を受けた URL を再 load する method。
+    //   data-registry から該当 entry を逆引きして _loadOne を再呼出。
+    //   _loadOne 内部の retry 機構 (修正1-A) で 3 回まで自動 retry。
+    //   重複防止: 直前 60 秒以内に同 URL が enqueue 済なら skip。
+    _findEntryByUrl(url){
+      try {
+        const path = new URL(url, global.location ? global.location.href : 'https://x/').pathname;
+        const reg = global.DataRegistry;
+        if(!reg) return null;
+        // global entries
+        for(const e of reg.DATA_REGISTRY.global){
+          if(e.url === path) return e;
+        }
+        // perPref entries (展開して検索)
+        for(const def of reg.DATA_REGISTRY.perPref){
+          const entries = reg.expandPerPref(def);
+          for(const e of entries){
+            if(e.url === path) return e;
+          }
+        }
+      } catch(_){}
+      return null;
+    }
+    async enqueueRetry(url){
+      if(!url) return;
+      // 重複防止: cooldown 60 秒
+      if(!this._retryCooldown) this._retryCooldown = new Map();
+      const now = Date.now();
+      const last = this._retryCooldown.get(url) || 0;
+      if(now - last < 60000){
+        if(typeof dlog === 'function') dlog('[Pipeline] enqueueRetry skip (cooldown): ' + url);
+        return;
+      }
+      this._retryCooldown.set(url, now);
+      const entry = this._findEntryByUrl(url);
+      if(!entry){
+        if(typeof dlog === 'function') dlog('[Pipeline] enqueueRetry: entry 見つからず ' + url);
+        return;
+      }
+      if(typeof dlog === 'function') dlog('[Pipeline] enqueueRetry 起動: ' + url);
+      // _loadOne 内で 3 回 retry が走る (修正1-A)
+      await this._loadOne(entry, !!entry.optional);
+    }
+
     async warmup(){
       const t0 = Date.now();
       if(typeof dlog === 'function') dlog('[Pipeline] warmup 開始');

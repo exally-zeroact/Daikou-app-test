@@ -4883,19 +4883,34 @@ if('serviceWorker' in navigator){
   // ★設計変更宣言 (2026-05-13): sw.js の cache.put 失敗通知を受信
   //   IndexedDB prefStatus と Cache Storage の整合性を回復するため、
   //   該当 pref を STORE_PREF から削除 (markPrefUndone) して未完了に戻す
+  // ★設計変更宣言 (2026-05-13・Phase 1 修正1-B): 新パイプライン retry 連携
+  //   DakomeDL.markPrefUndone (旧経路の整合性回復) に加えて
+  //   _mmPipeline.enqueueRetry を呼び、失敗 URL を再 load する。
+  //   _loadOne 内の 3 回 retry (修正1-A) で自動救済される。
+  //   DakomeDL 廃止後は markPrefUndone 呼出を削除予定。
   navigator.serviceWorker.addEventListener('message', function(ev){
     try {
       const m = ev && ev.data;
       if(!m || m.type !== 'cachePutFailed' || !m.url) return;
+      // 旧 DakomeDL 経路: IndexedDB prefStatus 削除
       const match = /\/data\/roads-([^./?]+)\.js/.exec(m.url);
-      if(!match) return;
-      const pref = match[1];
-      if(typeof DakomeDL !== 'undefined' && DakomeDL.markPrefUndone){
-        DakomeDL.markPrefUndone(pref).then(function(){
-          if(typeof dlog === 'function') dlog('[SW] cachePutFailed → prefStatus 削除: ' + pref);
-        }).catch(function(e){
-          console.warn('[SW] markPrefUndone 失敗:', pref, e && e.message);
+      if(match){
+        const pref = match[1];
+        if(typeof DakomeDL !== 'undefined' && DakomeDL.markPrefUndone){
+          DakomeDL.markPrefUndone(pref).then(function(){
+            if(typeof dlog === 'function') dlog('[SW] cachePutFailed → prefStatus 削除: ' + pref);
+          }).catch(function(e){
+            console.warn('[SW] markPrefUndone 失敗:', pref, e && e.message);
+          });
+        }
+      }
+      // 新パイプライン経路: enqueueRetry で再 load (3 回 retry 自動・cooldown 60 秒)
+      if(window._mmPipeline && typeof window._mmPipeline.enqueueRetry === 'function'){
+        window._mmPipeline.enqueueRetry(m.url).catch(function(e){
+          if(typeof dlog === 'function') dlog('[SW] enqueueRetry エラー: ' + (e && e.message));
         });
+      } else {
+        if(typeof dlog === 'function') dlog('[SW] _mmPipeline 未初期化・enqueueRetry skip: ' + m.url);
       }
     } catch(_){}
   });
