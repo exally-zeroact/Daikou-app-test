@@ -1639,6 +1639,22 @@ try {
           dlog('[Pipeline] ' + p.phase + ' ' + p.current + '/' + p.total + ' ' + (p.label || ''));
         }
         _updatePipelineProgressUI(p);
+        // ★設計変更宣言 (2026-05-13): Phase B 完了で overlay 早期 hide
+        //   47 県 roads worker load 完了 = ダイコメ主機能 (業務開始可能) の前提条件
+        //   満了 → overlay 維持理由なし → 早期 hide で体感起動時間最大化。
+        //   Phase C (Tier B 補助) / D (GPS) / E (MM warmup) は bg 継続。
+        //   warmup().then の 800ms hide はバックアップとして残置。
+        if(p.phase === 'roads' && p.current === p.total && p.total === 47){
+          setTimeout(function(){
+            try {
+              const overlay = document.getElementById('dlOverlay');
+              if(overlay){
+                overlay.style.display = 'none';
+                overlay.classList.remove('show');
+              }
+            } catch(_){}
+          }, 500);
+        }
       },
     });
     setTimeout(function(){
