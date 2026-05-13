@@ -1629,6 +1629,26 @@ try {
       },
     });
     setTimeout(function(){
+      // ★設計変更宣言 (2026-05-13・Phase 6-1): overlay 表示制御を新 pipeline 側に追加
+      //   DakomeDL.init() (内部 showOverlay 含む) を Phase 5 で停止したため、
+      //   新 pipeline warmup 開始時に dlOverlay を表示する制御を追加。
+      //   hideOverlay (warmup 完了時) は Phase 5 で追加済 (本変更で維持)。
+      //   showOverlay は DakomeDL 内 private のため直接 DOM 操作で表示。
+      try {
+        const _overlay = document.getElementById('dlOverlay');
+        if(_overlay){
+          _overlay.style.display = 'flex';
+          _overlay.classList.add('show');
+        }
+        const _loading = document.getElementById('dlStateLoading');
+        if(_loading) _loading.classList.add('show');
+        const _complete = document.getElementById('dlStateComplete');
+        if(_complete) _complete.classList.remove('show');
+        const _text0 = document.getElementById('dlProgressText');
+        if(_text0) _text0.textContent = '全国地図データを準備中...';
+        const _fill0 = document.getElementById('dlProgressFill');
+        if(_fill0) _fill0.style.width = '5%';
+      } catch(_){}
       try {
         window._mmPipeline.warmup().then(function(){
           // ★ warmup 完了で進捗を 100% に固定 + 完了文言
