@@ -2146,6 +2146,11 @@ let _highwaysData = null;
 //   将来的に GPS 海上 jump 検知 (海岸線越え) で emission penalty 強化
 let _coastlineData = null;
 
+// ★設計変更宣言 (2026-05-13・大改修 C9): 全国共通 railways data (鉄道)
+//   msgType='loadRailways' で受信
+//   将来的に電車 GPS 検知 (線路上を高速移動) で代行業務外と判定・mmResult.skipped
+let _railwaysData = null;
+
 // ─── メッセージハンドラ ─────────────────────────────────────────
 self.onmessage = function(e){
   const msg = e.data;
@@ -2286,6 +2291,19 @@ self.onmessage = function(e){
       self.postMessage({ type: 'coastlineLoaded', ok: true });
     } else {
       self.postMessage({ type: 'coastlineLoaded', ok: false, _reason: 'no data' });
+    }
+    return;
+  }
+
+  // ★設計変更宣言 (2026-05-13・大改修 C9): 全国共通 railways data 受信
+  //   msg.data: RAILWAYS_JP 構造体 (鉄道 polyline)
+  //   現段階は保存のみ・将来 電車 GPS 検知で代行業務外判定・skipped 返却
+  if(msg.type === 'loadRailways'){
+    if(msg.data){
+      _railwaysData = msg.data;
+      self.postMessage({ type: 'railwaysLoaded', ok: true });
+    } else {
+      self.postMessage({ type: 'railwaysLoaded', ok: false, _reason: 'no data' });
     }
     return;
   }
