@@ -68,7 +68,7 @@ const DEBUG = (() => {
   const btn = document.createElement('button');
   btn.id = 'erudaToggleBtn';
   btn.type = 'button';
-  btn.textContent = '🐛';
+  btn.textContent = '⚙️';
   btn.setAttribute('aria-label', 'Toggle Eruda console');
   btn.style.cssText =
     'position:fixed;left:8px;bottom:8px;z-index:9001;' +
@@ -88,6 +88,98 @@ const DEBUG = (() => {
     }
   }
   _attach();
+
+  // ★設計変更宣言 (2026-05-13): 🐛 → ⚙️ 切替 + drag 移動対応
+  //   旧: 画面左下固定 (left:8px / bottom:8px) のみ
+  //   新: pointerdown/move/up で自由移動・閾値 5px で click(=Eruda toggle) と drag を分離
+  //       drag 後の位置を localStorage 'daikome_eruda_btn_pos' に保存・次回起動時に復元
+  //       click 経路は既存ハンドラ (Eruda lazy load + toggle) を完全に維持 (capture 段で gate)
+  //       iOS Safari + Android Chrome 両対応 (touch-action:none で native gesture 干渉抑止)
+  btn.style.touchAction = 'none';
+  try {
+    const _saved = JSON.parse(localStorage.getItem('daikome_eruda_btn_pos') || 'null');
+    if(_saved && typeof _saved.left === 'number' && typeof _saved.top === 'number'){
+      const _maxL = window.innerWidth  - 52;
+      const _maxT = window.innerHeight - 52;
+      btn.style.bottom = '';
+      btn.style.left = Math.max(8, Math.min(_maxL, _saved.left)) + 'px';
+      btn.style.top  = Math.max(8, Math.min(_maxT, _saved.top))  + 'px';
+    }
+  } catch(_){}
+
+  const DRAG_THRESHOLD = 5;
+  let _startX = 0, _startY = 0, _origLeft = 0, _origTop = 0;
+  let _dragging = false, _moved = 0, _hasDragged = false;
+
+  btn.addEventListener('pointerdown', function(ev){
+    _startX = ev.clientX;
+    _startY = ev.clientY;
+    _dragging = true;
+    _moved = 0;
+    _hasDragged = false;
+    try { btn.setPointerCapture(ev.pointerId); } catch(_){}
+  });
+
+  btn.addEventListener('pointermove', function(ev){
+    if(!_dragging) return;
+    const dx = ev.clientX - _startX;
+    const dy = ev.clientY - _startY;
+    const dist = Math.hypot(dx, dy);
+    if(dist > _moved) _moved = dist;
+    if(_moved < DRAG_THRESHOLD) return;
+    if(!_hasDragged){
+      // 閾値超え初回: 現在の視覚位置を top-anchored に変換 (bottom:8px → top:Ypx)
+      const r = btn.getBoundingClientRect();
+      btn.style.bottom = '';
+      _origLeft = r.left;
+      _origTop  = r.top;
+      _hasDragged = true;
+    }
+    ev.preventDefault();
+    const maxL = window.innerWidth  - 52;
+    const maxT = window.innerHeight - 52;
+    const newL = Math.max(8, Math.min(maxL, _origLeft + dx));
+    const newT = Math.max(8, Math.min(maxT, _origTop  + dy));
+    btn.style.left = newL + 'px';
+    btn.style.top  = newT + 'px';
+  });
+
+  btn.addEventListener('pointerup', function(ev){
+    if(!_dragging) return;
+    _dragging = false;
+    try { btn.releasePointerCapture(ev.pointerId); } catch(_){}
+    if(_hasDragged){
+      ev.preventDefault();
+      try {
+        const r = btn.getBoundingClientRect();
+        localStorage.setItem('daikome_eruda_btn_pos',
+          JSON.stringify({ left: r.left, top: r.top }));
+      } catch(_){}
+    }
+  });
+
+  btn.addEventListener('pointercancel', function(){
+    _dragging = false;
+  });
+
+  // capture phase で click を gate (drag 直後の synthetic click を遮断)
+  btn.addEventListener('click', function(ev){
+    if(_hasDragged){
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      _hasDragged = false;
+    }
+  }, true);
+
+  // resize 時に top-anchored ボタンを画面内に clamp
+  window.addEventListener('resize', function(){
+    if(!btn.style.top) return;   // まだ bottom-anchored = ブラウザ任せでOK
+    const r = btn.getBoundingClientRect();
+    const maxL = window.innerWidth  - 52;
+    const maxT = window.innerHeight - 52;
+    btn.style.left = Math.max(8, Math.min(maxL, r.left)) + 'px';
+    btn.style.top  = Math.max(8, Math.min(maxT, r.top))  + 'px';
+  });
 
   function _loadEruda(cb){
     if(_erudaLoaded){ cb(); return; }
