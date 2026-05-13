@@ -3545,9 +3545,8 @@ try {
       updateResumeFromStartVisibility();
       // 2026/05/01：未許可ならバナー表示（許可済みなら何もしない）
       showSensorBannerIfNeeded();
-      // ★設計変更宣言 (2026-05-11): データ更新バナー表示判定
-      //   businessStart 表示直後・7 日経過 + snooze 期限切れなら表示
-      try { if(typeof DataUpdateBanner !== 'undefined') DataUpdateBanner.checkAndShow(); } catch(_){}
+      // ★設計変更宣言 (2026-05-13): 旧 DataUpdateBanner.checkAndShow 呼出削除
+      //   meta.json ベース差分検知実装まで dataUpdateBanner 機能停止中 (Phase 6-5)
     }
   }
 } catch(e){
@@ -3638,39 +3637,21 @@ function closeApkModal(){
 //        meta.json ベース差分検知の実装まで checkAndShow / show は no-op
 //        HTML (dataUpdateBannerWrap / dataUpdateBanner) は残置・hide も維持
 //        将来 meta.json 実装時に _shouldShow / startDownload を新方式で復活可能
+// ★設計変更宣言 (2026-05-13): DataUpdateBanner の no-op method 群を整理
+//   機能停止中 (Phase 6-5) で show / startDownload / checkAndShow / _isOnWifi
+//   は全て no-op だった → 全削除。close-btn が呼ぶ hide のみ残置。
+//   visibilitychange / online listener も checkAndShow 呼出のみだったので削除。
+//   meta.json 実装時に新方式で復活予定。
 const DataUpdateBanner = (function(){
-  // 機能停止中のためフラグ系定数は不要だが、HTML 構造との互換のため hide のみ残置
   function hide(){
     const wrap = document.getElementById('dataUpdateBannerWrap');
     if(wrap) wrap.classList.remove('show');
   }
-
-  // 一時停止: meta.json 実装まで何もしない
-  function show(){ /* no-op (Phase 6-5 一時停止) */ }
-  function startDownload(){ return Promise.resolve(); /* no-op */ }
-  function checkAndShow(){ return Promise.resolve(); /* no-op */ }
-  function _isOnWifi(){
-    const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    if(!c) return navigator.onLine;
-    return c.type === 'wifi' || (c.downlink && c.downlink > 5);
-  }
-
-  return { show, hide, startDownload, checkAndShow, _isOnWifi };
+  return { hide };
 })();
 
 // グローバル関数として close-btn onclick から呼べるよう公開
-function hideDataUpdateBanner(){ DataUpdateBanner.hide(true); }
-
-// visibility 復帰 + online で WiFi 自動 DL を再評価
-document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState === 'visible'){
-    DataUpdateBanner.checkAndShow();
-  }
-});
-window.addEventListener('online', function(){
-  // online になったら WiFi 経由の可能性ありなので再判定
-  DataUpdateBanner.checkAndShow();
-});
+function hideDataUpdateBanner(){ DataUpdateBanner.hide(); }
 
 // ─── 月次更新トースト UI 制御 ───
 const DakomeUpdateToast = (function(){
@@ -4445,7 +4426,7 @@ if(navigator.storage && navigator.storage.persist){
 
 <!-- ★設計変更宣言 (2026-05-10): ボトムナビ (4 タブ) -->
 <nav class="bottom-nav">
-  <button class="nav-item active" type="button" onclick="location.href='/'"><span class="nav-icon">●</span><span class="nav-label">業務</span></button>
+  <button class="nav-item active" type="button" onclick="if(location.pathname !== '/' &amp;&amp; !location.pathname.endsWith('/index.html')) location.href='/';"><span class="nav-icon">●</span><span class="nav-label">業務</span></button>
   <button class="nav-item" type="button" onclick="location.href='history.html'"><span class="nav-icon">≡</span><span class="nav-label">履歴</span></button>
   <button class="nav-item" type="button" onclick="location.href='help.html'"><span class="nav-icon">?</span><span class="nav-label">使い方</span></button>
   <button class="nav-item" type="button" onclick="location.href='settings.html'"><span class="nav-icon">⚙</span><span class="nav-label">設定</span></button>
