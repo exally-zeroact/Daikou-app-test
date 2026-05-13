@@ -1605,8 +1605,21 @@ function _updatePipelineProgressUI(p){
       phaseLabel = p.current + '/' + p.total + ' 県完了';
       phaseStart = 20; phaseRange = 50;
     } else if(p.phase && p.phase.indexOf('aux-') === 0){
-      phaseLabel = '補助データ読込中... ' + p.current + '/' + p.total;
+      // ★設計変更宣言 (2026-05-13・Phase C 累計化):
+      //   旧: 種別 (tunnels/bridges/...) ごとに 1/47 → 47/47 でリセット表示
+      //   新: 6 種 × 47 = 282 件の全体累計を smooth に表示
+      //   stats.auxOk は各 kind 完了後に 47 ずつ加算 → 現在 kind 内は stagnant
+      //   stats.auxOk + p.current で正確な累計 (1→282) を算出
+      const _auxOk = (window._mmPipeline && window._mmPipeline.stats)
+                    ? window._mmPipeline.stats.auxOk : 0;
+      const _cum = _auxOk + p.current;
+      const _TOTAL_AUX = 282;  // 47 県 × 6 種
+      phaseLabel = '補助データ読込中... ' + _cum + '/' + _TOTAL_AUX;
       phaseStart = 70; phaseRange = 20;
+      const _auxPct = phaseStart + (_cum / _TOTAL_AUX) * phaseRange;
+      fill.style.width = Math.min(100, Math.max(5, _auxPct)).toFixed(1) + '%';
+      text.textContent = phaseLabel;
+      return;
     } else {
       phaseLabel = p.phase + ' ' + p.current + '/' + p.total;
     }
