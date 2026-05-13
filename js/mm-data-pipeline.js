@@ -224,12 +224,22 @@
         dlog('[Pipeline] Phase B 完了 ok=' + this.stats.roadsOk +
              ' failed=' + this.stats.roadsFailed.length);
       }
-      // Phase C: 47 県補助
-      await this.loadAuxData();
-      if(typeof dlog === 'function'){
-        dlog('[Pipeline] Phase C 完了 ok=' + this.stats.auxOk +
-             ' failed=' + this.stats.auxFailed.length);
-      }
+      // ★設計変更宣言 (2026-05-13): Phase C を fire-and-forget で background 実行
+      //   旧: await this.loadAuxData() で完了まで待機 (~14 秒のボトルネック)
+      //   新: 起動時の warmup を 14 秒短縮・aux データは bg で順次完了
+      //   失う機能: 業務開始直後の数秒間、findNearestTunnel/Bridge と
+      //            道路属性警告 (school zone / flood 等) が無効
+      //   絶対ルール準拠: MM 主機能 (Phase B roads) は同期完了済・道路距離課金担保
+      this.loadAuxData().then(function(){
+        if(typeof dlog === 'function'){
+          dlog('[Pipeline] Phase C 完了 (bg) ok=' + this.stats.auxOk +
+               ' failed=' + this.stats.auxFailed.length);
+        }
+      }.bind(this)).catch(function(e){
+        if(typeof dlog === 'function'){
+          dlog('[Pipeline] Phase C bg エラー: ' + (e && e.message));
+        }
+      });
       // Phase D: GPS
       await this.waitForGPS();
       if(typeof dlog === 'function') dlog('[Pipeline] Phase D 完了');
