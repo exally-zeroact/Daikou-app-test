@@ -321,21 +321,15 @@
         dlog('[Pipeline] Phase C 完了 ok=' + this.stats.auxOk +
              ' failed=' + this.stats.auxFailed.length);
       }
-      // ★設計変更宣言 (2026-05-13・Phase D/E 進捗表示追加):
-      //   旧: Phase C 完了後 (90%) で進捗 bar が固まり、Phase D/E 中は UI 無音
-      //       → ユーザー指摘「補助データの後に何かしてるけど何も表示されない」矛盾
-      //   新: Phase D/E でも _emit で onProgress 発火し UI を更新
-      //   進捗配分: Phase C 90% → Phase D 95% → Phase E 100%
-      // Phase D: GPS
-      this._emit('gps', 0, 1, 'GPS 位置情報取得中...');
-      await this.waitForGPS();
-      this._emit('gps', 1, 1, 'GPS 取得完了');
-      if(typeof dlog === 'function') dlog('[Pipeline] Phase D 完了');
-      // Phase E: MM warmup
-      this._emit('mm-warmup', 0, 1, 'マッピング準備中...');
-      await this.waitForMMWarmup();
-      this._emit('mm-warmup', 1, 1, 'マッピング完了');
-      if(typeof dlog === 'function') dlog('[Pipeline] Phase E 完了');
+      // ★設計変更宣言 (2026-05-13・Phase D/E を warmup から外す):
+      //   旧: Phase D (waitForGPS) + Phase E (waitForMMWarmup) を warmup() で待つ
+      //   問題: startGPS() は「業務開始」ボタンで呼ばれる仕様 (index.html:2739 参照)
+      //   → warmup 時点では watchPosition 未起動 → notifyGpsFix が永遠に呼ばれない
+      //   → Phase D は 30 秒 timeout まで無駄待ち、Phase E も commit 来ず timeout
+      //   新: warmup() は Phase A/B/C (データ DL) のみで完了
+      //   GPS / MM warmup は業務開始ボタン押下後の通常フローに任せる (仕様通り)
+      //   waitForGPS / waitForMMWarmup / notifyGpsFix / notifyMMCommit は別用途
+      //   (将来 driving 画面で進捗 UI 等が必要になった時) のため method 自体は残置
       const dur = Date.now() - t0;
       if(typeof dlog === 'function') dlog('[Pipeline] warmup 完了: ' + dur + 'ms');
       // ★設計変更宣言 (2026-05-13・warmup 完了マーカー永続化):

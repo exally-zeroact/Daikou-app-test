@@ -1582,14 +1582,12 @@ _setupMmWorker('init');
 //   warmup() は fire-and-forget で起動・結果は ready フラグで参照
 // ★設計変更宣言 (2026-05-13・Phase 4 / C12): dlOverlay 流用 ローディング UI
 //   新パイプライン (MMDataPipeline) の進捗を dlOverlay に反映。
-//   既存 DakomeDL の showOverlay/updateProgress と並行動作 (Phase 5 で
-//   DakomeDL.init() 呼出停止予定・両者書込は冪等)。
-//   Phase 進行表現 (2026-05-13 update: Phase D/E も表示追加):
+//   Phase 進行表現 (2026-05-13・Phase D/E は warmup から除外で再配分):
 //     Phase A (global):       0% →  20%  "全国共通データ読込中... X/20"
-//     Phase B (roads):       20% →  70%  "X/47 県完了"
-//     Phase C (aux-*):       70% →  90%  "補助データ読込中... X/282"
-//     Phase D (gps):         90% →  95%  "GPS 位置情報取得中..."
-//     Phase E (mm-warmup):   95% → 100%  "マッピング準備中..."
+//     Phase B (roads):       20% →  50%  "X/47 県完了"
+//     Phase C (aux-*):       50% → 100%  "補助データ読込中... X/282"
+//     ※ GPS / MM warmup は「業務開始」ボタンで startGPS() 呼出後に発生する
+//       通常フローに任せる (仕様: index.html:2739 参照)
 function _updatePipelineProgressUI(p){
   try {
     const fill = document.getElementById('dlProgressFill');
@@ -1603,33 +1601,24 @@ function _updatePipelineProgressUI(p){
       phaseStart = 0; phaseRange = 20;
     } else if(p.phase === 'roads'){
       phaseLabel = p.current + '/' + p.total + ' 県完了';
-      phaseStart = 20; phaseRange = 50;
+      phaseStart = 20; phaseRange = 30;
     } else if(p.phase && p.phase.indexOf('aux-') === 0){
       // ★設計変更宣言 (2026-05-13・Phase C 累計化):
       //   旧: 種別 (tunnels/bridges/...) ごとに 1/47 → 47/47 でリセット表示
       //   新: 6 種 × 47 = 282 件の全体累計を smooth に表示
       //   stats.auxOk は各 kind 完了後に 47 ずつ加算 → 現在 kind 内は stagnant
       //   stats.auxOk + p.current で正確な累計 (1→282) を算出
+      //   Phase D/E を warmup から外したので Phase C を 50% → 100% に再配分。
       const _auxOk = (window._mmPipeline && window._mmPipeline.stats)
                     ? window._mmPipeline.stats.auxOk : 0;
       const _cum = _auxOk + p.current;
       const _TOTAL_AUX = 282;  // 47 県 × 6 種
       phaseLabel = '補助データ読込中... ' + _cum + '/' + _TOTAL_AUX;
-      phaseStart = 70; phaseRange = 20;
+      phaseStart = 50; phaseRange = 50;
       const _auxPct = phaseStart + (_cum / _TOTAL_AUX) * phaseRange;
       fill.style.width = Math.min(100, Math.max(5, _auxPct)).toFixed(1) + '%';
       text.textContent = phaseLabel;
       return;
-    } else if(p.phase === 'gps'){
-      // ★設計変更宣言 (2026-05-13・Phase D 進捗表示):
-      //   補助データ完了後の GPS 取得待ち。90% → 95% で表示。
-      phaseLabel = p.label || 'GPS 位置情報取得中...';
-      phaseStart = 90; phaseRange = 5;
-    } else if(p.phase === 'mm-warmup'){
-      // ★設計変更宣言 (2026-05-13・Phase E 進捗表示):
-      //   MM warmup commit 待ち。95% → 100% で表示。
-      phaseLabel = p.label || 'マッピング準備中...';
-      phaseStart = 95; phaseRange = 5;
     } else {
       phaseLabel = p.phase + ' ' + p.current + '/' + p.total;
     }
