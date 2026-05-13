@@ -1642,6 +1642,18 @@ try {
       },
     });
     setTimeout(function(){
+      // ★設計変更宣言 (2026-05-13・PWA standalone 限定化):
+      //   ブラウザ (Safari / Chrome) で URL を開いただけの状態 (非 PWA) では
+      //   新 pipeline overlay (welcome + 47県 DL 進捗) を出さない。
+      //   旧 DakomeDL の standalone IIFE が持っていた gate を新 pipeline へ復活。
+      //   非 PWA: 既存 tutorialOverlay / apkBanner が PWA インストール促進を担当。
+      //   PWA standalone: 既存通り overlay + warmup() 起動。
+      const _isStandalone = window.navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+      if(!_isStandalone){
+        if(typeof dlog === 'function') dlog('[Pipeline] 非 standalone・warmup skip (ホーム画面追加待ち)');
+        return;
+      }
       // ★設計変更宣言 (2026-05-13・Phase 6-1): overlay 表示制御を新 pipeline 側に追加
       //   DakomeDL.init() (内部 showOverlay 含む) を Phase 5 で停止したため、
       //   新 pipeline warmup 開始時に dlOverlay を表示する制御を追加。
