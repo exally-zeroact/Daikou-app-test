@@ -308,22 +308,19 @@
         dlog('[Pipeline] Phase B 完了 ok=' + this.stats.roadsOk +
              ' failed=' + this.stats.roadsFailed.length);
       }
-      // ★設計変更宣言 (2026-05-13): Phase C を fire-and-forget で background 実行
-      //   旧: await this.loadAuxData() で完了まで待機 (~14 秒のボトルネック)
-      //   新: 起動時の warmup を 14 秒短縮・aux データは bg で順次完了
-      //   失う機能: 業務開始直後の数秒間、findNearestTunnel/Bridge と
-      //            道路属性警告 (school zone / flood 等) が無効
-      //   絶対ルール準拠: MM 主機能 (Phase B roads) は同期完了済・道路距離課金担保
-      this.loadAuxData().then(function(){
-        if(typeof dlog === 'function'){
-          dlog('[Pipeline] Phase C 完了 (bg) ok=' + this.stats.auxOk +
-               ' failed=' + this.stats.auxFailed.length);
-        }
-      }.bind(this)).catch(function(e){
-        if(typeof dlog === 'function'){
-          dlog('[Pipeline] Phase C bg エラー: ' + (e && e.message));
-        }
-      });
+      // ★設計変更宣言 (2026-05-13・Phase C 同期化に再変更):
+      //   旧: fire-and-forget (起動時間 -14 秒) → 「補助データ完了前に業務画面」
+      //   新: await して Phase C 完了後に Phase D/E へ進む
+      //   理由: ユーザー指摘「補助データの後に何か読み込まな完了しないなら
+      //   それも補助データの後にダウンロードさすべき」「データが揃ってないから
+      //   問題発生」を受けて、全データ揃ってから業務画面を出す設計に変更。
+      //   起動時間 +14 秒の代償は再ロード時の cache 復元で吸収 (ms 単位)。
+      //   絶対ルール準拠: MM 主機能維持・道路距離課金担保。
+      await this.loadAuxData();
+      if(typeof dlog === 'function'){
+        dlog('[Pipeline] Phase C 完了 ok=' + this.stats.auxOk +
+             ' failed=' + this.stats.auxFailed.length);
+      }
       // Phase D: GPS
       await this.waitForGPS();
       if(typeof dlog === 'function') dlog('[Pipeline] Phase D 完了');
@@ -332,6 +329,29 @@
       if(typeof dlog === 'function') dlog('[Pipeline] Phase E 完了');
       const dur = Date.now() - t0;
       if(typeof dlog === 'function') dlog('[Pipeline] warmup 完了: ' + dur + 'ms');
+      // ★設計変更宣言 (2026-05-13・warmup 完了マーカー永続化):
+      //   旧: this.ready がインスタンス変数 = ページ再ロードで揮発
+      //       → 履歴→戻る等で / 再ロード = 毎回 warmup 全実行 + overlay 表示
+      //   新: localStorage に完了マーカーを永続化
+      //   起動時に index.html 側がマーカー確認 → 有 = overlay skip + warmup bg
+      //   バージョン: DataRegistry.VERSION (構造変更時に bump で invalidate)
+      try {
+        const reg = global.DataRegistry;
+        const marker = {
+          version: (reg && reg.VERSION) || '0',
+          ts: Date.now(),
+          globalOk: this.stats.globalOk,
+          roadsOk: this.stats.roadsOk,
+          auxOk: this.stats.auxOk,
+          durMs: dur,
+        };
+        if(typeof global.localStorage !== 'undefined'){
+          global.localStorage.setItem('daikome_warmup_v1', JSON.stringify(marker));
+          if(typeof dlog === 'function') dlog('[Pipeline] 完了マーカー永続化 ' + JSON.stringify(marker));
+        }
+      } catch(e){
+        if(typeof dlog === 'function') dlog('[Pipeline] マーカー保存失敗: ' + (e && e.message));
+      }
     }
   }
 

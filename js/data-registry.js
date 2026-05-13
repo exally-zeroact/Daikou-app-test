@@ -126,10 +126,17 @@
     });
   }
 
+  // ★設計変更宣言 (2026-05-13・warmup 永続マーカー versioning):
+  //   localStorage 'daikome_warmup_v1' のバージョン管理に使用。
+  //   データ構造変更 (registry 改修・新規県/補助種追加) 時に bump すると
+  //   既存マーカー invalidate → 全クライアントで再 warmup 起動。
+  const VERSION = '2026-05-13-v1';
+
   global.DataRegistry = {
     PREFECTURES_47: PREFECTURES_47,
     DATA_REGISTRY: DATA_REGISTRY,
     expandPerPref: expandPerPref,
+    VERSION: VERSION,
   };
 })(typeof window !== 'undefined' ? window
    : typeof self !== 'undefined' ? self

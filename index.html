@@ -1639,40 +1639,19 @@ try {
           dlog('[Pipeline] ' + p.phase + ' ' + p.current + '/' + p.total + ' ' + (p.label || ''));
         }
         _updatePipelineProgressUI(p);
-        // ★設計変更宣言 (2026-05-13): Phase C 完了 (282/282) で overlay hide
-        //   旧: Phase B 完了 (47/47) で hide (8 秒早かったが補助データ途中で
-        //       画面遷移 → ユーザー混乱)
-        //   新: Phase C 完了 (auxOk + p.current === 282) まで進捗 bar を見せて hide
-        //   ユーザーは「全部完了」感を得られる・Phase D/E は bg 継続。
-        //   warmup().then の 800ms hide はバックアップとして残置。
-        if(p.phase && p.phase.indexOf('aux-') === 0){
-          const _auxOk2 = (window._mmPipeline && window._mmPipeline.stats)
-                          ? window._mmPipeline.stats.auxOk : 0;
-          const _cum2 = _auxOk2 + p.current;
-          if(_cum2 === 282){
-            setTimeout(function(){
-              try {
-                const overlay = document.getElementById('dlOverlay');
-                if(overlay){
-                  overlay.style.display = 'none';
-                  overlay.classList.remove('show');
-                }
-              } catch(_){}
-            }, 500);
-          }
-        }
+        // ★設計変更宣言 (2026-05-13・Phase C 早期 hide 撤去):
+        //   旧: aux 282/282 で 500ms 後 hide → Phase D (GPS) / Phase E (MM warmup)
+        //       完了前に業務画面が見える矛盾 (ユーザー指摘の根本原因)
+        //   新: hide は warmup().then の Phase E 完了後のみ
+        //   ユーザー指示「データ揃ってから業務画面」を厳格に履行
       },
     });
     setTimeout(function(){
-      // ★設計変更宣言 (2026-05-13・PWA standalone 限定化):
-      //   ブラウザ (Safari / Chrome) で URL を開いただけの状態 (非 PWA) では
-      //   新 pipeline overlay (welcome + 47県 DL 進捗) を出さない。
-      //   非 PWA: 既存 tutorialOverlay / apkBanner が PWA インストール促進を担当。
-      //   PWA standalone: HTML inline で初期表示済 (display:flex) → warmup → 完了で hide。
       const _isStandalone = window.navigator.standalone === true ||
         (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-      if(!_isStandalone){
-        // ★非 PWA: HTML inline で初期表示 ON にした dlOverlay を即 hide
+
+      // ★ helper: dlOverlay を即 hide
+      const _hideOverlay = function(){
         try {
           const _ov = document.getElementById('dlOverlay');
           if(_ov){
@@ -1680,18 +1659,50 @@ try {
             _ov.classList.remove('show');
           }
         } catch(_){}
+      };
+
+      // ★設計変更宣言 (2026-05-13・非 PWA は即 hide):
+      //   ブラウザ閲覧 (非 PWA) では overlay を出さず即 hide。warmup も skip。
+      if(!_isStandalone){
+        _hideOverlay();
         if(typeof dlog === 'function') dlog('[Pipeline] 非 standalone・warmup skip + overlay 即 hide');
         return;
       }
-      // ★設計変更宣言 (2026-05-13・data 揃前に業務画面を出さない設計に変更):
-      //   旧: HTML 初期 display:none → warmup 開始時に display:flex
-      //       → 業務画面が一瞬見えた後に overlay 表示 (履歴→戻る時に矛盾発生)
-      //   新: HTML 初期 display:flex → 業務画面は overlay の裏で隠れて起動
-      //       → warmup 完了 (cache 復元 or DL 完了) で overlay hide → 業務画面表示
-      //   cache 揃ってる場合: loadFromCache が ms 単位で完了 → overlay も即消える
-      //   cache 揃ってない場合: 既存通り進捗 bar が動いて完了で hide
-      //   ※前回 commit の 340 件 cache check は daikome-roads-v1 (=47件のみ) を
-      //   見てたため常に false で機能せず → 撤去 (HTML 初期表示変更で代替)
+
+      // ★設計変更宣言 (2026-05-13・warmup 完了マーカー check):
+      //   旧: 毎回 overlay 表示 + warmup 全実行 → 履歴→戻るで毎回チラつき
+      //   新: localStorage 'daikome_warmup_v1' を確認・version 一致なら
+      //       overlay 即 hide + warmup を bg で実行 (cache 復元・SW 経由)
+      //   無 or 旧 version: overlay 表示 + warmup blocking → 完了で hide + マーカー更新
+      //   bg warmup 中も loadFromCache は ms 単位なので業務に影響なし。
+      let _markerOk = false;
+      try {
+        const _m = localStorage.getItem('daikome_warmup_v1');
+        if(_m){
+          const _p = JSON.parse(_m);
+          const _expected = (window.DataRegistry && window.DataRegistry.VERSION) || '0';
+          _markerOk = _p && _p.version === _expected;
+          if(typeof dlog === 'function'){
+            dlog('[Pipeline] マーカー確認 version=' + (_p && _p.version) +
+                 ' expected=' + _expected + ' overlay=' + (_markerOk ? 'skip' : 'show'));
+          }
+        } else {
+          if(typeof dlog === 'function') dlog('[Pipeline] マーカー無 (初回) overlay=show');
+        }
+      } catch(_){}
+
+      if(_markerOk){
+        // 完了済 → overlay 即 hide + warmup bg (cache 復元目的)
+        _hideOverlay();
+        try {
+          window._mmPipeline.warmup().catch(function(e){
+            console.warn('[Pipeline] warmup error (bg):', e && e.message);
+          });
+        } catch(e){ console.warn('[Pipeline] warmup throw (bg):', e && e.message); }
+        return;
+      }
+
+      // 初回 or 旧 version: overlay 維持 + warmup blocking
       try {
         const _loading = document.getElementById('dlStateLoading');
         if(_loading) _loading.classList.add('show');
@@ -1712,20 +1723,7 @@ try {
             if(text) text.textContent = '準備完了';
           } catch(_){}
           if(typeof dlog === 'function') dlog('[Pipeline] UI 完了表示');
-          // ★設計変更宣言 (2026-05-13・Phase 5): overlay hide 移管
-          //   DakomeDL.showCompleteBanner からの hide ロジックを新 pipeline 側へ移管。
-          //   "準備完了" 表示を 800ms 見せてから dlOverlay を確実に非表示化。
-          //   DakomeDL.init() 停止後も overlay が残らないことを担保。
-          setTimeout(function(){
-            try {
-              const overlay = document.getElementById('dlOverlay');
-              if(overlay){
-                overlay.style.display = 'none';
-                overlay.classList.remove('show');
-              }
-              if(typeof dlog === 'function') dlog('[Pipeline] dlOverlay hide 完了');
-            } catch(_){}
-          }, 800);
+          setTimeout(_hideOverlay, 800);
         }).catch(function(e){
           console.warn('[Pipeline] warmup error:', e && e.message);
         });
