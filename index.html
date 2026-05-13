@@ -1663,7 +1663,7 @@ try {
         }
       },
     });
-    setTimeout(function(){
+    setTimeout(async function(){
       // ★設計変更宣言 (2026-05-13・PWA standalone 限定化):
       //   ブラウザ (Safari / Chrome) で URL を開いただけの状態 (非 PWA) では
       //   新 pipeline overlay (welcome + 47県 DL 進捗) を出さない。
@@ -1674,6 +1674,30 @@ try {
         (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
       if(!_isStandalone){
         if(typeof dlog === 'function') dlog('[Pipeline] 非 standalone・warmup skip (ホーム画面追加待ち)');
+        return;
+      }
+      // ★設計変更宣言 (2026-05-13・再ロード時 overlay 抑制):
+      //   症状: 履歴→戻る等で / が再ロードされると warmup が再起動し、
+      //   全データ cache 済みでも overlay が一瞬表示されて DL 中に見える。
+      //   対策: warmup 開始前に cache 件数を quick check し、必要件数
+      //   (47県 roads + 全国共通 ~14 + 補助 282 ≒ 343) が揃っていれば
+      //   overlay を出さず warmup を bg で走らせる (cache 復元は ms 単位)。
+      //   閾値 340: optional 2 件 (backbone/DEM) 欠落許容 + 安全マージン。
+      let _cacheReady = false;
+      try {
+        const _c = await caches.open('daikome-roads-v1');
+        const _reqs = await _c.keys();
+        _cacheReady = _reqs.length >= 340;
+        if(typeof dlog === 'function'){
+          dlog('[Pipeline] cache 件数=' + _reqs.length + ' overlay=' + (_cacheReady ? 'skip' : 'show'));
+        }
+      } catch(_){}
+      if(_cacheReady){
+        try {
+          window._mmPipeline.warmup().catch(function(e){
+            console.warn('[Pipeline] warmup error (bg):', e && e.message);
+          });
+        } catch(e){ console.warn('[Pipeline] warmup throw (bg):', e && e.message); }
         return;
       }
       // ★設計変更宣言 (2026-05-13・Phase 6-1): overlay 表示制御を新 pipeline 側に追加
