@@ -47,7 +47,10 @@
       { url: '/data/railways-jp.js',       globalKey: 'RAILWAYS_JP',
         target: 'worker', msgType: 'loadRailways' },
 
-      // 業務 UX + 災害対応 (main 接続・13 件)
+      // 業務 UX + 災害対応 (main 接続・9 件)
+      // ★設計変更宣言 (2026-05-13): waterways/peaks/hiking-trails/misc は
+      //   ダイコメ機能上絶対使わないため registry から除外。
+      //   data/ ファイル自体は残置 (他プロジェクト利用)・ロードのみ停止。
       { url: '/data/shelters-jp.js',           globalKey: 'SHELTERS_JP',          target: 'main' },
       { url: '/data/emergency-medical-jp.js',  globalKey: 'EMERGENCY_MEDICAL_JP', target: 'main' },
       { url: '/data/stations-jp.js',           globalKey: 'STATIONS_JP',          target: 'main' },
@@ -55,12 +58,8 @@
       { url: '/data/ports-jp.js',              globalKey: 'PORTS_JP',             target: 'main' },
       { url: '/data/night-clinics-jp.js',      globalKey: 'NIGHT_CLINICS_JP',     target: 'main' },
       { url: '/data/michinoeki-jp.js',         globalKey: 'MICHINOEKI_JP',        target: 'main' },
-      { url: '/data/peaks-jp.js',              globalKey: 'PEAKS_JP',             target: 'main' },
       { url: '/data/faults-jp.js',             globalKey: 'FAULTS_JP',            target: 'main' },
       { url: '/data/hazard-cliff-jp.js',       globalKey: 'HAZARD_CLIFF_JP',      target: 'main' },
-      { url: '/data/waterways-jp.js',          globalKey: 'WATERWAYS_JP',         target: 'main' },
-      { url: '/data/hiking-trails-jp.js',      globalKey: 'HIKING_TRAILS_JP',     target: 'main' },
-      { url: '/data/misc-jp.js',               globalKey: 'MISC_JP',              target: 'main' },
 
       // 任意 (worker 接続)
       { url: '/data/road-graph-backbone-jp.js', globalKey: 'ROAD_GRAPH_BACKBONE_JP',

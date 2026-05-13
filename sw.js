@@ -46,17 +46,16 @@ const PRECACHE_FILES = [
   '/data/emergency-medical-jp.js',
   '/data/highways-jp.js',
   '/data/stations-jp.js',
-  '/data/misc-jp.js',
+  // ★設計変更宣言 (2026-05-13): waterways/peaks/hiking-trails/misc は
+  //   ダイコメ機能上絶対使わないため precache 対象から除外 (~32MB 削減)
+  //   data/ フォルダにファイル自体は残置・他プロジェクトで利用可
   '/data/faults-jp.js',
   '/data/night-clinics-jp.js',
   '/data/airports-jp.js',
   '/data/michinoeki-jp.js',
   '/data/coastline-jp.js',
   '/data/ports-jp.js',
-  '/data/peaks-jp.js',
-  '/data/hiking-trails-jp.js',
   '/data/railways-jp.js',
-  '/data/waterways-jp.js',
   '/data/hazard-cliff-jp.js',
 ];
 
