@@ -57,6 +57,11 @@ const PRECACHE_FILES = [
   '/data/ports-jp.js',
   '/data/railways-jp.js',
   '/data/hazard-cliff-jp.js',
+  // ★設計変更宣言 (2026-05-13): DEM (標高) データを precache に追加
+  //   全国 0.05° grid (~5.5km/cell) 333k cells Int16 → base64 ~870KB
+  //   用途: GPS 高度照合で誤マッチ判定 / 道路区間 Δh 加味で 3D 距離補正
+  //   従来 404 で globalFailed に積まれてた dem-jp.js を実データで提供
+  '/data/dem-jp.js',
 ];
 
 self.addEventListener('install', function(e){
