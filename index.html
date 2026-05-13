@@ -891,12 +891,12 @@ setInterval(_checkTripLimit, 30000);
 <div class="dl-update-toast" id="dlUpdateToast" onclick="onDlToastTap()">✅ 最新の地図データに更新しました</div>
 
 <!-- 初回DL UI（IndexedDBの dl_completed=true で2回目以降は表示しない） -->
-<!-- ★設計変更宣言 (2026-05-10): inline style="display:none" を追加
-     CSS .dl-overlay { display:none } と二重で hide。FOUC や stale cache で
-     .show class が残留しても inline style がより優先 (同 specificity だが
-     後勝ち) で hide 状態を維持。showOverlay/hideOverlay は inline style を
-     明示的に書き換える方式に変更。 -->
-<div class="dl-overlay" id="dlOverlay" style="display:none;">
+<!-- ★設計変更宣言 (2026-05-13): inline style="display:flex" に変更 (初期表示 ON)
+     ユーザー指摘「データ揃う前に業務画面に行くから矛盾が起きる」を受けて、
+     起動時から overlay を表示し、warmup 完了 (cache 復元 or 新規 DL) まで
+     業務画面を裏に隠す方式へ。非 PWA (Safari ブラウザ) では JS 起動直後に
+     overlay を hide するため、ブラウザ閲覧体験には影響しない。 -->
+<div class="dl-overlay" id="dlOverlay" style="display:flex;">
   <!-- 状態1：DL中 -->
   <div class="dl-state-loading show" id="dlStateLoading">
     <div style="text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;">
@@ -1663,54 +1663,36 @@ try {
         }
       },
     });
-    setTimeout(async function(){
+    setTimeout(function(){
       // ★設計変更宣言 (2026-05-13・PWA standalone 限定化):
       //   ブラウザ (Safari / Chrome) で URL を開いただけの状態 (非 PWA) では
       //   新 pipeline overlay (welcome + 47県 DL 進捗) を出さない。
-      //   旧 DakomeDL の standalone IIFE が持っていた gate を新 pipeline へ復活。
       //   非 PWA: 既存 tutorialOverlay / apkBanner が PWA インストール促進を担当。
-      //   PWA standalone: 既存通り overlay + warmup() 起動。
+      //   PWA standalone: HTML inline で初期表示済 (display:flex) → warmup → 完了で hide。
       const _isStandalone = window.navigator.standalone === true ||
         (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
       if(!_isStandalone){
-        if(typeof dlog === 'function') dlog('[Pipeline] 非 standalone・warmup skip (ホーム画面追加待ち)');
-        return;
-      }
-      // ★設計変更宣言 (2026-05-13・再ロード時 overlay 抑制):
-      //   症状: 履歴→戻る等で / が再ロードされると warmup が再起動し、
-      //   全データ cache 済みでも overlay が一瞬表示されて DL 中に見える。
-      //   対策: warmup 開始前に cache 件数を quick check し、必要件数
-      //   (47県 roads + 全国共通 ~14 + 補助 282 ≒ 343) が揃っていれば
-      //   overlay を出さず warmup を bg で走らせる (cache 復元は ms 単位)。
-      //   閾値 340: optional 2 件 (backbone/DEM) 欠落許容 + 安全マージン。
-      let _cacheReady = false;
-      try {
-        const _c = await caches.open('daikome-roads-v1');
-        const _reqs = await _c.keys();
-        _cacheReady = _reqs.length >= 340;
-        if(typeof dlog === 'function'){
-          dlog('[Pipeline] cache 件数=' + _reqs.length + ' overlay=' + (_cacheReady ? 'skip' : 'show'));
-        }
-      } catch(_){}
-      if(_cacheReady){
+        // ★非 PWA: HTML inline で初期表示 ON にした dlOverlay を即 hide
         try {
-          window._mmPipeline.warmup().catch(function(e){
-            console.warn('[Pipeline] warmup error (bg):', e && e.message);
-          });
-        } catch(e){ console.warn('[Pipeline] warmup throw (bg):', e && e.message); }
+          const _ov = document.getElementById('dlOverlay');
+          if(_ov){
+            _ov.style.display = 'none';
+            _ov.classList.remove('show');
+          }
+        } catch(_){}
+        if(typeof dlog === 'function') dlog('[Pipeline] 非 standalone・warmup skip + overlay 即 hide');
         return;
       }
-      // ★設計変更宣言 (2026-05-13・Phase 6-1): overlay 表示制御を新 pipeline 側に追加
-      //   DakomeDL.init() (内部 showOverlay 含む) を Phase 5 で停止したため、
-      //   新 pipeline warmup 開始時に dlOverlay を表示する制御を追加。
-      //   hideOverlay (warmup 完了時) は Phase 5 で追加済 (本変更で維持)。
-      //   showOverlay は DakomeDL 内 private のため直接 DOM 操作で表示。
+      // ★設計変更宣言 (2026-05-13・data 揃前に業務画面を出さない設計に変更):
+      //   旧: HTML 初期 display:none → warmup 開始時に display:flex
+      //       → 業務画面が一瞬見えた後に overlay 表示 (履歴→戻る時に矛盾発生)
+      //   新: HTML 初期 display:flex → 業務画面は overlay の裏で隠れて起動
+      //       → warmup 完了 (cache 復元 or DL 完了) で overlay hide → 業務画面表示
+      //   cache 揃ってる場合: loadFromCache が ms 単位で完了 → overlay も即消える
+      //   cache 揃ってない場合: 既存通り進捗 bar が動いて完了で hide
+      //   ※前回 commit の 340 件 cache check は daikome-roads-v1 (=47件のみ) を
+      //   見てたため常に false で機能せず → 撤去 (HTML 初期表示変更で代替)
       try {
-        const _overlay = document.getElementById('dlOverlay');
-        if(_overlay){
-          _overlay.style.display = 'flex';
-          _overlay.classList.add('show');
-        }
         const _loading = document.getElementById('dlStateLoading');
         if(_loading) _loading.classList.add('show');
         const _complete = document.getElementById('dlStateComplete');
