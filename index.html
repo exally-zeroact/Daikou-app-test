@@ -1292,6 +1292,15 @@ class NoSleep {
 <!-- ★road-graph-tile-loader.js: Phase B タイル road-graph 遅延ロード（main 側）-->
 <script src="js/road-graph-tile-loader.js"></script>
 
+<!-- ★設計変更宣言 (2026-05-13・大改修 C4): 新パイプライン基盤 3 ファイル
+     - data-loader.js: cache 直接読出 + sandbox eval (window 汚染なし)
+     - data-registry.js: 全データ metadata (47 県 + 全国共通 20 件)
+     - mm-data-pipeline.js: 段階的ロード制御 (Phase A-E)
+     現状は読み込みのみで起動は別 commit で配線 -->
+<script src="js/data-loader.js"></script>
+<script src="js/data-registry.js"></script>
+<script src="js/mm-data-pipeline.js"></script>
+
 <!-- ★dem-loader.js: MM-5 DEM データ遅延ロード -->
 <script src="js/dem-loader.js"></script>
 
