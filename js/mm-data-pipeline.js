@@ -60,48 +60,70 @@
       }
     }
 
+    // ★設計変更宣言 (2026-05-13・Phase 1 修正1-A): retry 機構追加
+    //   loadFromCache → eval → postMessage / window 代入の一連を 1 unit として
+    //   network / cache miss / eval / postMessage 失敗を最大 3 回・2 秒間隔で retry
+    //   最終失敗のみ stats.roadsFailed (等) に push される
+    //   ロード信頼性向上 (例: 一時的 network 不安定・SW 未活性時の救済)
     async _loadOne(entry, isOptional){
-      try {
-        const data = await this.loader.loadFromCache(entry.url);
-        const value = data[entry.globalKey];
-        if(!value){
+      const MAX_RETRY = 3;
+      const RETRY_INTERVAL_MS = 2000;
+      let lastReason = null;
+      for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
+        try {
+          const data = await this.loader.loadFromCache(entry.url);
+          const value = data[entry.globalKey];
+          if(!value){
+            if(typeof dlog === 'function'){
+              dlog('[Pipeline] ' + entry.url + ' 変数 ' + entry.globalKey + ' 未設定');
+            }
+            if(!isOptional) return { ok: false, entry: entry, reason: 'no global var' };
+            return { ok: true, entry: entry, skipped: true };
+          }
+          if(entry.target === 'worker'){
+            if(!this.worker){
+              return { ok: false, entry: entry, reason: 'worker not ready' };
+            }
+            if(entry.handler === 'loadRoadsBundle'){
+              // roads は roadsData / pois / conditionalRestrictions に分割送信
+              this.worker.postMessage({ type: 'loadRoads', pref: entry.pref, roadsData: value });
+              if(Array.isArray(value.pois) && value.pois.length > 0){
+                this.worker.postMessage({ type: 'loadPois', pref: entry.pref, points: value.pois });
+              }
+              if(Array.isArray(value.conditionalRestrictions) && value.conditionalRestrictions.length > 0){
+                this.worker.postMessage({
+                  type: 'loadConditionalRestrictions',
+                  pref: entry.pref,
+                  list: value.conditionalRestrictions,
+                });
+              }
+            } else if(entry.msgType){
+              this.worker.postMessage({ type: entry.msgType, data: value });
+            }
+          } else if(entry.target === 'main'){
+            // main 側で findNearest 等が読む既存 window グローバルへ
+            global[entry.globalKey] = value;
+          }
+          if(attempt > 1 && typeof dlog === 'function'){
+            dlog('[Pipeline] ' + entry.url + ' attempt ' + attempt + ' で成功');
+          }
+          return { ok: true, entry: entry };
+        } catch(e){
+          lastReason = e && e.message;
           if(typeof dlog === 'function'){
-            dlog('[Pipeline] ' + entry.url + ' 変数 ' + entry.globalKey + ' 未設定');
+            dlog('[Pipeline] ' + entry.url + ' attempt ' + attempt + '/' + MAX_RETRY +
+                 ' 失敗: ' + lastReason);
           }
-          if(!isOptional) return { ok: false, entry: entry, reason: 'no global var' };
-          return { ok: true, entry: entry, skipped: true };
-        }
-        if(entry.target === 'worker'){
-          if(!this.worker){
-            return { ok: false, entry: entry, reason: 'worker not ready' };
+          if(attempt < MAX_RETRY){
+            await new Promise(function(r){ setTimeout(r, RETRY_INTERVAL_MS); });
           }
-          if(entry.handler === 'loadRoadsBundle'){
-            // roads は roadsData / pois / conditionalRestrictions に分割送信
-            this.worker.postMessage({ type: 'loadRoads', pref: entry.pref, roadsData: value });
-            if(Array.isArray(value.pois) && value.pois.length > 0){
-              this.worker.postMessage({ type: 'loadPois', pref: entry.pref, points: value.pois });
-            }
-            if(Array.isArray(value.conditionalRestrictions) && value.conditionalRestrictions.length > 0){
-              this.worker.postMessage({
-                type: 'loadConditionalRestrictions',
-                pref: entry.pref,
-                list: value.conditionalRestrictions,
-              });
-            }
-          } else if(entry.msgType){
-            this.worker.postMessage({ type: entry.msgType, data: value });
-          }
-        } else if(entry.target === 'main'){
-          // main 側で findNearest 等が読む既存 window グローバルへ
-          global[entry.globalKey] = value;
         }
-        return { ok: true, entry: entry };
-      } catch(e){
-        if(typeof dlog === 'function'){
-          dlog('[Pipeline] ' + entry.url + ' エラー: ' + (e && e.message));
-        }
-        return { ok: false, entry: entry, reason: e && e.message };
       }
+      // 全 attempt 失敗
+      if(typeof dlog === 'function'){
+        dlog('[Pipeline] ' + entry.url + ' 全 ' + MAX_RETRY + ' 回 retry 失敗・諦め');
+      }
+      return { ok: false, entry: entry, reason: lastReason };
     }
 
     async _loadParallel(entries, concurrency, phase){
