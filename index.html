@@ -2029,28 +2029,62 @@ function _autoLoadNearbyAttrs(prefs){
   }
 }
 
-// 2026-05-09 (M1): GPS から近隣 5 県を取得 → roads-{pref}.js を script 動的 load
-//   → 完了後 Worker B に forward。県境を跨ぐと自動拡張・重複は skip。
-//   絶対ルール: 「課金距離は道路距離」のため Worker B に roads が届く前は MM が
-//   稼働しない。GPS callback で常時呼び出し続ければ走行中も追加 load 可能。
+// ★設計変更宣言 (2026-05-13): 起動時に全 47 県を MM worker に常時ロード化
+//   旧: GPS callback で近隣 5 県を lazy-load (位置依存・GPS 待ち)
+//   新: 起動直後に全 47 県を並列度 4 で worker 送信 (位置非依存)
+//   理由: ダイコメ設計思想「全 47 県データを内包」を体現・どこから業務開始
+//        しても MM 即稼働・GPS 取得待ちで「roads (0 prefs)」事故を排除
+//   絶対ルール: 「課金距離は道路距離」のため Worker B に全国データが常時
+//              揃った状態を確立する (直線距離 fallback を排除)
+//   _forwardedPrefs Set で重複防止・GPS callback 等の既存呼出は dedupe で no-op
+//   引数 (lat, lng) は後方互換のため保持・実際は無視する (位置非依存)
 // (2026-05-10) _autoRoadLoadInflight は script 先頭に移動済 (TDZ 対策)
 function _autoLoadNearbyRoads(lat, lng){
-  if(typeof RegionLoader === 'undefined' || !RegionLoader.nearestPrefectures) return;
-  if(_autoRoadLoadInflight) return;               // 1 リクエストずつ直列化
-  const prefs = RegionLoader.nearestPrefectures(lat, lng, 5);
-  if(!Array.isArray(prefs) || prefs.length === 0) return;
-  // 全部 forward 済みなら早期 return (走行中の頻繁呼出を軽量化)
-  const pending = prefs.filter(function(p){ return !_forwardedPrefs.has(p); });
+  if(typeof RegionLoader === 'undefined' || !RegionLoader.ensureRoadsLoaded) return;
+  if(_autoRoadLoadInflight) return;               // 1 起動につき 1 回だけ
+  // 全 47 県リスト (DakomeDL.PREFECTURES と同一順序・TDZ 回避のため hardcoded)
+  const ALL_PREFS = [
+    'hokkaido','aomori','iwate','miyagi','akita','yamagata','fukushima',
+    'ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa',
+    'niigata','toyama','ishikawa','fukui','yamanashi','nagano','gifu',
+    'shizuoka','aichi','mie','shiga','kyoto','osaka','hyogo','nara',
+    'wakayama','tottori','shimane','okayama','hiroshima','yamaguchi',
+    'tokushima','kagawa','ehime','kochi','fukuoka','saga','nagasaki',
+    'kumamoto','oita','miyazaki','kagoshima','okinawa',
+  ];
+  const pending = ALL_PREFS.filter(function(p){ return !_forwardedPrefs.has(p); });
   if(pending.length === 0) return;
-  _autoRoadLoadInflight = RegionLoader.ensureRoadsLoaded(pending).then(function(){
-    _forwardRoadsToMmWorker(pending);
-    if(typeof dlog === 'function') dlog('[MM] auto-loaded roads: ' + pending.join(','));
-    // P11/P12 (Tier B): roads と一緒に attrs もロード
-    _autoLoadNearbyAttrs(pending);
+  if(typeof dlog === 'function') dlog('[MM] 全 47 県ロード開始: ' + pending.length + ' 県');
+  // 並列度 4 の worker pool で順次 ensureRoadsLoaded → forward → attrs ロード
+  const CONCURRENCY = 4;
+  const queue = pending.slice();
+  async function _loadWorker(){
+    while(queue.length > 0){
+      const p = queue.shift();
+      try {
+        await RegionLoader.ensureRoadsLoaded([p]);
+        _forwardRoadsToMmWorker([p]);
+        if(typeof _autoLoadNearbyAttrs === 'function') _autoLoadNearbyAttrs([p]);
+      } catch(e){
+        if(typeof dlog === 'function') dlog('[MM] load ' + p + ' err: ' + (e && e.message || e));
+      }
+    }
+  }
+  const workers = [];
+  for(let i = 0; i < CONCURRENCY; i++) workers.push(_loadWorker());
+  _autoRoadLoadInflight = Promise.all(workers).then(function(){
+    if(typeof dlog === 'function') dlog('[MM] 全 47 県ロード完了');
   }).catch(function(e){
-    if(typeof dlog === 'function') dlog('[MM] auto-load roads err: ' + (e && e.message || e));
+    if(typeof dlog === 'function') dlog('[MM] 全 47 県ロード err: ' + (e && e.message || e));
   }).then(function(){ _autoRoadLoadInflight = null; });
 }
+
+// ★設計変更宣言 (2026-05-13): 起動直後に全 47 県ロードを kick
+//   GPS 取得・boot-fast の last_gps 履歴を待たずに即起動
+//   setTimeout 0 で current script task を抜けてから (RegionLoader 評価後)
+setTimeout(function(){
+  try { _autoLoadNearbyRoads(); } catch(_){}
+}, 0);
 
 // MM-5 (2026-05-08): DEM データを Worker B に転送する関数
 // data/dem-jp.js (window.DEM_JP) が未ビルドなら no-op（layer scorer は roads v6 + accel hint で稼働）
