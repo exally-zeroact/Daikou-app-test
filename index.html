@@ -4931,6 +4931,12 @@ if(navigator.storage && navigator.storage.persist){
     });
   };
 
+  // ★設計変更宣言 (2026-05-14・MA-4 バグ修正):
+  //   バグ 1: 保存後 overlay が閉じず業務画面に戻れなかった (旧 settings.html saveAll は
+  //          location.href='index.html' でホーム遷移していた) → hideAllOverlays() 呼出を追加
+  //   バグ 2: 保存後 autoResetCheck が新しい resetTime を即時評価しないと「効いてない」感が出る
+  //          (setInterval は 60s 毎・タイミング次第で最大 60s ずれる) → 保存直後に明示呼出
+  //   どちらも localStorage 書込み後の追加処理・既存 key / JSON パス / 判定式 (一致確認済) は無変更
   window._st_saveAll = function(){
     try {
       const existing = JSON.parse(localStorage.getItem('daikou_settings') || '{}');
@@ -4940,6 +4946,15 @@ if(navigator.storage && navigator.storage.persist){
       const msg = document.getElementById('_st_saveMsg');
       if(msg){ msg.textContent = '保存しました'; setTimeout(function(){ msg.textContent = ''; }, 2000); }
       _showToast('保存しました');
+      // バグ 2: 新しい resetTime で即時評価 (setInterval を待たず)
+      if(typeof autoResetCheck === 'function'){
+        try { autoResetCheck(); } catch(_){}
+      }
+      // バグ 1: 600ms 後に overlay を自動 close → 業務画面 (旧 location.href='index.html' 相当)
+      //   toast 「保存しました」をチラっと見せてから閉じる
+      setTimeout(function(){
+        try { if(typeof window.hideAllOverlays === 'function') window.hideAllOverlays(); } catch(_){}
+      }, 600);
     } catch(e){
       console.error('[Settings] saveAll error:', e);
       _showToast('保存に失敗しました');
