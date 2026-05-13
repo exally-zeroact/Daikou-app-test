@@ -2374,6 +2374,11 @@ function startGPS(){
   }
   gpsStarted = true;
   if(typeof dlog === 'function') dlog('[GPS] startGPS: watchPosition 開始');
+  // ★設計変更宣言 (2026-05-13・sticky gate 修正): GPS.start() が同期例外で失敗した時
+  //   旧: gpsStarted=true がそのまま残り、以降の startGPS が全て「既に起動済」で skip
+  //       → 業務開始フロー (L2846) からの startGPS が永久 dead → badge「GPS待機」固定
+  //   新: 失敗時に gpsStarted=false にロールバック → 次回 startGPS で再試行可能
+  //       (低リスク: 例外が起きた時のみ flag を戻す・正常系の二重起動防止は維持)
   try {
     GPS.start(function(g){
       try {
@@ -2440,7 +2445,12 @@ function startGPS(){
         // TestMode 走行中位置記録は H-3 対応で削除済
       } catch(e){ console.error('GPS callback error:', e); }
     });
-  } catch(e){ console.error('GPS start error:', e); }
+  } catch(e){
+    console.error('GPS start error:', e);
+    // ★設計変更宣言 (2026-05-13・sticky gate 修正): 例外時に gpsStarted を false へ戻す
+    gpsStarted = false;
+    if(typeof dlog === 'function') dlog('[GPS] startGPS: GPS.start 失敗 → gpsStarted=false にロールバック (' + ((e && e.message) || e) + ')');
+  }
 }
 
 // ─── #1+6 (2026-05-13): GPS error 状態を gpsAcc バッジに反映 ────────────
@@ -2843,7 +2853,11 @@ function onBusinessStart(){
     if(dimTimer){ clearTimeout(dimTimer); dimTimer = null; }
     document.documentElement.style.filter = '';
     // GPS 起動（業務全体で総走行距離を計測するため）
+    // ★設計変更宣言 (2026-05-13・診断): 実機で「watchPosition 開始」ログが出ない事象を可視化
+    //   startGPS が真に呼ばれていないのか / 早期 return (gpsStarted=true) で skip なのかを区別
+    if(typeof dlog === 'function') dlog('[Business] startGPS 呼出前 gpsStarted=' + gpsStarted);
     startGPS();
+    if(typeof dlog === 'function') dlog('[Business] startGPS 呼出後 gpsStarted=' + gpsStarted);
     // 画面遷移
     appState = 'idle';
     showScreen('idle');
