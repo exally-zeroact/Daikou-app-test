@@ -176,6 +176,39 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 @media (orientation: landscape) and (min-width: 700px){
   #overlayHelp .acc-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 }
+/* ★設計変更宣言 (2026-05-14・MA-4 settings コンテンツを #overlaySettings に scope して移植):
+   元 settings.html (882 行) の常時表示 section + resetTime UI (B-1 復活) を取り込み。
+   #devSection / #devSection2 (dev mode 限定) は元 settings.html に残置 (dual state)。
+   resetTime UI は元 #devSection 内で隠れていたので、本 phase で常時表示として復活。
+   全 selector に #overlaySettings prefix を付与し既存 .row / .toggle 等との衝突を回避。 */
+#overlaySettings{background:#f5f5f5;color:#111;}
+#overlaySettings .appbar{background:#007AFF;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;}
+#overlaySettings .appbar-back{color:#fff;font-size:16px;cursor:pointer;padding:4px 8px;}
+#overlaySettings .appbar-title{font-size:17px;font-weight:700;color:#fff;user-select:none;-webkit-user-select:none;}
+#overlaySettings .wrap{padding:16px;display:flex;flex-direction:column;gap:16px;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+#overlaySettings .section{background:#fff;border-radius:12px;overflow:hidden;}
+#overlaySettings .section-title{font-size:12px;color:#8E8E93;padding:12px 16px 4px;letter-spacing:1px;}
+#overlaySettings .row{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0f0f0;}
+#overlaySettings .row:last-child{border-bottom:none;}
+#overlaySettings .row-label{font-size:15px;color:#111;}
+#overlaySettings .row-input{width:120px;border:0.5px solid #ddd;border-radius:8px;padding:8px 10px;font-size:15px;text-align:right;font-family:'Noto Sans JP',sans-serif;background:#f9f9f9;}
+#overlaySettings .row-unit{font-size:13px;color:#8E8E93;margin-left:4px;}
+#overlaySettings .toggle{width:44px;height:26px;background:#ddd;border-radius:13px;position:relative;cursor:pointer;transition:background 0.2s;flex-shrink:0;}
+#overlaySettings .toggle.on{background:#007AFF;}
+#overlaySettings .toggle::after{content:'';position:absolute;top:2px;left:2px;width:22px;height:22px;background:#fff;border-radius:50%;transition:left 0.2s;}
+#overlaySettings .toggle.on::after{left:20px;}
+#overlaySettings .btn-save{width:100%;padding:16px;background:#007AFF;border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:900;letter-spacing:2px;cursor:pointer;font-family:'Noto Sans JP',sans-serif;transition:transform 0.1s,filter 0.1s;}
+#overlaySettings .btn-save:active{transform:scale(0.97);filter:brightness(0.85);}
+#overlaySettings .save-msg{text-align:center;color:#34C759;font-size:13px;min-height:20px;margin-top:4px;}
+#overlaySettings .dl-info{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0f0f0;}
+#overlaySettings .dl-info-label{font-size:15px;color:#111;}
+#overlaySettings .dl-info-value{font-size:14px;color:#007AFF;font-weight:700;font-family:monospace;}
+#overlaySettings .dl-update-btn-wrap{padding:12px 16px;}
+#overlaySettings .dl-update-btn{width:100%;padding:14px;background:#007AFF;border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;letter-spacing:1px;transition:transform 0.1s,filter 0.1s;-webkit-tap-highlight-color:transparent;}
+#overlaySettings .dl-update-btn:active{transform:scale(0.97);filter:brightness(0.9);}
+#overlaySettings .dl-update-btn:disabled{background:#aaa;cursor:not-allowed;}
+#overlaySettings .settings-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#E8F4FD;border:1.5px solid #007AFF;border-radius:10px;padding:10px 16px;font-size:13px;color:#1c1c1e;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;}
+#overlaySettings .settings-toast.show{display:block;}
 .bottom-nav .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;background:none;border:none;font-family:'Noto Sans JP',sans-serif;color:#8E8E93;-webkit-tap-highlight-color:transparent;}
 .bottom-nav .nav-item:active{background:#F2F2F7;}
 .bottom-nav .nav-item.active{color:#007AFF;}
@@ -4646,6 +4679,268 @@ if(navigator.storage && navigator.storage.persist){
     if(typeof dlog === 'function') dlog('[SPA] hideAllOverlays');
   };
 })();
+
+// ★設計変更宣言 (2026-05-14・MA-4 settings overlay 動作 JS):
+//   元 settings.html の <script> ロジック (常時表示部分のみ) を index.html に取り込み。
+//   公開関数は window._st_ prefix で attach し、既存 toggleSurcharge / saveAll 等
+//   (index.html 業務側) との衝突を完全回避。内部状態は IIFE クロージャに封じ込め。
+//   起動時 1 回 _init で resetTime input / training トグル / DL 状況を反映する。
+//   overlay 表示 (window.showOverlay('settings')) は MA-6 で wire up・本 phase は
+//   Eruda Console テスト経由で動作確認可能。
+(function(){
+  const PREFECTURES_DL = [
+    'hokkaido','aomori','iwate','miyagi','akita','yamagata','fukushima',
+    'ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa',
+    'niigata','toyama','ishikawa','fukui','yamanashi','nagano','gifu','shizuoka','aichi',
+    'mie','shiga','kyoto','osaka','hyogo','nara','wakayama',
+    'tottori','shimane','okayama','hiroshima','yamaguchi',
+    'tokushima','kagawa','ehime','kochi',
+    'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa'
+  ];
+  const PREF_EN_TO_JP = {
+    hokkaido:'北海道', aomori:'青森', iwate:'岩手', miyagi:'宮城', akita:'秋田',
+    yamagata:'山形', fukushima:'福島', ibaraki:'茨城', tochigi:'栃木', gunma:'群馬',
+    saitama:'埼玉', chiba:'千葉', tokyo:'東京', kanagawa:'神奈川', niigata:'新潟',
+    toyama:'富山', ishikawa:'石川', fukui:'福井', yamanashi:'山梨', nagano:'長野',
+    gifu:'岐阜', shizuoka:'静岡', aichi:'愛知', mie:'三重', shiga:'滋賀',
+    kyoto:'京都', osaka:'大阪', hyogo:'兵庫', nara:'奈良', wakayama:'和歌山',
+    tottori:'鳥取', shimane:'島根', okayama:'岡山', hiroshima:'広島', yamaguchi:'山口',
+    tokushima:'徳島', kagawa:'香川', ehime:'愛媛', kochi:'高知', fukuoka:'福岡',
+    saga:'佐賀', nagasaki:'長崎', kumamoto:'熊本', oita:'大分', miyazaki:'宮崎',
+    kagoshima:'鹿児島', okinawa:'沖縄'
+  };
+  let _toastTimer = null;
+
+  function _showToast(msg){
+    const t = document.getElementById('_st_settingsToast');
+    if(!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    if(_toastTimer) clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(function(){ t.classList.remove('show'); _toastTimer = null; }, 2500);
+  }
+
+  function _trainingIsEnabled(){
+    try {
+      const explicit = localStorage.getItem('daikome_training_enabled');
+      if(explicit !== null) return explicit === 'true';
+      const consent = localStorage.getItem('daikome_training_consent');
+      return consent !== null;
+    } catch(_){ return false; }
+  }
+  function _refreshTrainingToggleUI(){
+    const tg = document.getElementById('_st_trainingToggle');
+    if(!tg) return;
+    if(_trainingIsEnabled()) tg.classList.add('on');
+    else tg.classList.remove('on');
+  }
+  function _trainingGetDeviceId(){
+    try { return localStorage.getItem('daikome_anonymous_id') || null; }
+    catch(_){ return null; }
+  }
+  function _trainingClearIndexedDB(){
+    return new Promise(function(resolve){
+      if(typeof indexedDB === 'undefined') return resolve(0);
+      try {
+        const req = indexedDB.open('daikome-training', 1);
+        req.onsuccess = function(e){
+          const db = e.target.result;
+          try {
+            if(!db.objectStoreNames.contains('samples')){ db.close(); return resolve(0); }
+            const tx = db.transaction(['samples'], 'readwrite');
+            const store = tx.objectStore('samples');
+            const cnt = store.count();
+            let n = 0;
+            cnt.onsuccess = function(){ n = cnt.result; };
+            store.clear();
+            tx.oncomplete = function(){ db.close(); resolve(n); };
+            tx.onerror = function(){ db.close(); resolve(0); };
+          } catch(_){ db.close(); resolve(0); }
+        };
+        req.onerror = function(){ resolve(0); };
+      } catch(_){ resolve(0); }
+    });
+  }
+
+  async function _loadDlStatus(){
+    const updateEl = document.getElementById('_st_dataLastUpdateLine');
+    const statusEl = document.getElementById('_st_dataDlStatusLine');
+    const pendingRow = document.getElementById('_st_dataPendingRow');
+    const pendingEl = document.getElementById('_st_dataPendingLine');
+    if(!updateEl && !statusEl) return;
+    function setText(el, txt){ if(el) el.textContent = txt; }
+    const TOTAL = PREFECTURES_DL.length;
+    try {
+      let doneSet = new Set();
+      if(typeof caches !== 'undefined' && typeof caches.has === 'function'){
+        const exists = await caches.has('daikome-roads-v1');
+        if(exists){
+          const cache = await caches.open('daikome-roads-v1');
+          const reqs = await cache.keys();
+          for(const r of reqs){
+            const m = /\/data\/roads-([^./?]+)\.js/.exec(r.url);
+            if(m) doneSet.add(m[1]);
+          }
+        }
+      }
+      const pending = PREFECTURES_DL.filter(function(p){ return !doneSet.has(p); });
+      const doneCount = TOTAL - pending.length;
+      if(doneCount === 0){
+        setText(updateEl, '未取得');
+        setText(statusEl, '0/' + TOTAL + ' 県');
+        if(pendingRow) pendingRow.style.display = 'none';
+        return;
+      }
+      setText(updateEl, '─');
+      if(pending.length === 0){
+        setText(statusEl, doneCount + '/' + TOTAL + ' 県完了 ✅');
+        if(pendingRow) pendingRow.style.display = 'none';
+      } else {
+        setText(statusEl, doneCount + '/' + TOTAL + ' 県完了');
+        const names = pending.map(function(p){ return PREF_EN_TO_JP[p] || p; }).join('・');
+        setText(pendingEl, names);
+        if(pendingRow) pendingRow.style.display = 'flex';
+      }
+    } catch(e){
+      console.error('[Settings] DL状態読込失敗:', e);
+      setText(updateEl, '取得失敗');
+      setText(statusEl, '取得失敗');
+      if(pendingRow) pendingRow.style.display = 'none';
+    }
+  }
+
+  async function _onCheckUpdate(){
+    const btn = document.getElementById('_st_dlUpdateBtn');
+    if(!btn) return;
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ 確認中...';
+    try {
+      const total = PREFECTURES_DL.length;
+      const queue = PREFECTURES_DL.slice();
+      const PARALLEL = 2, MAX_RETRY = 3;
+      let ok = 0, failed = 0, processed = 0;
+      const failedList = [];
+      async function worker(){
+        while(queue.length > 0){
+          const pref = queue.shift();
+          let success = false, lastErr = null;
+          for(let attempt = 1; attempt <= MAX_RETRY && !success; attempt++){
+            try {
+              const url = '/data/roads-' + pref + '.js';
+              const res = await fetch(url, { cache: 'reload' });
+              if(!res.ok) throw new Error('HTTP ' + res.status);
+              await res.blob();
+              success = true;
+            } catch(e){
+              lastErr = e;
+              if(attempt < MAX_RETRY) await new Promise(r => setTimeout(r, 1000 * attempt));
+            }
+          }
+          if(success) ok++;
+          else { failed++; failedList.push(pref); console.warn('[Settings] DL失敗:', pref, lastErr); }
+          processed++;
+          btn.textContent = '⏳ ' + processed + '/' + total + '県確認中...';
+        }
+      }
+      const workers = [];
+      for(let i = 0; i < PARALLEL; i++) workers.push(worker());
+      await Promise.all(workers);
+      if(ok === total) _showToast('✅ ' + total + '県確認しました');
+      else if(ok > 0) _showToast('⚠️ ' + ok + '県成功・' + failed + '県失敗 (失敗: ' + failedList.slice(0,3).join(',') + (failedList.length>3?'…':'') + ')');
+      else _showToast('❌ 更新に失敗しました (オフライン?)');
+      await _loadDlStatus();
+    } catch(e){
+      console.error('[Settings] 更新チェック失敗:', e);
+      _showToast('❌ エラーが発生しました');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+  window._st_onCheckUpdate = _onCheckUpdate;
+
+  window._st_toggleTrainingEnabled = function(){
+    const next = !_trainingIsEnabled();
+    try {
+      localStorage.setItem('daikome_training_enabled', String(next));
+      if(localStorage.getItem('daikome_training_consent') === null){
+        localStorage.setItem('daikome_training_consent', next ? 'agreed' : 'declined');
+      }
+    } catch(_){}
+    _refreshTrainingToggleUI();
+    _showToast(next ? '学習データ提供を ON にしました' : '学習データ提供を OFF にしました');
+  };
+
+  window._st_toggleTrainingDetails = function(){
+    const body = document.getElementById('_st_trainingDetailsBody');
+    const chev = document.getElementById('_st_trainingDetailsChevron');
+    if(!body) return;
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    if(chev) chev.textContent = open ? '▼' : '▲';
+  };
+
+  window._st_deleteTrainingData = function(){
+    if(!confirm('過去に蓄積された学習データを全て削除します。\nIndexedDB と Firebase の両方から削除されます。\nよろしいですか?')) return;
+    const btn = document.getElementById('_st_trainingDeleteBtn');
+    const status = document.getElementById('_st_trainingDeleteStatus');
+    if(btn) btn.disabled = true;
+    if(status) status.textContent = '削除中...';
+    const deviceId = _trainingGetDeviceId();
+    const idbP = _trainingClearIndexedDB();
+    const fbP = (typeof FB !== 'undefined' && FB.deleteAllTrainingData && deviceId)
+      ? FB.deleteAllTrainingData(deviceId).catch(function(e){ return { error: e.message }; })
+      : Promise.resolve({ deleted: 0, skipped: 'no_fb_or_device_id' });
+    Promise.all([idbP, fbP]).then(function(results){
+      const idbN = results[0];
+      const fbR = results[1] || {};
+      let msg = 'IndexedDB ' + idbN + ' 件削除';
+      if(fbR.deleted != null) msg += '・Firebase ' + fbR.deleted + ' 件削除';
+      if(fbR.error) msg += ' (Firebase err: ' + fbR.error + ')';
+      if(status) status.textContent = msg;
+      if(btn) btn.disabled = false;
+      _showToast('学習データを削除しました');
+      try { localStorage.removeItem('daikome_training_last_upload'); } catch(_){}
+    }).catch(function(e){
+      if(status) status.textContent = '削除エラー: ' + (e && e.message);
+      if(btn) btn.disabled = false;
+    });
+  };
+
+  window._st_saveAll = function(){
+    try {
+      const existing = JSON.parse(localStorage.getItem('daikou_settings') || '{}');
+      const elReset = document.getElementById('_st_resetTime');
+      if(elReset) existing.resetTime = elReset.value || '12:00';
+      localStorage.setItem('daikou_settings', JSON.stringify(existing));
+      const msg = document.getElementById('_st_saveMsg');
+      if(msg){ msg.textContent = '保存しました'; setTimeout(function(){ msg.textContent = ''; }, 2000); }
+      _showToast('保存しました');
+    } catch(e){
+      console.error('[Settings] saveAll error:', e);
+      _showToast('保存に失敗しました');
+    }
+  };
+
+  function _init(){
+    try {
+      const s = localStorage.getItem('daikou_settings');
+      if(s){
+        const obj = JSON.parse(s);
+        const elReset = document.getElementById('_st_resetTime');
+        if(elReset && obj.resetTime) elReset.value = obj.resetTime;
+      }
+    } catch(_){}
+    _refreshTrainingToggleUI();
+    _loadDlStatus();
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', _init);
+  } else {
+    _init();
+  }
+})();
 </script>
 
 <!-- ★設計変更宣言 (2026-05-14・MA-1 SPA overlay 基盤・静的構造のみ・未起動):
@@ -4662,7 +4957,113 @@ if(navigator.storage && navigator.storage.persist){
   <!-- MA-5 で history.html の内容を移植 (本 phase では空) -->
 </div>
 <div id="overlaySettings" class="spa-overlay" aria-hidden="true">
-  <!-- MA-4 で settings.html の内容を移植 (本 phase では空) -->
+  <!-- ★設計変更宣言 (2026-05-14・MA-4 settings.html の常時表示 section を移植 + B-1 resetTime UI 復活):
+       元 settings.html の visible section のみを取り込み:
+         料金設定 link / 道路データ最終更新 + DL 状況 / 業務リセット時刻 (新規・B-1 復活)
+         / 学習データ提供 / 端末警告 / 法的ページリンク
+       元 #devSection / #devSection2 (dev mode 限定の割増/時間料金/OSRM/精度テスト) は
+       元 settings.html に残置 (dual state・MA-6 まで bottom-nav 旧経路で到達可能)。
+       id は _st_ prefix で隔離 (index.html 既存 id と衝突回避)。 -->
+  <div class="appbar">
+    <div class="appbar-back" onclick="window.hideAllOverlays()">＜</div>
+    <div class="appbar-title">設定</div>
+  </div>
+  <div class="wrap">
+    <!-- 料金設定 → fare.html -->
+    <div class="section">
+      <div class="section-title">料金設定</div>
+      <div class="row" onclick="location.href='fare.html'" style="cursor:pointer;">
+        <div class="row-label">料金設定（追加料金・基本・段階・割増・自動・車種・待機・区間・確認）</div>
+        <div style="color:#8E8E93;font-size:13px;">›</div>
+      </div>
+    </div>
+
+    <!-- 道路データ最終更新 + DL 状況 -->
+    <div class="section">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row-label" style="color:#8E8E93;">道路データ最終更新</div>
+        <div id="_st_dataLastUpdateLine" style="color:#1c1c1e;font-size:14px;font-weight:600;">読込中...</div>
+      </div>
+      <div class="row" style="justify-content:space-between;">
+        <div class="row-label" style="color:#8E8E93;">ダウンロード状況</div>
+        <div id="_st_dataDlStatusLine" style="color:#1c1c1e;font-size:14px;font-weight:600;">読込中...</div>
+      </div>
+      <div class="row" id="_st_dataPendingRow" style="display:none;justify-content:space-between;gap:12px;">
+        <div class="row-label" style="color:#8E8E93;flex-shrink:0;">未完了</div>
+        <div id="_st_dataPendingLine" style="color:#1c1c1e;font-size:14px;font-weight:600;text-align:right;line-height:1.5;">-</div>
+      </div>
+      <div class="dl-update-btn-wrap">
+        <button class="dl-update-btn" id="_st_dlUpdateBtn" onclick="_st_onCheckUpdate()">🔄 最新データを確認する</button>
+      </div>
+    </div>
+
+    <!-- ★設計変更宣言 (2026-05-14・MA-4 B-1): 業務リセット時刻 UI を常時表示として復活
+         元 settings.html L113-122 では #devSection 内で隠れており、5 秒長押し dev モードでしか
+         触れない状態だった。司さん原文「12時で設定して そこでリセットされる仕様にしとったろが」
+         に合致させるため、本 phase で常時表示の独立 section として overlay 内に配置する。
+         保存は底部の保存ボタン (_st_saveAll) 経由・localStorage daikou_settings.resetTime に書込み。 -->
+    <div class="section">
+      <div class="section-title">業務リセット</div>
+      <div class="row">
+        <div class="row-label">リセット時刻</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input class="row-input" type="time" id="_st_resetTime" value="12:00" style="width:110px;">
+        </div>
+      </div>
+      <div style="padding:12px 16px;font-size:12px;color:#8E8E93;line-height:1.7;border-top:0.5px solid #f0f0f0;">
+        毎日この時刻になると、ホーム画面の「本日の走行距離・営業回数」がリセットされます。
+        履歴データは残ります。業務中はリセットされません。
+      </div>
+    </div>
+
+    <!-- 学習データ提供 -->
+    <div class="section" id="_st_training">
+      <div class="section-title">学習データ提供</div>
+      <div class="row">
+        <div class="row-label">学習データ提供</div>
+        <div class="toggle" id="_st_trainingToggle" onclick="_st_toggleTrainingEnabled()"></div>
+      </div>
+      <div style="padding:12px 16px;font-size:12px;color:#8E8E93;line-height:1.7;border-bottom:0.5px solid #f0f0f0;">
+        Map Matching の精度向上のため、加速度センサー値と速度を匿名で送信します。
+        <br>
+        <strong style="color:#34C759;">送信される</strong>: 加速度・速度・匿名識別子・アプリバージョン
+        <br>
+        <strong style="color:#FF3B30;">送信されない</strong>: 位置情報・出発地/目的地・お名前・連絡先
+      </div>
+      <div class="row" id="_st_trainingDetailsToggle" onclick="_st_toggleTrainingDetails()" style="cursor:pointer;">
+        <div class="row-label" style="font-size:13px;color:#007AFF;">利用規約を表示</div>
+        <div style="color:#8E8E93;font-size:13px;" id="_st_trainingDetailsChevron">▼</div>
+      </div>
+      <div id="_st_trainingDetailsBody" style="display:none;padding:14px 16px;font-size:12px;color:#444;line-height:1.8;background:#E8F4FD;border-bottom:0.5px solid #f0f0f0;">
+        <strong style="display:block;margin-bottom:6px;color:#1c1c1e;">学習データ提供に関するお知らせ</strong>
+        ダイコメは Map Matching の精度向上のため、お客様のスマートフォンの加速度センサー値と速度を匿名で送信します。
+        送信される: 加速度・速度・匿名識別子。
+        送信されない: 位置情報・出発地/目的地・お名前・連絡先。
+        設定画面でいつでも無効化できます。
+      </div>
+      <div style="padding:12px 16px;">
+        <button id="_st_trainingDeleteBtn" onclick="_st_deleteTrainingData()" style="width:100%;padding:12px;background:#FF3B30;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans JP',sans-serif;">
+          過去の学習データを削除
+        </button>
+        <div id="_st_trainingDeleteStatus" style="margin-top:8px;font-size:12px;color:#8E8E93;text-align:center;min-height:18px;"></div>
+      </div>
+    </div>
+
+    <button class="btn-save" onclick="_st_saveAll()">保　存</button>
+    <div class="save-msg" id="_st_saveMsg"></div>
+
+    <div class="settings-toast" id="_st_settingsToast"></div>
+
+    <p style="text-align:center;font-size:11px;color:#aaa;margin-top:16px;line-height:1.8;padding:0 8px;">
+      古い機種や低価格端末ではGPS精度が<br>低下する場合があります
+    </p>
+
+    <div style="text-align:center;padding:24px 16px;border-top:1px solid #E5E5EA;margin-top:24px;">
+      <a href="commerce.html" style="color:#007AFF;text-decoration:none;margin:0 8px;font-size:13px;">特定商取引法</a>
+      <a href="privacy.html"  style="color:#007AFF;text-decoration:none;margin:0 8px;font-size:13px;">プライバシーポリシー</a>
+      <a href="terms.html"    style="color:#007AFF;text-decoration:none;margin:0 8px;font-size:13px;">利用規約</a>
+    </div>
+  </div>
 </div>
 <div id="overlayHelp" class="spa-overlay" aria-hidden="true">
   <!-- ★設計変更宣言 (2026-05-14・MA-3 help.html の body 内容を移植):
