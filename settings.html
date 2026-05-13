@@ -440,7 +440,7 @@ function load(){
     timeEnabled      = obj.timeEnabled      || false;
     if(obj.surchargeRate) document.getElementById('surchargeRate').value = obj.surchargeRate;
     if(obj.timeRate)      document.getElementById('timeRate').value      = obj.timeRate;
-    if(obj.resetTime)     document.getElementById('resetTime').value      = obj.resetTime;
+    // ★設計変更宣言 (2026-05-14): resetTime 撤去・時刻ベースリセット廃止
   }
   // MM-6: OSRM endpoint をロード
   // ★設計変更宣言 (2026-05-12): hardcoded URL → debug-config.js の OSRM_ENDPOINT 経由
@@ -808,7 +808,7 @@ function saveAll(){
       addDistanceM:     cfg.add_distance_m,
       addFare:          cfg.add_fare,
     };
-    settings.resetTime = document.getElementById('resetTime').value || '12:00';
+    // ★設計変更宣言 (2026-05-14): resetTime 保存撤去・時刻ベースリセット廃止
     localStorage.setItem('daikou_settings', JSON.stringify(settings));
     // ★設計変更宣言 (2026-05-11): daikou_extras 保存は fare.html「追加料金」タブの保存処理へ移行
 

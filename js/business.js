@@ -37,9 +37,11 @@ trips: [],                  // [{distance_m, fare_yen, start_time, end_time}]
 last_meter_distance_m: 0,   // 直前に観測した Meter.distance_m (差分計算用)
 };
 
-// 終了後の再開猶予期間（3時間）
-const RESUME_GRACE_MS = 3 * 60 * 60 * 1000;
-
+// ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
+//   旧: 3 時間猶予の RESUME_GRACE_MS / canResume / checkAutoAbandon で時刻ベース管理
+//   新: 時刻ベース全廃・代行開始ボタン押下時に表示値リセット (index.html 側)
+//       再開は前回業務が ended 状態 (state.start_time !== null && !state.active) なら常時可能
+//       3 時間制限なし
 // localStorage キー
 const STORAGE_KEY = 'daikou_business_state';
 const HISTORY_KEY = 'daikou_business_history';
@@ -58,9 +60,11 @@ if(state.active){
 if(typeof dlog === 'function') dlog('[Business] already active');
 return false;
 }
-// 既に終了済み（再開可能状態）の業務があれば自動 abandon
+// ★設計変更宣言 (2026-05-14): 旧 checkAutoAbandon(true) を abandon() に置換
+//   前業務が ended 状態 (= 再開可能 limbo) なら履歴に push してから新業務開始。
+//   abandon() は内部で _appendHistory + state リセットを実施。
 if(state.ended){
-checkAutoAbandon(true);  // force=true で即 abandon
+abandon();
 }
 const now = Date.now();
 state = {
@@ -96,19 +100,11 @@ if(typeof dlog === 'function') dlog('[Business] end (resumable for 3h)');
 return getReport();
 }
 
-// 業務再開（end 後・3時間以内なら可能）
+// 業務再開（end 後・前業務 limbo 状態なら常時可能・3 時間制限なし）
+// ★設計変更宣言 (2026-05-14): RESUME_GRACE_MS の 3h チェックを撤去
 function resume(){
 if(state.active) return false;
 if(!state.start_time) return false;  // start していない
-// 3時間以内かチェック
-if(state.ended && state.ended_at){
-const elapsed = Date.now() - state.ended_at;
-if(elapsed >= RESUME_GRACE_MS){
-// 3時間経過 → 再開不可
-if(typeof dlog === 'function') dlog('[Business] resume denied (3h elapsed)');
-return false;
-}
-}
 state.active = true;
 state.ended = false;
 state.ended_at = null;
@@ -122,43 +118,9 @@ if(typeof dlog === 'function') dlog('[Business] resume');
 return true;
 }
 
-// 再開可能か（ボタン表示判定用）
-function canResume(){
-if(!state.ended || !state.ended_at) return false;
-const elapsed = Date.now() - state.ended_at;
-return elapsed < RESUME_GRACE_MS;
-}
-
-// 自動 abandon チェック（起動時・start時に呼ぶ）
-// force=true なら時間チェックせず強制 abandon
-function checkAutoAbandon(force){
-if(!state.ended) return false;
-if(!force){
-const elapsed = state.ended_at ? (Date.now() - state.ended_at) : Infinity;
-if(elapsed < RESUME_GRACE_MS) return false;  // まだ猶予内
-}
-// 3時間経過 → 履歴に確定保存して state リセット
-if(state.start_time){
-const report = getReport();
-_appendHistory(report);
-}
-state = {
-active: false,
-start_time: null,
-end_time: null,
-ended: false,
-ended_at: null,
-total_distance_m: 0,
-actual_total_m: 0,
-fare_total_yen: 0,
-trip_count: 0,
-trips: [],
-last_meter_distance_m: 0,
-};
-save();
-if(typeof dlog === 'function') dlog('[Business] auto-abandon (3h elapsed)');
-return true;
-}
+// ★設計変更宣言 (2026-05-14): canResume / checkAutoAbandon を削除。
+//   旧仕様 (3 時間猶予) は撤去・新仕様は呼出側で
+//   (state.start_time !== null && !state.active) で再開可能性を直接判定する。
 
 // 業務完全終了（履歴に保存→state リセット）
 // 通常は3時間経過後に checkAutoAbandon() から呼ばれる
@@ -341,8 +303,8 @@ trip_count: parsed.trip_count || 0,
 trips: Array.isArray(parsed.trips) ? parsed.trips : [],
 last_meter_distance_m: parsed.last_meter_distance_m || 0,
 };
-// ロード後に3時間経過チェック（自動 abandon）
-checkAutoAbandon();
+// ★設計変更宣言 (2026-05-14): ロード後の自動 abandon (checkAutoAbandon) は撤去。
+//   limbo (ended=true / start_time!=null) はそのまま維持・代行開始時に abandon() で履歴 push。
 if(typeof dlog === 'function') dlog('[Business] loaded state');
 return true;
 } catch(e) {
@@ -412,7 +374,6 @@ return true;
 // ─────────────────────────────────────────
 return {
 start, end, resume, abandon,
-canResume, checkAutoAbandon,
 onGps, onTripEnd,
 getState, getReport,
 save, load,

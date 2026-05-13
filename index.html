@@ -1153,9 +1153,11 @@ setInterval(_checkTripLimit, 30000);
          style="display:none;text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
                 padding:8px 16px;margin:6px 24px 0;border-radius:8px;
                 background:#FDECEA;color:#C0392B;line-height:1.4;"></div>
-    <!-- 続きから再開ボタン（直前の業務が3時間以内に終了してる場合のみ表示） -->
-    <button class="btn-business-resume-start" id="btnResumeFromStart" onclick="onResumeFromStart()" style="display:none;">続きから再開</button>
-    <div class="resume-note" id="resumeNote" style="display:none;">直前の業務（<span id="resumeNoteTime">--:--</span>終了）から3時間以内なら再開できます</div>
+    <!-- ★設計変更宣言 (2026-05-14): 旧「続きから再開 (3時間以内)」→「前回の業務を引き継ぐ場合」
+         表示条件: Business.getState().start_time !== null && !Business.getState().active
+         (前回業務 limbo 状態がある場合のみ表示・3 時間制限撤去・グレーアウトなし) -->
+    <button class="btn-business-resume-start" id="btnResumeFromStart" onclick="onResumeFromStart()" style="display:none;">前回の業務を引き継ぐ場合</button>
+    <div class="resume-note" id="resumeNote" style="display:none;">前回の業務データ（距離・料金・営業回数）を引き継いで再開します</div>
   </div>
 
   <!-- BUSINESS REPORT（業務終了画面・日報・2026/05/01追加） -->
@@ -2264,8 +2266,7 @@ function loadSettings(){
   document.getElementById('todayCount').textContent = todayCount;
   if(surchargeEnabled) document.getElementById('surchargeBadge').style.display='flex';
 
-  // 自動リセットチェック
-  autoResetCheck();
+  // ★設計変更宣言 (2026-05-14): autoResetCheck 撤去・代行開始ボタン押下時リセットに統一
   // リロード復元チェック
   checkDrivingRestore();
   // 古い日付の履歴キーを削除（今日以外は不要）
@@ -2365,61 +2366,11 @@ function cleanOldHistoryKeys(){
   if(toDelete.length > 0) dlog('[Cleanup] 古い履歴キー削除:', toDelete.length + '件');
 }
 
-function autoResetCheck(){
-  // 2026/05/01：業務中（Business.active）ならリセットしない（手動操作優先）
-  try {
-    if(typeof Business !== 'undefined'){
-      const bs = Business.getState();
-      if(bs.active){
-        if(typeof dlog === 'function') dlog('[autoReset] 業務中のためリセットをスキップ');
-        return;
-      }
-    }
-  } catch(e){ console.error('[autoReset] Business check error:', e); }
-
-  const s = localStorage.getItem('daikou_settings');
-  const resetTime = s ? (JSON.parse(s).resetTime || '12:00') : '12:00';
-  const [resetH, resetM] = resetTime.split(':').map(Number);
-
-  const now = new Date();
-  const resetToday = new Date(now);
-  resetToday.setHours(resetH, resetM, 0, 0);
-
-  // 最後の仕事開始時刻を取得
-  const lastStart = parseInt(localStorage.getItem('daikou_last_start') || '0');
-
-  // リセット条件：
-  // ① 現在時刻がリセット時間を過ぎている
-  // ② 最後の仕事開始がリセット時間より前
-  // ③ 最後の仕事開始が昨日以前（当日仕事中の誤リセット防止）
-  // lastStartが今日のリセット時間より前ならリセット
-  if(now >= resetToday && (lastStart === 0 || lastStart < resetToday.getTime())){
-    // リセット実行
-    todayDist = 0;
-    todayCount = 0;
-    localStorage.setItem('daikou_today', JSON.stringify({
-      date: now.toDateString(), dist: 0, count: 0
-    }));
-    // 当日の履歴もクリア
-    const histKey = 'daikou_history_' + now.toDateString();
-    localStorage.removeItem(histKey);
-    document.getElementById('todayDist').textContent  = '0.0';
-    document.getElementById('todayCount').textContent = '0';
-  }
-}
-
-// ★設計変更宣言 (2026-05-14・MA-4 B-2): autoResetCheck を「起動時 1 回」から
-//   「1 分毎の定期チェック + foreground 復帰時チェック」に強化。
-//   旧: loadSettings() 経由で起動時 1 回のみ呼出 (PWA 長時間バックグラウンドで
-//       12 時跨ぐとリセット未発火 → 司さん「リセットが効いてない」感の原因)
-//   新: setInterval(60s) で常時監視 + visibilitychange で foreground 復帰時に即チェック。
-//   業務 active 中スキップガード (L2330) はそのまま維持・課金フローへの影響ゼロ。
-try {
-  setInterval(autoResetCheck, 60000);
-  document.addEventListener('visibilitychange', function(){
-    if(document.visibilityState === 'visible') autoResetCheck();
-  });
-} catch(_){}
+// ★設計変更宣言 (2026-05-14): autoResetCheck / setInterval / visibilitychange 全削除
+//   旧: 時刻ベースの自動リセット (12:00 など) + setInterval (1 分毎) + foreground 復帰時チェック
+//   新: 代行開始ボタン押下時に onBusinessStart 内で表示値 (todayDist/todayCount/totalDist/fareTotalYen)
+//       を全部 0 にリセット (時刻判定は撤去・業務開始トリガー方式に統一)。
+//       resume() 経由は前業務を引き継ぐためリセットしない。
 
 // ─── 時計（2026/05/01仕様変更：全画面共通の日時表示） ───
 function updateClock(){
@@ -2936,6 +2887,24 @@ function onBusinessStart(){
     }
     // Business 状態を active に
     Business.start();
+    // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
+    //   旧: autoResetCheck (時刻ベース・12:00 等で発火) で表示値リセット
+    //   新: 代行開始ボタン押下時 (= ここ) でホーム画面の集計表示を全部 0 にリセット
+    //       Business.start() が既に state を 0 初期化済・updateBusinessDashboard が 1 秒間隔で
+    //       DOM に反映するが、ユーザーに即時感を与えるため明示的に DOM + 集計 globals を 0 化。
+    //   resume() 経由 (onResumeFromStart / onBusinessResume) はリセット対象外・前業務を引き継ぐ。
+    try {
+      todayDist = 0;
+      todayCount = 0;
+      const _today = new Date().toDateString();
+      localStorage.setItem('daikou_today', JSON.stringify({ date: _today, dist: 0, count: 0 }));
+      localStorage.removeItem('daikou_history_' + _today);
+      const _elTotal = document.getElementById('totalDist');     if(_elTotal) _elTotal.textContent = '0.00';
+      const _elActual = document.getElementById('todayDist');    if(_elActual) _elActual.textContent = '0.00';
+      const _elCount = document.getElementById('todayCount');    if(_elCount) _elCount.textContent = '0';
+      const _elFare = document.getElementById('fareTotalYen');   if(_elFare) _elFare.textContent = '0';
+      if(typeof dlog === 'function') dlog('[Business] 代行開始リセット: 総走行/実車/営業/売上 → 0');
+    } catch(e){ console.error('[Business] 代行開始リセットエラー:', e); }
     // ★設計変更宣言 (2026-05-11): 業務開始押下でデータ更新バナーを自動非表示
     //   snooze 記録なし (= 翌業務サイクルで再判定・古いデータ未更新を忘れさせない)
     try { if(typeof DataUpdateBanner !== 'undefined') DataUpdateBanner.hide(false); } catch(_){}
@@ -3034,25 +3003,23 @@ function onBusinessResume(){
   }
 }
 
-// 業務開始画面の「続きから再開」ボタン押下
-// 直前の業務履歴が3時間以内なら、その業務を復元して resume する
+// 業務開始画面の「前回の業務を引き継ぐ場合」ボタン押下
+// ★設計変更宣言 (2026-05-14): 履歴 restore ベースから現在 state resume() ベースに変更
+//   旧: getLastEndedBusiness() で履歴最新を取得 + 3h 以内チェック + restoreFromHistory
+//   新: Business.getState() で limbo (start_time !== null && !active) なら Business.resume() を呼出
+//       3 時間制限なし・履歴復元は不要 (state がそのまま残っているため)
 function onResumeFromStart(){
   // 全ボタン共通：センサー未許可ならバナー表示してブロック
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined') return;
   try {
-    const lastBusiness = getLastEndedBusiness();
-    if(!lastBusiness){
-      showToast('再開できる直前の業務が見つかりません');
+    const bs = Business.getState();
+    if(!bs || bs.start_time === null || bs.active){
+      showToast('再開できる業務がありません');
       return;
     }
-    if((Date.now() - lastBusiness.ended_at) >= 3 * 3600 * 1000){
-      showToast('終了から3時間を超えたため再開できません');
-      return;
-    }
-    // 履歴から state を復元して active 状態に戻す
-    const restored = Business.restoreFromHistory(lastBusiness);
-    if(!restored){
+    const resumed = Business.resume();
+    if(!resumed){
       showToast('業務の復元に失敗しました');
       return;
     }
@@ -3101,28 +3068,26 @@ function onHistory(){
   location.href = 'history.html';
 }
 
-// 業務開始画面の「続きから再開」ボタンの表示制御
+// 業務開始画面の「前回の業務を引き継ぐ場合」ボタンの表示制御
 // 起動時 + onBusinessConfirm（[終了]押下後）の両方で呼ばれる
+// ★設計変更宣言 (2026-05-14): 3 時間履歴ベースから現在 state ベースに変更
+//   旧: getLastEndedBusiness() で履歴を見て 3h 以内なら表示
+//   新: Business.getState() で limbo (start_time !== null && !active) なら常時表示
 function updateResumeFromStartVisibility(){
   try {
     if(typeof Business === 'undefined') return;
     const btn = document.getElementById('btnResumeFromStart');
     const note = document.getElementById('resumeNote');
-    const timeSpan = document.getElementById('resumeNoteTime');
     if(!btn || !note) return;
-    const lastBusiness = getLastEndedBusiness();
-    if(lastBusiness && lastBusiness.ended_at && (Date.now() - lastBusiness.ended_at) < 3 * 3600 * 1000){
+    const bs = Business.getState();
+    if(bs && bs.start_time !== null && !bs.active){
       btn.style.display = 'block';
       note.style.display = 'block';
-      if(timeSpan){
-        const d = new Date(lastBusiness.ended_at);
-        timeSpan.textContent = d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
-      }
-      if(typeof dlog === 'function') dlog('[Business] resume from start: visible (3h以内)');
+      if(typeof dlog === 'function') dlog('[Business] resume button: visible (limbo state)');
     } else {
       btn.style.display = 'none';
       note.style.display = 'none';
-      if(typeof dlog === 'function') dlog('[Business] resume from start: hidden');
+      if(typeof dlog === 'function') dlog('[Business] resume button: hidden');
     }
   } catch(e){ console.error('[Business] updateResumeFromStartVisibility error:', e); }
 }
@@ -3654,7 +3619,7 @@ try {
   }
   if(typeof Business !== 'undefined'){
     Business.load();
-    Business.checkAutoAbandon();
+    // ★設計変更宣言 (2026-05-14): Business.checkAutoAbandon 撤去・3 時間制限なしに変更
     if(typeof dlog === 'function'){
       const s = Business.getState();
       dlog('[Business] init state: active=' + s.active + ' ended=' + s.ended + ' trips=' + s.trip_count);
@@ -3705,8 +3670,8 @@ try {
         }
       } catch(_){}
       if(typeof dlog === 'function') dlog('[Business] active 復元: appState=' + appState);
-    } else if(bs.ended && Business.canResume()){
-      // 業務終了済みかつ3時間以内 → 日報画面表示
+    } else if(bs.ended && bs.start_time !== null){
+      // ★設計変更宣言 (2026-05-14): canResume (3h 制限) を撤去・前業務 limbo (ended=true) なら常時日報表示
       appState = 'businessReport';
       renderBusinessReport();
       showScreen('businessReport');
@@ -4939,19 +4904,12 @@ if(navigator.storage && navigator.storage.persist){
   //   どちらも localStorage 書込み後の追加処理・既存 key / JSON パス / 判定式 (一致確認済) は無変更
   window._st_saveAll = function(){
     try {
-      const existing = JSON.parse(localStorage.getItem('daikou_settings') || '{}');
-      const elReset = document.getElementById('_st_resetTime');
-      if(elReset) existing.resetTime = elReset.value || '12:00';
-      localStorage.setItem('daikou_settings', JSON.stringify(existing));
+      // ★設計変更宣言 (2026-05-14): resetTime 入力は撤去済 (時刻ベース廃止)・保存対象なし
+      //   _st_saveAll は overlay 閉じる動作のみ残置 (将来追加設定項目が増えた時の枠)
       const msg = document.getElementById('_st_saveMsg');
       if(msg){ msg.textContent = '保存しました'; setTimeout(function(){ msg.textContent = ''; }, 2000); }
       _showToast('保存しました');
-      // バグ 2: 新しい resetTime で即時評価 (setInterval を待たず)
-      if(typeof autoResetCheck === 'function'){
-        try { autoResetCheck(); } catch(_){}
-      }
-      // バグ 1: 600ms 後に overlay を自動 close → 業務画面 (旧 location.href='index.html' 相当)
-      //   toast 「保存しました」をチラっと見せてから閉じる
+      // 600ms 後に overlay を自動 close → 業務画面 (旧 location.href='index.html' 相当)
       setTimeout(function(){
         try { if(typeof window.hideAllOverlays === 'function') window.hideAllOverlays(); } catch(_){}
       }, 600);
@@ -4962,14 +4920,7 @@ if(navigator.storage && navigator.storage.persist){
   };
 
   function _init(){
-    try {
-      const s = localStorage.getItem('daikou_settings');
-      if(s){
-        const obj = JSON.parse(s);
-        const elReset = document.getElementById('_st_resetTime');
-        if(elReset && obj.resetTime) elReset.value = obj.resetTime;
-      }
-    } catch(_){}
+    // ★設計変更宣言 (2026-05-14): resetTime restore 撤去 (時刻ベース廃止)
     _refreshTrainingToggleUI();
     _loadDlStatus();
   }
@@ -5035,24 +4986,8 @@ if(navigator.storage && navigator.storage.persist){
       </div>
     </div>
 
-    <!-- ★設計変更宣言 (2026-05-14・MA-4 B-1): 業務リセット時刻 UI を常時表示として復活
-         元 settings.html L113-122 では #devSection 内で隠れており、5 秒長押し dev モードでしか
-         触れない状態だった。司さん原文「12時で設定して そこでリセットされる仕様にしとったろが」
-         に合致させるため、本 phase で常時表示の独立 section として overlay 内に配置する。
-         保存は底部の保存ボタン (_st_saveAll) 経由・localStorage daikou_settings.resetTime に書込み。 -->
-    <div class="section">
-      <div class="section-title">業務リセット</div>
-      <div class="row">
-        <div class="row-label">リセット時刻</div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input class="row-input" type="time" id="_st_resetTime" value="12:00" style="width:110px;">
-        </div>
-      </div>
-      <div style="padding:12px 16px;font-size:12px;color:#8E8E93;line-height:1.7;border-top:0.5px solid #f0f0f0;">
-        毎日この時刻になると、ホーム画面の「本日の走行距離・営業回数」がリセットされます。
-        履歴データは残ります。業務中はリセットされません。
-      </div>
-    </div>
+    <!-- ★設計変更宣言 (2026-05-14): 業務リセット時刻 UI 撤去 (時刻ベース廃止・代行開始トリガーに統一)
+         旧 #_st_resetTime input + 説明文 は削除。リセット仕様は onBusinessStart 内の DOM 4 つ 0 化に統一。 -->
 
     <!-- 学習データ提供 -->
     <div class="section" id="_st_training">
