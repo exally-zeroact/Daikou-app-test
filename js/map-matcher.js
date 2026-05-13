@@ -2141,6 +2141,11 @@ let _prefBordersData = null;
 //   将来的に粗→詳 階層 snap (粗 highways → 詳 roads-{pref}) で latency 改善
 let _highwaysData = null;
 
+// ★設計変更宣言 (2026-05-13・大改修 C8): 全国共通 coastline data (海岸線)
+//   msgType='loadCoastline' で受信
+//   将来的に GPS 海上 jump 検知 (海岸線越え) で emission penalty 強化
+let _coastlineData = null;
+
 // ─── メッセージハンドラ ─────────────────────────────────────────
 self.onmessage = function(e){
   const msg = e.data;
@@ -2268,6 +2273,19 @@ self.onmessage = function(e){
       self.postMessage({ type: 'highwaysLoaded', ok: true });
     } else {
       self.postMessage({ type: 'highwaysLoaded', ok: false, _reason: 'no data' });
+    }
+    return;
+  }
+
+  // ★設計変更宣言 (2026-05-13・大改修 C8): 全国共通 coastline data 受信
+  //   msg.data: COASTLINE_JP 構造体 (海岸線 polyline)
+  //   現段階は保存のみ・将来 GPS 海上 jump 検知で emission penalty 強化
+  if(msg.type === 'loadCoastline'){
+    if(msg.data){
+      _coastlineData = msg.data;
+      self.postMessage({ type: 'coastlineLoaded', ok: true });
+    } else {
+      self.postMessage({ type: 'coastlineLoaded', ok: false, _reason: 'no data' });
     }
     return;
   }
