@@ -321,11 +321,20 @@
         dlog('[Pipeline] Phase C 完了 ok=' + this.stats.auxOk +
              ' failed=' + this.stats.auxFailed.length);
       }
+      // ★設計変更宣言 (2026-05-13・Phase D/E 進捗表示追加):
+      //   旧: Phase C 完了後 (90%) で進捗 bar が固まり、Phase D/E 中は UI 無音
+      //       → ユーザー指摘「補助データの後に何かしてるけど何も表示されない」矛盾
+      //   新: Phase D/E でも _emit で onProgress 発火し UI を更新
+      //   進捗配分: Phase C 90% → Phase D 95% → Phase E 100%
       // Phase D: GPS
+      this._emit('gps', 0, 1, 'GPS 位置情報取得中...');
       await this.waitForGPS();
+      this._emit('gps', 1, 1, 'GPS 取得完了');
       if(typeof dlog === 'function') dlog('[Pipeline] Phase D 完了');
       // Phase E: MM warmup
+      this._emit('mm-warmup', 0, 1, 'マッピング準備中...');
       await this.waitForMMWarmup();
+      this._emit('mm-warmup', 1, 1, 'マッピング完了');
       if(typeof dlog === 'function') dlog('[Pipeline] Phase E 完了');
       const dur = Date.now() - t0;
       if(typeof dlog === 'function') dlog('[Pipeline] warmup 完了: ' + dur + 'ms');
