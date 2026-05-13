@@ -1580,6 +1580,42 @@ _setupMmWorker('init');
 //   MMDataPipeline で全データロード + GPS + MM warmup を段階的に制御
 //   旧 _autoLoadNearbyRoads 起動 kick は並行で残置 (C11 で削除予定)
 //   warmup() は fire-and-forget で起動・結果は ready フラグで参照
+// ★設計変更宣言 (2026-05-13・Phase 4 / C12): dlOverlay 流用 ローディング UI
+//   新パイプライン (MMDataPipeline) の進捗を dlOverlay に反映。
+//   既存 DakomeDL の showOverlay/updateProgress と並行動作 (Phase 5 で
+//   DakomeDL.init() 呼出停止予定・両者書込は冪等)。
+//   Phase 進行表現:
+//     Phase A (global):       0% →  20%  "全国共通データ読込中... X/20"
+//     Phase B (roads):       20% →  70%  "X/47 県完了"
+//     Phase C (aux-*):       70% →  90%  "補助データ読込中... X/47"
+//     Phase D (GPS):        warmup 完了で hide (待機表示なし・通常 ms 単位)
+//     Phase E (MM warmup):  同上 (timeout 5 秒・dlOverlay の自動 hide で対応)
+function _updatePipelineProgressUI(p){
+  try {
+    const fill = document.getElementById('dlProgressFill');
+    const text = document.getElementById('dlProgressText');
+    if(!fill || !text) return;
+    let phaseLabel = '';
+    let phaseStart = 0;
+    let phaseRange = 0;
+    if(p.phase === 'global'){
+      phaseLabel = '全国共通データ読込中... ' + p.current + '/' + p.total;
+      phaseStart = 0; phaseRange = 20;
+    } else if(p.phase === 'roads'){
+      phaseLabel = p.current + '/' + p.total + ' 県完了';
+      phaseStart = 20; phaseRange = 50;
+    } else if(p.phase && p.phase.indexOf('aux-') === 0){
+      phaseLabel = '補助データ読込中... ' + p.current + '/' + p.total;
+      phaseStart = 70; phaseRange = 20;
+    } else {
+      phaseLabel = p.phase + ' ' + p.current + '/' + p.total;
+    }
+    const phasePct = phaseStart + (p.total > 0 ? (p.current / p.total) * phaseRange : 0);
+    fill.style.width = Math.min(100, Math.max(5, phasePct)).toFixed(1) + '%';
+    text.textContent = phaseLabel;
+  } catch(_){}
+}
+
 try {
   if(typeof MMDataPipeline === 'function' && typeof DataLoader !== 'undefined'){
     window._mmPipeline = new MMDataPipeline({
@@ -1589,11 +1625,21 @@ try {
         if(typeof dlog === 'function'){
           dlog('[Pipeline] ' + p.phase + ' ' + p.current + '/' + p.total + ' ' + (p.label || ''));
         }
+        _updatePipelineProgressUI(p);
       },
     });
     setTimeout(function(){
       try {
-        window._mmPipeline.warmup().catch(function(e){
+        window._mmPipeline.warmup().then(function(){
+          // ★ warmup 完了で進捗を 100% に固定 + 完了文言
+          try {
+            const fill = document.getElementById('dlProgressFill');
+            const text = document.getElementById('dlProgressText');
+            if(fill) fill.style.width = '100%';
+            if(text) text.textContent = '準備完了';
+          } catch(_){}
+          if(typeof dlog === 'function') dlog('[Pipeline] UI 完了表示');
+        }).catch(function(e){
           console.warn('[Pipeline] warmup error:', e && e.message);
         });
       } catch(e){
