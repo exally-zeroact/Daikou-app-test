@@ -1722,7 +1722,12 @@ try {
             if(text) text.textContent = '準備完了';
           } catch(_){}
           if(typeof dlog === 'function') dlog('[Pipeline] UI 完了表示');
-          setTimeout(_hideOverlay, 800);
+          setTimeout(function(){
+            _hideOverlay();
+            // ★設計変更宣言 (2026-05-13): warmup 完了直後に許可/業務開始ボタンを切替
+            //   未許可なら許可ボタンのみ・許可済なら業務開始ボタンのみ表示
+            try { if(typeof updateStartButtonsGate === 'function') updateStartButtonsGate(); } catch(_){}
+          }, 800);
         }).catch(function(e){
           console.warn('[Pipeline] warmup error:', e && e.message);
         });
@@ -2559,6 +2564,8 @@ function fmt(sec){
 // 全ボタン関数の冒頭で「if(blockIfSensorNotGranted()) return;」と呼ぶ
 // 戻り値：true=ブロックした（呼出元は処理中止）/ false=通過OK
 function blockIfSensorNotGranted(){
+  // ★設計変更宣言 (2026-05-13): 画面タップ毎に許可/業務開始ボタンの排他表示を再評価
+  try { if(typeof updateStartButtonsGate === 'function') updateStartButtonsGate(); } catch(_){}
   // iOS PWA 以外は常に通過（Android・PC・Safari通常モードは未許可ブロックしない）
   // 2026/05/02：_isIOS 未定義リスク対策で直接判定
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -3743,6 +3750,33 @@ function tutorialNext(){
   }
 }
 
+// ★設計変更宣言 (2026-05-13・許可/業務開始ボタンの排他表示):
+//   ユーザー指摘: 業務開始ボタンが先に出て押すと許可ダイアログ→再度業務開始
+//   → 望ましいフロー: ダウンロード完了 → 許可ボタンのみ → 許可 → 業務開始のみ
+//   集約関数 updateStartButtonsGate で permission 状態に応じて両ボタンを切替。
+//   呼出: (1) warmup 完了時 (2) requestSensorPermission の granted callback
+//        (3) blockIfSensorNotGranted (画面タップで再評価)
+function updateStartButtonsGate(){
+  const needs = typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function';
+  const granted = !needs ||
+    (sessionStorage.getItem('sensor_permission_active') === '1') ||
+    (localStorage.getItem('compass_granted') === '1' &&
+     localStorage.getItem('motion_granted') === '1');
+  const btnPerm = document.getElementById('btnSensorPermission');
+  const note = document.getElementById('sensorPermissionNote');
+  const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
+  if(granted){
+    if(btnPerm) btnPerm.style.display = 'none';
+    if(note) note.style.display = 'none';
+    if(btnStart) btnStart.style.display = '';
+  } else {
+    if(btnPerm) btnPerm.style.display = 'block';
+    if(note) note.style.display = 'block';
+    if(btnStart) btnStart.style.display = 'none';
+  }
+}
+
 function requestSensorPermission(){
   // 2026/05/02：tSensorBtn / sensorPermBtn 削除済み
   // 旧バージョンでチュートリアル/バナーにあったボタンの処理を削除
@@ -3798,6 +3832,8 @@ function requestSensorPermission(){
       const _noteSP = document.getElementById('sensorPermissionNote');
       if(_btnSP) _btnSP.style.display = 'none';
       if(_noteSP) _noteSP.style.display = 'none';
+      // ★設計変更宣言 (2026-05-13): 許可後に業務開始ボタンを表示
+      try { updateStartButtonsGate(); } catch(_){}
       const overlay = document.getElementById('tutorialOverlay');
       if(overlay && overlay.classList.contains('show')) tutorialNext();
 
