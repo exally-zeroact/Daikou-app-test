@@ -1813,6 +1813,8 @@ document.addEventListener('visibilitychange', function(){
   badge.textContent = 'MM init...';
   document.body.appendChild(badge);
   setInterval(function(){
+    // ★設計変更宣言 (2026-05-13): 業務中 (Meter.state.running) のみ表示
+    badge.style.display = (typeof Meter !== 'undefined' && Meter.state && Meter.state.running) ? '' : 'none';
     if(typeof Meter === 'undefined' || !Meter.getMMStats) return;
     const s = Meter.getMMStats();
     const snapPct = (s.snap_rate * 100).toFixed(0);
@@ -1876,6 +1878,8 @@ document.addEventListener('visibilitychange', function(){
   // Worker 再起動時に再 attach (window._mmWorker が変わったら検知)
   let _mmEventLogWorkerRef = window._mmWorker;
   setInterval(function(){
+    // ★設計変更宣言 (2026-05-13): 業務中 (Meter.state.running) のみ表示
+    mmLog.style.display = (typeof Meter !== 'undefined' && Meter.state && Meter.state.running) ? '' : 'none';
     if(window._mmWorker !== _mmEventLogWorkerRef){
       _mmEventLogWorkerRef = window._mmWorker;
       _attachMmEventLog();
