@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T03:40:10.783Z",
-  "git_sha": "ef88c8581e438b31975e0f90b00b1673e40d3b17",
+  "generated_at": "2026-05-13T03:41:58.054Z",
+  "git_sha": "d78bdefba2214445bb1acffd58177a7dbfc994b6",
   "git_ref": "main",
   "runner": "github-actions",
   "summary": {
@@ -26,7 +26,7 @@
       "skip_count": 0,
       "layer_check_count": 0,
       "layer_hit_count": 0,
-      "elapsed_ms": 1,
+      "elapsed_ms": 2,
       "issues": []
     },
     {
@@ -42,7 +42,7 @@
       "skip_count": 0,
       "layer_check_count": 71,
       "layer_hit_count": 71,
-      "elapsed_ms": 1,
+      "elapsed_ms": 0,
       "issues": []
     },
     {
@@ -58,7 +58,7 @@
       "skip_count": 0,
       "layer_check_count": 0,
       "layer_hit_count": 0,
-      "elapsed_ms": 0,
+      "elapsed_ms": 1,
       "issues": []
     }
   ],
