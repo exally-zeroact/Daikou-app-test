@@ -1639,21 +1639,27 @@ try {
           dlog('[Pipeline] ' + p.phase + ' ' + p.current + '/' + p.total + ' ' + (p.label || ''));
         }
         _updatePipelineProgressUI(p);
-        // ★設計変更宣言 (2026-05-13): Phase B 完了で overlay 早期 hide
-        //   47 県 roads worker load 完了 = ダイコメ主機能 (業務開始可能) の前提条件
-        //   満了 → overlay 維持理由なし → 早期 hide で体感起動時間最大化。
-        //   Phase C (Tier B 補助) / D (GPS) / E (MM warmup) は bg 継続。
+        // ★設計変更宣言 (2026-05-13): Phase C 完了 (282/282) で overlay hide
+        //   旧: Phase B 完了 (47/47) で hide (8 秒早かったが補助データ途中で
+        //       画面遷移 → ユーザー混乱)
+        //   新: Phase C 完了 (auxOk + p.current === 282) まで進捗 bar を見せて hide
+        //   ユーザーは「全部完了」感を得られる・Phase D/E は bg 継続。
         //   warmup().then の 800ms hide はバックアップとして残置。
-        if(p.phase === 'roads' && p.current === p.total && p.total === 47){
-          setTimeout(function(){
-            try {
-              const overlay = document.getElementById('dlOverlay');
-              if(overlay){
-                overlay.style.display = 'none';
-                overlay.classList.remove('show');
-              }
-            } catch(_){}
-          }, 500);
+        if(p.phase && p.phase.indexOf('aux-') === 0){
+          const _auxOk2 = (window._mmPipeline && window._mmPipeline.stats)
+                          ? window._mmPipeline.stats.auxOk : 0;
+          const _cum2 = _auxOk2 + p.current;
+          if(_cum2 === 282){
+            setTimeout(function(){
+              try {
+                const overlay = document.getElementById('dlOverlay');
+                if(overlay){
+                  overlay.style.display = 'none';
+                  overlay.classList.remove('show');
+                }
+              } catch(_){}
+            }, 500);
+          }
         }
       },
     });
