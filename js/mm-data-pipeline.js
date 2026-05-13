@@ -26,7 +26,11 @@
 
   const DEFAULT_CONCURRENCY = 4;
   const GPS_TIMEOUT_MS = 30000;
-  const MM_WARMUP_TIMEOUT_MS = 10000;
+  // ★設計変更宣言 (2026-05-13): MM warmup timeout を 10000 → 5000ms に短縮
+  //   走行中なら 1-3 秒で committed=true 来るため 5 秒で十分。
+  //   屋内停車中で commit 来ない場合の待ち時間を半減 → 起動時間 -5 秒
+  //   timeout 後も resolve するため致命的影響なし。
+  const MM_WARMUP_TIMEOUT_MS = 5000;
 
   class MMDataPipeline {
     constructor(opts){
