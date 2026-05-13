@@ -3584,172 +3584,28 @@ function closeApkModal(){
 //   - 業務開始ボタン押下で自動非表示 (snooze なし)
 //   - 業務中 (idle/driving/fare) は絶対表示しない
 //   - 完了で自動消滅・snooze 記録なし
+// ★設計変更宣言 (2026-05-13・Phase 6-5): dataUpdateBanner 簡易化
+//   旧: 7 日経過で「更新通知」バナー表示 + 全 47 県再 DL + 更新件数表示
+//        DakomeDL.getAllPrefectures / markPrefDone / PREFECTURES に依存
+//   新: DakomeDL 依存を全削除・「7 日経過判定 + 再 DL」機能を一時停止
+//        meta.json ベース差分検知の実装まで checkAndShow / show は no-op
+//        HTML (dataUpdateBannerWrap / dataUpdateBanner) は残置・hide も維持
+//        将来 meta.json 実装時に _shouldShow / startDownload を新方式で復活可能
 const DataUpdateBanner = (function(){
-  const STALE_MS  = 7 * 24 * 60 * 60 * 1000;
-  const SNOOZE_MS = 24 * 60 * 60 * 1000;
-  const SNOOZE_KEY = 'daikou_update_snooze';
-  let _downloading = false;
-  let _autoTriggered = false;  // wifi 自動 DL の重複防止
-
-  // IndexedDB から全 pref レコードを取得 (DakomeDL 公開 API 経由)
-  function _getAllPrefs(){
-    return DakomeDL.getAllPrefectures ? DakomeDL.getAllPrefectures() : Promise.resolve([]);
+  // 機能停止中のためフラグ系定数は不要だが、HTML 構造との互換のため hide のみ残置
+  function hide(){
+    const wrap = document.getElementById('dataUpdateBannerWrap');
+    if(wrap) wrap.classList.remove('show');
   }
 
-  async function _getOldestPrefTimestamp(){
-    try {
-      const all = await _getAllPrefs();
-      if(all.length === 0) return null;
-      return Math.min.apply(null, all.map(r => r.timestamp || Date.now()));
-    } catch(_) { return null; }
-  }
-
-  async function _shouldShow(){
-    if(appState !== 'businessStart') return false;
-    if(!_isIOS || window.navigator.standalone !== true) return false;
-    const snooze = parseInt(localStorage.getItem(SNOOZE_KEY) || '0', 10);
-    if(Date.now() - snooze < SNOOZE_MS) return false;
-    const oldest = await _getOldestPrefTimestamp();
-    if(oldest === null) return false;
-    return (Date.now() - oldest) > STALE_MS;
-  }
-
+  // 一時停止: meta.json 実装まで何もしない
+  function show(){ /* no-op (Phase 6-5 一時停止) */ }
+  function startDownload(){ return Promise.resolve(); /* no-op */ }
+  function checkAndShow(){ return Promise.resolve(); /* no-op */ }
   function _isOnWifi(){
     const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
     if(!c) return navigator.onLine;
     return c.type === 'wifi' || (c.downlink && c.downlink > 5);
-  }
-
-  function _resetText(){
-    const banner = document.getElementById('dataUpdateBanner');
-    if(!banner) return;
-    banner.classList.remove('downloading');
-    const icon = banner.querySelector('.icon');
-    const text = banner.querySelector('.text');
-    if(icon) icon.textContent = '📡';
-    if(text) text.innerHTML = '道路データが古くなっています。<strong>WiFiに繋いで</strong>更新してください。';
-  }
-
-  function show(){
-    _resetText();
-    const wrap = document.getElementById('dataUpdateBannerWrap');
-    if(wrap) wrap.classList.add('show');
-    // 既に WiFi なら 3 秒後に自動 DL (重複防止 _autoTriggered)
-    if(!_autoTriggered && !_downloading && _isOnWifi()){
-      _autoTriggered = true;
-      setTimeout(() => { if(!_downloading) startDownload(); }, 3000);
-    }
-  }
-
-  function hide(snooze){
-    const wrap = document.getElementById('dataUpdateBannerWrap');
-    if(wrap) wrap.classList.remove('show');
-    if(snooze){
-      try { localStorage.setItem(SNOOZE_KEY, Date.now().toString()); } catch(_){}
-    }
-  }
-
-  function _setProgress(done, total){
-    const banner = document.getElementById('dataUpdateBanner');
-    if(!banner) return;
-    const text = banner.querySelector('.text');
-    if(text) text.innerHTML = '<strong>地図データ更新中</strong> <span class="progress-text">' + done + '/' + total + ' 県</span>';
-  }
-
-  async function startDownload(){
-    if(_downloading) return;
-    _downloading = true;
-    const wrap = document.getElementById('dataUpdateBannerWrap');
-    const banner = document.getElementById('dataUpdateBanner');
-    const icon = banner.querySelector('.icon');
-    if(wrap) wrap.classList.add('show');
-    banner.classList.add('downloading');
-    if(icon) icon.textContent = '⟳';
-    const total = (DakomeDL.PREFECTURES || []).length || 47;
-    _setProgress(0, total);
-    try {
-      // ★設計変更宣言 (2026-05-12): 全 47 県 fetch 時に size 差で「実更新数」をカウント
-      //   settings.html onCheckUpdate と同じ判定方式 (size 差 = 実コンテンツ更新)
-      //   _finish に updated 件数を渡してメッセージに含める
-      const existing = await (DakomeDL.getAllPrefectures
-        ? DakomeDL.getAllPrefectures() : Promise.resolve([]));
-      const sizeMap = new Map((existing || []).map(r => [r.pref, r.size || 0]));
-      // 全 47 県を強制再 fetch (settings.html の onCheckUpdate と同等・cache busting)
-      const stamp = Date.now();
-      const PARALLEL = 2;
-      const MAX_RETRY = 3;
-      const queue = (DakomeDL.PREFECTURES || []).slice();
-      let done = 0;
-      let updated = 0;
-      async function worker(){
-        while(queue.length > 0){
-          const pref = queue.shift();
-          let newSize = 0;
-          let success = false;
-          for(let attempt = 1; attempt <= MAX_RETRY; attempt++){
-            try {
-              // ★設計変更宣言 (2026-05-13): ?_v= cache-busting を撤廃し {cache:'reload'} に変更
-              //   旧 SW が ?_v= 付き URL で別エントリ put する重複事故を防ぐ
-              const url = '/data/roads-' + pref + '.js';
-              const res = await fetch(url, { cache: 'reload' });
-              if(!res.ok) throw new Error('HTTP ' + res.status);
-              const blob = await res.blob();
-              newSize = blob.size;
-              await DakomeDL.markPrefDone(pref, newSize);
-              success = true;
-              break;
-            } catch(e){
-              if(attempt < MAX_RETRY) await new Promise(r => setTimeout(r, 1000 * attempt));
-            }
-          }
-          if(success){
-            const prev = sizeMap.get(pref) || 0;
-            if(prev !== newSize) updated++;
-          }
-          done++;
-          _setProgress(done, total);
-        }
-      }
-      const workers = [];
-      for(let i = 0; i < PARALLEL; i++) workers.push(worker());
-      await Promise.all(workers);
-      _finish(true, updated, total);
-    } catch(e){
-      console.warn('[DataUpdate] 失敗:', e && e.message);
-      _finish(false, 0, total);
-    }
-  }
-
-  function _finish(ok, updated, total){
-    const banner = document.getElementById('dataUpdateBanner');
-    const icon = banner.querySelector('.icon');
-    const text = banner.querySelector('.text');
-    banner.classList.remove('downloading');
-    if(ok){
-      if(icon) icon.textContent = '✅';
-      if(text){
-        // ★設計変更宣言 (2026-05-12): 実更新数を明示
-        //   updated > 0: "X 県の地図データを更新しました"
-        //   updated === 0: "すべて最新でした (全 N 県確認)"
-        if(updated > 0){
-          text.innerHTML = '<strong>' + updated + ' 県の地図データを更新しました</strong>';
-        } else {
-          text.innerHTML = '<strong>すべて最新でした</strong> (全 ' + total + ' 県確認)';
-        }
-      }
-    } else {
-      if(icon) icon.textContent = '⚠️';
-      if(text) text.innerHTML = '<strong>更新失敗・また後で試してください</strong>';
-    }
-    setTimeout(() => {
-      hide(false);  // snooze 記録しない (正常終了)
-      _downloading = false;
-      _autoTriggered = false;
-    }, 1800);
-  }
-
-  async function checkAndShow(){
-    if(await _shouldShow()) show();
   }
 
   return { show, hide, startDownload, checkAndShow, _isOnWifi };
