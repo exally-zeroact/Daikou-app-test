@@ -1639,6 +1639,20 @@ try {
             if(text) text.textContent = '準備完了';
           } catch(_){}
           if(typeof dlog === 'function') dlog('[Pipeline] UI 完了表示');
+          // ★設計変更宣言 (2026-05-13・Phase 5): overlay hide 移管
+          //   DakomeDL.showCompleteBanner からの hide ロジックを新 pipeline 側へ移管。
+          //   "準備完了" 表示を 800ms 見せてから dlOverlay を確実に非表示化。
+          //   DakomeDL.init() 停止後も overlay が残らないことを担保。
+          setTimeout(function(){
+            try {
+              const overlay = document.getElementById('dlOverlay');
+              if(overlay){
+                overlay.style.display = 'none';
+                overlay.classList.remove('show');
+              }
+              if(typeof dlog === 'function') dlog('[Pipeline] dlOverlay hide 完了');
+            } catch(_){}
+          }, 800);
         }).catch(function(e){
           console.warn('[Pipeline] warmup error:', e && e.message);
         });
@@ -4493,21 +4507,9 @@ function onDlToastTap(){
   DakomeUpdateToast.hide();
 }
 
-// 起動時実行：standalone（PWA）起動時のみDL実行
-// 理由：iOS Safari と PWA は IndexedDB が分離されているため
-//       Safari でDLしても PWA で再DLが必要になり二度DL
-//       Safari は Cache Storage 制限のため47県データ保持不可
-(function(){
-  const isStandalone =
-    window.navigator.standalone === true ||
-    window.matchMedia('(display-mode: standalone)').matches;
-  if(isStandalone){
-    DakomeDL.init();
-    if(typeof dlog === 'function') dlog('[DL] standalone起動・DL判定実行');
-  } else {
-    if(typeof dlog === 'function') dlog('[DL] ブラウザ起動・DLスキップ（ホーム画面追加待ち）');
-  }
-})();
+// ★設計変更宣言 (2026-05-13・Phase 5): DakomeDL.init() 呼出 standalone IIFE を削除
+//   役割は新パイプライン (MMDataPipeline.warmup) に完全移管済。
+//   DakomeDL モジュール自体は Phase 6 で削除予定 (consumer がまだ参照しているため残置)。
 
 // ─── チュートリアル（初回URL訪問時のみ） ───
 (function(){
