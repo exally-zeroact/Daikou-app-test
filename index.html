@@ -2413,6 +2413,30 @@ function startGPS(){
   } catch(e){ console.error('GPS start error:', e); }
 }
 
+// ─── #1+6 (2026-05-13): GPS error 状態を gpsAcc バッジに反映 ────────────
+// ★設計変更宣言 (2026-05-13):
+//   旧: GPS callback (L2371) 成功時のみ badge を「精度Xm」に更新
+//       denied / unavailable / timeout 等で callback 不発時は「GPS待機」のまま固まり
+//       ユーザに何が起きたか伝わらない (= 残バグ #1+6)
+//   新: GPS.onStatusChange でエラー状態を badge に反映
+//       granted は既存 callback が「精度Xm」を入れるので触らない
+//       (state.distance_m / fare_yen / GPS state machine への影響なし・UI 表示のみ)
+(function(){
+  if(typeof GPS === 'undefined' || !GPS.onStatusChange) return;
+  GPS.onStatusChange(function(s){
+    const el = document.getElementById('gpsAcc');
+    if(!el || !s || !s.state) return;
+    if(s.state === 'denied'){
+      el.textContent = 'GPS拒否';
+    } else if(s.state === 'unavailable'){
+      el.textContent = 'GPS信号弱';
+    } else if(s.state === 'timeout'){
+      el.textContent = 'GPS待機中';
+    }
+    // granted: 既存 callback が「精度Xm」に上書きするので何もしない
+  });
+})();
+
 // 業務終了時の GPS 停止（D案・2026/05/06）
 //   - watchPosition を解除（バッテリー節約）
 //   - DeviceMotion / DeviceOrientation のリスナー自体は残したまま、
