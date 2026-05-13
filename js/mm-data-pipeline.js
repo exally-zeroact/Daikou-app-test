@@ -281,6 +281,19 @@
     }
 
     async warmup(){
+      // ★設計変更宣言 (2026-05-13): warmup 多重起動ガード
+      //   visibility 復帰 / bfcache / 想定外の再呼出で warmup が再実行される事故を防ぐ。
+      //   既に起動済なら同じ Promise を返して全 phase 重複実行を回避。
+      if(this._warmupStarted){
+        if(typeof dlog === 'function') dlog('[Pipeline] warmup 既に起動済・skip');
+        return this._warmupPromise || Promise.resolve();
+      }
+      this._warmupStarted = true;
+      this._warmupPromise = this._warmupInternal();
+      return this._warmupPromise;
+    }
+
+    async _warmupInternal(){
       const t0 = Date.now();
       if(typeof dlog === 'function') dlog('[Pipeline] warmup 開始');
       // Phase A: 全国共通
