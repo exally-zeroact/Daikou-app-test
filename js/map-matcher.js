@@ -2131,6 +2131,11 @@ function _dbg(){
 //   現段階は受信 + 保存のみ・利用ロジックは別 commit
 let _coarseData = null;
 
+// ★設計変更宣言 (2026-05-13・大改修 C6): 全国共通 pref-borders data (47 県境界)
+//   msgType='loadPrefBorders' で受信
+//   将来的に county 跨ぎ判定 smooth 化で活用予定 (重心距離→真の境界判定)
+let _prefBordersData = null;
+
 // ─── メッセージハンドラ ─────────────────────────────────────────
 self.onmessage = function(e){
   const msg = e.data;
@@ -2232,6 +2237,19 @@ self.onmessage = function(e){
       self.postMessage({ type: 'coarseLoaded', ok: true });
     } else {
       self.postMessage({ type: 'coarseLoaded', ok: false, _reason: 'no data' });
+    }
+    return;
+  }
+
+  // ★設計変更宣言 (2026-05-13・大改修 C6): 全国共通 pref-borders data 受信
+  //   msg.data: PREF_BORDERS_JP 構造体 (47 県境界 polygon)
+  //   現段階は保存のみ・将来 county 跨ぎ判定 smooth 化で活用
+  if(msg.type === 'loadPrefBorders'){
+    if(msg.data){
+      _prefBordersData = msg.data;
+      self.postMessage({ type: 'prefBordersLoaded', ok: true });
+    } else {
+      self.postMessage({ type: 'prefBordersLoaded', ok: false, _reason: 'no data' });
     }
     return;
   }
