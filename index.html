@@ -2398,6 +2398,19 @@ function autoResetCheck(){
   }
 }
 
+// ★設計変更宣言 (2026-05-14・MA-4 B-2): autoResetCheck を「起動時 1 回」から
+//   「1 分毎の定期チェック + foreground 復帰時チェック」に強化。
+//   旧: loadSettings() 経由で起動時 1 回のみ呼出 (PWA 長時間バックグラウンドで
+//       12 時跨ぐとリセット未発火 → 司さん「リセットが効いてない」感の原因)
+//   新: setInterval(60s) で常時監視 + visibilitychange で foreground 復帰時に即チェック。
+//   業務 active 中スキップガード (L2330) はそのまま維持・課金フローへの影響ゼロ。
+try {
+  setInterval(autoResetCheck, 60000);
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible') autoResetCheck();
+  });
+} catch(_){}
+
 // ─── 時計（2026/05/01仕様変更：全画面共通の日時表示） ───
 function updateClock(){
   const now = new Date();
