@@ -1563,7 +1563,15 @@ function _mmReforwardAllState(){
 // メッセージハンドラを別関数に分離（addEventListener / removeEventListener 整合性）
 function _mmWorkerOnMessage(e){
     const m = e.data;
-    if(!m || typeof dlog !== 'function') return;
+    if(!m) return;
+    // ★設計変更宣言 (2026-05-13・大改修 C10): MM warmup 通知
+    //   committed=true (snap commit 成功) を 1 回受信したら pipeline に通知
+    //   Phase E (waitForMMWarmup) を resolve
+    if(m.type === 'mmResult' && m.committed && window._mmPipeline
+       && !window._mmPipeline.ready.mmWarmed){
+      try { window._mmPipeline.notifyMMCommit(); } catch(_){}
+    }
+    if(typeof dlog !== 'function') return;
     if(m.type === 'roadsLoaded'){
       dlog('[MM] worker roads ' + (m.ok ? 'loaded' : 'fail') +
            ': ' + m.pref + (m.ok ? ' (' + m.numRoads + '本)' : ' err=' + m.error));
@@ -1657,6 +1665,37 @@ function _mmWorkerOnMessage(e){
 
 // 起動（H-1: 失敗しても自動再起動が回るので例外で止めない）
 _setupMmWorker('init');
+
+// ★設計変更宣言 (2026-05-13・大改修 C10): 新パイプライン稼働
+//   MMDataPipeline で全データロード + GPS + MM warmup を段階的に制御
+//   旧 _autoLoadNearbyRoads 起動 kick は並行で残置 (C11 で削除予定)
+//   warmup() は fire-and-forget で起動・結果は ready フラグで参照
+try {
+  if(typeof MMDataPipeline === 'function' && typeof DataLoader !== 'undefined'){
+    window._mmPipeline = new MMDataPipeline({
+      worker: _mmWorker,
+      loader: DataLoader,
+      onProgress: function(p){
+        if(typeof dlog === 'function'){
+          dlog('[Pipeline] ' + p.phase + ' ' + p.current + '/' + p.total + ' ' + (p.label || ''));
+        }
+      },
+    });
+    setTimeout(function(){
+      try {
+        window._mmPipeline.warmup().catch(function(e){
+          console.warn('[Pipeline] warmup error:', e && e.message);
+        });
+      } catch(e){
+        console.warn('[Pipeline] warmup throw:', e && e.message);
+      }
+    }, 0);
+  } else {
+    if(typeof dlog === 'function') dlog('[Pipeline] 依存未満で起動 skip (MMDataPipeline or DataLoader 未定義)');
+  }
+} catch(e){
+  console.warn('[Pipeline] init err:', e && e.message);
+}
 
 // ★設計変更宣言 (2026-05-10): 起動直後の last-GPS warm-up を Worker B 初期化
 //   直後 (line ~1600) に移動して再起動後の道路データ load を高速化。
@@ -2521,6 +2560,11 @@ function startGPS(){
     GPS.start(function(g){
       try {
         _gpsCallbackCount++;
+        // ★設計変更宣言 (2026-05-13・大改修 C10): GPS 初回 fix 通知
+        //   pipeline の Phase D (waitForGPS) を resolve
+        if(window._mmPipeline && !window._mmPipeline.ready.gpsAcquired){
+          try { window._mmPipeline.notifyGpsFix(); } catch(_){}
+        }
         // 5秒に1回のペースで動作確認ログ（スパム防止）
         const now = Date.now();
         if(now - _lastGpsLogAt > 5000){
