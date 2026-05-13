@@ -4563,6 +4563,64 @@ if(navigator.storage && navigator.storage.persist){
     setTimeout(_checkCrashAndReport, 2000);
   }
 })();
+
+// ★設計変更宣言 (2026-05-14・MA-2 SPA overlay JS API・呼出元なし・Console テスト用):
+//   MA-1 で追加した #overlayHistory / #overlaySettings / #overlayHelp を切替する API。
+//   呼出元はまだ追加しない (MA-6 で bottom-nav onclick から呼ぶ時に初めて配線)。
+//   仕様:
+//   - showOverlay(name): 該当 overlay に .show + aria-hidden='false'・他は逆。
+//                       bottom-nav の .nav-item.active を該当 button (index) に移動。
+//   - hideAllOverlays(): 全 overlay の .show 削除・aria-hidden='true'・nav active を業務 (index 0) へ。
+//   nav-item の順序: [0]業務 / [1]履歴 / [2]使い方 / [3]設定 (index.html:4590-4593・MA-6 まで固定)。
+(function(){
+  const _OVERLAYS = {
+    history:  'overlayHistory',
+    settings: 'overlaySettings',
+    help:     'overlayHelp',
+  };
+  const _NAV_INDEX = { history: 1, help: 2, settings: 3 };
+
+  function _setNavActive(idx){
+    const items = document.querySelectorAll('.bottom-nav .nav-item');
+    items.forEach(function(btn, i){
+      if(i === idx) btn.classList.add('active');
+      else btn.classList.remove('active');
+    });
+  }
+
+  window.showOverlay = function(name){
+    const targetId = _OVERLAYS[name];
+    if(!targetId){
+      if(typeof dlog === 'function') dlog('[SPA] showOverlay: unknown name=' + name);
+      return;
+    }
+    Object.keys(_OVERLAYS).forEach(function(key){
+      const el = document.getElementById(_OVERLAYS[key]);
+      if(!el) return;
+      if(_OVERLAYS[key] === targetId){
+        el.classList.add('show');
+        el.setAttribute('aria-hidden', 'false');
+      } else {
+        el.classList.remove('show');
+        el.setAttribute('aria-hidden', 'true');
+      }
+    });
+    const idx = _NAV_INDEX[name];
+    if(typeof idx === 'number') _setNavActive(idx);
+    if(typeof dlog === 'function') dlog('[SPA] showOverlay: ' + name);
+  };
+
+  window.hideAllOverlays = function(){
+    Object.keys(_OVERLAYS).forEach(function(key){
+      const el = document.getElementById(_OVERLAYS[key]);
+      if(!el) return;
+      el.classList.remove('show');
+      el.setAttribute('aria-hidden', 'true');
+    });
+    _setNavActive(0);   // 業務ボタンに active を戻す
+    if(typeof dlog === 'function') dlog('[SPA] hideAllOverlays');
+  };
+})();
 </script>
 
 <!-- ★設計変更宣言 (2026-05-14・MA-1 SPA overlay 基盤・静的構造のみ・未起動):
