@@ -219,6 +219,38 @@ body{font-family:'Noto Sans JP',sans-serif;background:#fff;color:#111;height:100
 #overlaySettings .dl-update-btn:disabled{background:#aaa;cursor:not-allowed;}
 #overlaySettings .settings-toast{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 56px));transform:translateX(-50%);background:#E8F4FD;border:1.5px solid #007AFF;border-radius:10px;padding:10px 16px;font-size:13px;color:#1c1c1e;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:1050;width:85%;max-width:360px;text-align:center;font-weight:600;display:none;}
 #overlaySettings .settings-toast.show{display:block;}
+/* ★設計変更宣言 (2026-05-14・MA-5 history コンテンツを #overlayHistory に scope して移植):
+   元 history.html (204 行) の visible UI (appbar / 日付ヘッダ / summary-card / ride-list / empty) を取り込み。
+   全 selector に #overlayHistory prefix を付与し既存 .appbar / .wrap / .empty 等との衝突を回避。
+   .wrap の padding-bottom:40px は .spa-overlay の padding-bottom (60px + safe-area) と二重になるが
+   オリジナル仕様維持 (履歴最終 ride card と bottom-nav の隙間担保) のため残置。
+   show 時に毎回 _hist_render() で daikou_history_<today> を再描画 (session 中の trip 追加に追随)。
+   元 history.html は変更せず残存 (dual state・MA-6 まで bottom-nav は旧 html 経路維持)。 */
+#overlayHistory{background:#f5f5f5;color:#111;}
+#overlayHistory .appbar{background:#007AFF;padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top));display:flex;align-items:center;gap:12px;flex-shrink:0;}
+#overlayHistory .appbar-back{color:#fff;font-size:20px;cursor:pointer;padding:4px 8px;transition:transform 0.1s,filter 0.1s;}
+#overlayHistory .appbar-back:active{transform:scale(0.9);filter:brightness(0.8);}
+#overlayHistory .appbar-title{font-size:17px;font-weight:700;color:#fff;}
+#overlayHistory .wrap{padding:16px;display:flex;flex-direction:column;gap:16px;padding-bottom:40px;}
+#overlayHistory .date-header{font-size:13px;font-weight:700;color:#8E8E93;letter-spacing:1px;padding:4px 0;}
+#overlayHistory .summary-card{background:#fff;border-radius:12px;padding:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+#overlayHistory .summary-item{text-align:center;}
+#overlayHistory .summary-label{font-size:11px;color:#aaa;margin-bottom:4px;}
+#overlayHistory .summary-value{font-size:18px;font-weight:900;color:#111;}
+#overlayHistory .summary-unit{font-size:11px;color:#aaa;}
+#overlayHistory .ride-list{background:#fff;border-radius:12px;overflow:hidden;}
+#overlayHistory .ride-item{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:0.5px solid #f0f0f0;}
+#overlayHistory .ride-item:last-child{border-bottom:none;}
+#overlayHistory .ride-left{display:flex;flex-direction:column;gap:4px;}
+#overlayHistory .ride-num{font-size:12px;color:#aaa;}
+#overlayHistory .ride-time{font-size:15px;font-weight:700;color:#111;}
+#overlayHistory .ride-dist{font-size:12px;color:#8E8E93;}
+#overlayHistory .ride-right{text-align:right;}
+#overlayHistory .ride-fare{font-size:18px;font-weight:900;color:#111;}
+#overlayHistory .ride-extras{font-size:11px;color:#FF9500;margin-top:2px;}
+#overlayHistory .empty{text-align:center;padding:60px 20px;display:flex;flex-direction:column;align-items:center;gap:12px;}
+#overlayHistory .empty-icon{font-size:48px;opacity:0.2;}
+#overlayHistory .empty-text{font-size:15px;color:#aaa;}
 .bottom-nav .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;cursor:pointer;background:none;border:none;font-family:'Noto Sans JP',sans-serif;color:#8E8E93;-webkit-tap-highlight-color:transparent;}
 .bottom-nav .nav-item:active{background:#F2F2F7;}
 .bottom-nav .nav-item.active{color:#007AFF;}
@@ -4785,6 +4817,12 @@ if(navigator.storage && navigator.storage.persist){
     });
     const idx = _NAV_INDEX[name];
     if(typeof idx === 'number') _setNavActive(idx);
+    // ★設計変更宣言 (2026-05-14・MA-5): history overlay は表示の都度 fresh data に再描画。
+    //   onTripEnd で daikou_history_<today> に追記されるため、表示時点の値を反映する必要がある。
+    //   help / settings は静的 / 起動時 init で十分なので refresh hook を持たない (拡張時は同パターンで追加可能)。
+    if(name === 'history' && typeof window._hist_render === 'function'){
+      try { window._hist_render(); } catch(e){ console.error('[SPA] _hist_render error:', e); }
+    }
     if(typeof dlog === 'function') dlog('[SPA] showOverlay: ' + name);
   };
 
@@ -5062,6 +5100,101 @@ if(navigator.storage && navigator.storage.persist){
     _init();
   }
 })();
+
+// ★設計変更宣言 (2026-05-14・MA-5 history overlay 動作 JS):
+//   元 history.html の <script> ロジック (本日の trip を localStorage から読込・描画) を
+//   index.html に取り込み。daikou_history_<today.toDateString()> を読み、
+//   summary-card + ride-list を動的構築する。
+//   公開関数は window._hist_render に attach し、showOverlay('history') 経路から
+//   呼び出して overlay 表示時に最新データへ再描画する (session 中の onTripEnd で
+//   localStorage 追記された分も即時反映)。
+//   元 history.html の load() は DOMContentLoaded 直後に 1 回だけ呼ばれていたが、
+//   overlay は表示の都度 fresh data が要るので呼出契機を「showOverlay 時」に変更。
+(function(){
+  function _hist_render(){
+    const wrap = document.getElementById('_hist_wrap');
+    const emptyMsg = document.getElementById('_hist_emptyMsg');
+    if(!wrap || !emptyMsg) return;
+    // 既存の dynamic 追加 (date-header / summary-card / ride-list) を一旦撤去し emptyMsg だけ残す
+    Array.prototype.slice.call(wrap.children).forEach(function(ch){
+      if(ch !== emptyMsg) wrap.removeChild(ch);
+    });
+    emptyMsg.style.display = 'flex';
+
+    let rides = [];
+    try {
+      const today = new Date();
+      const key = 'daikou_history_' + today.toDateString();
+      rides = JSON.parse(localStorage.getItem(key) || '[]');
+    } catch(e){
+      if(typeof dlog === 'function') dlog('[History] localStorage 読込エラー: ' + (e && e.message));
+      return;
+    }
+    if(!rides || rides.length === 0) return;
+
+    emptyMsg.style.display = 'none';
+
+    // 日付ヘッダー
+    const today = new Date();
+    const days = ['日','月','火','水','木','金','土'];
+    const dateStr = today.getFullYear() + '年' +
+      (today.getMonth()+1) + '月' + today.getDate() + '日（' +
+      days[today.getDay()] + '）';
+    const dateHeader = document.createElement('div');
+    dateHeader.className = 'date-header';
+    dateHeader.textContent = dateStr;
+    wrap.appendChild(dateHeader);
+
+    // サマリー計算
+    const totalDist = rides.reduce(function(a,b){ return a + (b.distance_m || 0); }, 0);
+    const totalFare = rides.reduce(function(a,b){ return a + (b.fare || 0); }, 0);
+    const summary = document.createElement('div');
+    summary.className = 'summary-card';
+    summary.innerHTML =
+      '<div class="summary-item">' +
+        '<div class="summary-label">走行回数</div>' +
+        '<div class="summary-value">' + rides.length + '<span class="summary-unit">回</span></div>' +
+      '</div>' +
+      '<div class="summary-item">' +
+        '<div class="summary-label">総距離</div>' +
+        '<div class="summary-value">' + (totalDist/1000).toFixed(1) + '<span class="summary-unit">km</span></div>' +
+      '</div>' +
+      '<div class="summary-item">' +
+        '<div class="summary-label">総売上</div>' +
+        '<div class="summary-value" style="color:#007AFF;">¥' + totalFare.toLocaleString() + '</div>' +
+      '</div>';
+    wrap.appendChild(summary);
+
+    // 走行リスト
+    const list = document.createElement('div');
+    list.className = 'ride-list';
+    rides.forEach(function(ride, i){
+      const item = document.createElement('div');
+      item.className = 'ride-item';
+      let extrasText = '';
+      if(ride.extras && ride.extras.length > 0){
+        extrasText = ride.extras.map(function(e){
+          return e.name + ' +¥' + (e.amount || 0).toLocaleString();
+        }).join('　');
+      }
+      if(ride.surcharge) extrasText = (extrasText ? extrasText + '　' : '') + '割増あり';
+      item.innerHTML =
+        '<div class="ride-left">' +
+          '<div class="ride-num">' + (i+1) + '回目</div>' +
+          '<div class="ride-time">' + (ride.time || '') + '</div>' +
+          '<div class="ride-dist">' + ((ride.distance_m || 0)/1000).toFixed(2) + 'km</div>' +
+          (extrasText ? '<div class="ride-extras">' + extrasText + '</div>' : '') +
+        '</div>' +
+        '<div class="ride-right">' +
+          '<div class="ride-fare">¥' + (ride.fare || 0).toLocaleString() + '</div>' +
+        '</div>';
+      list.appendChild(item);
+    });
+    wrap.appendChild(list);
+    if(typeof dlog === 'function') dlog('[History] render: ' + rides.length + ' rides');
+  }
+  window._hist_render = _hist_render;
+})();
 </script>
 
 <!-- ★設計変更宣言 (2026-05-14・MA-1 SPA overlay 基盤・静的構造のみ・未起動):
@@ -5075,7 +5208,23 @@ if(navigator.storage && navigator.storage.persist){
           sensor listener / WakeLock 全停止 = 走行距離取りこぼし を完全解消する。
      業務 workflow (index.html JS) を常駐させたまま履歴/設定/使い方を viewing する。 -->
 <div id="overlayHistory" class="spa-overlay" aria-hidden="true">
-  <!-- MA-5 で history.html の内容を移植 (本 phase では空) -->
+  <!-- ★設計変更宣言 (2026-05-14・MA-5 history.html の本体を #overlayHistory に移植):
+       元 history.html (204 行) の appbar + wrap を移植。
+       appbar-back の戻り先は元 settings.html 固定 → window.hideAllOverlays() に変更
+       (overlay は SPA で単一画面・「戻る」= overlay を閉じて業務画面に戻る、が意味的に正)。
+       wrap 内は _hist_render() (showOverlay('history') 時に呼出) が動的構築する。
+       id は _hist_ prefix で隔離 (index.html 既存 id と衝突回避)。
+       元 history.html は変更せず残存 (dual state・MA-6 まで bottom-nav は旧 html 経路維持)。 -->
+  <div class="appbar">
+    <div class="appbar-back" onclick="window.hideAllOverlays()">＜</div>
+    <div class="appbar-title">本日の走行履歴</div>
+  </div>
+  <div class="wrap" id="_hist_wrap">
+    <div class="empty" id="_hist_emptyMsg">
+      <div class="empty-icon">🚗</div>
+      <div class="empty-text">本日の走行履歴はありません</div>
+    </div>
+  </div>
 </div>
 <div id="overlaySettings" class="spa-overlay" aria-hidden="true">
   <!-- ★設計変更宣言 (2026-05-14・MA-4 settings.html の常時表示 section を移植 + B-1 resetTime UI 復活):
