@@ -3310,17 +3310,42 @@ function onIdle(){
     // TestMode 走行終了記録は H-3 対応で削除済
 
     // ─── 走行サマリートースト（5秒表示）───
+    // ★設計変更宣言 (2026-05-14・サマリートーストを距離課金の機能内訳表示に変更):
+    //   旧: hasPosData=false ハードコード → 常に「座標: 未取得⚠️」と嘘表示・gap fill 1 行のみ
+    //   新: 距離計上に貢献した全機能 (MM / GPS補完 / 圏外補完 / 待機・値>0 のもののみ) を行表示
+    //        + GPS 精度 + センサー有無 を表示・dead code 撤去
     try {
-      // TestMode 削除済（H-3）→ pos データは meter 経由で取得するか省略
-      const hasPosData = false;
-      const gapCount = s.gap_fill_count || 0;
-      const gapM    = Math.round(s.gap_fill_total_m || 0);
-      const lines = [
+      const _lines = [
         `✅ ${(correctionDistanceM/1000).toFixed(2)}km ¥${correctionTotal.toLocaleString()}`,
-        gapCount > 0 ? `GPS補完: ${gapCount}回（${gapM}m）` : 'GPS補完: なし',
-        hasPosData ? '座標: 取得済 ✅' : '座標: 未取得 ⚠️（GPS圏外？）',
-      ].join('\n');
-      showToastLong(lines);
+      ];
+      // MM 距離 (mm_distance_m > 0 のみ・道路距離経由の主経路)
+      if(s.mm_distance_m && s.mm_distance_m > 0){
+        _lines.push(`MM: ${(s.mm_distance_m / 1000).toFixed(2)}km`);
+      }
+      // GPS 補完 (gap_fill_count > 0 のみ・5 秒以上空白の速度×時間補完)
+      if(s.gap_fill_count && s.gap_fill_count > 0){
+        _lines.push(`GPS補完: ${s.gap_fill_count}回 ${Math.round(s.gap_fill_total_m || 0)}m`);
+      }
+      // 圏外補完 (offroad_count > 0 のみ・snap 5 回連続失敗で Kalman GPS 累積)
+      if(s.offroad_count && s.offroad_count > 0){
+        _lines.push(`圏外補完: ${s.offroad_count}回 ${Math.round(s.offroad_distance_m || 0)}m`);
+      }
+      // 待機時間 (>=60s のみ・課金は wait.enabled+freeMins 超えで calcFare に反映)
+      if((s.wait_sec || 0) >= 60){
+        _lines.push(`待機: ${Math.floor(s.wait_sec / 60)}分`);
+      }
+      // GPS 精度 (#gpsAcc DOM text "精度Xm" から parse・"GPS待機"等は skip)
+      try {
+        const _gpsAccEl = document.getElementById('gpsAcc');
+        const _accText = _gpsAccEl ? (_gpsAccEl.textContent || '') : '';
+        const _accMatch = _accText.match(/精度(\d+)m/);
+        if(_accMatch){
+          _lines.push(`GPS精度: ${_accMatch[1]}m`);
+        }
+      } catch(_){}
+      // センサー有無 (常時表示・compass + motion 両方許可で「あり」)
+      _lines.push(`センサー: ${(window._compassGranted && window._motionGranted) ? 'あり' : 'なし'}`);
+      showToastLong(_lines.join('\n'));
     } catch(e){ /* サマリー表示エラーは無視 */ }
 
     // 確定画面からのみ空車に戻れる
