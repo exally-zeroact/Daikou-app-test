@@ -1547,6 +1547,19 @@ try {
   }
 } catch(_){}
 
+// ★設計変更宣言 (2026-05-14・許可ページ初期表示問題修正):
+//   navigation.type クリア直後に updateStartButtonsGate を即時呼出。
+//   旧: クリアした後・最初の updateStartButtonsGate 呼出が warmup 完了 (L1853 area・async 数秒〜数十秒) まで
+//       走らないため、それまで btn-business-start (CSS default visible) + L3733 startup routing の
+//       updateResumeFromStartVisibility で業務再開ボタンが見えてしまう状態が継続していた
+//   新: フラグクリア直後に即時 updateStartButtonsGate → sensorGranted=null なら btnPerm 表示 / 他は非表示
+//       function 宣言は同一 <script> 内 L3937・hoisting により L1547 から呼出可能
+//   DOM 要素は script 上 (L1146 area) に既に存在するので getElementById は成功
+try {
+  if(typeof updateStartButtonsGate === 'function') updateStartButtonsGate();
+  if(typeof dlog === 'function') dlog('[Sensor] 起動直後の updateStartButtonsGate 即時呼出');
+} catch(_){}
+
 // ★設計変更宣言 (2026-05-10): user gesture 直近時刻を記録
 //   blockIfSensorNotGranted が「user gesture 起因」かを判定するため
 //   document への click listener で _lastUserGestureAt を更新
@@ -3110,6 +3123,16 @@ function updateResumeFromStartVisibility(){
     const btn = document.getElementById('btnResumeFromStart');
     const note = document.getElementById('resumeNote');
     if(!btn || !note) return;
+    // ★設計変更宣言 (2026-05-14・許可ページ優先):
+    //   sensorGranted 未セット (= 許可ページ表示中) では resume button + note は絶対表示しない。
+    //   updateStartButtonsGate の未許可分岐と整合・「許可ページの中身が複数表示される」事象を回避。
+    const _granted = sessionStorage.getItem('sensorGranted') === '1';
+    if(!_granted){
+      btn.style.display = 'none';
+      note.style.display = 'none';
+      if(typeof dlog === 'function') dlog('[Business] resume button: hidden (sensor 未許可・許可ページ表示中)');
+      return;
+    }
     const bs = Business.getState();
     if(bs && bs.start_time !== null && !bs.active){
       btn.style.display = 'block';
