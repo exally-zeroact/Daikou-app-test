@@ -2385,10 +2385,19 @@ function updateBusinessDashboard(){
     const elActual = document.getElementById('todayDist');
     const elCount = document.getElementById('todayCount');
     const elFare = document.getElementById('fareTotalYen');
+    // ★設計変更宣言 (2026-05-14・実車完了後ホーム集計表示の最終更新修正):
+    //   旧: Business state のみで DOM 更新 → 何らかの理由で state.actual_total_m=0 / trip_count=0
+    //       のままだと、setInterval(1s) が DOM を 0 に上書きし続け実車完了後の更新が反映されない
+    //       (司さん実機 2026-05-14 09:45 報告事象)
+    //   新: Business state と global accumulator (todayDist/todayCount・renderFare で更新済) を
+    //       Math.max で取って表示・どちらか欠けても確実に値が表示される (安全側上書きなし)
+    //   絶対ルール準拠: 集計値の "正値" を残す方向 (誤って 0 に戻さない) ・課金本体は無影響
+    const actualM = Math.max(r.actual_total_m || 0, (typeof todayDist === 'number' ? todayDist : 0));
+    const tripN = Math.max(r.trip_count || 0, (typeof todayCount === 'number' ? todayCount : 0));
     if(elTotal)  elTotal.textContent  = (r.total_distance_m / 1000).toFixed(2);
-    if(elActual) elActual.textContent = (r.actual_total_m / 1000).toFixed(2);
-    if(elCount)  elCount.textContent  = r.trip_count;
-    if(elFare)   elFare.textContent   = r.fare_total_yen.toLocaleString();
+    if(elActual) elActual.textContent = (actualM / 1000).toFixed(2);
+    if(elCount)  elCount.textContent  = tripN;
+    if(elFare)   elFare.textContent   = (r.fare_total_yen || 0).toLocaleString();
   } catch(e){
     console.error('[Dashboard] update error:', e);
   }
@@ -3258,8 +3267,19 @@ function onIdle(){
       // appState は既に 'idle' に書き換わってるので、tripStartTime を使って fare から来たか判定
       // tripStartTime は fare 経由の時のみセットされる
       if(tripStartTime !== null){
-        Business.onTripEnd(tripDistanceM, tripFareYen, tripStartTime);
-        if(typeof dlog === 'function') dlog('[Business] onTripEnd: ' + Math.round(tripDistanceM) + 'm ¥' + tripFareYen);
+        // ★設計変更宣言 (2026-05-14): 診断 dlog 追加・state.active が false なら理由表示
+        //   onTripEnd の internal !state.active gate で ignored される事象を可視化
+        if(typeof dlog === 'function'){
+          const _bsBefore = Business.getState();
+          dlog('[Business] preTripEnd: active=' + _bsBefore.active +
+               ' start_time=' + (_bsBefore.start_time ? 'set' : 'null') +
+               ' ended=' + _bsBefore.ended +
+               ' tripDist=' + Math.round(tripDistanceM) +
+               ' tripFare=' + tripFareYen);
+        }
+        const _ok = Business.onTripEnd(tripDistanceM, tripFareYen, tripStartTime);
+        if(typeof dlog === 'function') dlog('[Business] onTripEnd result=' + _ok +
+             ' (active gate ignored?=' + (!_ok) + ')');
       }
     }
   } catch(e){ console.error('[Business] onTripEnd error:', e); }
