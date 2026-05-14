@@ -30,11 +30,15 @@ function makeLocalStorage() {
   };
 }
 
-function makeMeterMock(initialDistance = 0) {
+function makeMeterMock(initialDistance = 0, initialBusinessDistance = 0) {
   let dist = initialDistance;
+  let bizDist = initialBusinessDistance;
+  let running = false;
   return {
-    getState: () => ({ distance_m: dist, distanceSource: 'mm' }),
+    getState: () => ({ distance_m: dist, business_distance_m: bizDist, distanceSource: 'mm', running }),
     setDistance: (v) => { dist = v; },
+    setBusinessDistance: (v) => { bizDist = (typeof v === 'number' && v >= 0) ? v : 0; },
+    _setRunning: (v) => { running = !!v; },
   };
 }
 
@@ -220,47 +224,46 @@ describe('Business.onTripEnd()', () => {
   });
 });
 
-describe('Business.onGps()', () => {
+describe('Business.onGps() — Meter.business_distance_m 信源直結 (2026-05-14 変更後)', () => {
   it('!state.active なら何もしない (early return)', () => {
-    const meter = makeMeterMock(100);
+    const meter = makeMeterMock(100, 500);
     const { Business } = loadBusiness({ meter });
     Business.onGps({});
+    // active=false なので state.total_distance_m は同期されない
     expect(Business.getState().total_distance_m).toBe(0);
   });
 
-  it('Meter.distance_m の diff>0 を total_distance_m に加算する (MM 道路距離信源)', () => {
-    const meter = makeMeterMock(0);
+  it('Meter.business_distance_m を state.total_distance_m に sync する (永続化ミラー)', () => {
+    const meter = makeMeterMock(0, 0);
     const { Business } = loadBusiness({ meter });
-    Business.start();
-    // 1 回目: Meter=100m → total=100, last=100
-    meter.setDistance(100);
+    Business.start();  // Business.start は Meter.setBusinessDistance(0) で 0 化する
+    meter.setBusinessDistance(150);
     Business.onGps({});
-    expect(Business.getState().total_distance_m).toBe(100);
-    // 2 回目: Meter=350m → diff=250 → total=350
-    meter.setDistance(350);
+    expect(Business.getState().total_distance_m).toBe(150);
+    meter.setBusinessDistance(350);
     Business.onGps({});
     expect(Business.getState().total_distance_m).toBe(350);
   });
 
-  it('diff<0 (Meter.reset 直後等) は加算せず last_meter_distance_m=cur にリセット', () => {
-    const meter = makeMeterMock(0);
+  it('Meter.distance_m が 0 (空車中) でも business_distance_m が増えれば total に反映', () => {
+    const meter = makeMeterMock(0, 0);
     const { Business } = loadBusiness({ meter });
     Business.start();
-    // 走行で total=500・last=500
+    // 実車中相当 (Meter.running=true): distance_m + business_distance_m が連動して増える
+    meter._setRunning(true);
     meter.setDistance(500);
+    meter.setBusinessDistance(500);
     Business.onGps({});
     expect(Business.getState().total_distance_m).toBe(500);
-    // Meter.reset (= meter.distance=0) → diff=-500 → 加算スキップ + last=0
-    meter.setDistance(0);
+    // 空車相当 (Meter.running=false): distance_m はリセットされても business_distance_m は伸び続ける
+    meter._setRunning(false);
+    meter.setDistance(0);  // Meter.reset 想定
+    meter.setBusinessDistance(800);  // 空車中の道路距離増加 300m
     Business.onGps({});
-    expect(Business.getState().total_distance_m).toBe(500); // 不変
-    // 次の走行で diff>0 を再開
-    meter.setDistance(200);
-    Business.onGps({});
-    expect(Business.getState().total_distance_m).toBe(700); // 500 + 200
+    expect(Business.getState().total_distance_m).toBe(800);
   });
 
-  it('Meter 未ロード時は early return', () => {
+  it('Meter 未ロード時は early return (state.total_distance_m 不変)', () => {
     const { Business } = loadBusiness({ meter: undefined });
     Business.start();
     expect(() => Business.onGps({})).not.toThrow();
@@ -298,13 +301,12 @@ describe('Business.getReport()', () => {
     expect(r2.elapsed_sec).toBeLessThan(2);
   });
 
-  it('actual_ratio = actual / total (total>0 のみ)', () => {
-    Business.start();
-    // total=1000 / actual=300 になるよう内部 state を作るため onGps + onTripEnd を駆動
-    const meter = makeMeterMock(0);
+  it('actual_ratio = actual / total (total>0 のみ・total は Meter.business_distance_m 信源)', () => {
+    const meter = makeMeterMock(0, 0);
     const { Business: B2 } = loadBusiness({ meter });
     B2.start();
-    meter.setDistance(1000);
+    // total=1000 (Meter.business_distance_m) / actual=300 (onTripEnd)
+    meter.setBusinessDistance(1000);
     B2.onGps({});
     B2.onTripEnd(300, 1300, Date.now());
     const r = B2.getReport();
@@ -316,14 +318,31 @@ describe('Business.getReport()', () => {
   });
 
   it('actual > total になる異常データでも empty_distance_m は 0 で floor (整合性保証)', () => {
-    const meter = makeMeterMock(0);
+    const meter = makeMeterMock(0, 0);
     const { Business } = loadBusiness({ meter });
     Business.start();
-    // total=100 / actual=500 にして異常状態を作る
-    meter.setDistance(100);
+    // total=100 (Meter) / actual=500 (onTripEnd) → empty=max(0, -400)=0
+    meter.setBusinessDistance(100);
     Business.onGps({});
     Business.onTripEnd(500, 1300, Date.now());
     const r = Business.getReport();
     expect(r.empty_distance_m).toBe(0); // Math.max(0, 100-500) = 0
+  });
+
+  it('getReport().total_distance_m は Meter.getState().business_distance_m を直接参照', () => {
+    const meter = makeMeterMock(0, 0);
+    const { Business } = loadBusiness({ meter });
+    Business.start();
+    // onGps を呼ばずに Meter.business_distance_m だけ変えても getReport は反映する
+    meter.setBusinessDistance(2500);
+    const r = Business.getReport();
+    expect(r.total_distance_m).toBe(2500);
+  });
+
+  it('Meter 未ロード時は state.total_distance_m (永続化ミラー) を fallback として返す', () => {
+    const { Business } = loadBusiness({ meter: undefined });
+    Business.start();
+    const r = Business.getReport();
+    expect(r.total_distance_m).toBe(0);
   });
 });

@@ -80,6 +80,13 @@ trip_count: 0,
 trips: [],
 last_meter_distance_m: 0,
 };
+// ★設計変更宣言 (2026-05-14・business_distance_m を業務開始でも 0 リセット):
+//   通常は Meter.businessEnd() で 0 リセットされるが、abandon() 経由 (前業務 limbo) や
+//   タスクキル復元後の新業務開始で Meter.businessEnd を経由しないケースがあるため、
+//   業務開始時にも明示的に Meter 側を 0 化して整合を保つ。
+if(typeof Meter !== 'undefined' && typeof Meter.setBusinessDistance === 'function'){
+  try { Meter.setBusinessDistance(0); } catch(_){ /* Meter 未ロード等は致命傷ではないので無視 */ }
+}
 save();
 if(typeof dlog === 'function') dlog('[Business] start at ' + new Date(now).toISOString());
 return true;
@@ -171,26 +178,26 @@ if(!state.active) return;
 if(typeof Meter === 'undefined' || !Meter.getState) return;
 
 const meterState = Meter.getState();
-const cur = meterState.distance_m || 0;
-const prev = state.last_meter_distance_m || 0;
-const diff = cur - prev;
 
-// Meter.reset 後・業務開始直後は cur < prev になり得る → 0 リセット
-if(diff < 0){
-  state.last_meter_distance_m = cur;
-  return;
-}
-if(diff > 0){
-  state.total_distance_m += diff;
-  state.last_meter_distance_m = cur;
-  // 5 秒間隔ログ
-  const _logNow = Date.now();
-  if(!_lastDebugLogAt || _logNow - _lastDebugLogAt > 5000){
-    _lastDebugLogAt = _logNow;
-    if(typeof dlog === 'function')
-      dlog('[Business] +' + diff.toFixed(1) + 'm (' + (meterState.distanceSource || '?') +
-           ') total=' + (state.total_distance_m/1000).toFixed(2) + 'km');
-  }
+// ★設計変更宣言 (2026-05-14・total_distance_m を Meter 信源直結に変更):
+//   旧: cur - prev の diff を state.total_distance_m に累積
+//       問題: Meter.running=false (空車中) では Meter.distance_m が伸びないため、
+//             空車中の走行が total_distance_m に算入されない (= 司さん「総走行距離 0.23km」事象)
+//   新: Meter.state.business_distance_m を state.total_distance_m に sync。
+//       Meter 側は state.running を問わず業務単位累積を保持する。
+//       state.total_distance_m は永続化目的のミラー (localStorage save 経路維持)。
+//   getReport の total_distance_m は Meter.business_distance_m を直接返す経路に変更済 (下記)。
+state.total_distance_m = meterState.business_distance_m || 0;
+// last_meter_distance_m は legacy 互換のため Meter.distance_m を tracking (現状は未使用)
+state.last_meter_distance_m = meterState.distance_m || 0;
+
+// 5 秒間隔ログ
+const _logNow = Date.now();
+if(!_lastDebugLogAt || _logNow - _lastDebugLogAt > 5000){
+  _lastDebugLogAt = _logNow;
+  if(typeof dlog === 'function')
+    dlog('[Business] total=' + (state.total_distance_m/1000).toFixed(2) + 'km' +
+         ' (Meter.business_distance_m 信源・running=' + (meterState.running ? 'true' : 'false') + ')');
 }
 
 // 1 秒間隔 save
@@ -240,7 +247,20 @@ function getState(){ return { ...state, trips: [...state.trips] }; }
 
 // 日報集計
 function getReport(){
-const totalM = state.total_distance_m;
+// ★設計変更宣言 (2026-05-14・total_distance_m を Meter 信源直結に変更):
+//   旧: state.total_distance_m を返す (= Business.onGps の diff 累積結果)
+//   新: Meter.getState().business_distance_m を直接返す (= 業務開始から終了までの全走行距離・
+//       state.running=true/false 問わず累積されている値)
+//   フォールバック: Meter 未ロード時は state.total_distance_m (永続化ミラー値) を返す。
+let totalM = state.total_distance_m;
+if(typeof Meter !== 'undefined' && typeof Meter.getState === 'function'){
+  try {
+    const _ms = Meter.getState();
+    if(_ms && typeof _ms.business_distance_m === 'number'){
+      totalM = _ms.business_distance_m;
+    }
+  } catch(_){ /* Meter.getState 失敗時は state.total_distance_m (ミラー値) を返す */ }
+}
 const actualM = state.actual_total_m;
 const emptyM = Math.max(0, totalM - actualM);  // 整合性保証
 const elapsedMs = state.end_time
@@ -305,6 +325,15 @@ last_meter_distance_m: parsed.last_meter_distance_m || 0,
 };
 // ★設計変更宣言 (2026-05-14): ロード後の自動 abandon (checkAutoAbandon) は撤去。
 //   limbo (ended=true / start_time!=null) はそのまま維持・代行開始時に abandon() で履歴 push。
+// ★設計変更宣言 (2026-05-14・business_distance_m 復元):
+//   タスクキル後の再起動で active 業務が復元された場合、saved state.total_distance_m を
+//   Meter.business_distance_m に逆流させて連続性を確保する。
+//   Meter は新規 load で business_distance_m=0 で起動するため、prime しないと
+//   復元直後の getReport().total_distance_m が 0 にリセットされてしまう。
+if(state.active && state.total_distance_m > 0 &&
+   typeof Meter !== 'undefined' && typeof Meter.setBusinessDistance === 'function'){
+  try { Meter.setBusinessDistance(state.total_distance_m); } catch(_){ /* Meter prime failure は致命傷ではないので無視 */ }
+}
 if(typeof dlog === 'function') dlog('[Business] loaded state');
 return true;
 } catch(e) {
@@ -355,6 +384,12 @@ trip_count: history.trip_count || 0,
 trips: Array.isArray(history.trips) ? [...history.trips] : [],
 last_meter_distance_m: 0,                   // Meter は再起動するためクリア
 };
+// ★設計変更宣言 (2026-05-14・restoreFromHistory でも Meter.business_distance_m を逆流):
+//   履歴から業務再開時、保存された total_distance_m を Meter 側にも復元して連続性を確保。
+if(state.total_distance_m > 0 &&
+   typeof Meter !== 'undefined' && typeof Meter.setBusinessDistance === 'function'){
+  try { Meter.setBusinessDistance(state.total_distance_m); } catch(_){ /* Meter prime failure は致命傷ではないので無視 */ }
+}
 // 履歴から該当エントリを削除（重複防止）
 try {
 const raw = localStorage.getItem(HISTORY_KEY);

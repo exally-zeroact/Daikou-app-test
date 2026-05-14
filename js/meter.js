@@ -26,6 +26,14 @@ const Meter = (() => {
     offroad_count: 0,         // Off-Road Mode 起動回数
     // ─── 待機料金 (fareConfig v2・2026-05-10 追加) ───
     wait_sec: 0,              // 累積待機時間 (秒・速度<3km/h で加算)
+    // ─── 業務単位累積距離 (2026-05-14 追加) ───
+    // ★設計変更宣言 (2026-05-14・総走行距離を業務開始からの全走行距離に修正):
+    //   業務開始から終了までの「総走行距離」(実車中 + 空車中 + 待機中の道路移動全部) を累積する。
+    //   distance_m は trip 単位 (fare 計算入力) で Meter.start() / Meter.reset() でリセットされるが
+    //   business_distance_m は trip 跨ぎで保持し、Meter.businessEnd() でのみ 0 化する。
+    //   絶対ルール準拠: 距離計算は既存 5-tier (MM / inline / gap / off-road / GPS) と同じ道路距離。
+    //   永続化: Business.onGps() 経由で daikou_business_state の state.total_distance_m に sync。
+    business_distance_m: 0,
   };
 
   // MM 優先設計 (2026-05-09):
@@ -252,9 +260,13 @@ const Meter = (() => {
         // mmIncrement は加算しない・lastMmUsefulAt も更新しない (= mmHealthy false 維持)
       } else {
         // 通常: MM 優先で道路距離を課金距離に反映
-        state.distance_m += m.mmIncrementM;
-        state.fare_yen = calcFare(state.distance_m);
-        state.distanceSource = 'mm';
+        // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
+        state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+        if(state.running){
+          state.distance_m += m.mmIncrementM;
+          state.fare_yen = calcFare(state.distance_m);
+          state.distanceSource = 'mm';
+        }
         lastMmUsefulAt = Date.now();
         // 参照値も並行更新 (旧設計互換・stats 表示用)
         state.mm_distance_m += m.mmIncrementM;
@@ -272,10 +284,14 @@ const Meter = (() => {
         state.offroad_count = (state.offroad_count || 0) + 1;
         // 直前 commit からの haversine 累積を retroactive で加算 (snap-miss 区間の課金漏れ防止)
         if(_haverAccumSinceLastCommit > 0){
-          state.distance_m += _haverAccumSinceLastCommit;
-          state.fare_yen = calcFare(state.distance_m);
-          state.distanceSource = 'offroad';
-          state.offroad_distance_m = (state.offroad_distance_m || 0) + _haverAccumSinceLastCommit;
+          // ★設計変更宣言 (2026-05-14): retroactive 加算も業務単位累積は state.running を問わず加算
+          state.business_distance_m = (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
+          if(state.running){
+            state.distance_m += _haverAccumSinceLastCommit;
+            state.fare_yen = calcFare(state.distance_m);
+            state.distanceSource = 'offroad';
+            state.offroad_distance_m = (state.offroad_distance_m || 0) + _haverAccumSinceLastCommit;
+          }
           if(typeof dlog === 'function'){
             dlog(`[Meter] Phase1.C Off-Road 起動 (${_consecutiveSnapMiss} 連続 snap miss)・retroactive add ${_haverAccumSinceLastCommit.toFixed(0)}m`);
           }
@@ -334,6 +350,11 @@ const Meter = (() => {
     const warmupValid = lastWarmupGps &&
       lastWarmupGps.timestamp &&
       (now - lastWarmupGps.timestamp) < WARMUP_MAX_AGE_MS;
+    // ★設計変更宣言 (2026-05-14): business_distance_m は trip 跨ぎで保持。
+    //   Meter.start() は per-trip (代行開始) 呼出のため、業務単位累積をリセットしてはならない。
+    //   リセットは Meter.businessEnd() (業務終了) でのみ実行。初期 state.business_distance_m=0 は
+    //   初回 Meter モジュール load 時に効く。
+    const prevBusinessDist = (state && state.business_distance_m) || 0;
     state = {
       running: true,
       distance_m: 0,
@@ -363,6 +384,8 @@ const Meter = (() => {
       offroad_count: 0,
       // 待機料金 リセット
       wait_sec: 0,
+      // 業務単位累積 (per-trip リセットしない・businessEnd でのみ 0 化)
+      business_distance_m: prevBusinessDist,
     };
     prevSnap = null;  // Map Matching 連続性リセット（fallback 用）
     // Phase 1.C 状態リセット
@@ -415,6 +438,9 @@ const Meter = (() => {
     if(mmWorker){
       try { mmWorker.postMessage({ type: 'reset' }); } catch(e){}
     }
+    // ★設計変更宣言 (2026-05-14): 業務終了で business_distance_m を 0 リセット。
+    //   trip 単位の Meter.start() / Meter.reset() ではリセットせず、businessEnd でのみ 0 化する。
+    state.business_distance_m = 0;
     // T8 (2026-05-09): 業務終了で当 session の cross-user pheromone を Firebase に push
     if(typeof FB !== 'undefined' && typeof FB.pushSessionAggregates === 'function'){
       try { FB.pushSessionAggregates(); } catch(_){}
@@ -423,6 +449,10 @@ const Meter = (() => {
 
   function reset(){
     stop();
+    // ★設計変更宣言 (2026-05-14): business_distance_m は per-trip reset でリセットしない。
+    //   reset() は onIdle (空車) 経由の trip 単位リセット・業務終了ではない。
+    //   業務単位累積を引き継ぐため prevBusinessDist を保存して再代入。
+    const prevBusinessDist = (state && state.business_distance_m) || 0;
     state = {
       running: false,
       distance_m: 0,
@@ -445,6 +475,8 @@ const Meter = (() => {
       offroad_count: 0,
       // 待機料金 リセット
       wait_sec: 0,
+      // 業務単位累積 (per-trip リセットしない)
+      business_distance_m: prevBusinessDist,
     };
     prevSnap = null;
     // Phase 1.C 状態リセット
@@ -477,7 +509,7 @@ const Meter = (() => {
     return((Math.atan2(Math.sin(Δλ)*Math.cos(φ2),
       Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ))*180/Math.PI)+360)%360;
   }
-  function angleDiffMeter(a,b){let d=Math.abs(a-b)%360;return d>180?360-d:d;}
+  function angleDiffMeter(a,b){const d=Math.abs(a-b)%360;return d>180?360-d:d;}
 
   function calculateGapFill(prevLat, prevLng, currLat, currLng, gapSec, lastSpeedKmh, compassHeading){
     if(gapSec > GAP_MAX_SEC) return null;
@@ -620,15 +652,13 @@ const Meter = (() => {
   }
 
   function update(gpsResult){
-    // P3 (2026-05-09): 業務外 (state.running=false) でも MM Worker B には GPS を流す
-    //   これにより業務開始ボタン押下時には Viterbi 窓が温まっており即 ready
-    //   state.running=false の間は距離加算 (state.distance_m) は行わない
-    if(!state.running){
-      if(gpsResult && !gpsResult.isStationary){
-        _updateMapMatching(gpsResult);
-      }
-      return;
-    }
+    // ★設計変更宣言 (2026-05-14・空車中も business_distance_m を累積):
+    //   旧: state.running=false なら早期 return (距離計算自体スキップ)
+    //   新: state.running=false でも 5-tier 道路距離計算は行い、業務単位累積
+    //       (state.business_distance_m) には加算する。state.distance_m / state.fare_yen
+    //       (= trip 単位 / fare 計算入力) は state.running=true のときのみ更新。
+    //   絶対ルール準拠: 距離は既存 5-tier 道路距離 (MM / inline / gap / off-road) で計算・
+    //   GPS 直線は使わない。総走行距離 (= 業務開始から終了までの全走行) を仕様通り測る。
     if(gpsResult.isStationary){
       // B5 (2026-05-09): 停車中でも Worker B にハートビートを送信
       //   Viterbi 窓内の確定前候補が時間進行で commit される機会を作る
@@ -663,28 +693,38 @@ const Meter = (() => {
           state.last_gps.compassHeading
         );
         if(filled !== null){
-          state.distance_m += filled;
-          state.fare_yen = calcFare(state.distance_m);
-          state.distanceSource = 'gap';
-          _recordGapFill(filled);
+          // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
+          state.business_distance_m = (state.business_distance_m || 0) + filled;
+          if(state.running){
+            state.distance_m += filled;
+            state.fare_yen = calcFare(state.distance_m);
+            state.distanceSource = 'gap';
+            _recordGapFill(filled);
+          }
           _haverAccumSinceLastCommit = 0;   // gap fill で確定したのでバッファ reset
         }
       } else if(_offRoadActive){
         // Phase 1.C Off-Road Mode: GPS polyline 累積で課金続行
         const inc = _calculateOffRoadIncrement(gpsResult, dtSec);
         if(inc > 0){
-          state.distance_m += inc;
-          state.fare_yen = calcFare(state.distance_m);
-          state.distanceSource = 'offroad';
-          state.offroad_distance_m = (state.offroad_distance_m || 0) + inc;
+          state.business_distance_m = (state.business_distance_m || 0) + inc;
+          if(state.running){
+            state.distance_m += inc;
+            state.fare_yen = calcFare(state.distance_m);
+            state.distanceSource = 'offroad';
+            state.offroad_distance_m = (state.offroad_distance_m || 0) + inc;
+          }
         }
       } else if(!mmHealthy){
         // MM 不健全時の inline 道路スナップ fallback (絶対ルール: GPS 直線禁止)
         const inc = _inlineSnapAndIncrement(gpsResult);
         if(inc !== null && inc > 0){
-          state.distance_m += inc;
-          state.fare_yen = calcFare(state.distance_m);
-          state.distanceSource = 'inline';
+          state.business_distance_m = (state.business_distance_m || 0) + inc;
+          if(state.running){
+            state.distance_m += inc;
+            state.fare_yen = calcFare(state.distance_m);
+            state.distanceSource = 'inline';
+          }
         }
         // inc===null (snap miss / roads 未 load) → 加算なし・distance_m 据え置き
       }
@@ -696,7 +736,8 @@ const Meter = (() => {
     // 待機時間累積 (fareConfig v2): 速度 < 3km/h かつ業務中で wait_sec を増加
     //   wait.enabled が true でなくても累積する (= 集計用・課金は wait.enabled 時のみ)
     //   無料時間 freeMins は calcFare 側で控除する
-    if(state.last_timestamp){
+    //   state.running=false (空車) のときは wait_sec を加算しない (fare 入力なので)
+    if(state.running && state.last_timestamp){
       const dtSec2 = (gpsResult.timestamp - state.last_timestamp) / 1000;
       if(dtSec2 > 0 && dtSec2 < 60 && (gpsResult.speedKmh || 0) < 3){
         state.wait_sec += dtSec2;
@@ -997,6 +1038,14 @@ const Meter = (() => {
     state.fare_yen = calcFare(distanceM);
   }
 
+  // ★設計変更宣言 (2026-05-14): business_distance_m の外部設定 API。
+  //   Business.load() / Business.restoreFromHistory() からタスクキル復元時に
+  //   永続化値 (state.total_distance_m) を Meter 側に逆流させるために使う。
+  //   通常の業務中は呼ばない (Meter 内部で累積する)。
+  function setBusinessDistance(m){
+    state.business_distance_m = (typeof m === 'number' && m >= 0) ? m : 0;
+  }
+
   // リロード復元用：最終GPS状態をセット（層3・GPS消失補完を復元後に発火させる）
   function setLastGps(lat, lng, altitude, speedKmh, timestamp){
     state.last_gps = { lat, lng, altitude };
@@ -1029,6 +1078,8 @@ const Meter = (() => {
   }
 
   return { start, stop, businessEnd, reset, resume, update, updateGpsOnly, getState, getMMStats, setFareConfig, getFareConfig, calcFare, setDistance, setLastGps, setMapMatcher, isMmReady,
+    // 業務単位累積距離 (2026-05-14)
+    setBusinessDistance,
     // fareConfig v2 (2026-05-10)
     setSurchargeActive, toggleSurcharge, getActiveSurcharges, getSurchargeMultiplier,
     setVehicleType, getVehicleType,
