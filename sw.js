@@ -32,10 +32,13 @@ const CACHE_NAME_ROADS = 'daikome-roads-v1';
 // アイコン・manifest・start_url（"/"）をキャッシュ
 // "/"のキャッシュは Chrome の installability 要件で必須
 // （オフラインでも start_url が 200 を返せる必要がある）
+// ★設計変更宣言 (2026-05-14・MA-7): /history.html / /settings.html を precache から除外。
+//   MA-3/4/5 で各コンテンツは index.html の overlay に移植済・MA-6 で bottom-nav も
+//   showOverlay() に切替済。旧 html は redirect stub (= index.html へ即遷移) のみとなり
+//   precache する意義がなくなった (オフラインで起動すれば必ず index.html が動く)。
+//   /help.html は元から precache に含まれていなかったため変更なし。
 const PRECACHE_FILES = [
   '/',
-  '/history.html',
-  '/settings.html',
   '/icon-192.png',
   '/icon-512.png',
   '/manifest.json',
