@@ -306,18 +306,20 @@ text-decoration:none !important;
 }
 .btn-business-start:active{transform:scale(0.98);filter:brightness(0.9);}
 
-/* ★設計変更宣言 (2026-05-14・再開ボタンサイズ統一・グレーアウト撤去):
-   旧: 白背景 + 青枠 (outlined) で視覚的に「小さく見える」問題 + 1.5px border で実寸も微妙にズレ
-   新: .btn-business-start と同 box-sizing / 同サイズ・ただし背景色のみ薄い青 (#5AC8FA) で
-       「代行開始 とは別アクション」を視覚的に区別。border は無し・filled solid。 */
+/* ★設計変更宣言 (2026-05-14・業務再開ボタン色統一 + margin 縮小):
+   旧: 背景色 #5AC8FA (薄い青) で業務開始ボタン (#007AFF) と差別化していた
+   新: 背景色を #007AFF に統一・業務開始ボタンと完全に同色・同サイズ
+   margin-top: -18px で親 #screenBusinessStart (flex gap:24px) をキャンセル
+   → 但し書き (resume-note) との距離が 約 6px となり「但し書きはボタンの説明」と認識できる */
 .btn-business-resume-start{
   box-sizing:border-box;
   width:80%;max-width:300px;padding:14px;
-  background:#5AC8FA;border:none;
+  background:#007AFF;border:none;
   border-radius:12px;color:#fff;
   font-size:15px;font-weight:700;letter-spacing:2px;
   font-family:'Noto Sans JP',sans-serif;cursor:pointer;
   -webkit-tap-highlight-color:transparent;
+  margin-top:-18px;
 }
 .btn-business-resume-start:active{transform:scale(0.98);filter:brightness(0.9);}
 /* ★設計変更宣言 (2026-05-14・但し書き赤文字化):
@@ -3905,12 +3907,14 @@ function tutorialNext(){
 //   呼出: (1) warmup 完了時 (2) requestSensorPermission の granted callback
 //        (3) blockIfSensorNotGranted (画面タップで再評価)
 function updateStartButtonsGate(){
-  const needs = typeof DeviceOrientationEvent !== 'undefined' &&
-                typeof DeviceOrientationEvent.requestPermission === 'function';
-  const granted = !needs ||
-    (sessionStorage.getItem('sensor_permission_active') === '1') ||
-    (localStorage.getItem('compass_granted') === '1' &&
-     localStorage.getItem('motion_granted') === '1');
+  // ★設計変更宣言 (2026-05-14・sessionStorage 'sensorGranted' フラグ管理に変更):
+  //   旧: needs (DeviceOrientation 必要) + sensor_permission_active / compass_granted / motion_granted
+  //       (localStorage で permission を永続化・タスクキル後も granted 扱い)
+  //   新: sessionStorage.getItem('sensorGranted') === '1' のみで判定
+  //       タスクキル後は sessionStorage がクリア → 必ず許可ページ (センサー許可ボタンのみ) を経由
+  //       業務中・空車中・実車中の orange banner 処理 (sensor_permission_active 等) は無変更
+  //   sensorGranted は requestSensorPermission() 成功時のみセット (このセッション限り有効)
+  const granted = sessionStorage.getItem('sensorGranted') === '1';
   const btnPerm = document.getElementById('btnSensorPermission');
   const note = document.getElementById('sensorPermissionNote');
   const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
@@ -3979,6 +3983,9 @@ function requestSensorPermission(){
       localStorage.setItem('motion_granted','1');
       // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
       sessionStorage.setItem('sensor_permission_active','1');
+      // ★設計変更宣言 (2026-05-14): updateStartButtonsGate の primary フラグ
+      //   タスクキル後は sessionStorage がクリア → 次回起動時に必ず許可ページを経由する設計
+      sessionStorage.setItem('sensorGranted','1');
       // ★設計変更宣言 (2026-05-10): 許可後は dl_just_completed flag を削除
       //   (banner 抑制条件を解除・許可されれば banner も不要になる)
       try { sessionStorage.removeItem('dl_just_completed'); } catch(_){}
