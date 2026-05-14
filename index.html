@@ -1483,6 +1483,10 @@ let surchargeEnabled = false;
 let extras = [];
 let todayDist = 0;
 let todayCount = 0;
+// ★設計変更宣言 (2026-05-14・本日売上 global fallback):
+//   旧: updateBusinessDashboard は Business state のみ参照・onTripEnd 失敗時 ¥0 で固まる事象あり
+//   新: renderFare で todayFareYen += total を蓄積・updateBusinessDashboard で Math.max fallback
+let todayFareYen = 0;
 let uiTimer = null;
 let vehicleId = 'v1';
 
@@ -2292,6 +2296,7 @@ function loadSettings(){
     if(obj.date === today){
       todayDist  = obj.dist  || 0;
       todayCount = obj.count || 0;
+      todayFareYen = obj.fare || 0;
     }
   }
   FB.setVehicleId(vehicleId);
@@ -2439,10 +2444,14 @@ function updateBusinessDashboard(){
     //   絶対ルール準拠: 集計値の "正値" を残す方向 (誤って 0 に戻さない) ・課金本体は無影響
     const actualM = Math.max(r.actual_total_m || 0, (typeof todayDist === 'number' ? todayDist : 0));
     const tripN = Math.max(r.trip_count || 0, (typeof todayCount === 'number' ? todayCount : 0));
+    // ★設計変更宣言 (2026-05-14・本日売上にも global fallback 追加):
+    //   旧: elFare は r.fare_total_yen のみ → onTripEnd 失敗時に ¥0 で固まる
+    //   新: Math.max(r.fare_total_yen, todayFareYen) で renderFare 蓄積値を fallback (dist/count と同パターン)
+    const fareYen = Math.max(r.fare_total_yen || 0, (typeof todayFareYen === 'number' ? todayFareYen : 0));
     if(elTotal)  elTotal.textContent  = (r.total_distance_m / 1000).toFixed(2);
     if(elActual) elActual.textContent = (actualM / 1000).toFixed(2);
     if(elCount)  elCount.textContent  = tripN;
-    if(elFare)   elFare.textContent   = (r.fare_total_yen || 0).toLocaleString();
+    if(elFare)   elFare.textContent   = fareYen.toLocaleString();
   } catch(e){
     console.error('[Dashboard] update error:', e);
   }
@@ -2940,8 +2949,9 @@ function onBusinessStart(){
     try {
       todayDist = 0;
       todayCount = 0;
+      todayFareYen = 0;
       const _today = new Date().toDateString();
-      localStorage.setItem('daikou_today', JSON.stringify({ date: _today, dist: 0, count: 0 }));
+      localStorage.setItem('daikou_today', JSON.stringify({ date: _today, dist: 0, count: 0, fare: 0 }));
       localStorage.removeItem('daikou_history_' + _today);
       const _elTotal = document.getElementById('totalDist');     if(_elTotal) _elTotal.textContent = '0.00';
       const _elActual = document.getElementById('todayDist');    if(_elActual) _elActual.textContent = '0.00';
@@ -3022,13 +3032,16 @@ function onBusinessResume(){
   // 全ボタン共通：センサー未許可ならバナー表示してブロック
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined') return;
-  if(!Business.canResume()){
-    showToast('終了から3時間を超えたため再開できません');
-    onBusinessConfirm();  // 自動で abandon に進める
-    return;
-  }
+  // ★設計変更宣言 (2026-05-14・canResume 撤去残骸を除去):
+  //   旧: Business.canResume() を呼んでいたが commit 8ad6b9a2 で削除済 → TypeError で
+  //       state.active=false のまま limbo に取り残され onTripEnd が ignored される事象 (本日売上 ¥0) の根因
+  //   新: Business.resume() を直接呼出・false 返値で再開不可と判定 (3 時間 gate は撤去済)
   try {
-    Business.resume();
+    const _resumed = Business.resume();
+    if(!_resumed){
+      showToast('再開できる業務がありません');
+      return;
+    }
     // F3 (2026-05-09): Worker B 健全性 ping → 不調なら再起動して再 forward
     //   3 時間後再開で Worker が kill されている可能性に対応
     if(typeof _mmHealthCheck === 'function') _mmHealthCheck();
@@ -3244,8 +3257,9 @@ function renderFare(s, fare, extraTotal, total){
     histSaved = true;
     todayDist  += s.distance_m;
     todayCount += 1;
+    todayFareYen += total;
     localStorage.setItem('daikou_today', JSON.stringify({
-      date:new Date().toDateString(), dist:todayDist, count:todayCount
+      date:new Date().toDateString(), dist:todayDist, count:todayCount, fare:todayFareYen
     }));
     const now = new Date();
     const histKey = 'daikou_history_' + now.toDateString();
