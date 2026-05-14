@@ -1,5 +1,39 @@
 {
   "dependencies": {
     "iconv-lite": "^0.7.2"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "lint": "eslint '**/*.js' --fix",
+    "format": "prettier --write '**/*.{js,css,html}'",
+    "stylelint": "stylelint '**/*.{css,html}' --fix",
+    "audit": "npm audit --audit-level=moderate",
+    "check": "npm run lint && npm run format && npm run stylelint && npm run audit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:replay": "node tests/replay-mm.js",
+    "check:logic": "npm run test && npm run test:replay",
+    "check:all": "npm run check && npm run check:logic"
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{css,html}": [
+      "stylelint --fix",
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.6",
+    "eslint": "^8.57.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.4",
+    "prettier": "^3.8.3",
+    "stylelint": "^17.11.0",
+    "stylelint-config-standard": "^40.0.0",
+    "vitest": "^4.1.6"
   }
 }
