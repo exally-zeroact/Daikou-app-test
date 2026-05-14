@@ -294,7 +294,9 @@ text-decoration:none !important;
 
 /* 業務開始ボタン（業務未開始画面・中央配置） */
 /* 2026/05/01：[続きから再開]と同サイズに統一（司さん指示） */
+/* ★設計変更宣言 (2026-05-14): box-sizing:border-box で border 含めた寸法を統一・どんな border 設定でも .btn-business-resume-start と完全同サイズになる */
 .btn-business-start{
+  box-sizing:border-box;
   width:80%;max-width:300px;padding:14px;
   background:#007AFF;border:none;
   border-radius:12px;color:#fff;
@@ -304,16 +306,20 @@ text-decoration:none !important;
 }
 .btn-business-start:active{transform:scale(0.98);filter:brightness(0.9);}
 
-/* 続きから再開ボタン（業務開始画面・[業務開始]の下） */
+/* ★設計変更宣言 (2026-05-14・再開ボタンサイズ統一・グレーアウト撤去):
+   旧: 白背景 + 青枠 (outlined) で視覚的に「小さく見える」問題 + 1.5px border で実寸も微妙にズレ
+   新: .btn-business-start と同 box-sizing / 同サイズ・ただし背景色のみ薄い青 (#5AC8FA) で
+       「代行開始 とは別アクション」を視覚的に区別。border は無し・filled solid。 */
 .btn-business-resume-start{
+  box-sizing:border-box;
   width:80%;max-width:300px;padding:14px;
-  background:#fff;border:1.5px solid #007AFF;
-  border-radius:12px;color:#007AFF;
+  background:#5AC8FA;border:none;
+  border-radius:12px;color:#fff;
   font-size:15px;font-weight:700;letter-spacing:2px;
   font-family:'Noto Sans JP',sans-serif;cursor:pointer;
   -webkit-tap-highlight-color:transparent;
 }
-.btn-business-resume-start:active{background:#E8F4FD;transform:scale(0.98);}
+.btn-business-resume-start:active{transform:scale(0.98);filter:brightness(0.9);}
 .resume-note{
   text-align:center;font-size:11px;color:#999;
   padding:0 16px;
@@ -1537,33 +1543,15 @@ try {
 //         MM 0/5 でもボタンが押せて ReferenceError 発生
 //   新: 宣言直後に最小限の guard setInterval を register
 //       → script 中盤の halt があっても確実に動作
-//   絶対ルール準拠: 道路距離 0 件で業務開始 = inline fallback で
-//                   GPS 直線距離課金リスク → MM 1 県以上を gate に
-setInterval(function(){
-  try {
-    if(appState !== 'businessStart') return;
-    const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
-    if(!btnStart) return;
-    // ★設計変更宣言 (2026-05-13・gate 修正): 旧 _forwardedPrefs.size から
-    //   新パイプライン (MMDataPipeline.stats.roadsOk) 参照に書換。
-    //   C11+ で _forwardedPrefs を削除した影響で永久 disable していた問題を解消。
-    const forwarded = (window._mmPipeline && window._mmPipeline.stats)
-                      ? window._mmPipeline.stats.roadsOk : 0;
-    if(forwarded === 0){
-      btnStart.disabled = true;
-      btnStart.style.opacity = '0.4';
-      btnStart.style.cursor = 'not-allowed';
-      btnStart.style.pointerEvents = 'none';
-      btnStart.setAttribute('aria-disabled', 'true');
-    } else {
-      btnStart.disabled = false;
-      btnStart.style.opacity = '';
-      btnStart.style.cursor = '';
-      btnStart.style.pointerEvents = '';
-      btnStart.removeAttribute('aria-disabled');
-    }
-  } catch(_){}
-}, 1000);
+// ★設計変更宣言 (2026-05-14・業務開始ボタンのグレーアウト撤去):
+//   旧: roadsOk === 0 (MM 道路データ未ロード) で業務開始ボタンを opacity:0.4 + disabled
+//       「絶対ルール準拠: 道路距離 0 件で業務開始 = inline fallback で GPS 直線距離課金リスク」
+//        を理由に gate していた
+//   新: 司さん指示「業務開始ボタンは常時青・常時押せる状態」に従い setInterval を全削除
+//   絶対ルール準拠は meter.js 側で担保:
+//   - roads 未 load → _inlineSnapAndIncrement が null を返す → state.distance_m 加算なし
+//   - GPS 直線距離は使わない (絶対ルール) ・距離 0 のまま据え置きで安全
+//   ボタンの押下可否は ON/OFF 切替ではなく、押された後の挙動 (meter.js の null 据え置き) で保証する。
 
 function _setupMmWorker(reason){
   try {
@@ -3670,18 +3658,18 @@ try {
         }
       } catch(_){}
       if(typeof dlog === 'function') dlog('[Business] active 復元: appState=' + appState);
-    } else if(bs.ended && bs.start_time !== null){
-      // ★設計変更宣言 (2026-05-14): canResume (3h 制限) を撤去・前業務 limbo (ended=true) なら常時日報表示
-      appState = 'businessReport';
-      renderBusinessReport();
-      showScreen('businessReport');
-      document.getElementById('appbarTitle').textContent = '業務報告';
     } else {
-      // 業務未開始 → 業務開始画面
+      // ★設計変更宣言 (2026-05-14): 起動時 routing 統一・limbo (ended=true) も businessStart に route
+      //   旧: limbo → businessReport (日報) に直行・resume button が businessStart で出番なかった
+      //   新: 業務未開始 / limbo どちらも businessStart 画面に集約
+      //       limbo の場合は updateResumeFromStartVisibility が resume button を表示する
+      //       (start_time !== null && !active が limbo の判定条件)
+      //   業務終了直後の businessReport 画面は onBusinessEnd の直接遷移で見せるので維持
       appState = 'businessStart';
       showScreen('businessStart');
       document.getElementById('appbarTitle').textContent = 'ダイコメ';
-      // 直前の業務履歴が3時間以内なら「続きから再開」ボタン表示（共通関数）
+      // ちらつき修正: Business.load() (L3656) は既に完了済なので state は確定
+      // updateResumeFromStartVisibility は同期実行・初期 display:none → 判定後に確定
       updateResumeFromStartVisibility();
       // 2026/05/01：未許可ならバナー表示（許可済みなら何もしない）
       showSensorBannerIfNeeded();
@@ -4382,21 +4370,8 @@ setInterval(function(){
       ind.style.display = 'none';
     }
   }
-  // 業務開始ボタンの enable/disable
-  const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
-  if(btnStart){
-    if(forwarded === 0 && appState === 'businessStart'){
-      btnStart.disabled = true;
-      btnStart.style.opacity = '0.4';
-      btnStart.style.cursor = 'not-allowed';
-      btnStart.style.pointerEvents = 'none';
-    } else {
-      btnStart.disabled = false;
-      btnStart.style.opacity = '';
-      btnStart.style.cursor = '';
-      btnStart.style.pointerEvents = '';
-    }
-  }
+  // ★設計変更宣言 (2026-05-14): 業務開始ボタンの enable/disable (グレーアウト) 撤去
+  //   絶対ルール準拠は meter.js の inline snap miss 据え置きで担保・本 gate は不要
 }, 1000);
 
 // ★設計変更宣言 (2026-05-10): _preloadRoadsForBusinessStart を全削除
