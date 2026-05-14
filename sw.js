@@ -174,7 +174,7 @@ function staleWhileRevalidate(request, cacheName){
 }
 
 // ナビゲーション専用ハンドラ：querystring 無視で precache を確実にヒット
-// /history.html?_v=xxx のようなパラメータ付きでも /history.html のキャッシュとマッチ
+// ?_v=xxx のようなパラメータ付き URL でもキャッシュキーをマッチさせる
 function navigationHandler(request){
   return caches.open(CACHE_NAME).then(function(cache){
     return cache.match(request, { ignoreSearch: true }).then(function(cached){
@@ -194,7 +194,7 @@ function navigationHandler(request){
 }
 
 // /api/* 専用：ネットワーク優先・失敗時に HTML を返さず JSON エラーを返す
-// （history.html の /api/distance 呼び出しが HTML 化けして JSON.parse 失敗する事故を防ぐ）
+// （/api/* 呼び出しが HTML 化けして JSON.parse 失敗する事故を防ぐ）
 function networkOnlyJson(request){
   return fetch(request).catch(function(){
     return new Response(
@@ -229,7 +229,7 @@ self.addEventListener('fetch', function(e){
   }
 
   // [修正5] ナビゲーションリクエスト（HTML ページ取得）は querystring 無視で precache マッチ
-  //   → /history.html?foo=bar でも /history.html のキャッシュにヒット
+  //   → URL に ?foo=bar 等が付与されていても本体パスのキャッシュにヒット
   if(req.mode === 'navigate'){
     e.respondWith(navigationHandler(req));
     return;

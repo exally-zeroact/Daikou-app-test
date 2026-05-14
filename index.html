@@ -2377,9 +2377,12 @@ function loadSettings(){
   // 古い日付の履歴キーを削除（今日以外は不要）
   cleanOldHistoryKeys();
 
-  // 活動エリア（Map Matching・2026/04/30追加）
-  // 設定画面で選択された都道府県の roads データを起動時に自動ロード
-  loadUserRegions();
+  // ★設計変更宣言 (2026-05-14・MA-8): loadUserRegions() 撤去
+  //   daikou_user_regions / daikou_user_auto_region は旧 settings.html (現 redirect stub) で
+  //   書込まれていた deprecated localStorage キー。現行 UI には書込経路がなく永続的に null。
+  //   関数本体は _forwardRoadsToMmWorker (C11 大改修で削除済) を呼ぶため、もし saved が
+  //   非 null なら ReferenceError で落ちる dead code でもあった。
+  //   活動エリアロードは MMDataPipeline (C10) に完全移管済。
 
   // P2 (2026-05-09): 起動時 last-GPS warm-up
   //   localStorage から最後の GPS を復元 → 即時 _autoLoadNearbyRoads 発火
@@ -2426,36 +2429,11 @@ function loadSettings(){
   }
 }
 
-// 活動エリア自動ロード（2026/04/30追加・Map Matching用）
-function loadUserRegions(){
-  try {
-    const saved = localStorage.getItem('daikou_user_regions');
-    if(!saved) return;
-    const regions = JSON.parse(saved);
-    if(!Array.isArray(regions) || regions.length === 0) return;
-    if(typeof RegionLoader === 'undefined' || !RegionLoader.ensureRoadsLoaded){
-      // 旧版 region-loader.js（roads 機能なし）→ スキップ
-      return;
-    }
-    RegionLoader.ensureRoadsLoaded(regions).then((decoders)=>{
-      const loaded = decoders.filter(d=>d!==null).length;
-      if(typeof dlog === 'function'){
-        dlog('[Region] 活動エリア自動ロード完了: ' + loaded + '/' + regions.length + '県');
-      }
-      // MM-1: Worker B にも roads データを転送（main 側 RegionLoader と二重保持）
-      // 失敗しても main 側の MM 動作には影響しない（fallback あり）
-      _forwardRoadsToMmWorker(regions);
-
-      // Phase B (2026-05-08〜): per-pref road-graph の auto-load は廃止済み。
-      //   タイル経路（5km × 5km・LRU 25 個）+ backbone graph (cross-pref nearest-node)
-      //   で routing 精度を維持しつつ Worker B RAM を 60MB 以下に保つ。
-    }).catch(e=>{
-      console.error('活動エリアロードエラー:', e);
-    });
-  } catch(e){
-    console.error('loadUserRegions error:', e);
-  }
-}
+// ★設計変更宣言 (2026-05-14・MA-8): loadUserRegions 関数定義を撤去。
+//   daikou_user_regions / daikou_user_auto_region は旧 settings.html (現 redirect stub) で
+//   書込まれていた deprecated localStorage キー。MMDataPipeline (C10) に役割移管済で本関数は
+//   完全に dead code (内部の _forwardRoadsToMmWorker は C11 で削除済のため呼出時に
+//   ReferenceError も内包していた)。
 
 // ─── 古い履歴キー自動削除（今日以外は不要） ───
 function cleanOldHistoryKeys(){
