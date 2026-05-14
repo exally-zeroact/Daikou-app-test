@@ -1509,22 +1509,40 @@ let _preloadDone = false;
 //       orange banner を表示 (本番 Daikou-app と完全一致)
 //   起動時 banner 表示は line ~4218 の iOS PWA boot IIFE で行う
 
-// ★設計変更宣言 (2026-05-10): fresh load 判定で stale sensor_permission_active をクリア
-//   問題: iOS PWA 1 回目のタスクキル後、iOS の snapshot 機構で sessionStorage が
-//        保持されてしまい、orange banner が出ない (showSensorBannerIfNeeded が
-//        sessionStorage='1' を見て banner hide してしまう)
-//   解決: document.referrer が同一 origin でなければ fresh load (= task kill 起動)
-//        と判定し、sensor_permission_active を強制 removeItem する
-//   navigation (settings.html → index.html) では referrer が同 origin → 維持
-//   task kill → home icon 起動では referrer empty → 強制 clear → banner 表示
-//   この処理を script 先頭に置くことで全 showSensorBannerIfNeeded 呼出より先に実行
+// ★設計変更宣言 (2026-05-14・performance.navigation.type ベースの fresh load 判定に置換):
+//   旧: document.referrer が同 origin でなければ fresh load 扱いで sensor_permission_active をクリア
+//       問題: iOS PWA snapshot 機構で sessionStorage が消えないケースを referrer で代用していたが、
+//             SPA 化で MPA 遷移が減り referrer ベースの判定が不安定化・iOS PWA で誤判定発生
+//   新: PerformanceNavigationTiming (modern API) の entry.type を見て:
+//       - 'navigate' (新規ロード / タスクキル後起動 / アドレスバー入力) → sensorGranted + sensor_permission_active を統一クリア
+//       - 'reload' (F5 / SW controllerchange 経由の reload) → クリアしない
+//       - 'back_forward' (履歴ナビ) → クリアしない
+//     これにより iOS PWA のタスクキル → 再起動で確実に許可ページから入る (sessionStorage が消えなくても明示的クリアで保証)
+//     Legacy フォールバック: performance.navigation.type (deprecated・iOS Safari でも動く)
+//   業務中・空車中・実車中の orange banner 処理 (sensor_permission_active を参照) は無変更・
+//   このクリアは「許可ページに必ず一度戻す」目的のみ
 try {
-  const _sameOriginRef = document.referrer &&
-                          document.referrer.indexOf(location.origin) === 0;
-  if(!_sameOriginRef){
+  let _navType = 'navigate';
+  try {
+    const _entries = performance.getEntriesByType && performance.getEntriesByType('navigation');
+    if(_entries && _entries.length > 0 && _entries[0].type){
+      _navType = _entries[0].type;
+    } else if(performance.navigation){
+      const _t = performance.navigation.type;
+      if(_t === 0) _navType = 'navigate';
+      else if(_t === 1) _navType = 'reload';
+      else if(_t === 2) _navType = 'back_forward';
+    }
+  } catch(_){}
+  if(_navType === 'navigate'){
     sessionStorage.removeItem('sensor_permission_active');
+    sessionStorage.removeItem('sensorGranted');
     if(typeof dlog === 'function'){
-      dlog('[Sensor] fresh load 検知 (referrer empty) → sensor_permission_active クリア');
+      dlog('[Sensor] navigation.type=navigate → sensorGranted + sensor_permission_active 統一クリア');
+    }
+  } else {
+    if(typeof dlog === 'function'){
+      dlog('[Sensor] navigation.type=' + _navType + ' → flag 保持 (reload 等)');
     }
   }
 } catch(_){}
@@ -2169,7 +2187,11 @@ function onSensorRestoreTap(){
         window._compassGranted = true;
         localStorage.setItem('compass_granted','1');
         // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
-        if(window._motionGranted) sessionStorage.setItem('sensor_permission_active','1');
+        if(window._motionGranted){
+          sessionStorage.setItem('sensor_permission_active','1');
+          // ★設計変更宣言 (2026-05-14・フラグ統一): sensorGranted も同時にセット
+          sessionStorage.setItem('sensorGranted','1');
+        }
         // リスナー再登録
         if(typeof GPS !== 'undefined' && typeof GPS.startCompass === 'function'){
           GPS.startCompass();
@@ -2192,7 +2214,11 @@ function onSensorRestoreTap(){
         window._motionGranted = true;
         localStorage.setItem('motion_granted','1');
         // 2026/05/04 夜・追加：同 session 内のページ遷移で permission 維持を判定するため
-        if(window._compassGranted) sessionStorage.setItem('sensor_permission_active','1');
+        if(window._compassGranted){
+          sessionStorage.setItem('sensor_permission_active','1');
+          // ★設計変更宣言 (2026-05-14・フラグ統一): sensorGranted も同時にセット
+          sessionStorage.setItem('sensorGranted','1');
+        }
         // リスナー再登録
         if(typeof GPS !== 'undefined' && typeof GPS.startMotion === 'function'){
           GPS.startMotion();
@@ -2686,9 +2712,11 @@ function blockIfSensorNotGranted(){
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   if(!isIOS) return false;
   if(window.navigator.standalone !== true) return false;
-  // 2026/05/04 夜・修正：sessionStorage で同 session 内の permission 維持を判定
-  //   sensor_permission_active='1' があれば同 session 内 → permission 維持
-  if(sessionStorage.getItem('sensor_permission_active') === '1'){
+  // ★設計変更宣言 (2026-05-14・フラグ統一): sessionStorage 'sensorGranted' を一次判定に追加
+  //   updateStartButtonsGate と blockIfSensorNotGranted の両方が sensorGranted を見るように統一。
+  //   後方互換のため sensor_permission_active も OR で見る (旧 onSensorRestoreTap 経路で立つケース対応)
+  if(sessionStorage.getItem('sensorGranted') === '1' ||
+     sessionStorage.getItem('sensor_permission_active') === '1'){
     window._compassGranted = true;
     window._motionGranted = true;
     return false;
