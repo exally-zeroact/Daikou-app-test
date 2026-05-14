@@ -320,8 +320,10 @@ text-decoration:none !important;
   -webkit-tap-highlight-color:transparent;
 }
 .btn-business-resume-start:active{transform:scale(0.98);filter:brightness(0.9);}
+/* ★設計変更宣言 (2026-05-14・但し書き赤文字化):
+   司さん指示「赤文字で『前回の業務を引き継ぐ場合は』という但し書き」に合致させる */
 .resume-note{
-  text-align:center;font-size:11px;color:#999;
+  text-align:center;font-size:13px;color:#FF3B30;font-weight:700;
   padding:0 16px;
   max-width:80%;
 }
@@ -1159,11 +1161,13 @@ setInterval(_checkTripLimit, 30000);
          style="display:none;text-align:center;font-size:13px;font-weight:700;letter-spacing:1px;
                 padding:8px 16px;margin:6px 24px 0;border-radius:8px;
                 background:#FDECEA;color:#C0392B;line-height:1.4;"></div>
-    <!-- ★設計変更宣言 (2026-05-14): 旧「続きから再開 (3時間以内)」→「前回の業務を引き継ぐ場合」
-         表示条件: Business.getState().start_time !== null && !Business.getState().active
-         (前回業務 limbo 状態がある場合のみ表示・3 時間制限撤去・グレーアウトなし) -->
-    <button class="btn-business-resume-start" id="btnResumeFromStart" onclick="onResumeFromStart()" style="display:none;">前回の業務を引き継ぐ場合</button>
-    <div class="resume-note" id="resumeNote" style="display:none;">前回の業務データ（距離・料金・営業回数）を引き継いで再開します</div>
+    <!-- ★設計変更宣言 (2026-05-14・業務再開ボタン仕様再修正):
+         旧: button「前回の業務を引き継ぐ場合」+ note「データ引き継いで再開します」
+         新: note (赤文字)「前回の業務を引き継ぐ場合は」+ button「業務再開」 の順序
+         表示条件: Business.getState().start_time !== null && !active (limbo 状態のみ・3 時間制限なし)
+         updateStartButtonsGate で未許可時は完全非表示 -->
+    <div class="resume-note" id="resumeNote" style="display:none;">前回の業務を引き継ぐ場合は</div>
+    <button class="btn-business-resume-start" id="btnResumeFromStart" onclick="onResumeFromStart()" style="display:none;">業務再開</button>
   </div>
 
   <!-- BUSINESS REPORT（業務終了画面・日報・2026/05/01追加） -->
@@ -3095,12 +3099,18 @@ function onBusinessConfirm(){
   if(blockIfSensorNotGranted()) return;
   if(typeof Business === 'undefined') return;
   try {
-    Business.abandon();
+    // ★設計変更宣言 (2026-05-14・業務終了確定を abandon → end に変更):
+    //   旧: Business.abandon() → 履歴 push + state 完全リセット (start_time=null)
+    //       → 結果: 業務再開ボタンの表示条件 (start_time !== null && !active) を満たさず・出番なし
+    //   新: Business.end() → state.active=false / state.ended=true / start_time 維持 (limbo state)
+    //       履歴の確定 push は次の Business.start() 内の abandon() で実施 (二重 push 回避)
+    //       → 結果: businessStart 画面に戻った時に updateResumeFromStartVisibility が
+    //               「前回の業務を引き継ぐ場合は」note + 業務再開ボタンを表示する
+    Business.end();
     appState = 'businessStart';
     showScreen('businessStart');
     document.getElementById('appbarTitle').textContent = 'ダイコメ';
-    // 2026/05/01：[終了]押下直後に「続きから再開」ボタンの表示制御を実行
-    //   → abandon で履歴に保存された業務が3時間以内なら[続きから再開]を表示
+    // limbo state (start_time !== null && !active) なので業務再開ボタンが表示される
     updateResumeFromStartVisibility();
     // 2026/05/02：NoSleep 解除（業務終了確定でバッテリー節約）
     //   業務開始 → enable / 業務終了確定 → disable の自然なライフサイクル
@@ -3108,9 +3118,9 @@ function onBusinessConfirm(){
       noSleep.disable();
       if(typeof dlog === 'function') dlog('[NoSleep] 業務終了で解除');
     }
-    if(typeof dlog === 'function') dlog('[Business] abandon');
+    if(typeof dlog === 'function') dlog('[Business] end (limbo・next start で abandon して履歴 push)');
   } catch(e){
-    console.error('[Business] abandon error:', e);
+    console.error('[Business] end error:', e);
     showToast('終了処理に失敗しました');
   }
 }
@@ -3904,14 +3914,26 @@ function updateStartButtonsGate(){
   const btnPerm = document.getElementById('btnSensorPermission');
   const note = document.getElementById('sensorPermissionNote');
   const btnStart = document.querySelector('#screenBusinessStart .btn-business-start');
+  // ★設計変更宣言 (2026-05-14・screenBusinessStart 2 状態化):
+  //   未許可: btnSensorPermission のみ表示・他は全て非表示 (業務開始 / 業務再開 / 但し書き)
+  //   許可済: btn-business-start 表示・業務再開系は updateResumeFromStartVisibility に委譲
+  const btnResume = document.getElementById('btnResumeFromStart');
+  const resumeNote = document.getElementById('resumeNote');
   if(granted){
     if(btnPerm) btnPerm.style.display = 'none';
     if(note) note.style.display = 'none';
     if(btnStart) btnStart.style.display = '';
+    // 業務再開ボタンと但し書きは limbo state 判定に委ねる
+    if(typeof updateResumeFromStartVisibility === 'function'){
+      try { updateResumeFromStartVisibility(); } catch(_){}
+    }
   } else {
     if(btnPerm) btnPerm.style.display = 'block';
     if(note) note.style.display = 'block';
     if(btnStart) btnStart.style.display = 'none';
+    // 未許可時は業務再開ボタンと但し書きも完全非表示
+    if(btnResume) btnResume.style.display = 'none';
+    if(resumeNote) resumeNote.style.display = 'none';
   }
 }
 
