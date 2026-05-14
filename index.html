@@ -1525,6 +1525,16 @@ let _preloadDone = false;
 //     Legacy フォールバック: performance.navigation.type (deprecated・iOS Safari でも動く)
 //   業務中・空車中・実車中の orange banner 処理 (sensor_permission_active を参照) は無変更・
 //   このクリアは「許可ページに必ず一度戻す」目的のみ
+//
+// ★設計変更宣言 (2026-05-14・bottom-nav 経由 MPA navigation で誤クリアされる事象修正):
+//   バグ: 設定保存 → location.href='index.html' (settings.html L829) は navigation.type='navigate' に
+//        該当するため、本ブロックが sensor_permission_active を消し、Business.load() の active 復元路
+//        (L3766-3779) で screenIdle/screenDriving にオレンジバナーが誤表示されていた。
+//   修正: navigate 判定に「referrer が同一 origin でない」AND 条件を追加。
+//        - bottom-nav 経由 (settings.html → index.html): referrer = 同 origin → クリアしない (= 業務継続)
+//        - 真のコールドスタート / PWA タスクキル後: referrer = '' → クリア (= 許可ページ強制経由)
+//        - reload / back_forward: 元から非クリア (既存動作維持)
+//   MA-6 で bottom-nav を showOverlay() に切替えれば本条件分岐は不要になるが、phase 完了まで暫定。
 try {
   let _navType = 'navigate';
   try {
@@ -1538,15 +1548,23 @@ try {
       else if(_t === 2) _navType = 'back_forward';
     }
   } catch(_){}
-  if(_navType === 'navigate'){
+  // 同一 origin referrer 判定 (MPA 内部遷移を fresh load から除外)
+  let _sameOriginReferrer = false;
+  try {
+    if(document.referrer){
+      const _ref = new URL(document.referrer);
+      _sameOriginReferrer = (_ref.origin === location.origin);
+    }
+  } catch(_){}
+  if(_navType === 'navigate' && !_sameOriginReferrer){
     sessionStorage.removeItem('sensor_permission_active');
     sessionStorage.removeItem('sensorGranted');
     if(typeof dlog === 'function'){
-      dlog('[Sensor] navigation.type=navigate → sensorGranted + sensor_permission_active 統一クリア');
+      dlog('[Sensor] navigation.type=navigate + referrer 別 origin → sensorGranted + sensor_permission_active 統一クリア');
     }
   } else {
     if(typeof dlog === 'function'){
-      dlog('[Sensor] navigation.type=' + _navType + ' → flag 保持 (reload 等)');
+      dlog('[Sensor] navigation.type=' + _navType + ' / sameOrigin=' + _sameOriginReferrer + ' → flag 保持');
     }
   }
 } catch(_){}
