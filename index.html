@@ -2206,6 +2206,23 @@ function checkDrivingRestore(){
     // 緑バナー表示（復元できたことを通知するだけ）
     document.getElementById('restoreBanner').classList.add('show');
     dlog('[復元] 走行を再開しました');
+    // ★設計変更宣言 (2026-05-14・checkDrivingRestore での GPS 自動起動を復活):
+    //   2026-05-10 (d7a47fd8) で「user gesture 必須」として startGPS() を削除したが、
+    //   iOS PWA standalone では geolocation permission は永続化されており user gesture
+    //   なしで watchPosition が動作する (=当時の設計判断は iOS PWA の geolocation permission
+    //   挙動の誤認に基づくものだった)。
+    //   タスクキル後のセンサー許可状態は sensorRestoreBanner 経由のオレンジバナーで取得済み・
+    //   業務継続最優先 (絶対ルール「業務中メーター止めない」) の観点から実車画面復元時は
+    //   即座に GPS を起動すべき。
+    //   sensorGranted の状態に関わらず無条件で startGPS() を呼ぶ。
+    //   gpsStarted gate により二重起動は防止 (起動済の場合は早期 return)。
+    //   旧経路 (2026-05-10 削除): startGPS();   を本コミットで復活。
+    if(!gpsStarted){
+      try {
+        startGPS();
+        if(typeof dlog === 'function') dlog('[復元] 自動 startGPS');
+      } catch(_){}
+    }
     // 2026/05/02：iOS PWA なら「センサー再起動」バナー表示
     //   タスクキルで DeviceMotion/Orientation リスナーが消失してるため
     //   司さんがボタン押下時に user gesture で全部復活させる
