@@ -1015,7 +1015,12 @@ const Meter = (() => {
       }
     } else {
       // 旧形式 fallback: base + add 単純計算
-      if (distanceM < fareConfig.base_distance_m) {
+      // ★設計変更宣言 (2026-05-15・1000m 境界バグ修正):
+      //   旧: `distance_m < base_distance_m` (厳密未満) で 1000m ちょうどが
+      //       extra=0 / steps=1 計算により fare=1,300+100=1,400 となるバグ。
+      //   新: `<=` に変更し 1000m ちょうども base_fare 適用範囲に含める。
+      //   新形式 tiers 経路 (L995) は元から `<=` で正しいので無変更。
+      if (distanceM <= fareConfig.base_distance_m) {
         fare = fareConfig.base_fare;
       } else {
         const extra = distanceM - fareConfig.base_distance_m;

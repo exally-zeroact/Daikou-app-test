@@ -62,8 +62,8 @@ function loadMeter() {
 }
 
 // ─── 旧形式 (tiers=[]) calcFare の手計算検算 ───────────────────────────
-// js/meter.js:846-854
-//   if(distanceM < base_distance_m){ fare = base_fare; }
+// js/meter.js:1018-1024 (2026-05-15 修正後):
+//   if(distanceM <= base_distance_m){ fare = base_fare; }     ← 境界 inclusive に修正
 //   else { steps = Math.floor((distanceM - base_distance_m) / add_distance_m) + 1;
 //          fare = base_fare + steps * add_fare; }
 // その後 Step 7 で rounding (default 10円単位) を Math.round(fare / unit) * unit。
@@ -71,7 +71,8 @@ function loadMeter() {
 function expectedFareLegacy(distanceM, cfg) {
   const { base_fare, base_distance_m, add_fare, add_distance_m, rounding } = cfg;
   let fare;
-  if (distanceM < base_distance_m) {
+  // 2026-05-15: meter.js の修正に合わせて `<` → `<=` に変更
+  if (distanceM <= base_distance_m) {
     fare = base_fare;
   } else {
     const extra = distanceM - base_distance_m;
@@ -117,17 +118,17 @@ describe('Meter.calcFare 境界値テスト (旧形式・tiers=[])', () => {
     expect(Meter.calcFare(999)).toBe(1300);
   });
 
-  it('distance=1000 → 旧形式 path では境界が "<" のため fare=1,400 (≥ base_distance で extra=0, steps=1)', () => {
-    // 注: 本タスク指示の期待値は "1300" だったが、現行コード (meter.js:847 `if(distanceM < base_distance_m)`)
-    //     は厳密 "<" なので distance=1000 ちょうどは else 分岐に入り extra=0 / steps=Math.floor(0/420)+1=1
-    //     → fare = 1300 + 1 × 100 = 1400 となる。
-    //     これは境界判定の "off-by-one" 仕様であり、テストでは現行コードの実挙動を記録する。
-    //     報告: 司さんの仕様意図が "1000m まで base_fare" なら meter.js:847 を `<=` に修正する設計変更が必要。
-    //     本テストは絶対ルール「指示された作業のみ・実装は触らない」を守るため挙動を documenting する目的のみ。
-    expect(Meter.calcFare(1000)).toBe(1400);
+  it('distance=1000 → fare=base_fare (1,300・境界値 inclusive・2026-05-15 修正点)', () => {
+    // ★設計変更宣言 (2026-05-15・1000m 境界バグ修正):
+    //   旧コード (meter.js:1018) は `if(distanceM < base_distance_m)` で strict 未満。
+    //   1000m ちょうどは else 分岐に入り fare=1300+1×100=1400 となる off-by-one bug があった。
+    //   修正後 (`<=`) では 1000m ちょうども base_fare 適用範囲に含まれ fare=1300 となる。
+    //   司さんの仕様意図「1000m まで base_fare」と一致。
+    expect(Meter.calcFare(1000)).toBe(1300);
   });
 
-  it('distance=1001 → fare=base_fare+追加料金 1 回 (1,400)', () => {
+  it('distance=1001 → fare=base_fare+追加料金 1 回 (1,400・境界 +1m で加算料金発生)', () => {
+    // distance=1001m: extra=1 / steps=Math.floor(1/420)+1=1 / fare=1300+1×100=1400
     expect(Meter.calcFare(1001)).toBe(1400);
   });
 
