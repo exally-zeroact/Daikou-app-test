@@ -37,6 +37,14 @@
       "rules": {
         "no-console": "off"
       }
+    },
+    {
+      "files": ["scripts/**/*.js"],
+      "env": { "node": true, "browser": false },
+      "rules": {
+        "no-console": "off",
+        "no-undef": "off"
+      }
     }
   ]
 }
