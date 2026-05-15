@@ -65,16 +65,13 @@ const PRECACHE_FILES = [
   //   用途: GPS 高度照合で誤マッチ判定 / 道路区間 Δh 加味で 3D 距離補正
   //   従来 404 で globalFailed に積まれてた dem-jp.js を実データで提供
   '/data/dem-jp.js',
-  // ★設計変更宣言 (2026-05-15・住所データを precache に追加):
-  //   経由地点 + 住所表示機能 (2026-05-15 導入) で Meter.getNearestAddress が
-  //   window.ADDRESSES_FINE_JP / COARSE_JP を同期参照する。<script defer> で
-  //   load しているが PRECACHE_FILES 未登録だと初回起動時に 24.6 MB をネット fetch する
-  //   レースが発生し、代行開始直後の onTripStart / onWaypoint / setEndAddress が
-  //   全て null フォールバックする (= 2026-05-15 報告事象)。precache に追加して
-  //   SW install で起動時に確実にキャッシュ取得・2 回目以降は SWR で瞬時返却。
-  //   サイズ: coarse 約 220 KB (1,919 件) + fine 約 24.6 MB (239,760 件)。
+  // ★設計変更宣言 (2026-05-15・住所データ 47 県分割対応・選択肢 Y 実装):
+  //   旧: coarse + fine-jp (全国一括 24.6 MB) を precache → 初回 install で重い
+  //   新: coarse (220 KB・市区町村レベル) のみ precache 維持
+  //       fine は addresses-fine-{pref}.js (47 県分割・1 県 0.4 MB 平均) に切り替え、
+  //       perPref 動的ロード (data-registry.js) で現在地の県のみ load する設計に変更。
+  //   fine-jp.js (全国版・24.6 MB) はファイル自体は残置 (後方互換) だが PRECACHE 対象外。
   '/data/addresses-coarse-jp.js',
-  '/data/addresses-fine-jp.js',
 ];
 
 self.addEventListener('install', function (e) {
@@ -314,12 +311,14 @@ self.addEventListener('fetch', function (e) {
     req.url.includes('/data/railways-jp.js') ||
     req.url.includes('/data/waterways-jp.js') ||
     req.url.includes('/data/hazard-cliff-jp.js') ||
-    // ★設計変更宣言 (2026-05-15・住所データ全国共通バンドル明示登録):
-    //   経由地点 + 住所表示機能用の addresses-{coarse,fine}-jp.js を SWR 戦略に明示登録。
-    //   デフォルトの「その他 JS・CSS」分岐 (L327) でも SWR 適用されるが、明示登録で
-    //   全国共通バンドル扱いと意図を明確化し、将来 cache-first 等の戦略変更を容易にする。
+    // ★設計変更宣言 (2026-05-15・住所データ 47 県分割対応):
+    //   coarse は全国一括 (220 KB・PRECACHE 維持) → 明示 SWR 登録。
+    //   fine-{pref} は 47 県分割で perPref 動的ロード経路だが、SW 経由 fetch を SWR で
+    //   キャッシュ化するため /data/addresses-fine- 接頭辞分岐を追加。
+    //   旧 fine-jp.js (全国版・24.6 MB) も SWR キャッシュ対象に残置 (後方互換)。
     req.url.includes('/data/addresses-coarse-jp.js') ||
-    req.url.includes('/data/addresses-fine-jp.js')
+    req.url.includes('/data/addresses-fine-jp.js') ||
+    req.url.includes('/data/addresses-fine-')
   ) {
     e.respondWith(staleWhileRevalidate(req));
     return;

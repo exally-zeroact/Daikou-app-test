@@ -1348,18 +1348,26 @@ const Meter = (() => {
 
   // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・最近傍住所検索ヘルパ):
   //   経由地点ボタン押下時 / 代行開始時 / 確定時に呼ばれ、現在地の町名を返す。
-  //   データソース (index.html から事前 load 済):
-  //     window.ADDRESSES_FINE_JP   大字代表点 239,760 件・47/47 県
-  //     window.ADDRESSES_COARSE_JP 市区町村代表点 1,919 件・47/47 県
+  // ★設計変更宣言 (2026-05-15・47 県分割対応・選択肢 Y 実装):
+  //   旧: window.ADDRESSES_FINE_JP (全国一括 24.6 MB) を線形スキャン
+  //       → 全国版 precache が初回 24.6 MB DL で起動遅延の原因 (2026-05-15 報告事象)
+  //   新: 47 県分割 (data/addresses-fine-{pref}.js 各 ~0.4 MB) + perPref 動的ロード
+  //       現在地の県を coarse の最近傍 (c の JIS5 桁先頭 2 桁) で特定し、
+  //       対応する window.ADDRESSES_FINE_{PREF_UPPER} を参照する。
+  //       旧 ADDRESSES_FINE_JP (全国版) も load 済なら fallback として使う (後方互換)。
+  //   データソース:
+  //     window.ADDRESSES_FINE_{PREF}  大字代表点・県別 (perPref 動的ロード)
+  //     window.ADDRESSES_FINE_JP      大字代表点・全国 (後方互換・通常 load されない)
+  //     window.ADDRESSES_COARSE_JP    市区町村代表点 1,919 件・47/47 県 (PRECACHE 維持)
   //   2 段フォールバック:
-  //     ① fine 半径 500m 以内最近傍 → item.n (例: "道後温泉")
-  //     ② fine miss なら coarse 半径 3km 以内最近傍 → item.n + " 付近" (例: "松山市 付近")
-  //     ③ どちらも miss / GPS accuracy>50m / データ未 load → null
-  //   座標は 1e5 倍整数 (lat=4303504 → 43.03504°)。bbox プレフィルタで線形スキャンを高速化
-  //   (1 単位 = 1e-5°・緯度方向 1.111 m/単位)。bbox 内候補は haversine で厳密 m 判定。
-  //   絶対ルール準拠: 同期完結 (await 不要)・データ未 load や検索失敗で null を返し、
-  //   呼び出し側 (business.js の onTripStart / onSend) は null でも業務継続 (絶対ルール:
-  //   業務継続性最優先・住所取得失敗で代行開始/確定を絶対に止めない)。
+  //     ① coarse から最近傍 (~3km 内) を取り県コード抽出
+  //     ② 該当県の fine が load 済なら fine 検索 (~500m 内) → "○○町"
+  //     ③ fine 未 load / fine miss なら ① の coarse を採用 → "○○市 付近"
+  //     ④ どれも miss / GPS accuracy>50m / coarse 未 load → null
+  //   座標は 1e5 倍整数 (lat=4303504 → 43.03504°)。bbox プレフィルタ + haversine 厳密判定。
+  //   絶対ルール準拠: 同期完結 (await 不要)・データ未 load や検索失敗で null・
+  //                  呼び出し側 (business.js) は null でも業務継続。
+  //                  iOS/Android 共通経路 (platform 分岐なし)。
   function _haversineMetersForAddr(lat1, lng1, lat2, lng2) {
     const R = 6371000;
     const toRad = Math.PI / 180;
@@ -1370,6 +1378,93 @@ const Meter = (() => {
       Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLng / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
+  // JIS X 0401 都道府県コード (2 桁文字列) → ローマ字 pref 名 (perPref 命名規則)
+  const _JIS_TO_PREF = {
+    '01': 'hokkaido',
+    '02': 'aomori',
+    '03': 'iwate',
+    '04': 'miyagi',
+    '05': 'akita',
+    '06': 'yamagata',
+    '07': 'fukushima',
+    '08': 'ibaraki',
+    '09': 'tochigi',
+    10: 'gunma',
+    11: 'saitama',
+    12: 'chiba',
+    13: 'tokyo',
+    14: 'kanagawa',
+    15: 'niigata',
+    16: 'toyama',
+    17: 'ishikawa',
+    18: 'fukui',
+    19: 'yamanashi',
+    20: 'nagano',
+    21: 'gifu',
+    22: 'shizuoka',
+    23: 'aichi',
+    24: 'mie',
+    25: 'shiga',
+    26: 'kyoto',
+    27: 'osaka',
+    28: 'hyogo',
+    29: 'nara',
+    30: 'wakayama',
+    31: 'tottori',
+    32: 'shimane',
+    33: 'okayama',
+    34: 'hiroshima',
+    35: 'yamaguchi',
+    36: 'tokushima',
+    37: 'kagawa',
+    38: 'ehime',
+    39: 'kochi',
+    40: 'fukuoka',
+    41: 'saga',
+    42: 'nagasaki',
+    43: 'kumamoto',
+    44: 'oita',
+    45: 'miyazaki',
+    46: 'kagoshima',
+    47: 'okinawa',
+  };
+  // _JIS_TO_PREF の key は混合 (先頭 '0' の数値リテラル化を防ぐため文字列 + 数値) なので
+  // 取り出し時には文字列に正規化して引く。
+  function _jisToPref(jis) {
+    if (typeof jis !== 'string' && typeof jis !== 'number') return null;
+    const key = String(jis);
+    return _JIS_TO_PREF[key] || _JIS_TO_PREF[Number(key)] || null;
+  }
+  // 県別 fine データ参照 (window.ADDRESSES_FINE_{PREF_UPPER}・未 load なら null)
+  function _getFineBundleForPref(pref) {
+    if (typeof window === 'undefined') return null;
+    const upper = pref.toUpperCase().replace(/-/g, '_');
+    const bundle = window['ADDRESSES_FINE_' + upper];
+    if (bundle && Array.isArray(bundle.items)) return bundle;
+    return null;
+  }
+  // 県別の items に対して半径 500m 以内最近傍を探す (bbox プレフィルタ + haversine)
+  function _searchFineItems(items, lat, lng, targetLatI, targetLngI) {
+    const FINE_RADIUS_M = 500;
+    const fineRangeI = 520; // ≈ 580m 緯度方向 (経度方向は緯度依存で短くなる・広めに取って漏らさない)
+    let best = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const dLatI = it.lat - targetLatI;
+      if (dLatI > fineRangeI || dLatI < -fineRangeI) continue;
+      const dLngI = it.lng - targetLngI;
+      if (dLngI > fineRangeI || dLngI < -fineRangeI) continue;
+      const itemLat = it.lat / 100000;
+      const itemLng = it.lng / 100000;
+      const distM = _haversineMetersForAddr(lat, lng, itemLat, itemLng);
+      if (distM <= FINE_RADIUS_M && distM < bestDist) {
+        bestDist = distM;
+        best = it;
+      }
+    }
+    return best;
+  }
   function getNearestAddress(lat, lng, accuracy) {
     if (typeof lat !== 'number' || typeof lng !== 'number' || !isFinite(lat) || !isFinite(lng)) {
       return null;
@@ -1377,45 +1472,12 @@ const Meter = (() => {
     if (typeof accuracy === 'number' && isFinite(accuracy) && accuracy > 50) {
       return null;
     }
-    // 入力 lat/lng を 1e5 倍整数に変換 (データ表現と揃える)
     const targetLatI = Math.round(lat * 100000);
     const targetLngI = Math.round(lng * 100000);
-    // bbox プレフィルタ用範囲 (1 単位 ≈ 1.111m・経度方向は緯度依存で短くなるが
-    // 1.111 m/単位 を緯度・経度共通に使うと経度側で広めに取れる → 漏れなし)
-    // fine: 500m → 約 450 単位・余裕 +60 単位
-    // coarse: 3000m → 約 2700 単位・余裕 +100 単位
-    const FINE_RADIUS_M = 500;
     const COARSE_RADIUS_M = 3000;
-    const fineRangeI = 520;
     const coarseRangeI = 2800;
 
-    // ─── ① fine 検索 (半径 500m) ───
-    let bestFine = null;
-    let bestFineDistM = Infinity;
-    if (
-      typeof window !== 'undefined' &&
-      window.ADDRESSES_FINE_JP &&
-      Array.isArray(window.ADDRESSES_FINE_JP.items)
-    ) {
-      const items = window.ADDRESSES_FINE_JP.items;
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        const dLatI = it.lat - targetLatI;
-        if (dLatI > fineRangeI || dLatI < -fineRangeI) continue;
-        const dLngI = it.lng - targetLngI;
-        if (dLngI > fineRangeI || dLngI < -fineRangeI) continue;
-        const itemLat = it.lat / 100000;
-        const itemLng = it.lng / 100000;
-        const distM = _haversineMetersForAddr(lat, lng, itemLat, itemLng);
-        if (distM <= FINE_RADIUS_M && distM < bestFineDistM) {
-          bestFineDistM = distM;
-          bestFine = it;
-        }
-      }
-    }
-    if (bestFine) return bestFine.n;
-
-    // ─── ② coarse 検索 (半径 3km) ───
+    // ─── ① coarse から最近傍 (~3km 内) を引いて県コードを取得 ───
     let bestCoarse = null;
     let bestCoarseDistM = Infinity;
     if (
@@ -1423,9 +1485,9 @@ const Meter = (() => {
       window.ADDRESSES_COARSE_JP &&
       Array.isArray(window.ADDRESSES_COARSE_JP.items)
     ) {
-      const items = window.ADDRESSES_COARSE_JP.items;
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
+      const coarseItems = window.ADDRESSES_COARSE_JP.items;
+      for (let i = 0; i < coarseItems.length; i++) {
+        const it = coarseItems[i];
         const dLatI = it.lat - targetLatI;
         if (dLatI > coarseRangeI || dLatI < -coarseRangeI) continue;
         const dLngI = it.lng - targetLngI;
@@ -1439,32 +1501,74 @@ const Meter = (() => {
         }
       }
     }
+    // coarse の c は JIS X 0402 市区町村コード 5 桁・先頭 2 桁が県コード
+    let prefName = null;
+    if (bestCoarse && typeof bestCoarse.c === 'string' && bestCoarse.c.length >= 2) {
+      prefName = _jisToPref(bestCoarse.c.substring(0, 2));
+    }
+
+    // ─── ② 該当県の fine が load 済なら fine 検索 (~500m 内) ───
+    if (prefName) {
+      const bundle = _getFineBundleForPref(prefName);
+      if (bundle) {
+        const best = _searchFineItems(bundle.items, lat, lng, targetLatI, targetLngI);
+        if (best) return best.n;
+      }
+    }
+
+    // ─── ③ 後方互換: 全国版 ADDRESSES_FINE_JP が load 済ならそれも検索 ───
+    if (
+      typeof window !== 'undefined' &&
+      window.ADDRESSES_FINE_JP &&
+      Array.isArray(window.ADDRESSES_FINE_JP.items)
+    ) {
+      const best = _searchFineItems(
+        window.ADDRESSES_FINE_JP.items,
+        lat,
+        lng,
+        targetLatI,
+        targetLngI
+      );
+      if (best) return best.n;
+    }
+
+    // ─── ④ fine miss / fine 未 load → coarse 結果 (市区町村 + 付近) ───
     if (bestCoarse) return bestCoarse.n + ' 付近';
 
     return null;
   }
 
-  // ★設計変更宣言 (2026-05-15・住所取得 retry 用判定ヘルパ):
-  //   addresses-fine-jp.js は 24.6 MB あり defer load 完了まで数秒〜数十秒かかる。
-  //   その間 getNearestAddress を呼んでも fine/coarse どちらも未ロードで null フォールバックとなり、
-  //   代行開始直後のボタン押下が全て失敗する事象 (2026-05-15 報告) を回避するため、
-  //   呼び出し側 (business.js の retry ロジック) で「データ未ロード」と「データ済 miss」を
-  //   区別する必要がある。本ヘルパは fine / coarse のいずれかが load 済なら true を返す。
-  //   ・fine のみ未ロード・coarse のみ済 → true (= coarse fallback で動作可能)
-  //   ・両方未ロード → false (= retry 推奨)
+  // ★設計変更宣言 (2026-05-15・住所取得 retry 用判定ヘルパ・47 県分割対応):
+  //   旧: ADDRESSES_FINE_JP (全国版) or COARSE_JP のいずれか load 済なら true
+  //   新: ADDRESSES_FINE_{PREF} (47 県のいずれか) / ADDRESSES_FINE_JP (後方互換) /
+  //       ADDRESSES_COARSE_JP のいずれか load 済なら true
+  //   coarse (PRECACHE 維持・220 KB) は必ず load 済になる前提のため、現実的には
+  //   coarse のロード完了をもって retry を止める判定として機能する (= 旧挙動と等価)。
   //   絶対ルール準拠: 同期判定・例外を投げない・データ未 load でも業務継続性に影響を与えない。
+  function _anyFinePrefLoaded() {
+    if (typeof window === 'undefined') return false;
+    for (const code of Object.keys(_JIS_TO_PREF)) {
+      const pref = _JIS_TO_PREF[code];
+      const upper = pref.toUpperCase().replace(/-/g, '_');
+      const bundle = window['ADDRESSES_FINE_' + upper];
+      if (bundle && Array.isArray(bundle.items) && bundle.items.length > 0) return true;
+    }
+    return false;
+  }
   function isAddressDataReady() {
-    const fineReady =
-      typeof window !== 'undefined' &&
-      window.ADDRESSES_FINE_JP &&
-      Array.isArray(window.ADDRESSES_FINE_JP.items) &&
-      window.ADDRESSES_FINE_JP.items.length > 0;
     const coarseReady =
       typeof window !== 'undefined' &&
       window.ADDRESSES_COARSE_JP &&
       Array.isArray(window.ADDRESSES_COARSE_JP.items) &&
       window.ADDRESSES_COARSE_JP.items.length > 0;
-    return Boolean(fineReady || coarseReady);
+    if (coarseReady) return true;
+    const fineLegacyReady =
+      typeof window !== 'undefined' &&
+      window.ADDRESSES_FINE_JP &&
+      Array.isArray(window.ADDRESSES_FINE_JP.items) &&
+      window.ADDRESSES_FINE_JP.items.length > 0;
+    if (fineLegacyReady) return true;
+    return _anyFinePrefLoaded();
   }
 
   // 起動時warm up（2026/04/30追加）

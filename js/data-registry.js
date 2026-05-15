@@ -209,6 +209,24 @@
         target: 'main',
         optional: true,
       },
+
+      // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・47 県分割対応):
+      //   旧: addresses-fine-jp.js (全国一括 24.6 MB) を SW precache + script defer で起動時 load
+      //   新: addresses-fine-{pref}.js (47 県分割 1 県あたり 0.4 MB 平均) を perPref 動的ロード。
+      //       roads/bridges/tunnels と同じパイプラインで現在地の県のみロードする。
+      //   target='main': window.ADDRESSES_FINE_{PREF} として main thread にロード
+      //                (Meter.getNearestAddress が同期参照)
+      //   optional=true: ロード失敗 (404 / ネット異常) で業務継続性を維持
+      //                (絶対ルール: 住所取得失敗で代行開始/確定を絶対に止めない)
+      {
+        kind: 'addresses-fine',
+        template: '/data/addresses-fine-{pref}.js',
+        globalKeyFn: function (pref) {
+          return 'ADDRESSES_FINE_' + _prefUpper(pref);
+        },
+        target: 'main',
+        optional: true,
+      },
     ],
   };
 
@@ -232,7 +250,9 @@
   //   localStorage 'daikome_warmup_v1' のバージョン管理に使用。
   //   データ構造変更 (registry 改修・新規県/補助種追加) 時に bump すると
   //   既存マーカー invalidate → 全クライアントで再 warmup 起動。
-  const VERSION = '2026-05-13-v1';
+  // ★設計変更宣言 (2026-05-15): perPref に addresses-fine 追加で VERSION bump。
+  //   既存 warmup マーカーを invalidate して全クライアントで新 perPref エントリを取得させる。
+  const VERSION = '2026-05-15-v1';
 
   global.DataRegistry = {
     PREFECTURES_47: PREFECTURES_47,
