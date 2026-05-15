@@ -1287,6 +1287,16 @@ const Meter = (() => {
     isMmReady,
     // 業務単位累積距離 (2026-05-14)
     setBusinessDistance,
+    // ★設計変更宣言 (2026-05-15・テスト用 drain window 制御 API):
+    //   tests/meter-mm-priority.js 等の統合テストは Meter.start() 直後に
+    //   fakeWorker._dispatch() で mmResult を同期投入する設計のため、
+    //   prod 用の 500ms drain window に引っ掛かって state.distance_m が
+    //   加算されず期待値と乖離する。テストでは Meter.start() の直後に
+    //   Meter._setDrainMmUntil(0) を呼出して drain を即時無効化できるようにする。
+    //   prod コードからは呼び出さない (テスト専用 escape hatch)。
+    _setDrainMmUntil: function (t) {
+      _drainMmUntil = typeof t === 'number' ? t : 0;
+    },
     // fareConfig v2 (2026-05-10)
     setSurchargeActive,
     toggleSurcharge,

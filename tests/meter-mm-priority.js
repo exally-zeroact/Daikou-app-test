@@ -143,6 +143,7 @@ console.log('\n[case1] MM healthy → distance_m は MM 由来で増える');
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
   // 仕様: 起動直後は MM がまだ何も返していない (lastMmUsefulAt=0) ため
   //       最初の GPS 入力は GPS-fallback で課金される。これは正しい挙動。
   //       「MM 健全状態からスタート」を再現するには事前に mmResult を 1 回 dispatch する。
@@ -165,6 +166,7 @@ console.log('\n[case1b] 絶対ルール: MM プライムなしでも GPS 直線�
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
   // プライムなし → step 1 では mmHealthy=false だが、roads が無ければ
   // inline road-snap も snap miss → distance_m は加算されない (絶対ルール)
   // step 1 の mmResult 受信で MM 健全に切替・以後は MM 由来で加算
@@ -186,6 +188,7 @@ console.log('\n[case2] 絶対ルール: MM 沈黙でも GPS 直線距離での�
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
   Meter.update(gpsAt(0));
   Meter.update(gpsAt(1));
   w._dispatch({ type: 'mmResult', mmIncrementM: 90 });
@@ -213,6 +216,7 @@ console.log('\n[case3] 絶対ルール: Worker null + roads 未 load → distanc
   Meter.reset();
   Meter.setMapMatcher(null);
   Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
   for (let i = 0; i < 3; i++) Meter.update(gpsAt(i));
   const s = Meter.getState();
   assertNear(
@@ -234,6 +238,7 @@ console.log('\n[case4] MM 沈黙 → 復帰 → distance_m は MM 復帰分の�
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
   Meter.update(gpsAt(0));
   // 6 秒経過 → MM 沈黙中の GPS step (加算なし)
   const realNow = Date.now;
