@@ -163,7 +163,7 @@ function staleWhileRevalidate(request, cacheName) {
               //       Cache の整合性破れ (47/47 完了マーク済なのに 1 県だけ cache 欠落)
               //   新: cache.put 失敗時に postMessage({type:'cachePutFailed', url})
               //       main thread 側 (index.html) で受信し prefStatus を未完了に戻す
-              cache.put(cacheKey, response.clone()).catch(function (err) {
+              cache.put(cacheKey, response.clone()).catch(function (_err) {
                 return self.clients
                   .matchAll({ type: 'window' })
                   .then(function (clients) {

@@ -1,4 +1,5 @@
 // Firebase読み書き・オフライン対応
+// eslint-disable-next-line no-unused-vars -- 他ファイルから FB をグローバル参照 (cross-file global pattern)
 const FB = (() => {
   let vehicleId = 'v1';
   let sessionId = null;
@@ -220,7 +221,7 @@ const FB = (() => {
     q.forEach((data) => {
       db.ref('vehicles/' + vehicleId)
         .update(data)
-        .catch((e) => {
+        .catch((_e) => {
           offlineQueue.push(data);
         });
     });

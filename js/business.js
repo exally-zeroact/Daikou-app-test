@@ -175,7 +175,7 @@ window.Business = (function () {
   const GPS_SAVE_INTERVAL_MS = 1000;
   let _lastDebugLogAt = 0;
 
-  function onGps(gpsResult) {
+  function onGps(_gpsResult) {
     if (!state.active) return;
     if (typeof Meter === 'undefined' || !Meter.getState) return;
 

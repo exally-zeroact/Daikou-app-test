@@ -256,7 +256,7 @@ const ACCEL_LAYER_MIN_SAMPLES = 8;
 const ACCEL_BRIDGE_RANGE_THRESHOLD = 4.0; // m/s² 急上下 G の検出閾値
 const ACCEL_BRIDGE_VARIANCE_THRESHOLD = 0.8; // 高 vibration の検出閾値
 
-function calcAccelLayerHint(accelSamples, now) {
+function _calcAccelLayerHint(accelSamples, now) {
   if (!accelSamples || !Array.isArray(accelSamples)) return null;
   if (accelSamples.length < ACCEL_LAYER_MIN_SAMPLES) return null;
 
@@ -346,7 +346,7 @@ const T12_INERTIAL_MAX_DRIFT_M = 30; // 慣性推定 30m 超なら信用しな�
 
 // 急ブレーキ検出: 直近 N サンプルの |a|-9.8 が一貫して大きい (= 強い動き)
 //   かつ GPS 速度が下降中なら急ブレーキ確度高
-function _detectHardBrake(accelSamples, prevSpeedKmh, currSpeedKmh, now) {
+function _detectHardBrake(accelSamples, prevSpeedKmh, currSpeedKmh, _now) {
   if (!accelSamples || accelSamples.length < T12_HARD_BRAKE_MIN_SAMPLES) return false;
   const recent = accelSamples.slice(-T12_HARD_BRAKE_MIN_SAMPLES);
   let count = 0;
@@ -478,7 +478,7 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
 }
 
-function calcDistance3D(lat1, lng1, alt1, lat2, lng2, alt2) {
+function _calcDistance3D(lat1, lng1, alt1, lat2, lng2, alt2) {
   const flat = calcDistance(lat1, lng1, lat2, lng2);
   if (alt1 == null || alt2 == null) return flat;
   const altDiff = alt2 - alt1;

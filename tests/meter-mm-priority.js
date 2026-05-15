@@ -29,7 +29,7 @@ const ctx = {
   performance: { now: () => Date.now() },
   // GPS グローバル: meter.js が calcDistance3D / calcDistance を期待する
   GPS: {
-    calcDistance3D: function (lat1, lng1, alt1, lat2, lng2, alt2) {
+    calcDistance3D: function (lat1, lng1, _alt1, lat2, lng2, _alt2) {
       return haversineM(lat1, lng1, lat2, lng2);
     },
     calcDistance: function (lat1, lng1, lat2, lng2) {
@@ -59,7 +59,7 @@ function haversineM(lat1, lng1, lat2, lng2) {
 }
 ctx.haversineM = haversineM;
 // vm の context 内でも GPS が同じハバーサインを使えるよう注入し直し
-ctx.GPS.calcDistance3D = function (lat1, lng1, alt1, lat2, lng2, alt2) {
+ctx.GPS.calcDistance3D = function (lat1, lng1, _alt1, lat2, lng2, _alt2) {
   return haversineM(lat1, lng1, lat2, lng2);
 };
 ctx.GPS.calcDistance = function (lat1, lng1, lat2, lng2) {

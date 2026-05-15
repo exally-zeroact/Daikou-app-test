@@ -3,6 +3,7 @@
 // GPS取得はメインスレッド・計算処理はWorkerで実行
 // Worker非対応ブラウザは自動でフォールバック
 // ===========================================
+// eslint-disable-next-line no-unused-vars -- 他ファイルから GPS をグローバル参照 (cross-file global pattern)
 const GPS = (() => {
   let watchId = null;
   let onUpdateCallback = null;

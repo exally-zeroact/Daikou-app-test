@@ -3,6 +3,7 @@
 //   旧: state.distance_m = GPS 直線+×1.3 補正 / MM は参照のみ
 //   新: state.distance_m = MM 道路距離 (primary) / MM silent 5s+ で GPS 直線 (fallback)
 //   業務継続性は維持: MM Worker dead でも GPS 経路で課金が動く
+// eslint-disable-next-line no-unused-vars -- 他ファイルから Meter をグローバル参照 (cross-file global pattern)
 const Meter = (() => {
   let state = {
     running: false,

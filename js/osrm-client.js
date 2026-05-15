@@ -27,7 +27,7 @@
 //   }
 // ============================================================
 
-(function (global) {
+(function (_global) {
   'use strict';
 
   // ★設計変更宣言 (2026-05-12): Web Worker 内で動作するため main thread の
