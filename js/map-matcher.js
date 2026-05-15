@@ -1,4 +1,7 @@
 // ============================================================
+/* eslint-disable no-console -- ★設計変更宣言 (2026-05-15・lint Phase 6):
+   本ファイルは Web Worker 内で動作・window.dlog が未定義のため代替手段なし。
+   内部 _dbg() ラッパーが console.log を呼ぶ箇所のみで使用 (= Class C)。 */
 // map-matcher.js (Worker B)
 // MM-1: 既存 _updateMapMatching 処理を Worker に移植・挙動同一
 // MM-1.5: Cellular Network API による tunnel hint 受信・デッドレコニング

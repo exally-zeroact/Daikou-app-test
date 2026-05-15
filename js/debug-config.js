@@ -4,6 +4,11 @@
 // ★本番ドメイン移行時に自動的に無効化される
 // ★リリース時の削除作業ゼロ化
 // ===========================================
+/* eslint-disable no-console -- ★設計変更宣言 (2026-05-15・lint Phase 6):
+   本ファイルは dlog 実装本体 (window.dlog) と DEBUG-mode 専用の Eruda 初期化ログを
+   含むため、console.* の使用が意図的 (= Class C)。
+   dlog で置換すると無限再帰 (dlog → console → dlog → ...) になる箇所もあり file-level
+   opt-out が唯一妥当な解決。 */
 const DEBUG = (() => {
   const hostname = location.hostname;
   const search = location.search;

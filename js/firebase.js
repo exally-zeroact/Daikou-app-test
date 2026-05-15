@@ -13,7 +13,7 @@ const FB = (() => {
       try {
         _db = firebase.database();
       } catch (e) {
-        console.error('DB init error:', e);
+        dlog('[FB] DB init error:', e);
       }
     }
     return _db;
@@ -76,10 +76,10 @@ const FB = (() => {
             nextRetryAt: Date.now() + RETRY_BACKOFF_MS[1], // 1 秒後から再試行可
           });
         } catch (e) {
-          console.error('[FB.retry] enqueue error:', e);
+          dlog('[FB.retry] enqueue error:', e);
         }
       })
-      .catch((e) => console.error('[FB.retry] db open error:', e));
+      .catch((e) => dlog('[FB.retry] db open error:', e));
   }
 
   function _retryGetAll() {
@@ -171,7 +171,7 @@ const FB = (() => {
         }
       }
     } catch (e) {
-      console.error('[FB.retry] flush error:', e);
+      dlog('[FB.retry] flush error:', e);
     } finally {
       _flushInProgress = false;
     }
@@ -204,7 +204,7 @@ const FB = (() => {
       db.ref('vehicles/' + vehicleId)
         .update(payload)
         .catch((e) => {
-          console.error('[FB] 書き込みエラー:', e);
+          dlog('[FB] 書き込みエラー:', e);
           offlineQueue.push(payload);
         });
     } else {
@@ -244,7 +244,7 @@ const FB = (() => {
     db.ref('sessions_log/' + sessionId)
       .set(sessionData)
       .catch((e) => {
-        console.error('[FB] startSession failed, enqueuing retry:', e && e.message);
+        dlog('[FB] startSession failed, enqueuing retry:', e && e.message);
         _enqueueRetry('startSession', { sessionId: sessionId, data: sessionData });
       });
     db.ref('vehicles/' + vehicleId).update({ status: 'driving' });
@@ -264,7 +264,7 @@ const FB = (() => {
     db.ref('sessions_log/' + _sid)
       .update(sessionUpdate)
       .catch((e) => {
-        console.error('[FB] endSession failed, enqueuing retry:', e && e.message);
+        dlog('[FB] endSession failed, enqueuing retry:', e && e.message);
         _enqueueRetry('endSession', { sessionId: _sid, data: sessionUpdate });
       });
     db.ref('vehicles/' + vehicleId).update({
@@ -340,7 +340,7 @@ const FB = (() => {
           } catch (e) {}
         }
       })
-      .catch((e) => console.error('[FB] loadFareConfig error:', e));
+      .catch((e) => dlog('[FB] loadFareConfig error:', e));
   }
 
   function saveFareConfig(config) {
@@ -350,7 +350,7 @@ const FB = (() => {
     db.ref('fare_config/default')
       .set(config)
       .catch((e) => {
-        console.error('[FB] saveFareConfig failed, enqueuing retry:', e && e.message);
+        dlog('[FB] saveFareConfig failed, enqueuing retry:', e && e.message);
         _enqueueRetry('saveFareConfig', config);
       });
   }
@@ -389,7 +389,7 @@ const FB = (() => {
         // RTDB transaction でアトミック +1
         db.ref('pheromone/' + pref + '/' + roadIndex)
           .transaction((curr) => (curr || 0) + 1)
-          .catch((e) => console.error('[FB] pheromone+1 error:', e));
+          .catch((e) => dlog('[FB] pheromone+1 error:', e));
       }
     }
     _sessionVisited.clear();

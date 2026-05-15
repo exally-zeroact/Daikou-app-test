@@ -33,6 +33,9 @@
         "afterEach": "readonly",
         "beforeAll": "readonly",
         "afterAll": "readonly"
+      },
+      "rules": {
+        "no-console": "off"
       }
     }
   ]
