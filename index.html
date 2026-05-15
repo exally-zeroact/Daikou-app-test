@@ -1454,14 +1454,22 @@
         color: #fff;
         border-color: #007aff;
       }
+      /* ★設計変更宣言 (2026-05-15・修正3): preview-table を全段列挙 (~50 行) に変更したため
+         固定高さ + 縦スクロール container でラップ・thead は sticky で常時表示。 */
+      #overlayFare .preview-table-scroll {
+        max-height: 45vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #b8d9ff;
+        overscroll-behavior-y: contain;
+      }
       #overlayFare .preview-table {
         width: 100%;
         border-collapse: collapse;
         font-family: 'DM Mono', monospace;
         background: #fff;
-        border-radius: 8px;
-        overflow: hidden;
-        border: 1px solid #b8d9ff;
       }
       #overlayFare .preview-table th,
       #overlayFare .preview-table td {
@@ -1474,6 +1482,9 @@
         background: #b8d9ff;
         color: #1c1c1e;
         font-weight: 700;
+        position: sticky;
+        top: 0;
+        z-index: 1;
       }
       #overlayFare .preview-table td {
         color: #1c1c1e;
@@ -1611,31 +1622,7 @@
           padding: 14px 4px;
         }
       }
-      .menu-btn {
-        background: rgba(255, 255, 255, 0.2);
-        border: none;
-        border-radius: 8px;
-        padding: 4px 12px;
-        cursor: pointer;
-        color: #fff;
-        font-size: 20px;
-        font-weight: 700;
-        font-family: 'Noto Sans JP', sans-serif;
-        -webkit-transition:
-          transform 0.1s,
-          -webkit-filter 0.1s;
-        transition:
-          transform 0.1s,
-          filter 0.1s;
-        -webkit-appearance: none;
-        display: flex;
-        align-items: center;
-        text-decoration: none !important;
-      }
-      .menu-btn:active {
-        -webkit-transform: scale(0.9);
-        transform: scale(0.9);
-      }
+      /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn 削除済 (≡ ハンバーガーメニュー撤去) */
       .surcharge-badge span {
         font-size: 11px;
         color: #fff;
@@ -2467,12 +2454,7 @@
           padding: 3px 10px !important;
           font-size: 10px !important;
         }
-        .menu-btn {
-          padding: 6px 12px !important;
-          font-size: 16px !important;
-          margin: 0 !important;
-          line-height: 1 !important;
-        }
+        /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn landscape 上書き削除済 (ハンバーガーメニュー撤去) */
 
         /* コンテンツ：左半分 */
         .content {
@@ -2704,14 +2686,10 @@
         }
       }
 
-      /* ★設計変更宣言 (2026-05-11): Eruda DevTools floating ボタン保険的非表示
-   debug-config.js で load 自体スキップしているが、過去 cache から残った場合も非表示にする
-   ?debug=eruda 付き時のみ debug-config.js が load する */
-      .eruda-dev-tools,
-      [class*='eruda-entry'],
-      [class*='eruda-container'] {
-        display: none !important;
-      }
+      /* ★設計変更宣言 (2026-05-15・修正2): Eruda 関連 CSS 削除済。
+         本ファイル内には Eruda 本体実装 (eruda.init / ⚙️ ボタン / ?debug=eruda 経路) は
+         元々存在せず、本 selector は旧 cache 上の Eruda DOM を保険的に隠す目的のみだった。
+         Eruda 機能自体は js/debug-config.js に常駐し続けるが、本 selector は不要のため削除。 */
 
       /* ★設計変更宣言 (2026-05-11): データ更新バナー (businessStart 7 日経過時のみ flow 表示) */
       .data-update-banner-wrap {
@@ -3276,17 +3254,9 @@
         >
           <span id="surchargeLabel">割増 ON</span>
         </div>
-        <button
-          class="menu-btn"
-          id="menuBtn"
-          onclick="
-            event.stopPropagation();
-            onMenuClick();
-            return false;
-          "
-        >
-          ≡
-        </button>
+        <!-- ★設計変更宣言 (2026-05-15・修正1): 業務画面右上ハンバーガーメニュー (≡ menuBtn) 削除。
+             下部ナビ (bottom-nav) に設定タブが常時表示されているため機能的に重複・冗長。
+             onMenuClick() 関数定義 (L6536) と .menu-btn CSS (L1614,1635,2470) も合わせて削除。 -->
       </div>
     </div>
 
@@ -6532,32 +6502,9 @@
         // OSRM削除済（2026/04/26）：GPS+IMU融合エンジンへ移行
       }
 
-      // ─── Menuボタン ───
-      function onMenuClick() {
-        if (appState === 'driving') {
-          showToast('走行中はMenuを開けません');
-          return;
-        }
-        // 2026/05/04 夜・追加：設定画面遷移前に Business 状態を強制保存
-        // 司さん指摘「設定行ったら総走行距離0に戻る」
-        // 1秒throttle で save が間に合わない場合の対策
-        if (typeof Business !== 'undefined' && typeof Business.save === 'function') {
-          try {
-            Business.save();
-            if (typeof dlog === 'function') dlog('[Business] menu遷移前save');
-          } catch (e) {
-            console.error('[Business] menu遷移前save エラー:', e);
-          }
-        }
-        // ★設計変更宣言 (2026-05-15・Phase B): location.href='settings.html' (MPA + redirect)
-        //   → window.showOverlay('settings') (SPA seamless) に切替。
-        //   page reload 発生せず GPS / Meter / MM Worker / WakeLock 継続稼働。
-        if (typeof window.showOverlay === 'function') {
-          window.showOverlay('settings');
-        } else {
-          location.href = 'settings.html';
-        }
-      }
+      // ★設計変更宣言 (2026-05-15・修正1): onMenuClick() 削除済。
+      //   旧 ≡ ハンバーガーメニューボタン (menuBtn) からのみ呼び出されていた関数で、
+      //   bottom-nav 設定タブの showOverlay('settings') に役割を完全に吸収済のため不要。
 
       // ─── 確定ボタン（旧Send）───
       function onSend() {
@@ -9288,22 +9235,53 @@
             typeof fc.add_distance_m === 'number' && fc.add_distance_m > 0
               ? fc.add_distance_m
               : 420;
-          const stepsToShow = [0, 1, 2, 3, 5, 10, 15, 20, 30, 50];
-          const distances = stepsToShow.map((n) => baseD + n * addD);
+          // ★設計変更宣言 (2026-05-15・修正3・プレビューテーブル全段列挙化):
+          //   旧: stepsToShow=[0,1,2,3,5,10,15,20,30,50] の飛び飛び 10 段表示で
+          //       _calcFareForPreview の +1 step 計算と相まって 1420m → ¥1500
+          //       と表示され ¥1400 が消失していた事象を解消。
+          //   新: 旧形式 (tiersEnabled=false) では baseFare + n*addFare の純粋線形列挙で
+          //       n=0..maxN まで全段 (~22000m 程度) を順次表示・段間 ¥100 ずつ確実に増える。
+          //       tiersEnabled=true の場合は従来の _calcFareForPreview を使用 (段階定義は
+          //       ユーザーの自由なので飛び飛び表示しない・連続段表示)。
+          //   絶対ルール「指示された箇所のみ」遵守: 本変更は overlayFare 確認タブの
+          //   プレビューテーブル生成ロジックのみ・meter.js の calcFare 本体は無変更。
           const tbody = $('_fare_previewTbody');
           tbody.innerHTML = '';
-          distances.forEach((d, idx) => {
-            const fare = _calcFareForPreview(d) * mul;
-            const rounded = _roundFare(fare);
-            const n = stepsToShow[idx];
-            const label =
-              n === 0
-                ? '初乗り (' + d.toLocaleString() + 'm)'
-                : (d >= 1000 ? (d / 1000).toFixed(2) + 'km' : d + 'm') + ' (+' + n + '段)';
-            const tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + label + '</td><td>¥' + rounded.toLocaleString() + '</td>';
-            tbody.appendChild(tr);
-          });
+          const useTiers =
+            Array.isArray(fc.tiers) && fc.tiers.length > 0 && fc.tiersEnabled !== false;
+          const MAX_DIST_M = 22000;
+          if (useTiers) {
+            // tiers 経路: 旧式 stepsToShow を維持 (段階定義はユーザー設定なので飛び飛び表示)
+            const stepsToShow = [0, 1, 2, 3, 5, 10, 15, 20, 30, 50];
+            stepsToShow.forEach((n) => {
+              const d = baseD + n * addD;
+              if (d > MAX_DIST_M) return;
+              const fare = _calcFareForPreview(d) * mul;
+              const rounded = _roundFare(fare);
+              const label =
+                n === 0
+                  ? '初乗り (' + d.toLocaleString() + 'm)'
+                  : (d >= 1000 ? (d / 1000).toFixed(2) + 'km' : d + 'm') + ' (+' + n + '段)';
+              const tr = document.createElement('tr');
+              tr.innerHTML = '<td>' + label + '</td><td>¥' + rounded.toLocaleString() + '</td>';
+              tbody.appendChild(tr);
+            });
+          } else {
+            // 旧形式 (base + add) 純粋線形列挙: n=0 で base_fare・以降 n*add_fare 加算
+            const maxN = addD > 0 ? Math.floor((MAX_DIST_M - baseD) / addD) : 0;
+            for (let n = 0; n <= maxN; n++) {
+              const d = baseD + n * addD;
+              const fare = (fc.base_fare + n * fc.add_fare) * mul;
+              const rounded = _roundFare(fare);
+              const label =
+                n === 0
+                  ? '初乗り (' + d.toLocaleString() + 'm)'
+                  : (d >= 1000 ? (d / 1000).toFixed(2) + 'km' : d + 'm') + ' (+' + n + '段)';
+              const tr = document.createElement('tr');
+              tr.innerHTML = '<td>' + label + '</td><td>¥' + rounded.toLocaleString() + '</td>';
+              tbody.appendChild(tr);
+            }
+          }
 
           const ps = $('_fare_previewAutoStatus');
           if (ps) {
@@ -10291,15 +10269,19 @@
             <div class="card">
               <div class="card-title">距離別料金</div>
               <div class="preview-multiplier" id="_fare_previewMultiplier">適用倍率: 1.00</div>
-              <table class="preview-table">
-                <thead>
-                  <tr>
-                    <th>距離</th>
-                    <th>料金</th>
-                  </tr>
-                </thead>
-                <tbody id="_fare_previewTbody"></tbody>
-              </table>
+              <!-- ★設計変更宣言 (2026-05-15・修正3): 全段列挙 (~50 行) 化に伴い preview-table を
+                   固定高さスクロール container でラップ。max-height は viewport 45% 程度。 -->
+              <div class="preview-table-scroll">
+                <table class="preview-table">
+                  <thead>
+                    <tr>
+                      <th>距離</th>
+                      <th>料金</th>
+                    </tr>
+                  </thead>
+                  <tbody id="_fare_previewTbody"></tbody>
+                </table>
+              </div>
             </div>
             <div class="card">
               <div class="card-title">基本料金</div>
