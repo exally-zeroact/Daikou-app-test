@@ -1113,6 +1113,31 @@
         color: #ff9500;
         margin-top: 2px;
       }
+      /* ★設計変更宣言 (2026-05-16・履歴画面 経路表示):
+         各 ride-item の ride-left 内に「南江戸町 → 道後温泉 → 三津浜」形式で経路を表示。
+         既存 .ride-extras と同じ控えめなトーン (11px / margin-top 2px) に、route-card と
+         同じ青系 (#1d4ed8) を採用して「経路」とすぐわかるようにする。
+         長い経路の折返し対応に word-break: break-word を付与。 */
+      #overlayHistory .ride-route {
+        font-size: 11px;
+        color: #1d4ed8;
+        font-weight: 700;
+        margin-top: 2px;
+        word-break: break-word;
+        line-height: 1.4;
+      }
+      #overlayHistory .ride-route .route-sep {
+        color: #93c5fd;
+        margin: 0 3px;
+        font-weight: 700;
+      }
+      #overlayHistory .ride-route .route-warn {
+        background: #fef3c7;
+        color: #92400e;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 10px;
+      }
       #overlayHistory .empty {
         text-align: center;
         padding: 60px 20px;
@@ -3906,7 +3931,11 @@
             onclick="onWaypointBtn()"
           >
             <div class="wp-main">
-              <div class="wp-title">📍 経由地点を記録</div>
+              <!-- ★設計変更宣言 (2026-05-16・waypointCard 表示拡張):
+                   wp-title を動的に書き換えて「出発地 → 経由地」を表示する。
+                   updateWaypointCardUI が startUiTimer (500ms) で Business.getCurrentTrip
+                   から start_address と waypoints を読み、矢印区切りで連結描画する。 -->
+              <div class="wp-title" id="waypointTitle">📍 経由地点を記録</div>
               <div class="wp-sub" id="waypointSub">タップで現在地の住所を記録</div>
             </div>
             <div class="wp-badge" id="waypointBadge">0</div>
@@ -6521,20 +6550,60 @@
         updateWaypointCardUI();
       }
       function updateWaypointCardUI() {
+        // ★設計変更宣言 (2026-05-16・waypointCard 表示拡張・出発地+経由地連結):
+        //   wp-title を Business.getCurrentTrip() の start_address と waypoints から動的構築。
+        //   ・出発地未取得: 「📍 出発地取得中...」
+        //   ・経由 0 件 + 出発地あり: 「📍 ○○町 から出発」
+        //   ・経由 N 件 + 出発地あり: 「📍 ○○町 → △△町 → ... 」(矢印連結)
+        //   ・住所 null の項目は「⚠ 位置不明」と表示 (route-warn 風)
+        //   wp-sub もカウントに応じて文言を変える ("タップで経由地点を追加（N件）")。
+        //   startUiTimer (500ms) で毎回呼ばれるため retry で住所が遅延取得されても自動追従。
         const card = document.getElementById('waypointCard');
+        const titleEl = document.getElementById('waypointTitle');
         const badge = document.getElementById('waypointBadge');
         const sub = document.getElementById('waypointSub');
         if (!card) return;
         let count = 0;
+        let startAddr = null;
+        let waypoints = [];
         try {
           if (typeof Business !== 'undefined' && typeof Business.getCurrentTrip === 'function') {
             const ct = Business.getCurrentTrip();
-            if (ct && Array.isArray(ct.waypoints)) count = ct.waypoints.length;
+            if (ct) {
+              startAddr = ct.start_address;
+              if (Array.isArray(ct.waypoints)) {
+                waypoints = ct.waypoints;
+                count = waypoints.length;
+              }
+            }
           }
         } catch (_) {}
+
+        // wp-title 構築
+        if (titleEl) {
+          const ESC = typeof _escapeHtmlForRoute === 'function' ? _escapeHtmlForRoute : String;
+          const WARN = '<span class="route-warn">⚠ 位置不明</span>';
+          if (!startAddr && count === 0) {
+            // 代行開始直後で出発地住所がまだ取得できていない (retry 待ち)
+            titleEl.textContent = '📍 出発地取得中...';
+          } else if (count === 0) {
+            titleEl.innerHTML = '📍 ' + ESC(startAddr) + ' から出発';
+          } else {
+            // 出発地 → 経由 1 → 経由 2 → ... を矢印連結
+            const parts = [];
+            parts.push(startAddr ? ESC(startAddr) : WARN);
+            for (const wp of waypoints) {
+              const a = wp && wp.address;
+              parts.push(a ? ESC(a) : WARN);
+            }
+            titleEl.innerHTML = '📍 ' + parts.join(' <span class="route-sep">→</span> ');
+          }
+        }
+
+        // wp-sub / .recorded / badge
         if (count > 0) {
           card.classList.add('recorded');
-          if (sub) sub.textContent = '記録済み・もう一度タップで追加';
+          if (sub) sub.textContent = 'タップで経由地点を追加（' + count + '件）';
         } else {
           card.classList.remove('recorded');
           if (sub) sub.textContent = 'タップで現在地の住所を記録';
@@ -6632,6 +6701,17 @@
           const now = new Date();
           const histKey = 'daikou_history_' + now.toDateString();
           const hist = JSON.parse(localStorage.getItem(histKey) || '[]');
+          // ★設計変更宣言 (2026-05-16・履歴画面 経路表示・hist エントリに住所追加):
+          //   Business.getCurrentTrip() から start_address / waypoints / end_address を取得し
+          //   hist エントリに保存。null フィールドは undefined のまま保存 (_hist_render が
+          //   未取得時は表示スキップ判定する)。住所取得失敗でも distance/fare は保存される
+          //   (絶対ルール: 業務継続性最優先)。
+          let _trip = null;
+          try {
+            if (typeof Business !== 'undefined' && typeof Business.getCurrentTrip === 'function') {
+              _trip = Business.getCurrentTrip();
+            }
+          } catch (_) {}
           hist.push({
             time:
               now.getHours().toString().padStart(2, '0') +
@@ -6641,6 +6721,14 @@
             fare: total,
             surcharge: surchargeOn,
             extras: [...extras],
+            start_address: _trip ? _trip.start_address || null : null,
+            end_address: _trip ? _trip.end_address || null : null,
+            waypoints:
+              _trip && Array.isArray(_trip.waypoints)
+                ? _trip.waypoints.map(function (w) {
+                    return { address: (w && w.address) || null };
+                  })
+                : [],
           });
           localStorage.setItem(histKey, JSON.stringify(hist));
         }
@@ -8959,6 +9047,38 @@
           // 走行リスト
           const list = document.createElement('div');
           list.className = 'ride-list';
+          // ★設計変更宣言 (2026-05-16・履歴画面 経路表示):
+          //   ride.start_address / end_address / waypoints[] が記録されている ride のみ
+          //   ride-left 内に経路行を追加表示 (「南江戸町 → 道後温泉 → 三津浜」形式)。
+          //   start/end 両方 null の古い ride は経路行を表示しない (= 既存 UI と同じ)。
+          //   null 個別項目は ⚠ 位置不明 (route-warn) でレンダリング。
+          //   XSS 対策: 住所文字列は _escapeHtmlForRoute で escape する。
+          function _histEscape(s) {
+            if (typeof _escapeHtmlForRoute === 'function') return _escapeHtmlForRoute(s);
+            return String(s).replace(/[&<>"']/g, function (c) {
+              return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+          }
+          function _buildRouteHtml(ride) {
+            const startAddr = ride && ride.start_address;
+            const endAddr = ride && ride.end_address;
+            if (!startAddr && !endAddr) return ''; // 旧 ride or 完全 miss → 経路行非表示
+            const WARN = '<span class="route-warn">⚠ 位置不明</span>';
+            const parts = [];
+            parts.push(startAddr ? _histEscape(startAddr) : WARN);
+            if (Array.isArray(ride.waypoints)) {
+              ride.waypoints.forEach(function (wp) {
+                const a = wp && wp.address;
+                parts.push(a ? _histEscape(a) : WARN);
+              });
+            }
+            parts.push(endAddr ? _histEscape(endAddr) : WARN);
+            return (
+              '<div class="ride-route">🗺 ' +
+              parts.join('<span class="route-sep">→</span>') +
+              '</div>'
+            );
+          }
           rides.forEach(function (ride, i) {
             const item = document.createElement('div');
             item.className = 'ride-item';
@@ -8971,6 +9091,7 @@
                 .join('　');
             }
             if (ride.surcharge) extrasText = (extrasText ? extrasText + '　' : '') + '割増あり';
+            const routeHtml = _buildRouteHtml(ride);
             item.innerHTML =
               '<div class="ride-left">' +
               '<div class="ride-num">' +
@@ -8983,6 +9104,7 @@
               ((ride.distance_m || 0) / 1000).toFixed(2) +
               'km</div>' +
               (extrasText ? '<div class="ride-extras">' + extrasText + '</div>' : '') +
+              routeHtml +
               '</div>' +
               '<div class="ride-right">' +
               '<div class="ride-fare">¥' +
