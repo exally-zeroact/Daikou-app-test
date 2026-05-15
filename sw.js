@@ -154,7 +154,7 @@ function staleWhileRevalidate(request, cacheName){
             //       main thread 側 (index.html) で受信し prefStatus を未完了に戻す
             cache.put(cacheKey, response.clone()).catch(function(err){
               return self.clients.matchAll({ type: 'window' }).then(function(clients){
-                for(var i = 0; i < clients.length; i++){
+                for(let i = 0; i < clients.length; i++){
                   try { clients[i].postMessage({ type: 'cachePutFailed', url: request.url }); } catch(_) {}
                 }
               }).catch(function(){});
