@@ -68,11 +68,11 @@ const TrainingCollector = (() => {
     }
   }
   let _enabled = _initEnabledState();
-  let _accelBuffer = [];   // [{x, y, z}] (sliding window・最大 WINDOW_SAMPLES)
-  let _gyroBuffer = [];    // [{a, b, g}] (任意・最大 WINDOW_SAMPLES)
+  const _accelBuffer = [];   // [{x, y, z}] (sliding window・最大 WINDOW_SAMPLES)
+  const _gyroBuffer = [];    // [{a, b, g}] (任意・最大 WINDOW_SAMPLES)
   let _lastSampleT = 0;
   let _motionListenerAdded = false;
-  let _stats = {
+  const _stats = {
     sampled: 0, saved: 0,
     skipped_disabled: 0, skipped_not_ready: 0,
     skipped_accuracy: 0, skipped_speed: 0,

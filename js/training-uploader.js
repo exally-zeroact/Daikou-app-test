@@ -61,7 +61,7 @@ const TrainingUploader = (() => {
   let _periodicTimer = null;
   let _initDone = false;
 
-  let _stats = {
+  const _stats = {
     triggered: 0, uploaded: 0,
     skipped_disabled: 0, skipped_running: 0,
     skipped_offline: 0, skipped_not_wifi: 0, skipped_not_charging: 0,

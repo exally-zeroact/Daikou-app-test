@@ -189,7 +189,7 @@ function calcBearing(lat1, lng1, lat2, lng2) {
 }
 
 function angleDiff(a, b) {
-  let d = Math.abs(a - b) % 360;
+  const d = Math.abs(a - b) % 360;
   return d > 180 ? 360 - d : d;
 }
 

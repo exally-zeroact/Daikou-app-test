@@ -307,7 +307,7 @@
     }
     // 未指定の場合はフォールバック検索（軽い→重いの順）
     // 1回目: radiusGrids=5（121グリッド）通常時はこれで成功
-    let result = this._searchSnap(lat, lng, options, 5);
+    const result = this._searchSnap(lat, lng, options, 5);
     if (result) return result;
     // 2回目: radiusGrids=9（361グリッド）長い道路の始点が遠い場合のフォールバック
     return this._searchSnap(lat, lng, options, 9);
@@ -450,7 +450,7 @@
     if (options.radiusGrids != null) {
       return this._searchAllSnaps(lat, lng, options, options.radiusGrids, K);
     }
-    let result = this._searchAllSnaps(lat, lng, options, 5, K);
+    const result = this._searchAllSnaps(lat, lng, options, 5, K);
     if (result.length >= K) return result;
     // フォールバック: より広い範囲で再検索（長い道路の始点が遠い場合）
     return this._searchAllSnaps(lat, lng, options, 9, K);

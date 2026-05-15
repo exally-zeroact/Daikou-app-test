@@ -469,7 +469,7 @@ const GPS = (() => {
     const φ1=lat1*Math.PI/180,φ2=lat2*Math.PI/180,Δλ=(lng2-lng1)*Math.PI/180;
     return((Math.atan2(Math.sin(Δλ)*Math.cos(φ2),Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ))*180/Math.PI)+360)%360;
   }
-  function angleDiff(a,b){let d=Math.abs(a-b)%360;return d>180?360-d:d;}
+  function angleDiff(a,b){const d=Math.abs(a-b)%360;return d>180?360-d:d;}
   function checkStationaryFallback(speedKmh,lat,lng,now){
     if(isStationary&&speedKmh>=CONFIG.resume_speed_kmh){lowSpeedStart=null;return false;}
     if(speedKmh<CONFIG.speed_limit_kmh){

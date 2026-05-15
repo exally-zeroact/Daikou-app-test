@@ -624,7 +624,7 @@ let _osrmInflight = false;                  // 並列実行防止
 let _osrmEnabled = true;                    // false で機能無効化（main から configOsrm で制御）
 
 // 直近の教師信号: trace[i] と trace[i+1] 間の OSRM 計算距離 = legs[i]
-let _osrmTeacher = {
+const _osrmTeacher = {
   trace: [],
   legs: [],
   expiresAt: 0,
@@ -830,7 +830,7 @@ function _segmentBearing(latA, lngA, latB, lngB){
 }
 
 function _angleDiff(a, b){
-  let d = Math.abs(a - b) % 360;
+  const d = Math.abs(a - b) % 360;
   return d > 180 ? 360 - d : d;
 }
 
@@ -2112,7 +2112,7 @@ ViterbiMatcher.prototype.flush = function(){
 };
 
 // MM-3 / MM-7: Viterbi インスタンス（reset で使い回し・N=15 で開始）
-let viterbi = new ViterbiMatcher(_viterbiN);
+const viterbi = new ViterbiMatcher(_viterbiN);
 
 // 実機デバッグログ (2026-05-09 追加・既定 OFF)
 //   true で gps 受信・候補スコア・mmResult を console.log 出力
