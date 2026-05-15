@@ -72,6 +72,13 @@ const PRECACHE_FILES = [
   //       perPref 動的ロード (data-registry.js) で現在地の県のみ load する設計に変更。
   //   fine-jp.js (全国版・24.6 MB) はファイル自体は残置 (後方互換) だが PRECACHE 対象外。
   '/data/addresses-coarse-jp.js',
+  // ★設計変更宣言 (2026-05-16・road-graph-backbone-jp.js を PRECACHE に追加):
+  //   map-matcher.js L2576 loadBackbone msgType ハンドラで実装済の機能が参照しているが
+  //   PRECACHE 未登録だったため、初回起動時に 32 MB のネット fetch が走り起動遅延の原因に
+  //   なっていた (addresses-fine-jp.js 24.6 MB と同等の症状)。data-registry global に
+  //   optional 登録済 (worker target・loadBackbone msgType) なので、PRECACHE で先取得して
+  //   起動時に確実にキャッシュ取得・2 回目以降は SWR で瞬時返却する。
+  '/data/road-graph-backbone-jp.js',
 ];
 
 self.addEventListener('install', function (e) {
@@ -318,7 +325,11 @@ self.addEventListener('fetch', function (e) {
     //   旧 fine-jp.js (全国版・24.6 MB) も SWR キャッシュ対象に残置 (後方互換)。
     req.url.includes('/data/addresses-coarse-jp.js') ||
     req.url.includes('/data/addresses-fine-jp.js') ||
-    req.url.includes('/data/addresses-fine-')
+    req.url.includes('/data/addresses-fine-') ||
+    // ★設計変更宣言 (2026-05-16・road-graph-backbone-jp.js を SWR 明示登録):
+    //   PRECACHE 追加と対で全国共通バンドル分岐に明示登録。デフォルト「その他 JS・CSS」
+    //   分岐でも SWR は効くが、明示登録で意図を明確化し他全国共通バンドルと並列の扱いに。
+    req.url.includes('/data/road-graph-backbone-jp.js')
   ) {
     e.respondWith(staleWhileRevalidate(req));
     return;
