@@ -246,6 +246,13 @@ self.addEventListener('fetch', function (e) {
   //   → ブラウザが直接処理。SW を経由しないことで opaque キャッシュ汚染も回避
   if (url.origin !== self.location.origin) return;
 
+  // ★設計変更宣言 (2026-05-15・SW 自動更新確実化):
+  //   sw.js 自身の fetch は browser の SW 更新フローのため絶対に intercept してはいけない。
+  //   仕様上 browser はトップレベル SW script を network 直送するが、iOS Safari 等で
+  //   稀にこのパスが SW を経由する報告があり、その場合 staleWhileRevalidate fallback で
+  //   旧 sw.js を返してしまうと更新検知が永久に止まる。defense-in-depth として明示 skip。
+  if (url.pathname === '/sw.js') return;
+
   // [修正4] /api/* は network-only。失敗時も HTML フォールバックせず JSON エラー返却
   //   → 旧コードでは fetch 失敗時 caches.match('/') が HTML を返し、呼び出し側 JSON.parse が落ちていた
   if (url.pathname.startsWith('/api/')) {

@@ -7633,6 +7633,35 @@
             try {
               reg.update();
             } catch (_) {}
+            // ★設計変更宣言 (2026-05-15・SW 自動更新確実化):
+            //   旧: register 直後の reg.update() 1 回のみ・以降は browser 任せ (24h cycle)
+            //       → iOS PWA 長時間起動で新版 SW を取得し損ねる事象 (司さん「キャッシュクリア
+            //         手動」必要だった件) を解消するため、visibilitychange + 5 分間隔 polling
+            //         で能動的に update check する。
+            //   挙動: タスクキル復帰 / 別タブ復帰 / 5 分経過 のいずれかで reg.update() 発火。
+            //         新 SW があれば install → skipWaiting → activate → controllerchange →
+            //         location.reload (既存 handler L7621-7627) で自動切替。
+            //   業務影響: reg.update() は HEAD 相当の軽量チェック・通信 100KB 未満・
+            //             業務継続 (GPS / Meter / Worker B) には影響なし。
+            try {
+              document.addEventListener('visibilitychange', function () {
+                if (document.visibilityState === 'visible') {
+                  try {
+                    reg.update();
+                  } catch (_) {}
+                }
+              });
+            } catch (_) {}
+            try {
+              setInterval(
+                function () {
+                  try {
+                    reg.update();
+                  } catch (_) {}
+                },
+                5 * 60 * 1000
+              );
+            } catch (_) {}
           })
           .catch(function (err) {
             dlog('[SW] 登録失敗（開発環境では正常）:', err.message);
