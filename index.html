@@ -5520,7 +5520,13 @@
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           let total = fare + extraTotal;
 
-          document.getElementById('driveDist').textContent = (s.distance_m / 1000).toFixed(2);
+          // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・走行距離表示ラグ解消):
+          //   表示は state.distance_m (Tier 1 commit-authoritative・課金距離) +
+          //   state.tier2_pending_m (Tier 2 inline 道路 snap 先行値・道路ジオメトリ距離) の和。
+          //   commit ラグ (Android 3s / iOS 10s) を Tier 2 並走で 0.2s/1.0s まで短縮する。
+          //   driveFare (= 課金額) は s.fare_yen のまま (= calcFare(state.distance_m) の結果)。
+          const displayDistM = (s.distance_m || 0) + (s.tier2_pending_m || 0);
+          document.getElementById('driveDist').textContent = (displayDistM / 1000).toFixed(2);
           document.getElementById('driveFare').textContent = total.toLocaleString();
 
           // ★設計変更宣言 (2026-05-10): driveSource を全面見直し

@@ -35,7 +35,27 @@ const Meter = (() => {
     //   絶対ルール準拠: 距離計算は既存 5-tier (MM / inline / gap / off-road / GPS) と同じ道路距離。
     //   永続化: Business.onGps() 経由で daikou_business_state の state.total_distance_m に sync。
     business_distance_m: 0,
+    // ─── Tier 2 リードインジケータ用 表示先行距離 (2026-05-15 追加) ───
+    // ★設計変更宣言 (2026-05-15・走行距離表示ラグ解消・Tier 2 リードインジケータ):
+    //   問題: 課金経路 (state.distance_m) は Tier 1 (MM Worker B) Viterbi commit 発火時のみ
+    //         更新されるため、UI 反映が Android 5Hz=3s / iOS 1Hz=10s 遅れる。
+    //   対策: Tier 2 (inline 道路 snap・main thread 同期) を mmHealthy 時も毎 GPS step 並走させ、
+    //         RegionLoader.calcRoadDistance で算出した道路ジオメトリ距離を本フィールドに累積。
+    //         表示式は state.distance_m + state.tier2_pending_m (即時反映)、課金式は
+    //         state.fare_yen = calcFare(state.distance_m) のまま (Tier 1 authoritative 維持)。
+    //   commit 受領時に当該 window 期間 (cutoffTs=m.snap.observationTimestamp 以前) の tier2
+    //   セグメントを差し引いて二重課金回避・残量が次の commit 前の先行 preview として残る。
+    //   絶対ルール準拠:
+    //     ✓ 距離計算 = RegionLoader.calcRoadDistance (道路 polyline 距離)
+    //     ✓ GPS 直線距離は経由しない (snap miss 時は加算ゼロ・据え置き)
+    //     ✓ iOS / Android 両経路で同一動作 (platform 分岐なし)
+    tier2_pending_m: 0,
   };
+
+  // Tier 2 リードインジケータ用 道路 snap セグメントキュー (2026-05-15 追加)
+  //   各エントリ: {endTimestamp, distanceM}
+  //   _onMmWorkerMessage の commit 分岐で cutoffTs 以前を削除し pending から差し引く。
+  let _tier2Segments = [];
 
   // MM 優先設計 (2026-05-09):
   //   _onMmWorkerMessage が mmIncrementM>0 を受信した時刻
@@ -304,6 +324,11 @@ const Meter = (() => {
         _offRoadActive = false;
         _consecutiveSnapMiss = 0;
         _haverAccumSinceLastCommit = 0;
+        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・Off-Road 復帰時クリア):
+        //   Off-Road 中は update() の Tier 2 並走分岐は走らないので通常 segments は空のはず。
+        //   ただし安全側として復帰時に明示的に 0 化する (Worker B resetCommittedSnap 送信と整合)。
+        state.tier2_pending_m = 0;
+        _tier2Segments = [];
         if (mmWorker) {
           try {
             mmWorker.postMessage({ type: 'resetCommittedSnap' });
@@ -336,6 +361,29 @@ const Meter = (() => {
         state.mm_distance_m += m.mmIncrementM;
         // Phase 1.C: 通常 commit が起きたので haversine 累積 buffer をリセット
         _haverAccumSinceLastCommit = 0;
+        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ正規化):
+        //   commit window 期間 (cutoffTs=m.snap.observationTimestamp 以前) の tier2 segments を
+        //   全削除し、削除分の合計を state.tier2_pending_m から減算する (0 下限 clamp)。
+        //   これにより Tier 1 commit が authoritative で取り込んだ window 期間と
+        //   Tier 2 が先行表示した window 期間が重複しない (= 二重課金回避)。
+        //   削除後に残る tier2_pending_m は「まだ commit されていない最新の preview」となる。
+        if (m.snap && typeof m.snap.observationTimestamp === 'number') {
+          const cutoffTs = m.snap.observationTimestamp;
+          let removedSum = 0;
+          let keepIdx = 0;
+          for (let i = 0; i < _tier2Segments.length; i++) {
+            const seg = _tier2Segments[i];
+            if (seg && seg.endTimestamp <= cutoffTs) {
+              removedSum += seg.distanceM;
+            } else {
+              _tier2Segments[keepIdx++] = seg;
+            }
+          }
+          _tier2Segments.length = keepIdx;
+          if (removedSum > 0) {
+            state.tier2_pending_m = Math.max(0, (state.tier2_pending_m || 0) - removedSum);
+          }
+        }
       }
     }
     // Phase 1.C (2026-05-10): snap miss 連続検出 → Off-Road Mode 起動
@@ -375,6 +423,14 @@ const Meter = (() => {
             mmWorker.postMessage({ type: 'resetCommittedSnap' });
           } catch (_) {}
         }
+        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・Off-Road 起動時クリア):
+        //   Off-Road 起動後は update() の Tier 2 並走分岐が走らなくなり、Off-Road 経路
+        //   (state.distance_m += _haverAccumSinceLastCommit) が課金距離を直接更新する。
+        //   既に蓄積された tier2_pending_m を残すと UI で二重表示になるため 0 化する。
+        //   retroactive 加算は state.distance_m に既に取り込まれているので、表示式
+        //   (distance_m + tier2_pending_m) は Off-Road 経路の課金値そのまま反映する。
+        state.tier2_pending_m = 0;
+        _tier2Segments = [];
       }
     }
     // D4 (2026-05-09): 直近 snap の typeCode を記録 (gap fill 速度クランプ用)
@@ -463,12 +519,16 @@ const Meter = (() => {
       wait_sec: 0,
       // 業務単位累積 (per-trip リセットしない・businessEnd でのみ 0 化)
       business_distance_m: prevBusinessDist,
+      // Tier 2 リードインジケータ (代行開始時は常に 0 から)
+      tier2_pending_m: 0,
     };
     prevSnap = null; // Map Matching 連続性リセット（fallback 用）
     // Phase 1.C 状態リセット
     _offRoadActive = false;
     _consecutiveSnapMiss = 0;
     _haverAccumSinceLastCommit = 0;
+    // Tier 2 リードインジケータ segments クリア (2026-05-15)
+    _tier2Segments = [];
     // fareConfig v2: 業務開始時に default ON の surcharge を初期 active に
     _activeSurchargeIds = new Set();
     if (Array.isArray(fareConfig.surcharges)) {
@@ -541,6 +601,10 @@ const Meter = (() => {
     // ★設計変更宣言 (2026-05-14): 業務終了で business_distance_m を 0 リセット。
     //   trip 単位の Meter.start() / Meter.reset() ではリセットせず、businessEnd でのみ 0 化する。
     state.business_distance_m = 0;
+    // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ): 業務終了で表示先行値も 0 化。
+    //   segments キューも空にして次業務に持ち越さない。
+    state.tier2_pending_m = 0;
+    _tier2Segments = [];
     // T8 (2026-05-09): 業務終了で当 session の cross-user pheromone を Firebase に push
     if (typeof FB !== 'undefined' && typeof FB.pushSessionAggregates === 'function') {
       try {
@@ -579,12 +643,16 @@ const Meter = (() => {
       wait_sec: 0,
       // 業務単位累積 (per-trip リセットしない)
       business_distance_m: prevBusinessDist,
+      // Tier 2 リードインジケータ (reset 時も 0 から)
+      tier2_pending_m: 0,
     };
     prevSnap = null;
     // Phase 1.C 状態リセット
     _offRoadActive = false;
     _consecutiveSnapMiss = 0;
     _haverAccumSinceLastCommit = 0;
+    // Tier 2 リードインジケータ segments クリア (2026-05-15)
+    _tier2Segments = [];
     lastMmUsefulAt = 0;
     // F5 (2026-05-09): trip reset では Worker 'softReset' を送る
     //   → lastCommittedSnap のみクリア・Viterbi 窓は維持
@@ -882,8 +950,25 @@ const Meter = (() => {
           }
         }
         // inc===null (snap miss / roads 未 load) → 加算なし・distance_m 据え置き
+      } else {
+        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ並走・走行距離表示ラグ解消):
+        //   mmHealthy 時も _inlineSnapAndIncrement を毎 GPS step 呼び出して
+        //   道路ジオメトリ距離 (RegionLoader.calcRoadDistance) を算出し
+        //   state.tier2_pending_m に累積する。表示式は state.distance_m + tier2_pending_m
+        //   なので UI には GPS 到達と同時 (Android 5Hz=0.2s / iOS 1Hz=1s) で道路距離が反映される。
+        //   課金経路 (state.distance_m / fare_yen / business_distance_m) には加算しない。
+        //   Tier 1 (Worker B Viterbi commit) が authoritative。_onMmWorkerMessage 内の
+        //   commit 分岐で cutoffTs=m.snap.observationTimestamp 以前の segments を差し引いて
+        //   二重課金回避する。
+        //   絶対ルール準拠: snap miss (inc===null) や 0m なら加算なし・GPS 直線は経由しない。
+        //   state.running=false (空車中) は driveDist 非表示のため tier2 蓄積不要。
+        const inc = _inlineSnapAndIncrement(gpsResult);
+        if (inc !== null && inc > 0 && state.running) {
+          state.tier2_pending_m = (state.tier2_pending_m || 0) + inc;
+          _tier2Segments.push({ endTimestamp: gpsResult.timestamp, distanceM: inc });
+        }
+        // mmHealthy 時の課金は _onMmWorkerMessage で行われる (state.distance_m += mmIncrementM)
       }
-      // mmHealthy 時はここで距離は加算しない・MM Worker が _onMmWorkerMessage で加算する
     } else {
       // 初回 GPS step: 比較対象がないので加算せず prevSnap を初期化
       _inlineSnapAndIncrement(gpsResult);
@@ -1055,11 +1140,22 @@ const Meter = (() => {
       //       extra=0 / steps=1 計算により fare=1,300+100=1,400 となるバグ。
       //   新: `<=` に変更し 1000m ちょうども base_fare 適用範囲に含める。
       //   新形式 tiers 経路 (L995) は元から `<=` で正しいので無変更。
+      // ★設計変更宣言 (2026-05-15・420m 倍数境界バグ修正):
+      //   旧: `steps = Math.floor(extra / add_distance_m) + 1`
+      //       → 1420m (extra=420) で steps=floor(1)+1=2 → fare=1500 (1400 をスキップ)
+      //       境界 (n × add_distance_m) ちょうどが次バケットに繰り上がる off-by-one。
+      //   新: `steps = Math.ceil(extra / add_distance_m)` (確定仕様)
+      //       1001m (extra=1)   → ceil(1/420)=1   → fare=1400 ✓
+      //       1420m (extra=420) → ceil(420/420)=1 → fare=1400 ✓
+      //       1421m (extra=421) → ceil(421/420)=2 → fare=1500 ✓
+      //       1840m (extra=840) → ceil(840/420)=2 → fare=1500 ✓
+      //       1841m (extra=841) → ceil(841/420)=3 → fare=1600 ✓
+      //       2260m (extra=1260)→ ceil(1260/420)=3 → fare=1600 ✓
       if (distanceM <= fareConfig.base_distance_m) {
         fare = fareConfig.base_fare;
       } else {
         const extra = distanceM - fareConfig.base_distance_m;
-        const steps = Math.floor(extra / fareConfig.add_distance_m) + 1;
+        const steps = Math.ceil(extra / fareConfig.add_distance_m);
         fare = fareConfig.base_fare + steps * fareConfig.add_fare;
       }
     }

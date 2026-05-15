@@ -23,21 +23,25 @@ function loadMeter() {
 }
 
 // ─── 旧形式 (tiers=[]) calcFare の手計算検算 ───────────────────────────
-// js/meter.js:1018-1024 (2026-05-15 修正後):
-//   if(distanceM <= base_distance_m){ fare = base_fare; }     ← 境界 inclusive に修正
-//   else { steps = Math.floor((distanceM - base_distance_m) / add_distance_m) + 1;
+// js/meter.js (2026-05-15 修正後・確定仕様):
+//   if(distanceM <= base_distance_m){ fare = base_fare; }
+//   else { steps = Math.ceil((distanceM - base_distance_m) / add_distance_m);
 //          fare = base_fare + steps * add_fare; }
 // その後 Step 7 で rounding (default 10円単位) を Math.round(fare / unit) * unit。
 // default config: base_fare=1300 / base_distance_m=1000 / add_fare=100 / add_distance_m=420 / rounding=10
+//
+// ★設計変更宣言 (2026-05-15・420m 倍数境界バグ修正):
+//   旧: Math.floor(extra/add) + 1 → 1420m (extra=420) で steps=2 → fare=1500
+//       境界 (n×add) ちょうどが次バケットに繰り上がる off-by-one。
+//   新: Math.ceil(extra/add)      → 1420m (extra=420) で steps=1 → fare=1400
 function expectedFareLegacy(distanceM, cfg) {
   const { base_fare, base_distance_m, add_fare, add_distance_m, rounding } = cfg;
   let fare;
-  // 2026-05-15: meter.js の修正に合わせて `<` → `<=` に変更
   if (distanceM <= base_distance_m) {
     fare = base_fare;
   } else {
     const extra = distanceM - base_distance_m;
-    const steps = Math.floor(extra / add_distance_m) + 1;
+    const steps = Math.ceil(extra / add_distance_m);
     fare = base_fare + steps * add_fare;
   }
   const unit = rounding > 0 ? rounding : 1;
@@ -89,23 +93,49 @@ describe('Meter.calcFare 境界値テスト (旧形式・tiers=[])', () => {
   });
 
   it('distance=1001 → fare=base_fare+追加料金 1 回 (1,400・境界 +1m で加算料金発生)', () => {
-    // distance=1001m: extra=1 / steps=Math.floor(1/420)+1=1 / fare=1300+1×100=1400
+    // distance=1001m: extra=1 / steps=Math.ceil(1/420)=1 / fare=1300+1×100=1400
     expect(Meter.calcFare(1001)).toBe(1400);
   });
 
-  it('distance=1420 → fare=base_fare+追加料金 2 回 (1,500)', () => {
-    // extra=420, steps=Math.floor(420/420)+1 = 2, fare=1300+200=1500
-    expect(Meter.calcFare(1420)).toBe(1500);
+  // ★設計変更宣言 (2026-05-15・420m 倍数境界バグ修正): 1420m が ¥1,500 から ¥1,400 に変わる
+  // 旧 (Math.floor+1): 1420 → steps=2 → ¥1,500 (1400 をスキップ・off-by-one bug)
+  // 新 (Math.ceil)   : 1420 → steps=1 → ¥1,400 (確定仕様: 1000m まで base、その後 420m ごと +¥100)
+  it('distance=1420 → fare=base_fare+追加料金 1 回 (1,400・420m 境界 inclusive)', () => {
+    // extra=420, steps=Math.ceil(420/420)=1, fare=1300+100=1400
+    expect(Meter.calcFare(1420)).toBe(1400);
+  });
+
+  it('distance=1421 → fare=base_fare+追加料金 2 回 (1,500・420m 境界 +1m で次バケット)', () => {
+    // extra=421, steps=Math.ceil(421/420)=2, fare=1300+200=1500
+    expect(Meter.calcFare(1421)).toBe(1500);
+  });
+
+  it('distance=1840 → fare=base_fare+追加料金 2 回 (1,500・2回目 420m 境界 inclusive)', () => {
+    // extra=840, steps=Math.ceil(840/420)=2, fare=1300+200=1500
+    expect(Meter.calcFare(1840)).toBe(1500);
+  });
+
+  it('distance=1841 → fare=base_fare+追加料金 3 回 (1,600・2回目 420m 境界 +1m)', () => {
+    // extra=841, steps=Math.ceil(841/420)=3, fare=1300+300=1600
+    expect(Meter.calcFare(1841)).toBe(1600);
+  });
+
+  it('distance=2260 → fare=base_fare+追加料金 3 回 (1,600・3回目 420m 境界 inclusive)', () => {
+    // extra=1260, steps=Math.ceil(1260/420)=3, fare=1300+300=1600
+    expect(Meter.calcFare(2260)).toBe(1600);
   });
 
   it('distance=5000 → 手計算値と一致', () => {
-    // extra=4000, steps=Math.floor(4000/420)+1 = 9+1 = 10, fare=1300+10*100=2300
+    // extra=4000, steps=Math.ceil(4000/420)=ceil(9.52)=10, fare=1300+10*100=2300
     expect(Meter.calcFare(5000)).toBe(2300);
     expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5000, DEFAULT_CFG));
   });
 
   it('多数の距離点で expectedFareLegacy ヘルパと一致', () => {
-    const samples = [0, 100, 500, 999, 1001, 1420, 1421, 2000, 3000, 5000, 10000, 20000];
+    const samples = [
+      0, 100, 500, 999, 1000, 1001, 1420, 1421, 1840, 1841, 2260, 2261, 2000, 3000, 5000, 10000,
+      20000,
+    ];
     samples.forEach((d) => {
       expect(Meter.calcFare(d)).toBe(expectedFareLegacy(d, DEFAULT_CFG));
     });
