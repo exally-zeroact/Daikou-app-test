@@ -40,6 +40,14 @@ const Business = (function () {
     //   旧: GPS Haversine 直線距離 (絶対ルール違反)
     //   新: Meter の差分を加算 (= MM 道路距離・GPS 直線禁止)
     last_meter_distance_m: 0, // 直前に観測した Meter.distance_m (差分計算用)
+
+    // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・trip 単位住所トラッキング):
+    //   trip 1 件分 (= 1 つの代行) の出発地住所・経由地点リスト・到着地住所を保持する。
+    //   onTripStart で初期化 + start_address 取得、onWaypoint で waypoints に追加、
+    //   setEndAddress で end_address 取得、onTripEnd 時に trips[].push に統合して
+    //   current_trip を null 化する。住所取得は Meter.getNearestAddress に委譲。
+    //   絶対ルール準拠: 住所取得失敗 (null) でも業務継続・代行開始/確定を絶対に止めない。
+    current_trip: null, // { start_time, start_address, waypoints:[{address,timestamp}], end_address }
   };
 
   // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
@@ -84,6 +92,8 @@ const Business = (function () {
       trip_count: 0,
       trips: [],
       last_meter_distance_m: 0,
+      // 経由地点 + 住所表示機能 (2026-05-15・業務開始時は trip 未開始のため null)
+      current_trip: null,
     };
     // ★設計変更宣言 (2026-05-14・business_distance_m を業務開始でも 0 リセット):
     //   通常は Meter.businessEnd() で 0 リセットされるが、abandon() 経由 (前業務 limbo) や
@@ -158,6 +168,8 @@ const Business = (function () {
       trip_count: 0,
       trips: [],
       last_meter_distance_m: 0,
+      // 経由地点 + 住所表示機能 (2026-05-15・abandon で trip 進行中なら破棄)
+      current_trip: null,
     };
     save();
     if (typeof dlog === 'function') dlog('[Business] abandon (history saved)');
@@ -224,6 +236,98 @@ const Business = (function () {
   }
 
   // ─────────────────────────────────────────
+  // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能):
+  //   代行 1 件単位の住所トラッキング API 群。Meter.getNearestAddress に委譲し、
+  //   返り値 null (= 取得失敗) でも例外を投げず業務継続性を維持する。
+  //   呼び出し側 (index.html):
+  //     onTripStart   : 代行開始ボタン押下時 (Meter.start 直後) に呼ぶ
+  //     onWaypoint    : 経由地点ボタン押下時に呼ぶ
+  //     setEndAddress : 確定ボタン (onSend) 押下時に呼ぶ (renderFare の経路カード描画用)
+  //     getCurrentTrip: renderFare で経路情報を読む際に呼ぶ
+  //   onTripEnd は既存 signature 維持・内部で current_trip を trips[] に統合してリセット。
+  // ─────────────────────────────────────────
+  function _safeGetNearestAddress(lat, lng, accuracy) {
+    // Meter モジュール経由で getNearestAddress を呼ぶ・例外は呑んで null フォールバック。
+    if (
+      typeof Meter !== 'undefined' &&
+      Meter &&
+      typeof Meter.getNearestAddress === 'function' &&
+      typeof lat === 'number' &&
+      typeof lng === 'number'
+    ) {
+      try {
+        return Meter.getNearestAddress(lat, lng, accuracy);
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  // 代行開始時の出発地住所取得 + current_trip 初期化
+  function onTripStart(lat, lng, accuracy) {
+    const startAddr = _safeGetNearestAddress(lat, lng, accuracy);
+    state.current_trip = {
+      start_time: Date.now(),
+      start_address: startAddr,
+      waypoints: [],
+      end_address: null,
+    };
+    save();
+    if (typeof dlog === 'function') {
+      dlog('[Business] onTripStart start_address=' + (startAddr || '(null)'));
+    }
+    return startAddr;
+  }
+
+  // 経由地点記録 (押下回数ごとに waypoints に追加)
+  // 戻り値: 記録した住所文字列 (null なら住所取得失敗)
+  function onWaypoint(lat, lng, accuracy) {
+    if (!state.current_trip) {
+      // trip 進行中でない場合は記録対象なし (絶対ルール: 業務継続性のため例外は投げない)
+      return null;
+    }
+    const addr = _safeGetNearestAddress(lat, lng, accuracy);
+    state.current_trip.waypoints.push({
+      address: addr,
+      timestamp: Date.now(),
+    });
+    save();
+    if (typeof dlog === 'function') {
+      dlog(
+        '[Business] onWaypoint #' +
+          state.current_trip.waypoints.length +
+          ' address=' +
+          (addr || '(null)')
+      );
+    }
+    return addr;
+  }
+
+  // 確定ボタン押下時の到着地住所取得 (renderFare 直前に呼ぶ・current_trip に保持)
+  function setEndAddress(lat, lng, accuracy) {
+    if (!state.current_trip) return null;
+    const endAddr = _safeGetNearestAddress(lat, lng, accuracy);
+    state.current_trip.end_address = endAddr;
+    save();
+    if (typeof dlog === 'function') {
+      dlog('[Business] setEndAddress end_address=' + (endAddr || '(null)'));
+    }
+    return endAddr;
+  }
+
+  // 進行中の trip 情報を返す (renderFare の経路カード描画用)
+  function getCurrentTrip() {
+    if (!state.current_trip) return null;
+    return {
+      start_time: state.current_trip.start_time,
+      start_address: state.current_trip.start_address,
+      end_address: state.current_trip.end_address,
+      waypoints: state.current_trip.waypoints.slice(),
+    };
+  }
+
+  // ─────────────────────────────────────────
   // 実車終了通知（実車総距離・売上・回数加算）
   // ─────────────────────────────────────────
   // 呼び出し側（index.html の支払ボタン処理）が
@@ -239,12 +343,26 @@ const Business = (function () {
     state.actual_total_m += distanceM;
     state.fare_total_yen += fareYen;
     state.trip_count += 1;
+    // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能):
+    //   trip オブジェクトに current_trip の住所トラッキング情報を統合する。
+    //   start_address/end_address/waypoints は null でも push (業務継続性最優先・
+    //   絶対ルール: 住所取得失敗でも代行確定を絶対に止めない)。
+    const currentTrip = state.current_trip || {
+      start_address: null,
+      end_address: null,
+      waypoints: [],
+    };
     state.trips.push({
       distance_m: distanceM,
       fare_yen: fareYen,
-      start_time: tripStartTime || null,
+      start_time: tripStartTime || currentTrip.start_time || null,
       end_time: Date.now(),
+      start_address: currentTrip.start_address,
+      end_address: currentTrip.end_address,
+      waypoints: currentTrip.waypoints.slice ? currentTrip.waypoints.slice() : [],
     });
+    // 統合後 current_trip はリセット (次の代行で onTripStart が新規初期化する)
+    state.current_trip = null;
     save();
     if (typeof dlog === 'function') {
       dlog(
@@ -459,6 +577,11 @@ const Business = (function () {
     abandon,
     onGps,
     onTripEnd,
+    // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能): trip 住所トラッキング API
+    onTripStart,
+    onWaypoint,
+    setEndAddress,
+    getCurrentTrip,
     getState,
     getReport,
     save,

@@ -1346,6 +1346,104 @@ const Meter = (() => {
     }, 1000);
   }
 
+  // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・最近傍住所検索ヘルパ):
+  //   経由地点ボタン押下時 / 代行開始時 / 確定時に呼ばれ、現在地の町名を返す。
+  //   データソース (index.html から事前 load 済):
+  //     window.ADDRESSES_FINE_JP   大字代表点 239,760 件・47/47 県
+  //     window.ADDRESSES_COARSE_JP 市区町村代表点 1,919 件・47/47 県
+  //   2 段フォールバック:
+  //     ① fine 半径 500m 以内最近傍 → item.n (例: "道後温泉")
+  //     ② fine miss なら coarse 半径 3km 以内最近傍 → item.n + " 付近" (例: "松山市 付近")
+  //     ③ どちらも miss / GPS accuracy>50m / データ未 load → null
+  //   座標は 1e5 倍整数 (lat=4303504 → 43.03504°)。bbox プレフィルタで線形スキャンを高速化
+  //   (1 単位 = 1e-5°・緯度方向 1.111 m/単位)。bbox 内候補は haversine で厳密 m 判定。
+  //   絶対ルール準拠: 同期完結 (await 不要)・データ未 load や検索失敗で null を返し、
+  //   呼び出し側 (business.js の onTripStart / onSend) は null でも業務継続 (絶対ルール:
+  //   業務継続性最優先・住所取得失敗で代行開始/確定を絶対に止めない)。
+  function _haversineMetersForAddr(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLng = (lng2 - lng1) * toRad;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+  function getNearestAddress(lat, lng, accuracy) {
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !isFinite(lat) || !isFinite(lng)) {
+      return null;
+    }
+    if (typeof accuracy === 'number' && isFinite(accuracy) && accuracy > 50) {
+      return null;
+    }
+    // 入力 lat/lng を 1e5 倍整数に変換 (データ表現と揃える)
+    const targetLatI = Math.round(lat * 100000);
+    const targetLngI = Math.round(lng * 100000);
+    // bbox プレフィルタ用範囲 (1 単位 ≈ 1.111m・経度方向は緯度依存で短くなるが
+    // 1.111 m/単位 を緯度・経度共通に使うと経度側で広めに取れる → 漏れなし)
+    // fine: 500m → 約 450 単位・余裕 +60 単位
+    // coarse: 3000m → 約 2700 単位・余裕 +100 単位
+    const FINE_RADIUS_M = 500;
+    const COARSE_RADIUS_M = 3000;
+    const fineRangeI = 520;
+    const coarseRangeI = 2800;
+
+    // ─── ① fine 検索 (半径 500m) ───
+    let bestFine = null;
+    let bestFineDistM = Infinity;
+    if (
+      typeof window !== 'undefined' &&
+      window.ADDRESSES_FINE_JP &&
+      Array.isArray(window.ADDRESSES_FINE_JP.items)
+    ) {
+      const items = window.ADDRESSES_FINE_JP.items;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const dLatI = it.lat - targetLatI;
+        if (dLatI > fineRangeI || dLatI < -fineRangeI) continue;
+        const dLngI = it.lng - targetLngI;
+        if (dLngI > fineRangeI || dLngI < -fineRangeI) continue;
+        const itemLat = it.lat / 100000;
+        const itemLng = it.lng / 100000;
+        const distM = _haversineMetersForAddr(lat, lng, itemLat, itemLng);
+        if (distM <= FINE_RADIUS_M && distM < bestFineDistM) {
+          bestFineDistM = distM;
+          bestFine = it;
+        }
+      }
+    }
+    if (bestFine) return bestFine.n;
+
+    // ─── ② coarse 検索 (半径 3km) ───
+    let bestCoarse = null;
+    let bestCoarseDistM = Infinity;
+    if (
+      typeof window !== 'undefined' &&
+      window.ADDRESSES_COARSE_JP &&
+      Array.isArray(window.ADDRESSES_COARSE_JP.items)
+    ) {
+      const items = window.ADDRESSES_COARSE_JP.items;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const dLatI = it.lat - targetLatI;
+        if (dLatI > coarseRangeI || dLatI < -coarseRangeI) continue;
+        const dLngI = it.lng - targetLngI;
+        if (dLngI > coarseRangeI || dLngI < -coarseRangeI) continue;
+        const itemLat = it.lat / 100000;
+        const itemLng = it.lng / 100000;
+        const distM = _haversineMetersForAddr(lat, lng, itemLat, itemLng);
+        if (distM <= COARSE_RADIUS_M && distM < bestCoarseDistM) {
+          bestCoarseDistM = distM;
+          bestCoarse = it;
+        }
+      }
+    }
+    if (bestCoarse) return bestCoarse.n + ' 付近';
+
+    return null;
+  }
+
   // 起動時warm up（2026/04/30追加）
   // 代行開始前でも常に呼ばれて、GPSを内部に保存しておく
   // 「代行開始」押した瞬間に start() が lastWarmupGps を初期値として使う
@@ -1377,6 +1475,10 @@ const Meter = (() => {
     setFareConfig,
     getFareConfig,
     calcFare,
+    // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能):
+    //   ADDRESSES_FINE_JP / COARSE_JP からの最近傍住所検索ヘルパを export。
+    //   呼び出し側は index.html (経由地点ボタン) / js/business.js (start/end 住所取得)。
+    getNearestAddress,
     setDistance,
     setLastGps,
     setMapMatcher,
