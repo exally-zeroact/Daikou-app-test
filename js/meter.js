@@ -1444,6 +1444,29 @@ const Meter = (() => {
     return null;
   }
 
+  // ★設計変更宣言 (2026-05-15・住所取得 retry 用判定ヘルパ):
+  //   addresses-fine-jp.js は 24.6 MB あり defer load 完了まで数秒〜数十秒かかる。
+  //   その間 getNearestAddress を呼んでも fine/coarse どちらも未ロードで null フォールバックとなり、
+  //   代行開始直後のボタン押下が全て失敗する事象 (2026-05-15 報告) を回避するため、
+  //   呼び出し側 (business.js の retry ロジック) で「データ未ロード」と「データ済 miss」を
+  //   区別する必要がある。本ヘルパは fine / coarse のいずれかが load 済なら true を返す。
+  //   ・fine のみ未ロード・coarse のみ済 → true (= coarse fallback で動作可能)
+  //   ・両方未ロード → false (= retry 推奨)
+  //   絶対ルール準拠: 同期判定・例外を投げない・データ未 load でも業務継続性に影響を与えない。
+  function isAddressDataReady() {
+    const fineReady =
+      typeof window !== 'undefined' &&
+      window.ADDRESSES_FINE_JP &&
+      Array.isArray(window.ADDRESSES_FINE_JP.items) &&
+      window.ADDRESSES_FINE_JP.items.length > 0;
+    const coarseReady =
+      typeof window !== 'undefined' &&
+      window.ADDRESSES_COARSE_JP &&
+      Array.isArray(window.ADDRESSES_COARSE_JP.items) &&
+      window.ADDRESSES_COARSE_JP.items.length > 0;
+    return Boolean(fineReady || coarseReady);
+  }
+
   // 起動時warm up（2026/04/30追加）
   // 代行開始前でも常に呼ばれて、GPSを内部に保存しておく
   // 「代行開始」押した瞬間に start() が lastWarmupGps を初期値として使う
@@ -1479,6 +1502,8 @@ const Meter = (() => {
     //   ADDRESSES_FINE_JP / COARSE_JP からの最近傍住所検索ヘルパを export。
     //   呼び出し側は index.html (経由地点ボタン) / js/business.js (start/end 住所取得)。
     getNearestAddress,
+    // ★設計変更宣言 (2026-05-15・住所取得 retry 用判定ヘルパ): データ load 完了判定を export。
+    isAddressDataReady,
     setDistance,
     setLastGps,
     setMapMatcher,

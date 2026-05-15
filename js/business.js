@@ -264,6 +264,93 @@ const Business = (function () {
     return null;
   }
 
+  // ★設計変更宣言 (2026-05-15・住所取得 retry ロジック・data load 遅延吸収):
+  //   addresses-fine-jp.js (24.6 MB) の defer load 完了前に経由地点ボタン/代行開始/確定が
+  //   発火すると、Meter.getNearestAddress が null を返し「⚠ 住所を取得できませんでした」が
+  //   毎回出る (2026-05-15 報告事象)。本ヘルパで未 load 時は 1 秒間隔で最大 5 回再試行し、
+  //   load 完了後の最初の解決で current_trip の該当フィールドを更新する。
+  //   再解決成功時は window CustomEvent 'business:address-resolved' を発火し、UI 側 (index.html)
+  //   が waypointCard / routeCard を即時更新できるようにする。
+  //   絶対ルール準拠:
+  //     ✓ 業務継続性最優先: retry 全失敗でも null 据え置きで業務は止めない
+  //     ✓ 同期完結は維持: 関数 (onTripStart 等) は同期呼出のまま・retry は背景で実行
+  //     ✓ current_trip が onTripEnd で null 化された後に retry が解決しても上書きしない
+  //       (state.current_trip 存在チェックを毎回行う)
+  //   iOS/Android 共通: setTimeout は両 OS 同一動作・onLoad 検知ではなく時間ベースで簡素化
+  const _ADDR_RETRY_MAX = 5;
+  const _ADDR_RETRY_INTERVAL_MS = 1000;
+  function _scheduleAddressRetry(kind, lat, lng, accuracy, waypointIdx, attempt) {
+    const cur = attempt || 1;
+    if (cur > _ADDR_RETRY_MAX) return;
+    setTimeout(function () {
+      // current_trip が無くなっていたら retry 中止 (= onTripEnd 後)
+      if (!state.current_trip) return;
+      // 該当 waypoint がまだ null のままか確認 (= 他経路で解決していたらスキップ)
+      let alreadyResolved = false;
+      if (kind === 'start') {
+        alreadyResolved = state.current_trip.start_address != null;
+      } else if (kind === 'end') {
+        alreadyResolved = state.current_trip.end_address != null;
+      } else if (kind === 'waypoint') {
+        const wps = state.current_trip.waypoints;
+        if (Array.isArray(wps) && wps[waypointIdx]) {
+          alreadyResolved = wps[waypointIdx].address != null;
+        } else {
+          // waypoint がもう存在しない (異常系) → 中止
+          return;
+        }
+      }
+      if (alreadyResolved) return;
+
+      const addr = _safeGetNearestAddress(lat, lng, accuracy);
+      if (addr) {
+        if (kind === 'start') {
+          state.current_trip.start_address = addr;
+        } else if (kind === 'end') {
+          state.current_trip.end_address = addr;
+        } else if (kind === 'waypoint') {
+          state.current_trip.waypoints[waypointIdx].address = addr;
+        }
+        save();
+        if (typeof dlog === 'function') {
+          dlog(
+            '[Business] address retry resolved (kind=' +
+              kind +
+              ' attempt=' +
+              cur +
+              ') => ' +
+              addr
+          );
+        }
+        // UI 通知 (browser context のみ・Node test では window 未定義で skip)
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('business:address-resolved', {
+                detail: { kind: kind, address: addr, waypointIdx: waypointIdx },
+              })
+            );
+          } catch (_) {}
+        }
+        return; // 解決済 → retry 終了
+      }
+      // まだ null・データもまだ未 load 確率高 → 再試行
+      _scheduleAddressRetry(kind, lat, lng, accuracy, waypointIdx, cur + 1);
+    }, _ADDR_RETRY_INTERVAL_MS);
+  }
+
+  function _needsAddressRetry() {
+    // データ未 load なら true・load 済 (miss 起因 null) なら retry しても無駄なので false
+    if (typeof Meter !== 'undefined' && typeof Meter.isAddressDataReady === 'function') {
+      try {
+        return !Meter.isAddressDataReady();
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+
   // 代行開始時の出発地住所取得 + current_trip 初期化
   function onTripStart(lat, lng, accuracy) {
     const startAddr = _safeGetNearestAddress(lat, lng, accuracy);
@@ -275,7 +362,18 @@ const Business = (function () {
     };
     save();
     if (typeof dlog === 'function') {
-      dlog('[Business] onTripStart start_address=' + (startAddr || '(null)'));
+      dlog(
+        '[Business] onTripStart start_address=' +
+          (startAddr || '(null)') +
+          ' addrReady=' +
+          (typeof Meter !== 'undefined' && Meter.isAddressDataReady
+            ? Meter.isAddressDataReady()
+            : '?')
+      );
+    }
+    // データ未 load による null の場合のみ retry (load 済 miss なら retry しても解決しない)
+    if (!startAddr && _needsAddressRetry() && lat != null && lng != null) {
+      _scheduleAddressRetry('start', lat, lng, accuracy, null, 1);
     }
     return startAddr;
   }
@@ -292,6 +390,7 @@ const Business = (function () {
       address: addr,
       timestamp: Date.now(),
     });
+    const waypointIdx = state.current_trip.waypoints.length - 1;
     save();
     if (typeof dlog === 'function') {
       dlog(
@@ -300,6 +399,10 @@ const Business = (function () {
           ' address=' +
           (addr || '(null)')
       );
+    }
+    // データ未 load による null の場合のみ retry
+    if (!addr && _needsAddressRetry() && lat != null && lng != null) {
+      _scheduleAddressRetry('waypoint', lat, lng, accuracy, waypointIdx, 1);
     }
     return addr;
   }
@@ -312,6 +415,10 @@ const Business = (function () {
     save();
     if (typeof dlog === 'function') {
       dlog('[Business] setEndAddress end_address=' + (endAddr || '(null)'));
+    }
+    // データ未 load による null の場合のみ retry
+    if (!endAddr && _needsAddressRetry() && lat != null && lng != null) {
+      _scheduleAddressRetry('end', lat, lng, accuracy, null, 1);
     }
     return endAddr;
   }
