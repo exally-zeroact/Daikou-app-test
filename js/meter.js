@@ -279,13 +279,25 @@ const Meter = (() => {
   //   Kalman 平滑化済 GPS 連続点の haversine = polyline 累積の 1 区間
   // ★設計変更宣言 (2026-05-16・距離計算精査・停車判定共通ヘルパ):
   //   バグ2 (停車中の業務距離増加) の根治のため、Tier 1〜4 全経路で
-  //   state.last_speed_kmh < 2 km/h を停車判定として共通化する。
+  //   停車判定を共通化する。
   //   - business_distance_m += 加算をスキップする際に使用
   //   - distance_m (課金) への加算では使わない (絶対ルール「distance_m 変えない」)
   //   - iOS/Android 共通 (state.last_speed_kmh は GPS layer 由来で両 OS 共通)
-  //   2 km/h 閾値の根拠: GPS 5m 精度の jitter で発生する速度ノイズ (~1-2 km/h) の上限
+  // ★設計変更宣言 (2026-05-16・閾値修正・実走テストで総走行距離が増えない事象を修正):
+  //   旧: state.last_speed_kmh < 2 km/h で停車判定
+  //       iOS Safari Geolocation API の coords.speed は走行中も null や瞬間 0 を返す
+  //       癖があり (高速道路 60km/h でも瞬間 0 km/h を返すケース)、走行中の業務距離
+  //       加算が頻繁にスキップされる事象が発生 (2026-05-16 実走テストで判明)。
+  //   新: gps.js の isStationary フラグ (= 5秒継続低速 + 3m以内の保守的判定・L621
+  //       checkStationaryFallback) を最優先に使用。
+  //       補助として state.last_speed_kmh < 0.5 km/h を「明らかに動いていない」とみなす。
+  //       → 走行中の瞬間 speed=null や 1km/h を停車誤判定しない。
+  //   両 OS で同一動作 (iOS / Android Chrome の Geolocation API 仕様共通)。
   function _isStationary() {
-    return (state.last_speed_kmh || 0) < 2;
+    // gps.js が確定した isStationary を最優先 (= 5秒継続低速 + 3m 半径以内)
+    if (state.last_isStationary === true) return true;
+    // 補助: 明らかに動いていない極低速 (0.5 km/h 未満)
+    return (state.last_speed_kmh || 0) < 0.5;
   }
 
   function _calculateOffRoadIncrement(gpsResult, dtSec) {
@@ -386,13 +398,21 @@ const Meter = (() => {
         state.mm_distance_m += m.mmIncrementM;
         // Phase 1.C: 通常 commit が起きたので haversine 累積 buffer をリセット
         _haverAccumSinceLastCommit = 0;
-        // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ commit 正規化):
-        //   旧: cutoffTs=m.snap.observationTimestamp 以前の _tier2Segments を削除
-        //       (main inline snap 経路用の cutoff ロジック・main 経路廃止に伴い不要)
-        //   新: Worker B 経由で tentativeIncrementM を毎 step 受信する設計に移行したため、
-        //       commit が来たら preview 累積 (tier2_pending_m) を 0 にリセットするだけで足りる。
-        //       _tier2Segments は使わない (空のまま) ・互換のため変数自体は残置。
-        state.tier2_pending_m = 0;
+        // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ commit 差分減算):
+        //   旧設計 (2026-05-16 朝): commit 時に tier2_pending_m = 0 で全リセット
+        //     問題: 走行中 mmIncrementM (Viterbi 確定値) < tier2_pending_m (preview 累積)
+        //           のとき表示値 (distance_m + tier2_pending_m) が前回より小さくなる →
+        //           「走行距離が急に 0 に戻る・繰り返し下がる」事象 (2026-05-16 実走テスト報告)。
+        //   新設計: tier2_pending_m -= mmIncrementM (0 下限 clamp) で差分減算。
+        //     ・mmIncrementM <= tier2_pending_m: 表示値 不変 (= 表示停止・課金は増加)
+        //     ・mmIncrementM >  tier2_pending_m: 表示値 増加 (= 通常追従)
+        //     → 表示値は単調増加 (絶対に下がらない)
+        //   distance_m への加算は完全に不変 (= 絶対ルール「distance_m 変えない」準拠)
+        //   _tier2Segments は引き続き未使用 (旧経路で使われていたが現在は空のまま維持)
+        state.tier2_pending_m = Math.max(
+          0,
+          (state.tier2_pending_m || 0) - (m.mmIncrementM || 0)
+        );
         _tier2Segments = [];
       }
     }
@@ -1025,6 +1045,10 @@ const Meter = (() => {
     };
     state.last_timestamp = gpsResult.timestamp;
     state.last_speed_kmh = gpsResult.speedKmh || 0;
+    // ★設計変更宣言 (2026-05-16・isStationary フラグを Meter 側に伝搬):
+    //   _isStationary() が gps.js の保守的判定 (5秒継続低速 + 3m以内) を参照するため
+    //   gpsResult.isStationary を state に保存する。両 OS 共通 (gps.js が両 OS で判定)。
+    state.last_isStationary = gpsResult.isStationary === true;
 
     // Phase 2.A (2026-05-10): 訓練データ収集
     //   GPS 良好 (accuracy<=20m) + 速度>5km/h + !isStationary で 1 サンプル保存

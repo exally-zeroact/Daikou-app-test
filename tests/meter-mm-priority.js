@@ -315,7 +315,9 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
     '表示式 (distance_m + tier2_pending_m) = 270m で即時反映'
   );
 
-  // 通常 commit を dispatch (mmIncrementM=200・preview リセット)
+  // ★設計変更宣言 (2026-05-16・commit で 0 リセット → 差分減算に変更):
+  //   通常 commit を dispatch (mmIncrementM=200・tier2_pending_m -= 200 with 0 下限)
+  //   270 - 200 = 70 が残り、表示式 (distance_m + tier2_pending_m) = 270 で表示後退しない
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 200,
@@ -331,15 +333,20 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
   });
   s = Meter.getState();
   assertNear(s.distance_m, 200, 0.01, 'commit 後 state.distance_m に MM 200m が加算');
-  assertNear(s.tier2_pending_m, 0, 0.01, 'commit で tier2_pending_m が 0 リセット');
+  assertNear(
+    s.tier2_pending_m,
+    70,
+    0.01,
+    'commit で tier2_pending_m が 270-200=70m に差分減算 (表示後退防止)'
+  );
   assertNear(
     s.distance_m + s.tier2_pending_m,
-    200,
+    270,
     0.01,
-    '表示式 (distance_m + tier2_pending_m) = 200m (= distance_m のみ)'
+    '表示式 (distance_m + tier2_pending_m) = 270m で commit 前と同値 (= 単調増加維持)'
   );
 
-  // 次の tentativeIncrement → 90m を tier2 に積む
+  // 次の tentativeIncrement → 90m を tier2 に積む (70 + 90 = 160m)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
@@ -348,7 +355,36 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
     committed: false,
   });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 90, 0.01, '次 step で tier2_pending_m が 0→90m');
+  assertNear(s.tier2_pending_m, 160, 0.01, '次 step で tier2_pending_m が 70→160m');
+  assertNear(
+    s.distance_m + s.tier2_pending_m,
+    360,
+    0.01,
+    '表示式 (distance_m + tier2_pending_m) = 360m (単調増加・270→360)'
+  );
+
+  // ★追加テスト: mmIncrementM > tier2_pending_m のときも下限 0 で clamp される
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 500,
+    tentativeIncrementM: 0,
+    snapped: 1,
+    committed: true,
+    snap: {
+      observationTimestamp: gpsAt(3).timestamp,
+      typeCode: 0,
+      prefecture: 'ehime',
+      roadIndex: 1,
+    },
+  });
+  s = Meter.getState();
+  assertNear(s.distance_m, 700, 0.01, 'distance_m が 500m 加算 (200+500=700)');
+  assertNear(
+    s.tier2_pending_m,
+    0,
+    0.01,
+    'tier2_pending_m=160 から 500 減算 → 下限 0 clamp'
+  );
 
   Meter.stop();
 }
@@ -375,7 +411,7 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
   let s = Meter.getState();
   assertNear(s.tier2_pending_m, 0, 0.01, 'tentativeIncrementM=0 なら tier2 加算なし');
 
-  // (b) tentativeIncrementM > 0 + state.last_speed_kmh = 36 (走行中) → 90m 加算
+  // (b) tentativeIncrementM > 0 + state.last_speed_kmh = 36 (走行中・新閾値 0.5 以上) → 90m 加算
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
@@ -384,11 +420,13 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
     committed: false,
   });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 90, 0.01, '走行中なら tier2_pending_m=90 加算');
+  assertNear(s.tier2_pending_m, 90, 0.01, '走行中 (36 km/h・> 0.5) なら tier2_pending_m=90 加算');
 
-  // (c) 停車中 (speedKmh < 2 km/h) GPS で update → state.last_speed_kmh が 1 km/h に更新
+  // (c) 停車中 (speedKmh < 0.5 km/h) GPS で update → state.last_speed_kmh が 0.3 km/h に更新
   //     その後 tentativeIncrementM > 0 を dispatch → 加算スキップ (バグ2 対応・停車判定)
-  const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 1.0 });
+  // ★設計変更宣言 (2026-05-16・閾値修正): 2 km/h → 0.5 km/h に変更したので
+  //   テストも 0.3 km/h で「明らかに停車」を表現する。
+  const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 0.3 });
   Meter.update(slowGps);
   w._dispatch({
     type: 'mmResult',
@@ -398,7 +436,7 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
     committed: false,
   });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 90, 0.01, '停車中 (speed<2 km/h) なら tier2 加算スキップ');
+  assertNear(s.tier2_pending_m, 90, 0.01, '停車中 (speed<0.5 km/h) なら tier2 加算スキップ');
 
   Meter.stop();
 }
@@ -413,8 +451,8 @@ console.log('\n[case9] 停車中 commit: business_distance_m += skip・distance_
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
-  // 停車中状態をセット (1 km/h)
-  const slowGps = Object.assign({}, gpsAt(0), { speedKmh: 1.0 });
+  // 停車中状態をセット (0.3 km/h ・新閾値 0.5 未満)
+  const slowGps = Object.assign({}, gpsAt(0), { speedKmh: 0.3 });
   Meter.update(slowGps);
 
   // GPS ジッターで Worker B が 5m の commit を出した想定
