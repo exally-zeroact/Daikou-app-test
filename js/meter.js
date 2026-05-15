@@ -277,6 +277,17 @@ const Meter = (() => {
 
   //   Off-Road 中に毎フレーム加算する 1 step distance
   //   Kalman 平滑化済 GPS 連続点の haversine = polyline 累積の 1 区間
+  // ★設計変更宣言 (2026-05-16・距離計算精査・停車判定共通ヘルパ):
+  //   バグ2 (停車中の業務距離増加) の根治のため、Tier 1〜4 全経路で
+  //   state.last_speed_kmh < 2 km/h を停車判定として共通化する。
+  //   - business_distance_m += 加算をスキップする際に使用
+  //   - distance_m (課金) への加算では使わない (絶対ルール「distance_m 変えない」)
+  //   - iOS/Android 共通 (state.last_speed_kmh は GPS layer 由来で両 OS 共通)
+  //   2 km/h 閾値の根拠: GPS 5m 精度の jitter で発生する速度ノイズ (~1-2 km/h) の上限
+  function _isStationary() {
+    return (state.last_speed_kmh || 0) < 2;
+  }
+
   function _calculateOffRoadIncrement(gpsResult, dtSec) {
     if (!state.last_gps) return 0;
     if (gpsResult.isStationary) return 0;
@@ -353,8 +364,7 @@ const Meter = (() => {
         //   停車中 (speedKmh < 2 km/h) は Worker B が GPS ジッターで commit を出しても
         //   業務距離 (business_distance_m) に加算しない。distance_m (課金) は触らない
         //   = 絶対ルール「distance_m は絶対変えない」準拠。停車中の課金は現仕様維持。
-        const _stationary = (state.last_speed_kmh || 0) < 2;
-        if (!_stationary) {
+        if (!_isStationary()) {
           // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
           state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
         } else if (typeof dlog === 'function') {
@@ -400,8 +410,7 @@ const Meter = (() => {
       !_offRoadActive &&
       Date.now() >= _drainMmUntil
     ) {
-      const _stationary = (state.last_speed_kmh || 0) < 2;
-      if (!_stationary) {
+      if (!_isStationary()) {
         state.tier2_pending_m = (state.tier2_pending_m || 0) + m.tentativeIncrementM;
       }
     }
@@ -936,7 +945,13 @@ const Meter = (() => {
         );
         if (filled !== null) {
           // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
-          state.business_distance_m = (state.business_distance_m || 0) + filled;
+          // ★設計変更宣言 (2026-05-16・バグ2 整合・停車判定を gap fill 経路にも適用):
+          //   gap fill は GPS≥5s 空白で発火。停車中 (speed<2 km/h) は filled が微小だが
+          //   complete 0 ではない (infraLength 含む可能性) ため業務距離加算をスキップ。
+          //   distance_m への加算は維持 (= 絶対ルール「distance_m 変えない」)。
+          if (!_isStationary()) {
+            state.business_distance_m = (state.business_distance_m || 0) + filled;
+          }
           if (state.running) {
             state.distance_m += filled;
             state.fare_yen = calcFare(state.distance_m);
@@ -949,7 +964,13 @@ const Meter = (() => {
         // Phase 1.C Off-Road Mode: GPS polyline 累積で課金続行
         const inc = _calculateOffRoadIncrement(gpsResult, dtSec);
         if (inc > 0) {
-          state.business_distance_m = (state.business_distance_m || 0) + inc;
+          // ★設計変更宣言 (2026-05-16・バグ2 整合・停車判定を Off-Road 経路にも適用):
+          //   _calculateOffRoadIncrement は内部で isStationary を判定するが、こちらは
+          //   state.last_speed_kmh ベースで isStationary=false / speed<2 km/h を拾う。
+          //   業務距離加算をスキップ・distance_m への加算は維持。
+          if (!_isStationary()) {
+            state.business_distance_m = (state.business_distance_m || 0) + inc;
+          }
           if (state.running) {
             state.distance_m += inc;
             state.fare_yen = calcFare(state.distance_m);
@@ -961,7 +982,10 @@ const Meter = (() => {
         // MM 不健全時の inline 道路スナップ fallback (絶対ルール: GPS 直線禁止)
         const inc = _inlineSnapAndIncrement(gpsResult);
         if (inc !== null && inc > 0) {
-          state.business_distance_m = (state.business_distance_m || 0) + inc;
+          // ★設計変更宣言 (2026-05-16・バグ2 整合・停車判定を inline fallback 経路にも適用)
+          if (!_isStationary()) {
+            state.business_distance_m = (state.business_distance_m || 0) + inc;
+          }
           if (state.running) {
             state.distance_m += inc;
             state.fare_yen = calcFare(state.distance_m);
