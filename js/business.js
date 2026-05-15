@@ -3,7 +3,14 @@
 // meter.js には触らず、Meter.getState() を読むだけ
 //
 // 2026/05/01：iOS Safari 環境での確実なグローバル化のため window.Business に変更
-window.Business = (function () {
+// ★設計変更宣言 (2026-05-15・Phase C・Node coverage 計測可能化):
+//   旧: window.Business = (function(){...})()    (Node では window 未定義で即 ReferenceError)
+//   新: const Business = (function(){...})()  +  if(typeof window!=='undefined') window.Business = Business
+//       + 末尾 module.exports = Business
+//   IIFE 本体 (function () { ... })() の構造は完全に無変更。外側の代入だけを env 両対応に拡張。
+//   browser context: const Business + window.Business 両方が同じ参照を指す (旧挙動と等価)
+//   Node test context: const Business + module.exports = Business で require 経由 load 可能
+const Business = (function () {
   // ─────────────────────────────────────────
   // 状態
   // ─────────────────────────────────────────
@@ -459,3 +466,7 @@ window.Business = (function () {
     restoreFromHistory,
   };
 })();
+
+// ★設計変更宣言 (2026-05-15・Phase C): browser global expose + Node module.exports 両対応
+if (typeof window !== 'undefined') window.Business = Business;
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = Business;

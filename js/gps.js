@@ -785,3 +785,9 @@ const GPS = (() => {
     setRoadType,
   };
 })();
+
+// ★設計変更宣言 (2026-05-15・Phase C・Node coverage 計測可能化):
+//   既存 `const GPS = (() => {...})()` IIFE は無変更。末尾に Node 環境用 module.exports を追加。
+//   browser context: module 未定義のため no-op (旧挙動と等価)。
+//   Node test context: require('./gps.js') で GPS API オブジェクトを取得可能。
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = GPS;

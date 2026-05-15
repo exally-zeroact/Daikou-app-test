@@ -1261,3 +1261,9 @@ const Meter = (() => {
     getVehicleType,
   };
 })();
+
+// ★設計変更宣言 (2026-05-15・Phase C・Node coverage 計測可能化):
+//   既存 `const Meter = (() => {...})()` IIFE は無変更。末尾に Node 環境用 module.exports を追加。
+//   browser/Worker context: module 未定義のため no-op (旧挙動と等価)。
+//   Node test context: require('./meter.js') で Meter API オブジェクトを取得可能。
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = Meter;

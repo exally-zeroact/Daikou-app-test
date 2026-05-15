@@ -1,64 +1,25 @@
 // tests/calcfare.test.js
 // js/meter.js の calcFare 境界テスト
 //
-// 読込方式: meter.js は `const Meter = (() => {...})()` の top-level const なので
-// require() では取り出せない。new Function で wrap し、末尾に return Meter; を追加して取得。
-//
-// 依存: dlog (optional, typeof check), Worker / GPS は calcFare からは呼ばれない
-// → 最小限の global stub だけ用意
+// ★設計変更宣言 (2026-05-15・Phase C・V8 coverage 計測可能化):
+//   旧: new Function('window','dlog',...) sandbox + 末尾 return Meter で load
+//       → V8 coverage instrument は require/import 経路のみ追跡するため計測対象外 (0%)
+//   新: meter.js 末尾に module.exports = Meter を追加 (Phase C) したので require() で直接 load
+//       require.cache を都度クリアして毎回 fresh IIFE 評価 (fresh state) を強制
+//       → V8 coverage 計測有効化
 //
 // 絶対ルール準拠: 距離計算ロジックは触らず、入力 → 出力の境界値だけ検証
 // calcFare の実装は js/meter.js:820-902 (旧形式 fallback path・tiers=[] のとき)
 
 // describe / it / expect / beforeEach は vitest.config.js の globals:true で自動注入
-const fs = require('fs');
 const path = require('path');
 
 const METER_JS_PATH = path.join(__dirname, '..', 'js', 'meter.js');
-const METER_JS_SOURCE = fs.readFileSync(METER_JS_PATH, 'utf8');
 
 function loadMeter() {
-  // sandbox: stub dlog / DEBUG / RegionLoader / GPS / FB / TrainingCollector など
-  // meter.js は CONFIG block で参照するだけで、calcFare 経路では呼ばれない
-  const sandbox = {};
-  sandbox.window = sandbox;
-  sandbox.dlog = () => {};
-  sandbox.DEBUG = { enabled: false, isProduction: false };
-  sandbox.RegionLoader = undefined;
-  sandbox.GPS = undefined;
-  sandbox.FB = undefined;
-  sandbox.TrainingCollector = undefined;
-  sandbox.console = console;
-  sandbox.Worker = undefined; // initWorker は使われない
-  sandbox.performance =
-    typeof performance !== 'undefined' ? performance : { now: () => Date.now() };
-  // meter.js は top-level に `const Meter = (() => {...})()` を書く。
-  // new Function スコープで実行し、末尾で Meter を return して呼出側に渡す。
-  const fn = new Function(
-    'window',
-    'dlog',
-    'DEBUG',
-    'RegionLoader',
-    'GPS',
-    'FB',
-    'TrainingCollector',
-    'console',
-    'Worker',
-    'performance',
-    METER_JS_SOURCE + '\n;return Meter;'
-  );
-  return fn(
-    sandbox.window,
-    sandbox.dlog,
-    sandbox.DEBUG,
-    sandbox.RegionLoader,
-    sandbox.GPS,
-    sandbox.FB,
-    sandbox.TrainingCollector,
-    sandbox.console,
-    sandbox.Worker,
-    sandbox.performance
-  );
+  // require.cache を都度クリアして毎回 fresh IIFE 評価を強制 (state リーク回避)
+  delete require.cache[require.resolve(METER_JS_PATH)];
+  return require(METER_JS_PATH);
 }
 
 // ─── 旧形式 (tiers=[]) calcFare の手計算検算 ───────────────────────────
