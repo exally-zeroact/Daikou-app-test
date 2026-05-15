@@ -44,6 +44,22 @@ const Meter = (() => {
   let lastMmUsefulAt = 0;
   const MM_SILENT_THRESHOLD_MS = 2500; // A2 (2026-05-09): 5000→2500 短縮で fallback 早期化
 
+  // ★設計変更宣言 (2026-05-15・代行開始直後の Worker B バッファ残骸 drain):
+  //   問題: 業務開始 → 空車中 (state.running=false) でも MM Worker B は GPS を受け
+  //         _onMmWorkerMessage 経路で state.business_distance_m を蓄積する設計。
+  //         代行開始 (Meter.start) は worker に postMessage('reset') を送るが ASYNC のため、
+  //         worker が直前に commit した mmIncrementM が queue 内に残り、Meter.start() 完了
+  //         直後の event loop tick で main thread が受信する。
+  //         この時点で state.running=true (代行中) のため state.distance_m += バッファ残骸
+  //         が走り driveDist が 0.17km 等で開始してしまう (司さん 2026-05-15 報告事象)。
+  //         加えて business_distance_m も既に空車 phase で加算済なので二重カウントになる。
+  //   対策: Meter.start() で _drainMmUntil = Date.now() + DRAIN_MS を設定し、
+  //         _onMmWorkerMessage の mmIncrement 加算経路でこの時刻未満は state.distance_m /
+  //         state.business_distance_m のどちらも加算しない (mm_distance_m / lastMmUsefulAt
+  //         は stats のため更新する)。
+  let _drainMmUntil = 0;
+  const MM_DRAIN_AFTER_START_MS = 500;
+
   // ★設計変更宣言 Phase 1.C (2026-05-10): Off-Road Mode
   //   snap 連続失敗時に Worker B が distance を計算できなくなる
   //   (例: 私道・駐車場・農道・OSM 未登録道路)
@@ -294,6 +310,18 @@ const Meter = (() => {
           } catch (_) {}
         }
         // mmIncrement は加算しない・lastMmUsefulAt も更新しない (= mmHealthy false 維持)
+      } else if (Date.now() < _drainMmUntil) {
+        // ★設計変更宣言 (2026-05-15・drain window 経路):
+        //   Meter.start() 直後の MM_DRAIN_AFTER_START_MS 期間中は worker queue 内の
+        //   前 phase 残骸 mmIncrementM を破棄する。state.distance_m / business_distance_m
+        //   どちらにも加算しない (driveDist が代行開始直後に 0.17km 等になる事象を防ぐ)。
+        //   stats 用 mm_distance_m と lastMmUsefulAt は更新 (健全性判定に必要)。
+        if (typeof dlog === 'function') {
+          dlog('[Meter] drain mmIncrement ' + m.mmIncrementM.toFixed(1) + 'm (代行開始直後の残骸)');
+        }
+        lastMmUsefulAt = Date.now();
+        state.mm_distance_m += m.mmIncrementM;
+        _haverAccumSinceLastCommit = 0;
       } else {
         // 通常: MM 優先で道路距離を課金距離に反映
         // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
@@ -466,6 +494,13 @@ const Meter = (() => {
     //   その間に Worker B から最初の useful mmResult が届く想定
     //   届かなければ自然に inline / gap fallback に移行
     lastMmUsefulAt = Date.now();
+    // ★設計変更宣言 (2026-05-15・代行開始直後の Worker B バッファ残骸 drain):
+    //   worker への 'reset' postMessage は ASYNC・queue 内に残った直前 mmResult が
+    //   本関数完了直後に main thread に届く race を回避するため drain window を設定。
+    //   この時刻未満に届く mmIncrementM は state.distance_m / business_distance_m
+    //   いずれにも加算しない (空車 phase で business 側は既加算・代行中 distance に
+    //   持ち越さない)。
+    _drainMmUntil = Date.now() + MM_DRAIN_AFTER_START_MS;
     // MM-1: Worker 側 prevSnap も初期化（業務開始時の連続性リセット）
     if (mmWorker) {
       try {
