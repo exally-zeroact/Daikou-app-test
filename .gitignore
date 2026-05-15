@@ -36,3 +36,8 @@ input/
 .env
 .env.local
 .env.*.local
+
+# Playwright / Vitest 動的解析 ② ③ 生成物 (2026-05-15)
+test-results/
+playwright-report/
+coverage/
