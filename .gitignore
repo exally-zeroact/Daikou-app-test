@@ -38,6 +38,8 @@ input/
 .env.*.local
 
 # Playwright / Vitest 動的解析 ② ③ 生成物 (2026-05-15)
-test-results/
-playwright-report/
-coverage/
+# 注: leading `/` を付けて repo root にアンカー。
+# data/test-results/ は CI (mm-regression.yml) が更新する追跡対象なので除外しない。
+/test-results/
+/playwright-report/
+/coverage/
