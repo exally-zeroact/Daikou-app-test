@@ -30,18 +30,34 @@ function loadMeter() {
   sandbox.TrainingCollector = undefined;
   sandbox.console = console;
   sandbox.Worker = undefined; // initWorker は使われない
-  sandbox.performance = (typeof performance !== 'undefined') ? performance : { now: () => Date.now() };
+  sandbox.performance =
+    typeof performance !== 'undefined' ? performance : { now: () => Date.now() };
   // meter.js は top-level に `const Meter = (() => {...})()` を書く。
   // new Function スコープで実行し、末尾で Meter を return して呼出側に渡す。
   const fn = new Function(
-    'window', 'dlog', 'DEBUG', 'RegionLoader', 'GPS', 'FB', 'TrainingCollector',
-    'console', 'Worker', 'performance',
+    'window',
+    'dlog',
+    'DEBUG',
+    'RegionLoader',
+    'GPS',
+    'FB',
+    'TrainingCollector',
+    'console',
+    'Worker',
+    'performance',
     METER_JS_SOURCE + '\n;return Meter;'
   );
   return fn(
-    sandbox.window, sandbox.dlog, sandbox.DEBUG, sandbox.RegionLoader,
-    sandbox.GPS, sandbox.FB, sandbox.TrainingCollector,
-    sandbox.console, sandbox.Worker, sandbox.performance
+    sandbox.window,
+    sandbox.dlog,
+    sandbox.DEBUG,
+    sandbox.RegionLoader,
+    sandbox.GPS,
+    sandbox.FB,
+    sandbox.TrainingCollector,
+    sandbox.console,
+    sandbox.Worker,
+    sandbox.performance
   );
 }
 
@@ -79,7 +95,11 @@ describe('Meter.calcFare 境界値テスト (旧形式・tiers=[])', () => {
     vehicles: [],
     vehiclesEnabled: false,
     wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
-    autoSurcharges: { night: { enabled: false }, weekend: { enabled: false }, winter: { enabled: false } },
+    autoSurcharges: {
+      night: { enabled: false },
+      weekend: { enabled: false },
+      winter: { enabled: false },
+    },
     minFare: null,
     maxFare: null,
   };
@@ -161,8 +181,12 @@ describe('Meter.calcFare 自動割増 (autoSurcharges) の整数丸め', () => {
 
   it('autoSurcharges 全 disabled なら倍率 1.0 (距離料金そのまま)', () => {
     Meter.setFareConfig({
-      base_fare: 1300, base_distance_m: 1000, add_fare: 100, add_distance_m: 420,
-      rounding: 10, tiers: [],
+      base_fare: 1300,
+      base_distance_m: 1000,
+      add_fare: 100,
+      add_distance_m: 420,
+      rounding: 10,
+      tiers: [],
       autoSurcharges: {
         night: { enabled: false, from: 22, to: 5, rate: 1.2 },
         weekend: { enabled: false, rate: 1.1 },
@@ -175,12 +199,18 @@ describe('Meter.calcFare 自動割増 (autoSurcharges) の整数丸め', () => {
 
 describe('Meter.calcFare 丸め単位 (rounding)', () => {
   let Meter;
-  beforeEach(() => { Meter = loadMeter(); });
+  beforeEach(() => {
+    Meter = loadMeter();
+  });
 
   it('rounding=10 で 10 円単位に丸め (default 動作確認)', () => {
     Meter.setFareConfig({
-      base_fare: 1305, base_distance_m: 1000, add_fare: 100, add_distance_m: 420,
-      rounding: 10, tiers: [],
+      base_fare: 1305,
+      base_distance_m: 1000,
+      add_fare: 100,
+      add_distance_m: 420,
+      rounding: 10,
+      tiers: [],
     });
     // 距離 0 → fare=1305 → Math.round(1305/10)*10 = 1310
     expect(Meter.calcFare(0)).toBe(1310);
@@ -188,8 +218,12 @@ describe('Meter.calcFare 丸め単位 (rounding)', () => {
 
   it('rounding=1 (or 0) で整数丸めのみ', () => {
     Meter.setFareConfig({
-      base_fare: 1304, base_distance_m: 1000, add_fare: 100, add_distance_m: 420,
-      rounding: 1, tiers: [],
+      base_fare: 1304,
+      base_distance_m: 1000,
+      add_fare: 100,
+      add_distance_m: 420,
+      rounding: 1,
+      tiers: [],
     });
     expect(Meter.calcFare(0)).toBe(1304);
   });
@@ -197,22 +231,34 @@ describe('Meter.calcFare 丸め単位 (rounding)', () => {
 
 describe('Meter.calcFare 最低/最高料金 clamp (minFare / maxFare)', () => {
   let Meter;
-  beforeEach(() => { Meter = loadMeter(); });
+  beforeEach(() => {
+    Meter = loadMeter();
+  });
 
   it('minFare=2000 で距離料金 1,300 を 2,000 に底上げ', () => {
     Meter.setFareConfig({
-      base_fare: 1300, base_distance_m: 1000, add_fare: 100, add_distance_m: 420,
-      rounding: 10, tiers: [],
-      minFare: 2000, maxFare: null,
+      base_fare: 1300,
+      base_distance_m: 1000,
+      add_fare: 100,
+      add_distance_m: 420,
+      rounding: 10,
+      tiers: [],
+      minFare: 2000,
+      maxFare: null,
     });
     expect(Meter.calcFare(0)).toBe(2000);
   });
 
   it('maxFare=1500 で 5,000m の高額計算を 1,500 に圧縮', () => {
     Meter.setFareConfig({
-      base_fare: 1300, base_distance_m: 1000, add_fare: 100, add_distance_m: 420,
-      rounding: 10, tiers: [],
-      minFare: null, maxFare: 1500,
+      base_fare: 1300,
+      base_distance_m: 1000,
+      add_fare: 100,
+      add_distance_m: 420,
+      rounding: 10,
+      tiers: [],
+      minFare: null,
+      maxFare: 1500,
     });
     expect(Meter.calcFare(5000)).toBe(1500);
   });

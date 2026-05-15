@@ -27,7 +27,7 @@ const u = require('./bundle-utils.js');
 const args = process.argv.slice(2);
 const MODE_COARSE = args.includes('--coarse');
 const MODE_FINE = args.includes('--fine');
-const prefArg = args.find(a => a.startsWith('--pref='));
+const prefArg = args.find((a) => a.startsWith('--pref='));
 const ONLY_PREF = prefArg ? prefArg.slice(7) : null;
 
 if (!MODE_COARSE && !MODE_FINE) {
@@ -38,38 +38,117 @@ if (!MODE_COARSE && !MODE_FINE) {
 const PROJECT_ROOT = path.join(__dirname, '..');
 const INPUT_ROOT = path.join(PROJECT_ROOT, 'input');
 const ALL_PREFS = [
-  'hokkaido','aomori','iwate','miyagi','akita','yamagata','fukushima',
-  'ibaraki','tochigi','gunma','saitama','chiba','tokyo','kanagawa',
-  'niigata','toyama','ishikawa','fukui','yamanashi','nagano','gifu','shizuoka','aichi',
-  'mie','shiga','kyoto','osaka','hyogo','nara','wakayama',
-  'tottori','shimane','okayama','hiroshima','yamaguchi',
-  'tokushima','kagawa','ehime','kochi',
-  'fukuoka','saga','nagasaki','kumamoto','oita','miyazaki','kagoshima','okinawa',
+  'hokkaido',
+  'aomori',
+  'iwate',
+  'miyagi',
+  'akita',
+  'yamagata',
+  'fukushima',
+  'ibaraki',
+  'tochigi',
+  'gunma',
+  'saitama',
+  'chiba',
+  'tokyo',
+  'kanagawa',
+  'niigata',
+  'toyama',
+  'ishikawa',
+  'fukui',
+  'yamanashi',
+  'nagano',
+  'gifu',
+  'shizuoka',
+  'aichi',
+  'mie',
+  'shiga',
+  'kyoto',
+  'osaka',
+  'hyogo',
+  'nara',
+  'wakayama',
+  'tottori',
+  'shimane',
+  'okayama',
+  'hiroshima',
+  'yamaguchi',
+  'tokushima',
+  'kagawa',
+  'ehime',
+  'kochi',
+  'fukuoka',
+  'saga',
+  'nagasaki',
+  'kumamoto',
+  'oita',
+  'miyazaki',
+  'kagoshima',
+  'okinawa',
 ];
 // JIS X 0401 都道府県コード (2 桁)
 const PREF_CODE = {
   hokkaido: '01',
-  aomori: '02', iwate: '03', miyagi: '04', akita: '05', yamagata: '06', fukushima: '07',
-  ibaraki: '08', tochigi: '09', gunma: '10',
-  saitama: '11', chiba: '12', tokyo: '13', kanagawa: '14',
-  niigata: '15', toyama: '16', ishikawa: '17', fukui: '18',
-  yamanashi: '19', nagano: '20', gifu: '21', shizuoka: '22', aichi: '23',
-  mie: '24', shiga: '25', kyoto: '26', osaka: '27',
-  hyogo: '28', nara: '29', wakayama: '30',
-  tottori: '31', shimane: '32', okayama: '33', hiroshima: '34', yamaguchi: '35',
-  tokushima: '36', kagawa: '37', ehime: '38', kochi: '39',
-  fukuoka: '40', saga: '41', nagasaki: '42', kumamoto: '43',
-  oita: '44', miyazaki: '45', kagoshima: '46', okinawa: '47',
+  aomori: '02',
+  iwate: '03',
+  miyagi: '04',
+  akita: '05',
+  yamagata: '06',
+  fukushima: '07',
+  ibaraki: '08',
+  tochigi: '09',
+  gunma: '10',
+  saitama: '11',
+  chiba: '12',
+  tokyo: '13',
+  kanagawa: '14',
+  niigata: '15',
+  toyama: '16',
+  ishikawa: '17',
+  fukui: '18',
+  yamanashi: '19',
+  nagano: '20',
+  gifu: '21',
+  shizuoka: '22',
+  aichi: '23',
+  mie: '24',
+  shiga: '25',
+  kyoto: '26',
+  osaka: '27',
+  hyogo: '28',
+  nara: '29',
+  wakayama: '30',
+  tottori: '31',
+  shimane: '32',
+  okayama: '33',
+  hiroshima: '34',
+  yamaguchi: '35',
+  tokushima: '36',
+  kagawa: '37',
+  ehime: '38',
+  kochi: '39',
+  fukuoka: '40',
+  saga: '41',
+  nagasaki: '42',
+  kumamoto: '43',
+  oita: '44',
+  miyazaki: '45',
+  kagoshima: '46',
+  okinawa: '47',
 };
 const targetPrefs = ONLY_PREF ? [ONLY_PREF] : ALL_PREFS;
 
 // ─── 任意ジオメトリから重心 [lat, lng] を計算 ────────────────────
 function centroid(geometry) {
-  let sumLat = 0, sumLng = 0, n = 0;
+  let sumLat = 0,
+    sumLng = 0,
+    n = 0;
   function walk(node) {
     if (!Array.isArray(node)) return;
     if (typeof node[0] === 'number' && typeof node[1] === 'number') {
-      sumLng += node[0]; sumLat += node[1]; n++;
+      sumLng += node[0];
+      sumLat += node[1];
+      n++;
       return;
     }
     for (const v of node) walk(v);
@@ -92,19 +171,26 @@ function buildCoarse() {
     const json = JSON.parse(fs.readFileSync(fp, 'utf8'));
     // 同一 城市 (city + code) の複数ポリゴンを合算重心化
     const cityMap = new Map(); // key=code → { sumLat, sumLng, n, pref, county, city }
-    for (const f of (json.features || [])) {
+    for (const f of json.features || []) {
       const c = centroid(f.geometry);
       if (!c) continue;
       const p = f.properties || {};
-      const code = p.code || (p.pref + p.city); // フォールバック
+      const code = p.code || p.pref + p.city; // フォールバック
       if (!cityMap.has(code)) {
         cityMap.set(code, {
-          sumLat: 0, sumLng: 0, n: 0,
-          pref: p.pref || '', county: p.county || '', city: p.city || '', code,
+          sumLat: 0,
+          sumLng: 0,
+          n: 0,
+          pref: p.pref || '',
+          county: p.county || '',
+          city: p.city || '',
+          code,
         });
       }
       const e = cityMap.get(code);
-      e.sumLat += c.lat; e.sumLng += c.lng; e.n++;
+      e.sumLat += c.lat;
+      e.sumLng += c.lng;
+      e.n++;
     }
     for (const e of cityMap.values()) {
       if (e.n === 0) continue;
@@ -147,18 +233,26 @@ function buildFine() {
       if (!line) continue;
       // 簡易 CSV パース (引用符付きフィールド対応)
       const cols = [];
-      let cur = '', inQ = false;
+      let cur = '',
+        inQ = false;
       for (let j = 0; j < line.length; j++) {
         const ch = line[j];
-        if (ch === '"') { inQ = !inQ; continue; }
-        if (ch === ',' && !inQ) { cols.push(cur); cur = ''; continue; }
+        if (ch === '"') {
+          inQ = !inQ;
+          continue;
+        }
+        if (ch === ',' && !inQ) {
+          cols.push(cur);
+          cur = '';
+          continue;
+        }
         cur += ch;
       }
       cols.push(cur);
       if (cols.length < 12) continue;
       if (cols[11] !== '1') continue; // 代表フラグ=1 のみ
-      const city  = cols[1] || '';
-      const oaza  = cols[2] || '';
+      const city = cols[1] || '';
+      const oaza = cols[2] || '';
       const koaza = cols[3] || '';
       const key = city + '|' + oaza + '|' + koaza;
       if (seen.has(key)) continue;
@@ -167,10 +261,11 @@ function buildFine() {
       const lng = parseFloat(cols[9]);
       if (isNaN(lat) || isNaN(lng)) continue;
       items.push({
-        lat, lng,
+        lat,
+        lng,
         n: oaza + (koaza || ''),
         c: city,
-        p: pcode,   // 都道府県コード (2 桁・JIS X 0401)
+        p: pcode, // 都道府県コード (2 桁・JIS X 0401)
       });
       count++;
     }
@@ -185,7 +280,10 @@ function buildFine() {
   if (MODE_COARSE) {
     console.log(`▼ build coarse (中精度・市区町村代表点)`);
     const { items, prefsProcessed } = buildCoarse();
-    if (items.length === 0) { console.error('❌ no items'); process.exit(1); }
+    if (items.length === 0) {
+      console.error('❌ no items');
+      process.exit(1);
+    }
     const data = u.buildPointBundle(items, (it) => {
       const o = {};
       if (it.n) o.n = it.n;
@@ -200,13 +298,16 @@ function buildFine() {
       `// 市区町村単位の代表点 (ポリゴン重心) を集約`,
       `// 全国 ${items.length} 件 / ${prefsProcessed}/${targetPrefs.length} 県`,
     ]);
-    console.log(`✅ ${OUT}  count=${items.length} size=${(size/1024).toFixed(2)} KB`);
+    console.log(`✅ ${OUT}  count=${items.length} size=${(size / 1024).toFixed(2)} KB`);
   }
 
   if (MODE_FINE) {
     console.log(`▼ build fine (詳細・大字代表点)`);
     const { items, prefsProcessed } = buildFine();
-    if (items.length === 0) { console.error('❌ no items'); process.exit(1); }
+    if (items.length === 0) {
+      console.error('❌ no items');
+      process.exit(1);
+    }
     const data = u.buildPointBundle(items, (it) => {
       const o = {};
       if (it.n) o.n = it.n;
@@ -221,6 +322,9 @@ function buildFine() {
       `// 代表フラグ=1 の街区代表点のみ抽出`,
       `// 全国 ${items.length} 件 / ${prefsProcessed}/${targetPrefs.length} 県`,
     ]);
-    console.log(`✅ ${OUT}  count=${items.length} size=${(size/1024).toFixed(2)} KB`);
+    console.log(`✅ ${OUT}  count=${items.length} size=${(size / 1024).toFixed(2)} KB`);
   }
-})().catch(e => { console.error('FATAL:', e); process.exit(1); });
+})().catch((e) => {
+  console.error('FATAL:', e);
+  process.exit(1);
+});

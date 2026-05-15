@@ -1,16 +1,18 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="refresh" content="0;url=/">
-<title>リダイレクト中...</title>
-<!-- ★設計変更宣言 (2026-05-14・MA-7): settings.html を redirect stub に置換。
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <meta http-equiv="refresh" content="0;url=/" />
+    <title>リダイレクト中...</title>
+    <!-- ★設計変更宣言 (2026-05-14・MA-7): settings.html を redirect stub に置換。
      MA-4 で settings コンテンツは #overlaySettings に移植済・MA-6 で bottom-nav も
      showOverlay('settings') に切替済。残された旧 URL への直接アクセス (外部リンク・
      ブックマーク・履歴・古い PWA キャッシュ) を / (index.html) に強制リダイレクトする。
      overlay 経由のフローで GPS / MM Worker / WakeLock の継続性が担保される。 -->
-<script>location.replace('/');</script>
-</head>
-<body></body>
+    <script>
+      location.replace('/');
+    </script>
+  </head>
+  <body></body>
 </html>

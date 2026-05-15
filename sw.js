@@ -67,17 +67,24 @@ const PRECACHE_FILES = [
   '/data/dem-jp.js',
 ];
 
-self.addEventListener('install', function(e){
+self.addEventListener('install', function (e) {
   e.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache){
-      // "/"は明示的に reload で取得（古いキャッシュを使わない）
-      return Promise.all([
-        cache.add(new Request('/', { cache: 'reload' })),
-        cache.addAll(PRECACHE_FILES.filter(function(p){ return p !== '/'; }))
-      ]);
-    }).then(function(){
-      return self.skipWaiting();
-    })
+    caches
+      .open(CACHE_NAME)
+      .then(function (cache) {
+        // "/"は明示的に reload で取得（古いキャッシュを使わない）
+        return Promise.all([
+          cache.add(new Request('/', { cache: 'reload' })),
+          cache.addAll(
+            PRECACHE_FILES.filter(function (p) {
+              return p !== '/';
+            })
+          ),
+        ]);
+      })
+      .then(function () {
+        return self.skipWaiting();
+      })
   );
 });
 
@@ -86,39 +93,42 @@ self.addEventListener('install', function(e){
 //   新: 旧 daikome-{hash} cache 内の /data/roads-*.js を CACHE_NAME_ROADS へ
 //       1 件ずつ try/catch で migrate してから旧 cache 削除
 //       CACHE_NAME / CACHE_NAME_ROADS は保護対象 (削除しない)
-self.addEventListener('activate', function(e){
-  e.waitUntil((async function(){
-    try {
-      const keys = await caches.keys();
-      const newRoadsCache = await caches.open(CACHE_NAME_ROADS);
-      // 旧 daikome-{hash} cache から /data/roads-*.js を migrate
-      for(const oldName of keys){
-        // 保護対象: 新 CACHE_NAME と CACHE_NAME_ROADS は触らない
-        if(oldName === CACHE_NAME) continue;
-        if(oldName === CACHE_NAME_ROADS) continue;
-        // 旧 daikome-* prefix のみ migrate 対象 (他オリジン無関係 cache は触らない)
-        if(oldName.indexOf('daikome-') !== 0) continue;
-        try {
-          const oldCache = await caches.open(oldName);
-          const reqs = await oldCache.keys();
-          for(const req of reqs){
-            if(req.url.indexOf('/data/roads-') === -1) continue;
-            // 1 件失敗で全体止めないよう個別 try/catch
-            try {
-              const res = await oldCache.match(req);
-              if(res) await newRoadsCache.put(req, res);
-            } catch(_){}
-          }
-        } catch(_){}
-      }
-      // migrate 後に旧 cache (CACHE_NAME / CACHE_NAME_ROADS 以外) を削除
-      await Promise.all(
-        keys.filter(k => k !== CACHE_NAME && k !== CACHE_NAME_ROADS)
-            .map(k => caches.delete(k).catch(function(){}))
-      );
-    } catch(_){}
-    await self.clients.claim();
-  })());
+self.addEventListener('activate', function (e) {
+  e.waitUntil(
+    (async function () {
+      try {
+        const keys = await caches.keys();
+        const newRoadsCache = await caches.open(CACHE_NAME_ROADS);
+        // 旧 daikome-{hash} cache から /data/roads-*.js を migrate
+        for (const oldName of keys) {
+          // 保護対象: 新 CACHE_NAME と CACHE_NAME_ROADS は触らない
+          if (oldName === CACHE_NAME) continue;
+          if (oldName === CACHE_NAME_ROADS) continue;
+          // 旧 daikome-* prefix のみ migrate 対象 (他オリジン無関係 cache は触らない)
+          if (oldName.indexOf('daikome-') !== 0) continue;
+          try {
+            const oldCache = await caches.open(oldName);
+            const reqs = await oldCache.keys();
+            for (const req of reqs) {
+              if (req.url.indexOf('/data/roads-') === -1) continue;
+              // 1 件失敗で全体止めないよう個別 try/catch
+              try {
+                const res = await oldCache.match(req);
+                if (res) await newRoadsCache.put(req, res);
+              } catch (_) {}
+            }
+          } catch (_) {}
+        }
+        // migrate 後に旧 cache (CACHE_NAME / CACHE_NAME_ROADS 以外) を削除
+        await Promise.all(
+          keys
+            .filter((k) => k !== CACHE_NAME && k !== CACHE_NAME_ROADS)
+            .map((k) => caches.delete(k).catch(function () {}))
+        );
+      } catch (_) {}
+      await self.clients.claim();
+    })()
+  );
 });
 
 // SWR（Stale-While-Revalidate）共通関数
@@ -131,43 +141,53 @@ self.addEventListener('activate', function(e){
 //   旧: ?_v={timestamp} 等のクエリ付き URL がそのまま別エントリとして cache に
 //       残り、no-query 版と二重化していた (10 県の ?_v= 付き残存問題)
 //   新: cacheKey = normalizedRequest (query 除去) で put/match → 1 県 1 エントリに統一
-function staleWhileRevalidate(request, cacheName){
+function staleWhileRevalidate(request, cacheName) {
   cacheName = cacheName || CACHE_NAME;
   let cacheKey = request;
-  if(cacheName === CACHE_NAME_ROADS){
+  if (cacheName === CACHE_NAME_ROADS) {
     try {
       const normalizedUrl = new URL(request.url);
       normalizedUrl.search = '';
       cacheKey = new Request(normalizedUrl.toString(), { headers: request.headers });
-    } catch(_){}
+    } catch (_) {}
   }
-  return caches.open(cacheName).then(function(cache){
-    return cache.match(cacheKey).then(function(cached){
-      const fetchPromise = fetch(request).then(function(response){
-        if(response && response.ok && request.method === 'GET'){
-          // 同一オリジンの正常レスポンスのみキャッシュ（opaque は除外）
-          if(response.type === 'basic' || response.type === 'default'){
-            // ★設計変更宣言 (2026-05-13): cache.put 失敗を main thread に通知
-            //   旧: .catch(()=>{}) で黙って握りつぶし → IndexedDB prefStatus と
-            //       Cache の整合性破れ (47/47 完了マーク済なのに 1 県だけ cache 欠落)
-            //   新: cache.put 失敗時に postMessage({type:'cachePutFailed', url})
-            //       main thread 側 (index.html) で受信し prefStatus を未完了に戻す
-            cache.put(cacheKey, response.clone()).catch(function(err){
-              return self.clients.matchAll({ type: 'window' }).then(function(clients){
-                for(let i = 0; i < clients.length; i++){
-                  try { clients[i].postMessage({ type: 'cachePutFailed', url: request.url }); } catch(_) {}
-                }
-              }).catch(function(){});
-            });
+  return caches.open(cacheName).then(function (cache) {
+    return cache.match(cacheKey).then(function (cached) {
+      const fetchPromise = fetch(request)
+        .then(function (response) {
+          if (response && response.ok && request.method === 'GET') {
+            // 同一オリジンの正常レスポンスのみキャッシュ（opaque は除外）
+            if (response.type === 'basic' || response.type === 'default') {
+              // ★設計変更宣言 (2026-05-13): cache.put 失敗を main thread に通知
+              //   旧: .catch(()=>{}) で黙って握りつぶし → IndexedDB prefStatus と
+              //       Cache の整合性破れ (47/47 完了マーク済なのに 1 県だけ cache 欠落)
+              //   新: cache.put 失敗時に postMessage({type:'cachePutFailed', url})
+              //       main thread 側 (index.html) で受信し prefStatus を未完了に戻す
+              cache.put(cacheKey, response.clone()).catch(function (err) {
+                return self.clients
+                  .matchAll({ type: 'window' })
+                  .then(function (clients) {
+                    for (let i = 0; i < clients.length; i++) {
+                      try {
+                        clients[i].postMessage({ type: 'cachePutFailed', url: request.url });
+                      } catch (_) {}
+                    }
+                  })
+                  .catch(function () {});
+              });
+            }
           }
-        }
-        return response;
-      }).catch(function(){
-        // ネット失敗時：cached → "/" → 最終手段で network error Response
-        return cached || caches.match('/').then(function(r){
-          return r || Response.error();
+          return response;
+        })
+        .catch(function () {
+          // ネット失敗時：cached → "/" → 最終手段で network error Response
+          return (
+            cached ||
+            caches.match('/').then(function (r) {
+              return r || Response.error();
+            })
+          );
         });
-      });
       return cached || fetchPromise;
     });
   });
@@ -175,19 +195,24 @@ function staleWhileRevalidate(request, cacheName){
 
 // ナビゲーション専用ハンドラ：querystring 無視で precache を確実にヒット
 // ?_v=xxx のようなパラメータ付き URL でもキャッシュキーをマッチさせる
-function navigationHandler(request){
-  return caches.open(CACHE_NAME).then(function(cache){
-    return cache.match(request, { ignoreSearch: true }).then(function(cached){
-      const fetchPromise = fetch(request).then(function(response){
-        if(response && response.ok){
-          cache.put(request, response.clone()).catch(function(){});
-        }
-        return response;
-      }).catch(function(){
-        return cached || caches.match('/').then(function(r){
-          return r || Response.error();
+function navigationHandler(request) {
+  return caches.open(CACHE_NAME).then(function (cache) {
+    return cache.match(request, { ignoreSearch: true }).then(function (cached) {
+      const fetchPromise = fetch(request)
+        .then(function (response) {
+          if (response && response.ok) {
+            cache.put(request, response.clone()).catch(function () {});
+          }
+          return response;
+        })
+        .catch(function () {
+          return (
+            cached ||
+            caches.match('/').then(function (r) {
+              return r || Response.error();
+            })
+          );
         });
-      });
       return cached || fetchPromise;
     });
   });
@@ -195,55 +220,55 @@ function navigationHandler(request){
 
 // /api/* 専用：ネットワーク優先・失敗時に HTML を返さず JSON エラーを返す
 // （/api/* 呼び出しが HTML 化けして JSON.parse 失敗する事故を防ぐ）
-function networkOnlyJson(request){
-  return fetch(request).catch(function(){
-    return new Response(
-      JSON.stringify({ error: 'offline', source: 'sw' }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
-    );
+function networkOnlyJson(request) {
+  return fetch(request).catch(function () {
+    return new Response(JSON.stringify({ error: 'offline', source: 'sw' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
   });
 }
 
-self.addEventListener('fetch', function(e){
+self.addEventListener('fetch', function (e) {
   const req = e.request;
 
   // [修正1] 非 GET (POST/PUT/DELETE/OPTIONS) は SW 介入しない
   //   → cache.match できず undefined を respondWith → "null FetchEvent" の主因
-  if(req.method !== 'GET') return;
+  if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
 
   // [修正2] http(s) 以外（chrome-extension://, data:, blob:, devtools://）は SW 介入しない
   //   → cache.put が "scheme not supported" 例外で reject → respondWith が undefined になる
-  if(url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
   // [修正3] クロスオリジン（firebase / googleapis / gstatic / fonts.g 含む）は SW 介入しない
   //   → ブラウザが直接処理。SW を経由しないことで opaque キャッシュ汚染も回避
-  if(url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) return;
 
   // [修正4] /api/* は network-only。失敗時も HTML フォールバックせず JSON エラー返却
   //   → 旧コードでは fetch 失敗時 caches.match('/') が HTML を返し、呼び出し側 JSON.parse が落ちていた
-  if(url.pathname.startsWith('/api/')){
+  if (url.pathname.startsWith('/api/')) {
     e.respondWith(networkOnlyJson(req));
     return;
   }
 
   // [修正5] ナビゲーションリクエスト（HTML ページ取得）は querystring 無視で precache マッチ
   //   → URL に ?foo=bar 等が付与されていても本体パスのキャッシュにヒット
-  if(req.mode === 'navigate'){
+  if (req.mode === 'navigate') {
     e.respondWith(navigationHandler(req));
     return;
   }
 
   // ★設計変更宣言 (2026-05-13): /data/roads-*.js は CACHE_NAME_ROADS (固定名) に分離
   //   アプリコード CACHE_NAME が hash 更新されても 47 県キャッシュは保持される
-  if(req.url.includes('/data/roads-')){
+  if (req.url.includes('/data/roads-')) {
     e.respondWith(staleWhileRevalidate(req, CACHE_NAME_ROADS));
     return;
   }
 
   // 道路データ・地図関連：SWR（最重要・オフライン必須）
-  if(
+  if (
     req.url.includes('/roads/') ||
     req.url.includes('/road-data/') ||
     req.url.includes('/data/roads-') ||
@@ -272,16 +297,21 @@ self.addEventListener('fetch', function(e){
     req.url.includes('/data/railways-jp.js') ||
     req.url.includes('/data/waterways-jp.js') ||
     req.url.includes('/data/hazard-cliff-jp.js')
-  ){
+  ) {
     e.respondWith(staleWhileRevalidate(req));
     return;
   }
 
   // 静的アセット（icon・manifest）：cache-first
-  if(req.url.includes('/icon-') || req.url.includes('/manifest.json')){
+  if (req.url.includes('/icon-') || req.url.includes('/manifest.json')) {
     e.respondWith(
-      caches.match(req).then(function(cached){
-        return cached || fetch(req).catch(function(){ return Response.error(); });
+      caches.match(req).then(function (cached) {
+        return (
+          cached ||
+          fetch(req).catch(function () {
+            return Response.error();
+          })
+        );
       })
     );
     return;
@@ -294,16 +324,18 @@ self.addEventListener('fetch', function(e){
 // Background Sync（Phase 2.B 訓練データ upload trigger）
 //   M2 (2026-05-10): 旧 'firebase-sync' tag handler は dead code のため削除
 //   現在使用中の tag は 'training-upload' のみ
-self.addEventListener('sync', function(e){
-  if(e.tag === 'training-upload'){
+self.addEventListener('sync', function (e) {
+  if (e.tag === 'training-upload') {
     e.waitUntil(_notifyClientsTrainingUpload());
   }
 });
 
-function _notifyClientsTrainingUpload(){
-  return self.clients.matchAll({ type: 'window' }).then(function(clients){
-    for(const c of clients){
-      try { c.postMessage({ type: 'TRAINING_UPLOAD_TRIGGER' }); } catch(_) {}
+function _notifyClientsTrainingUpload() {
+  return self.clients.matchAll({ type: 'window' }).then(function (clients) {
+    for (const c of clients) {
+      try {
+        c.postMessage({ type: 'TRAINING_UPLOAD_TRIGGER' });
+      } catch (_) {}
     }
   });
 }

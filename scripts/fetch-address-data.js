@@ -24,25 +24,62 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 function requireGlobal(name) {
-  try { return require(name); } catch {}
+  try {
+    return require(name);
+  } catch {}
   const root = execSync('npm root -g', { encoding: 'utf8' }).trim();
   return require(path.join(root, name));
 }
 
 // ─── 47都道府県 + KSJ コード ───────────────────────────────────────
 const PREFS = {
-  hokkaido:  '01',
-  aomori:    '02', iwate:     '03', miyagi:    '04', akita:    '05', yamagata: '06', fukushima: '07',
-  ibaraki:   '08', tochigi:   '09', gunma:     '10',
-  saitama:   '11', chiba:     '12', tokyo:     '13', kanagawa:  '14',
-  niigata:   '15', toyama:    '16', ishikawa:  '17', fukui:     '18',
-  yamanashi: '19', nagano:    '20', gifu:      '21', shizuoka:  '22', aichi:    '23',
-  mie:       '24', shiga:     '25', kyoto:     '26', osaka:     '27',
-  hyogo:     '28', nara:      '29', wakayama:  '30',
-  tottori:   '31', shimane:   '32', okayama:   '33', hiroshima: '34', yamaguchi:'35',
-  tokushima: '36', kagawa:    '37', ehime:     '38', kochi:     '39',
-  fukuoka:   '40', saga:      '41', nagasaki:  '42', kumamoto:  '43',
-  oita:      '44', miyazaki:  '45', kagoshima: '46', okinawa:   '47',
+  hokkaido: '01',
+  aomori: '02',
+  iwate: '03',
+  miyagi: '04',
+  akita: '05',
+  yamagata: '06',
+  fukushima: '07',
+  ibaraki: '08',
+  tochigi: '09',
+  gunma: '10',
+  saitama: '11',
+  chiba: '12',
+  tokyo: '13',
+  kanagawa: '14',
+  niigata: '15',
+  toyama: '16',
+  ishikawa: '17',
+  fukui: '18',
+  yamanashi: '19',
+  nagano: '20',
+  gifu: '21',
+  shizuoka: '22',
+  aichi: '23',
+  mie: '24',
+  shiga: '25',
+  kyoto: '26',
+  osaka: '27',
+  hyogo: '28',
+  nara: '29',
+  wakayama: '30',
+  tottori: '31',
+  shimane: '32',
+  okayama: '33',
+  hiroshima: '34',
+  yamaguchi: '35',
+  tokushima: '36',
+  kagawa: '37',
+  ehime: '38',
+  kochi: '39',
+  fukuoka: '40',
+  saga: '41',
+  nagasaki: '42',
+  kumamoto: '43',
+  oita: '44',
+  miyazaki: '45',
+  kagoshima: '46',
+  okinawa: '47',
 };
 
 const PROJECT_ROOT = path.join(__dirname, '..');
@@ -76,7 +113,9 @@ async function fetchBuffer(url, timeoutMs = 240000) {
     const res = await fetch(url, { signal: ctrl.signal, headers: UA });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
-  } finally { clearTimeout(t); }
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 function unzipTo(zipPath, dir) {
@@ -102,13 +141,13 @@ function findFiles(dir, pattern) {
 async function downloadZipIfNeeded(url, fname) {
   const zipPath = path.join(RAW_DIR, fname);
   if (fs.existsSync(zipPath) && fs.statSync(zipPath).size > 1024) {
-    console.log(`  cache: ${fname} (${(fs.statSync(zipPath).size/1024/1024).toFixed(1)} MB)`);
+    console.log(`  cache: ${fname} (${(fs.statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB)`);
     return zipPath;
   }
   console.log(`  DL: ${url}`);
   const buf = await fetchBuffer(url);
   fs.writeFileSync(zipPath, buf);
-  console.log(`  saved ${fname} (${(buf.length/1024/1024).toFixed(1)} MB)`);
+  console.log(`  saved ${fname} (${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
   return zipPath;
 }
 
@@ -124,7 +163,8 @@ async function fetchN03() {
     { date: '20230101', dir: 'N03-2023' },
     { date: '20220101', dir: 'N03-2022' },
   ];
-  let zipPath = null, usedDate = null;
+  let zipPath = null,
+    usedDate = null;
   for (const c of candidates) {
     const url = `https://nlftp.mlit.go.jp/ksj/gml/data/N03/${c.dir}/N03-${c.date}_${PCODE}_GML.zip`;
     const fname = `N03-${c.date}_${PCODE}_GML.zip`;
@@ -148,25 +188,31 @@ async function fetchN03() {
   for (const gp of geojsons) {
     const text = fs.readFileSync(gp, 'utf8');
     let json;
-    try { json = JSON.parse(text); } catch { continue; }
-    for (const f of (json.features || [])) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    for (const f of json.features || []) {
       if (!f.geometry) continue;
       const props = f.properties || {};
       features.push({
         type: 'Feature',
         properties: {
-          pref:    props.N03_001 || '',           // 都道府県名
-          subpref: props.N03_002 || '',           // 支庁・振興局
-          county:  props.N03_003 || '',           // 郡・政令市
-          city:    props.N03_004 || '',           // 市区町村名
-          code:    props.N03_007 || '',           // 行政区域コード (5桁)
+          pref: props.N03_001 || '', // 都道府県名
+          subpref: props.N03_002 || '', // 支庁・振興局
+          county: props.N03_003 || '', // 郡・政令市
+          city: props.N03_004 || '', // 市区町村名
+          code: props.N03_007 || '', // 行政区域コード (5桁)
         },
         geometry: f.geometry,
       });
     }
   }
-  fs.writeFileSync(path.join(OUT_DIR, 'admin.geojson'),
-    JSON.stringify({ type: 'FeatureCollection', features }));
+  fs.writeFileSync(
+    path.join(OUT_DIR, 'admin.geojson'),
+    JSON.stringify({ type: 'FeatureCollection', features })
+  );
   console.log(`  N03 → admin.geojson: ${features.length} feats`);
   return features.length;
 }
@@ -180,7 +226,8 @@ async function fetchN03() {
 async function fetchISJ() {
   // 最新版 → 旧版フォールバック
   const versions = ['23.0a', '22.0a', '20.0a', '19.0a'];
-  let zipPath = null, usedVer = null;
+  let zipPath = null,
+    usedVer = null;
   for (const v of versions) {
     const url = `https://nlftp.mlit.go.jp/isj/dls/data/${v}/${PCODE}000-${v}.zip`;
     const fname = `isj-${PCODE}000-${v}.zip`;
@@ -206,20 +253,36 @@ async function fetchISJ() {
   const outPath = path.join(OUT_DIR, 'streets.csv');
   fs.writeFileSync(outPath, utf8);
   // 行数 (- ヘッダ)
-  const lines = utf8.split('\n').filter(l => l.trim()).length;
-  console.log(`  ISJ → streets.csv: ${lines - 1} 街区 (${(utf8.length/1024/1024).toFixed(2)} MB UTF-8)`);
+  const lines = utf8.split('\n').filter((l) => l.trim()).length;
+  console.log(
+    `  ISJ → streets.csv: ${lines - 1} 街区 (${(utf8.length / 1024 / 1024).toFixed(2)} MB UTF-8)`
+  );
   return lines - 1;
 }
 
 // ─── main ──────────────────────────────────────────────────────────
 (async () => {
   const t0 = Date.now();
-  let coarseCount = 0, fineCount = 0;
+  let coarseCount = 0,
+    fineCount = 0;
   if (DO_COARSE) {
-    try { coarseCount = await fetchN03(); } catch (e) { console.log(`  N03 failed: ${e.message}`); }
+    try {
+      coarseCount = await fetchN03();
+    } catch (e) {
+      console.log(`  N03 failed: ${e.message}`);
+    }
   }
   if (DO_FINE) {
-    try { fineCount = await fetchISJ(); } catch (e) { console.log(`  ISJ failed: ${e.message}`); }
+    try {
+      fineCount = await fetchISJ();
+    } catch (e) {
+      console.log(`  ISJ failed: ${e.message}`);
+    }
   }
-  console.log(`✅ ${PREF}: coarse=${coarseCount} fine=${fineCount} (${((Date.now()-t0)/1000).toFixed(1)}s)`);
-})().catch(e => { console.error('FATAL:', e); process.exit(1); });
+  console.log(
+    `✅ ${PREF}: coarse=${coarseCount} fine=${fineCount} (${((Date.now() - t0) / 1000).toFixed(1)}s)`
+  );
+})().catch((e) => {
+  console.error('FATAL:', e);
+  process.exit(1);
+});

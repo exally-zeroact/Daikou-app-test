@@ -1,16 +1,18 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="refresh" content="0;url=/">
-<title>リダイレクト中...</title>
-<!-- ★設計変更宣言 (2026-05-14・MA-7): history.html を redirect stub に置換。
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <meta http-equiv="refresh" content="0;url=/" />
+    <title>リダイレクト中...</title>
+    <!-- ★設計変更宣言 (2026-05-14・MA-7): history.html を redirect stub に置換。
      MA-5 で history コンテンツは #overlayHistory に移植済 (_hist_render で動的描画)・
      MA-6 で bottom-nav も showOverlay('history') に切替済。残された旧 URL への
      直接アクセス (外部リンク・ブックマーク・履歴) を / (index.html) に強制リダイレクトする。
      overlay 経由のフローで GPS / Meter / Worker B の継続性が担保される。 -->
-<script>location.replace('/');</script>
-</head>
-<body></body>
+    <script>
+      location.replace('/');
+    </script>
+  </head>
+  <body></body>
 </html>

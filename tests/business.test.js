@@ -20,12 +20,24 @@ const BUSINESS_JS_SOURCE = fs.readFileSync(BUSINESS_JS_PATH, 'utf8');
 function makeLocalStorage() {
   const store = Object.create(null);
   return {
-    getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
-    setItem(k, v) { store[k] = String(v); },
-    removeItem(k) { delete store[k]; },
-    clear() { for (const k of Object.keys(store)) delete store[k]; },
-    key(i) { return Object.keys(store)[i] || null; },
-    get length() { return Object.keys(store).length; },
+    getItem(k) {
+      return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null;
+    },
+    setItem(k, v) {
+      store[k] = String(v);
+    },
+    removeItem(k) {
+      delete store[k];
+    },
+    clear() {
+      for (const k of Object.keys(store)) delete store[k];
+    },
+    key(i) {
+      return Object.keys(store)[i] || null;
+    },
+    get length() {
+      return Object.keys(store).length;
+    },
     _raw: store,
   };
 }
@@ -35,10 +47,21 @@ function makeMeterMock(initialDistance = 0, initialBusinessDistance = 0) {
   let bizDist = initialBusinessDistance;
   let running = false;
   return {
-    getState: () => ({ distance_m: dist, business_distance_m: bizDist, distanceSource: 'mm', running }),
-    setDistance: (v) => { dist = v; },
-    setBusinessDistance: (v) => { bizDist = (typeof v === 'number' && v >= 0) ? v : 0; },
-    _setRunning: (v) => { running = !!v; },
+    getState: () => ({
+      distance_m: dist,
+      business_distance_m: bizDist,
+      distanceSource: 'mm',
+      running,
+    }),
+    setDistance: (v) => {
+      dist = v;
+    },
+    setBusinessDistance: (v) => {
+      bizDist = typeof v === 'number' && v >= 0 ? v : 0;
+    },
+    _setRunning: (v) => {
+      running = !!v;
+    },
   };
 }
 
@@ -54,7 +77,11 @@ function loadBusiness({ meter, localStorageMock } = {}) {
   // The business.js IIFE references Meter / localStorage / dlog as bare identifiers.
   // We feed them as named args so they resolve without leaking to real global.
   const fn = new Function(
-    'window', 'Meter', 'localStorage', 'dlog', 'console',
+    'window',
+    'Meter',
+    'localStorage',
+    'dlog',
+    'console',
     BUSINESS_JS_SOURCE + '\n;return window.Business;'
   );
   return {
@@ -65,7 +92,9 @@ function loadBusiness({ meter, localStorageMock } = {}) {
 
 describe('Business.start()', () => {
   let Business;
-  beforeEach(() => { ({ Business } = loadBusiness()); });
+  beforeEach(() => {
+    ({ Business } = loadBusiness());
+  });
 
   it('全フィールドを 0 化し active=true にする', () => {
     Business.start();
@@ -115,7 +144,9 @@ describe('Business.start()', () => {
 
 describe('Business.end()', () => {
   let Business;
-  beforeEach(() => { ({ Business } = loadBusiness()); });
+  beforeEach(() => {
+    ({ Business } = loadBusiness());
+  });
 
   it('active=false / ended=true にし start_time を保持する', () => {
     Business.start();
@@ -139,7 +170,9 @@ describe('Business.end()', () => {
 
 describe('Business.resume()', () => {
   let Business;
-  beforeEach(() => { ({ Business } = loadBusiness()); });
+  beforeEach(() => {
+    ({ Business } = loadBusiness());
+  });
 
   it('end 後の limbo 状態から active=true に復帰する', () => {
     Business.start();
@@ -167,7 +200,9 @@ describe('Business.resume()', () => {
 
 describe('Business.onTripEnd()', () => {
   let Business;
-  beforeEach(() => { ({ Business } = loadBusiness()); });
+  beforeEach(() => {
+    ({ Business } = loadBusiness());
+  });
 
   it('!state.active なら false を返し state を加算しない (active gate)', () => {
     // Never started → active=false
@@ -236,7 +271,7 @@ describe('Business.onGps() — Meter.business_distance_m 信源直結 (2026-05-1
   it('Meter.business_distance_m を state.total_distance_m に sync する (永続化ミラー)', () => {
     const meter = makeMeterMock(0, 0);
     const { Business } = loadBusiness({ meter });
-    Business.start();  // Business.start は Meter.setBusinessDistance(0) で 0 化する
+    Business.start(); // Business.start は Meter.setBusinessDistance(0) で 0 化する
     meter.setBusinessDistance(150);
     Business.onGps({});
     expect(Business.getState().total_distance_m).toBe(150);
@@ -257,8 +292,8 @@ describe('Business.onGps() — Meter.business_distance_m 信源直結 (2026-05-1
     expect(Business.getState().total_distance_m).toBe(500);
     // 空車相当 (Meter.running=false): distance_m はリセットされても business_distance_m は伸び続ける
     meter._setRunning(false);
-    meter.setDistance(0);  // Meter.reset 想定
-    meter.setBusinessDistance(800);  // 空車中の道路距離増加 300m
+    meter.setDistance(0); // Meter.reset 想定
+    meter.setBusinessDistance(800); // 空車中の道路距離増加 300m
     Business.onGps({});
     expect(Business.getState().total_distance_m).toBe(800);
   });
@@ -273,7 +308,9 @@ describe('Business.onGps() — Meter.business_distance_m 信源直結 (2026-05-1
 
 describe('Business.getReport()', () => {
   let Business;
-  beforeEach(() => { ({ Business } = loadBusiness()); });
+  beforeEach(() => {
+    ({ Business } = loadBusiness());
+  });
 
   it('未開始時の getReport は 0 値で 0 除算なし', () => {
     const r = Business.getReport();
