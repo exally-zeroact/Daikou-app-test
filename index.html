@@ -2742,7 +2742,7 @@
       </div>
       <div style="display: flex; gap: 8px">
         <button
-          onclick="location.href = 'settings.html#training'"
+          onclick="if(typeof window.showOverlay==='function'){window.showOverlay('settings');}else{location.href='settings.html#training';}"
           style="
             flex: 1;
             padding: 10px;
@@ -5735,10 +5735,18 @@
         }
       }
 
-      // [履歴]ボタン押下：history.html へ遷移（センサー未許可ならブロック）
+      // [履歴]ボタン押下：history overlay 表示（センサー未許可ならブロック）
+      // ★設計変更宣言 (2026-05-15・Phase B): location.href='history.html' (MPA + redirect 経由)
+      //   → window.showOverlay('history') (SPA seamless) に切替。
+      //   page reload 発生せず GPS / Meter / MM Worker / WakeLock 継続稼働。
+      //   showOverlay 未定義環境 (旧 cache 等) は location.href fallback (= MA-7 redirect 経由 / 着地)。
       function onHistory() {
         if (blockIfSensorNotGranted()) return;
-        location.href = 'history.html';
+        if (typeof window.showOverlay === 'function') {
+          window.showOverlay('history');
+        } else {
+          location.href = 'history.html';
+        }
       }
 
       // 業務開始画面の「前回の業務を引き継ぐ場合」ボタンの表示制御
@@ -6118,7 +6126,14 @@
             console.error('[Business] menu遷移前save エラー:', e);
           }
         }
-        location.href = 'settings.html';
+        // ★設計変更宣言 (2026-05-15・Phase B): location.href='settings.html' (MPA + redirect)
+        //   → window.showOverlay('settings') (SPA seamless) に切替。
+        //   page reload 発生せず GPS / Meter / MM Worker / WakeLock 継続稼働。
+        if (typeof window.showOverlay === 'function') {
+          window.showOverlay('settings');
+        } else {
+          location.href = 'settings.html';
+        }
       }
 
       // ─── 確定ボタン（旧Send）───
@@ -7682,6 +7697,21 @@
           _setNavActive(0); // 業務ボタンに active を戻す
           if (typeof dlog === 'function') dlog('[SPA] hideAllOverlays');
         };
+
+        // ★設計変更宣言 (2026-05-15・Phase E・ESC ハンドラ追加):
+        //   ESC キー押下で現在 .spa-overlay.show 状態のオーバーレイを閉じる。
+        //   従来は appbar-back ボタン (overlay 内左上 ＜) か bottom-nav 業務タブのみで close 可能だった。
+        //   PC キーボードでの UX 向上。モバイルでは ESC 入力経路がない (代替手段あり) のため影響なし。
+        //   業務継続性: hideAllOverlays は overlay class 操作のみ・GPS / Meter / Worker B には無影響。
+        //   業務中 (driving) の ESC でも業務に影響なし (overlay 自体は業務継続中も普通に閉じる)。
+        document.addEventListener('keydown', function (e) {
+          if (e.key !== 'Escape') return;
+          const shown = document.querySelector('.spa-overlay.show');
+          if (shown) {
+            window.hideAllOverlays();
+            e.preventDefault();
+          }
+        });
       })();
 
       // ★設計変更宣言 (2026-05-14・MA-4 settings overlay 動作 JS):
