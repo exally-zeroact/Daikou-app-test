@@ -2797,6 +2797,9 @@ self.onmessage = function (e) {
     });
 
     let mmIncrementM = 0;
+    // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ): preview 用 単 step 道路距離
+    //   通常 commit (mmIncrementM > 0) とは独立。main で tier2_pending_m に加算される。
+    let tentativeIncrementM = 0;
     let snapped = 0,
       skipped = 0;
     let outSnap = null;
@@ -2854,6 +2857,37 @@ self.onmessage = function (e) {
         pickedEmission = bestEmit.emission;
         snapped = 1;
         outSnap = bestEmit;
+        // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ Worker B 経由実装):
+        //   旧設計: main thread で _inlineSnapAndIncrement (RegionLoader.snapToNearestRoad) を呼んで
+        //           毎 GPS step 道路距離を算出 → tier2_pending_m に加算する設計だったが、
+        //           RegionLoader が main thread に存在せず常に null フォールバック・Tier 2 が動かない
+        //           (= 走行距離が ~300m 走らないと更新されない事象 2026-05-15 報告)。
+        //   新設計: Worker B 内に既にある dec.calcRoadDistance を使い、prevSnap (前 step の bestEmit)
+        //           から current bestEmit までの道路距離を毎 GPS step 計算し、mmResult.tentativeIncrementM
+        //           として main に送信する。main は tier2_pending_m += tentativeIncrementM のみ。
+        //   絶対ルール準拠:
+        //     ✓ 道路ジオメトリ距離 (_routeDistance = dec.calcRoadDistance) を使用・GPS 直線禁止
+        //     ✓ 課金 (distance_m) は Tier 1 (Viterbi commit) のみで更新・本実装で変更なし
+        //     ✓ 物理上限 (200m/step) で異常値 skip・jumpProb 高なら skip
+        //     ✓ iOS/Android 共通 (Worker B 同一動作)
+        if (prevSnap && prevSnap.timestamp != null) {
+          const _dtTentative = (msg.timestamp - prevSnap.timestamp) / 1000;
+          if (_dtTentative > 0 && _dtTentative <= MM_GAP_RESET_SEC) {
+            try {
+              const _rt = _routeDistance(prevSnap, bestEmit);
+              if (_rt && typeof _rt.distanceM === 'number' && _rt.distanceM >= 0) {
+                // 物理上限: 1 GPS step (~1-5Hz) で 200m 超は GPS jump 扱いで skip
+                //   通常運転 60km/h=16.7m/s・高速 120km/h=33.3m/s・1秒なら最大 50m 程度
+                //   200m は十分余裕のある上限値 (= 720km/h 相当の異常時のみ trip)
+                if (_rt.distanceM <= 200) {
+                  tentativeIncrementM = _rt.distanceM;
+                }
+              }
+            } catch (_) {
+              // calcRoadDistance 失敗は無視 (= preview 不要・課金には影響しない)
+            }
+          }
+        }
         // M6 (2026-05-09): bestEmit のタイルを持続 pin (eviction 防止)
         _setActivePinnedTile(bestEmit.prefecture, bestEmit.snapLat, bestEmit.snapLng);
         if (_mmDebug)
@@ -2966,6 +3000,10 @@ self.onmessage = function (e) {
     self.postMessage({
       type: 'mmResult',
       mmIncrementM: mmIncrementM,
+      // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ Worker B 経由):
+      //   commit (mmIncrementM) を待たない preview 用の単 step 道路距離。
+      //   main 側で state.tier2_pending_m に加算し、commit で 0 リセットされる。
+      tentativeIncrementM: tentativeIncrementM,
       snap: outSnap,
       confidence: pickedEmission > 0 ? Math.min(1.0, pickedEmission) : 1.0,
       windowSize: viterbi.size(),

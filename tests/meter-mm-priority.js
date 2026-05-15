@@ -275,53 +275,39 @@ console.log('\n[case6] ROAD_FACTOR が削除され Meter 内に未参照');
   assert(src.indexOf('* ROAD_FACTOR') === -1, '* ROAD_FACTOR の乗算が消えている');
 }
 
-// ─── case7 (2026-05-15): Tier 2 リードインジケータ並走 + commit 正規化 ───
-//   mmHealthy=true 時に inline 道路 snap が毎 GPS step 並走し state.tier2_pending_m に
-//   道路距離を累積。commit 受領で cutoffTs 以前の segments を差し引き表示先行値を維持する。
-//   表示式 (distance_m + tier2_pending_m) が即時更新されることを検証。
-console.log('\n[case7] Tier2 リードインジケータ: mmHealthy 時に inline 並走 + commit 正規化');
+// ─── case7 (2026-05-16): Tier 2 リードインジケータ Worker B 経由 + commit リセット ───
+//   ★設計変更宣言 (2026-05-16・選択肢 P2 採用):
+//     旧仕様: main 側 _inlineSnapAndIncrement (RegionLoader.snapToNearestRoad) で道路距離を計算し
+//             cutoffTs で commit との重複を削除する設計だったが、RegionLoader が main thread に
+//             未定義のため実機で Tier 2 が動かなかった (2026-05-15 報告)。
+//     新仕様: Worker B が mmResult.tentativeIncrementM フィールドで毎 GPS step 道路距離を返し、
+//             main は単純に tier2_pending_m に累積。commit (mmIncrementM>0) で 0 リセット。
+//     本テストは fakeWorker で mmResult を直接 dispatch する方式に変更。
+//     RegionLoader モックは不要 (main 側で snap を計算しない設計に変わった)。
+//     state.last_speed_kmh で停車判定 (case 内で gpsAt 経由で 36 km/h を保証)。
+console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commit リセット');
 {
-  // RegionLoader モック注入 (calcRoadDistance を 90m 固定で返す)
-  ctx.RegionLoader = {
-    snapToNearestRoad: function (lat, lng) {
-      return { lat: lat, lng: lng, _typeBucket: 0, roadIndex: 1, prefecture: 'ehime' };
-    },
-    calcRoadDistance: function () {
-      return { distanceM: 90 };
-    },
-    findTunnelByPosition: function () {
-      return null;
-    },
-    findBridgeByPosition: function () {
-      return null;
-    },
-    findNearestTunnel: function () {
-      return null;
-    },
-    findNearestBridge: function () {
-      return null;
-    },
-    calcInfraPolylineDistance: function () {
-      return null;
-    },
-  };
-
   Meter.reset();
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
-  // start() 直後 lastMmUsefulAt = now なので mmHealthy=true (プライム不要)
+  // 停車判定回避: state.last_speed_kmh を 36 km/h に設定するため GPS step を 1 回投入
+  Meter.update(gpsAt(0));
 
-  // GPS step 0,1,2,3 投入
-  //   step 0: 初回 (state.last_gps=null) → _inlineSnapAndIncrement で prevSnap 初期化のみ
-  //   step 1,2,3: mmHealthy=true 経路の Tier2 並走で各 90m → tier2_pending_m に累積
-  for (let i = 0; i < 4; i++) {
-    Meter.update(gpsAt(i));
+  // mmResult を 3 回 dispatch (tentativeIncrementM=90 ずつ・mmIncrementM=0 = preview)
+  for (let i = 0; i < 3; i++) {
+    w._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 90,
+      snapped: 1,
+      committed: false,
+    });
   }
   let s = Meter.getState();
   assertNear(s.tier2_pending_m, 270, 0.01, 'tier2_pending_m に 3 step × 90m = 270m が蓄積');
-  assertNear(s.distance_m, 0, 0.01, 'state.distance_m は MM commit 待ちで未加算 (= 0)');
+  assertNear(s.distance_m, 0, 0.01, 'state.distance_m は commit 待ちで未加算 (= 0)');
   assertNear(
     s.distance_m + s.tier2_pending_m,
     270,
@@ -329,13 +315,11 @@ console.log('\n[case7] Tier2 リードインジケータ: mmHealthy 時に inlin
     '表示式 (distance_m + tier2_pending_m) = 270m で即時反映'
   );
 
-  // 通常 commit を dispatch (observationTimestamp = gpsAt(2).timestamp)
-  //   → segments のうち endTimestamp <= gpsAt(2).timestamp の 2 件 (step1, step2) が削除
-  //   → tier2_pending_m -= 180m → 90m (step3 分のみ残る)
-  //   → state.distance_m += 200m (MM authoritative)
+  // 通常 commit を dispatch (mmIncrementM=200・preview リセット)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 200,
+    tentativeIncrementM: 0,
     snapped: 1,
     committed: true,
     snap: {
@@ -347,74 +331,118 @@ console.log('\n[case7] Tier2 リードインジケータ: mmHealthy 時に inlin
   });
   s = Meter.getState();
   assertNear(s.distance_m, 200, 0.01, 'commit 後 state.distance_m に MM 200m が加算');
-  assertNear(
-    s.tier2_pending_m,
-    90,
-    0.01,
-    'cutoffTs 以前の 2 segments (180m) が削除され tier2_pending_m=90m 残る'
-  );
+  assertNear(s.tier2_pending_m, 0, 0.01, 'commit で tier2_pending_m が 0 リセット');
   assertNear(
     s.distance_m + s.tier2_pending_m,
-    290,
+    200,
     0.01,
-    '表示式 (distance_m + tier2_pending_m) = 290m で連続的に進む'
+    '表示式 (distance_m + tier2_pending_m) = 200m (= distance_m のみ)'
   );
 
-  // 次の GPS step → さらに 90m を tier2 に積む
-  Meter.update(gpsAt(4));
+  // 次の tentativeIncrement → 90m を tier2 に積む
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 0,
+    tentativeIncrementM: 90,
+    snapped: 1,
+    committed: false,
+  });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 180, 0.01, '次 step で tier2_pending_m が 90→180m');
+  assertNear(s.tier2_pending_m, 90, 0.01, '次 step で tier2_pending_m が 0→90m');
 
   Meter.stop();
-  // RegionLoader を解除して他テスト/他 case に影響しないようにする
-  delete ctx.RegionLoader;
 }
 
-// ─── case8 (2026-05-15): Tier 2 リードインジケータ・absolute rule 準拠 ───
-//   snap miss (RegionLoader.snapToNearestRoad が null) のときは tier2_pending_m に
-//   加算しない (= GPS 直線距離での課金/表示禁止の絶対ルール準拠)。
-console.log('\n[case8] Tier2: snap miss 時は加算ゼロ (GPS 直線禁止)');
+// ─── case8 (2026-05-16): Tier 2 absolute rule 準拠 + 停車判定 ───
+console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road で加算ゼロ');
 {
-  // snapToNearestRoad は常に null を返す = 道路から遠い状況
-  ctx.RegionLoader = {
-    snapToNearestRoad: function () {
-      return null;
-    },
-    calcRoadDistance: function () {
-      return { distanceM: 90 };
-    },
-    findTunnelByPosition: function () {
-      return null;
-    },
-    findBridgeByPosition: function () {
-      return null;
-    },
-    findNearestTunnel: function () {
-      return null;
-    },
-    findNearestBridge: function () {
-      return null;
-    },
-    calcInfraPolylineDistance: function () {
-      return null;
-    },
-  };
-
   Meter.reset();
   const w = makeFakeWorker();
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  // 走行中状態をセット (36 km/h)
+  Meter.update(gpsAt(0));
 
-  for (let i = 0; i < 4; i++) {
-    Meter.update(gpsAt(i));
-  }
-  const s = Meter.getState();
-  assertNear(s.tier2_pending_m, 0, 0.01, 'snap miss なら tier2_pending_m は 0 据え置き');
-  assertNear(s.distance_m, 0, 0.01, 'state.distance_m も 0 据え置き (commit 未来訪)');
+  // (a) tentativeIncrementM = 0 → 加算なし
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 0,
+    tentativeIncrementM: 0,
+    snapped: 0,
+    committed: false,
+  });
+  let s = Meter.getState();
+  assertNear(s.tier2_pending_m, 0, 0.01, 'tentativeIncrementM=0 なら tier2 加算なし');
+
+  // (b) tentativeIncrementM > 0 + state.last_speed_kmh = 36 (走行中) → 90m 加算
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 0,
+    tentativeIncrementM: 90,
+    snapped: 1,
+    committed: false,
+  });
+  s = Meter.getState();
+  assertNear(s.tier2_pending_m, 90, 0.01, '走行中なら tier2_pending_m=90 加算');
+
+  // (c) 停車中 (speedKmh < 2 km/h) GPS で update → state.last_speed_kmh が 1 km/h に更新
+  //     その後 tentativeIncrementM > 0 を dispatch → 加算スキップ (バグ2 対応・停車判定)
+  const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 1.0 });
+  Meter.update(slowGps);
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 0,
+    tentativeIncrementM: 50,
+    snapped: 1,
+    committed: false,
+  });
+  s = Meter.getState();
+  assertNear(s.tier2_pending_m, 90, 0.01, '停車中 (speed<2 km/h) なら tier2 加算スキップ');
 
   Meter.stop();
-  delete ctx.RegionLoader;
+}
+
+// ─── case9 (2026-05-16): バグ2 対応・停車中 commit で business_distance_m 加算スキップ ───
+console.log('\n[case9] 停車中 commit: business_distance_m += skip・distance_m は加算継続');
+{
+  // ★business_distance_m は per-trip reset しない (= case 間で累積) ため businessEnd で 0 化してから開始
+  Meter.businessEnd();
+  Meter.reset();
+  const w = makeFakeWorker();
+  Meter.setMapMatcher(w);
+  Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  // 停車中状態をセット (1 km/h)
+  const slowGps = Object.assign({}, gpsAt(0), { speedKmh: 1.0 });
+  Meter.update(slowGps);
+
+  // GPS ジッターで Worker B が 5m の commit を出した想定
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 5,
+    tentativeIncrementM: 0,
+    snapped: 1,
+    committed: true,
+    snap: {
+      observationTimestamp: slowGps.timestamp,
+      typeCode: 0,
+      prefecture: 'ehime',
+      roadIndex: 1,
+    },
+  });
+  const s = Meter.getState();
+  // 絶対ルール準拠: distance_m (課金) は加算継続・触らない
+  assertNear(s.distance_m, 5, 0.01, '停車中でも distance_m += mmIncrementM (課金経路維持)');
+  // バグ2 対応: business_distance_m は停車中なら加算しない
+  assertNear(
+    s.business_distance_m,
+    0,
+    0.01,
+    '停車中 (speed<2 km/h) は business_distance_m += スキップ'
+  );
+
+  Meter.stop();
 }
 
 if (_failures === 0) {

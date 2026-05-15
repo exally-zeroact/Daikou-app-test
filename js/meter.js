@@ -349,8 +349,23 @@ const Meter = (() => {
         _haverAccumSinceLastCommit = 0;
       } else {
         // 通常: MM 優先で道路距離を課金距離に反映
-        // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
-        state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+        // ★設計変更宣言 (2026-05-16・バグ2 対応・停車判定追加):
+        //   停車中 (speedKmh < 2 km/h) は Worker B が GPS ジッターで commit を出しても
+        //   業務距離 (business_distance_m) に加算しない。distance_m (課金) は触らない
+        //   = 絶対ルール「distance_m は絶対変えない」準拠。停車中の課金は現仕様維持。
+        const _stationary = (state.last_speed_kmh || 0) < 2;
+        if (!_stationary) {
+          // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
+          state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+        } else if (typeof dlog === 'function') {
+          dlog(
+            '[Meter] business_distance_m skip (stationary: speed=' +
+              (state.last_speed_kmh || 0).toFixed(1) +
+              ' km/h, mmIncrement=' +
+              m.mmIncrementM.toFixed(1) +
+              'm)'
+          );
+        }
         if (state.running) {
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
@@ -361,29 +376,33 @@ const Meter = (() => {
         state.mm_distance_m += m.mmIncrementM;
         // Phase 1.C: 通常 commit が起きたので haversine 累積 buffer をリセット
         _haverAccumSinceLastCommit = 0;
-        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ正規化):
-        //   commit window 期間 (cutoffTs=m.snap.observationTimestamp 以前) の tier2 segments を
-        //   全削除し、削除分の合計を state.tier2_pending_m から減算する (0 下限 clamp)。
-        //   これにより Tier 1 commit が authoritative で取り込んだ window 期間と
-        //   Tier 2 が先行表示した window 期間が重複しない (= 二重課金回避)。
-        //   削除後に残る tier2_pending_m は「まだ commit されていない最新の preview」となる。
-        if (m.snap && typeof m.snap.observationTimestamp === 'number') {
-          const cutoffTs = m.snap.observationTimestamp;
-          let removedSum = 0;
-          let keepIdx = 0;
-          for (let i = 0; i < _tier2Segments.length; i++) {
-            const seg = _tier2Segments[i];
-            if (seg && seg.endTimestamp <= cutoffTs) {
-              removedSum += seg.distanceM;
-            } else {
-              _tier2Segments[keepIdx++] = seg;
-            }
-          }
-          _tier2Segments.length = keepIdx;
-          if (removedSum > 0) {
-            state.tier2_pending_m = Math.max(0, (state.tier2_pending_m || 0) - removedSum);
-          }
-        }
+        // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ commit 正規化):
+        //   旧: cutoffTs=m.snap.observationTimestamp 以前の _tier2Segments を削除
+        //       (main inline snap 経路用の cutoff ロジック・main 経路廃止に伴い不要)
+        //   新: Worker B 経由で tentativeIncrementM を毎 step 受信する設計に移行したため、
+        //       commit が来たら preview 累積 (tier2_pending_m) を 0 にリセットするだけで足りる。
+        //       _tier2Segments は使わない (空のまま) ・互換のため変数自体は残置。
+        state.tier2_pending_m = 0;
+        _tier2Segments = [];
+      }
+    }
+    // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ・Worker B 経由 preview):
+    //   mmIncrementM === 0 でも tentativeIncrementM > 0 を毎 GPS step 受信する設計。
+    //   commit を待たず state.tier2_pending_m に加算し、表示式
+    //   driveDist = distance_m + tier2_pending_m を即時更新する (= 走行距離ラグ解消)。
+    //   停車中 (speedKmh < 2 km/h) は加算スキップ (バグ2 対応)。
+    //   state.running=false (空車中) も加算スキップ (= 既存仕様維持・空車中 driveDist 非表示)。
+    if (
+      m.type === 'mmResult' &&
+      typeof m.tentativeIncrementM === 'number' &&
+      m.tentativeIncrementM > 0 &&
+      state.running &&
+      !_offRoadActive &&
+      Date.now() >= _drainMmUntil
+    ) {
+      const _stationary = (state.last_speed_kmh || 0) < 2;
+      if (!_stationary) {
+        state.tier2_pending_m = (state.tier2_pending_m || 0) + m.tentativeIncrementM;
       }
     }
     // Phase 1.C (2026-05-10): snap miss 連続検出 → Off-Road Mode 起動
@@ -950,25 +969,15 @@ const Meter = (() => {
           }
         }
         // inc===null (snap miss / roads 未 load) → 加算なし・distance_m 据え置き
-      } else {
-        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ並走・走行距離表示ラグ解消):
-        //   mmHealthy 時も _inlineSnapAndIncrement を毎 GPS step 呼び出して
-        //   道路ジオメトリ距離 (RegionLoader.calcRoadDistance) を算出し
-        //   state.tier2_pending_m に累積する。表示式は state.distance_m + tier2_pending_m
-        //   なので UI には GPS 到達と同時 (Android 5Hz=0.2s / iOS 1Hz=1s) で道路距離が反映される。
-        //   課金経路 (state.distance_m / fare_yen / business_distance_m) には加算しない。
-        //   Tier 1 (Worker B Viterbi commit) が authoritative。_onMmWorkerMessage 内の
-        //   commit 分岐で cutoffTs=m.snap.observationTimestamp 以前の segments を差し引いて
-        //   二重課金回避する。
-        //   絶対ルール準拠: snap miss (inc===null) や 0m なら加算なし・GPS 直線は経由しない。
-        //   state.running=false (空車中) は driveDist 非表示のため tier2 蓄積不要。
-        const inc = _inlineSnapAndIncrement(gpsResult);
-        if (inc !== null && inc > 0 && state.running) {
-          state.tier2_pending_m = (state.tier2_pending_m || 0) + inc;
-          _tier2Segments.push({ endTimestamp: gpsResult.timestamp, distanceM: inc });
-        }
-        // mmHealthy 時の課金は _onMmWorkerMessage で行われる (state.distance_m += mmIncrementM)
       }
+      // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータを Worker B 経由に完全移行):
+      //   旧: mmHealthy=true 時に main 側 _inlineSnapAndIncrement を呼出して tier2_pending_m に
+      //       累積していたが、RegionLoader が main thread に未定義のため毎 step null 返却・
+      //       Tier 2 が実機で全く動かなかった (2026-05-15 報告事象)。
+      //   新: tier2_pending_m への加算は _onMmWorkerMessage で Worker B からの
+      //       tentativeIncrementM (毎 GPS step・道路距離) を受けて行う方式に移行。
+      //       main 側の mmHealthy=true 分岐では追加処理なし (Worker B が課金経路 + preview 両方を担当)。
+      //   mmHealthy 時の課金は _onMmWorkerMessage の通常 commit で更新される。
     } else {
       // 初回 GPS step: 比較対象がないので加算せず prevSnap を初期化
       _inlineSnapAndIncrement(gpsResult);
