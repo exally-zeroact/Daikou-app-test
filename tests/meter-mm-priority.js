@@ -422,27 +422,33 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
   s = Meter.getState();
   assertNear(s.tier2_pending_m, 90, 0.01, '走行中 (36 km/h・> 0.5) なら tier2_pending_m=90 加算');
 
-  // (c) 停車中 (speedKmh < 0.5 km/h) GPS で update → state.last_speed_kmh が 0.3 km/h に更新
-  //     その後 tentativeIncrementM > 0 を dispatch → 加算スキップ (バグ2 対応・停車判定)
-  // ★設計変更宣言 (2026-05-16・閾値修正): 2 km/h → 0.5 km/h に変更したので
-  //   テストも 0.3 km/h で「明らかに停車」を表現する。
+  // (c) ★設計変更宣言 (2026-05-16・Step4): Worker B 側で msg.isStationary=true 時に
+  //     tentativeIncrementM=0 を返す設計に移行したため、main 側のスキップは撤去済。
+  //     テストでは fakeWorker が「Worker B が 0 化した結果」を直接 dispatch する。
+  //     停車中の Worker B 出力 = mmIncrementM=0 + tentativeIncrementM=0 を確認。
   const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 0.3 });
   Meter.update(slowGps);
+  // Worker B 側で 0 化されたあとの結果を dispatch (= 停車中シナリオ)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
-    tentativeIncrementM: 50,
+    tentativeIncrementM: 0,
     snapped: 1,
     committed: false,
   });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 90, 0.01, '停車中 (speed<0.5 km/h) なら tier2 加算スキップ');
+  assertNear(
+    s.tier2_pending_m,
+    90,
+    0.01,
+    '停車中シナリオ (Worker B 出力 0) で tier2_pending_m 不変 (前回 90m のまま)'
+  );
 
   Meter.stop();
 }
 
-// ─── case9 (2026-05-16): バグ2 対応・停車中 commit で business_distance_m 加算スキップ ───
-console.log('\n[case9] 停車中 commit: business_distance_m += skip・distance_m は加算継続');
+// ─── case9 (2026-05-16・Step4 で仕様変更): 停車中は Worker B 側で出力 0 化 ───
+console.log('\n[case9] Step4: 停車中は Worker B 出力 = 0 → main 加算ゼロ');
 {
   // ★business_distance_m は per-trip reset しない (= case 間で累積) ため businessEnd で 0 化してから開始
   Meter.businessEnd();
@@ -455,10 +461,13 @@ console.log('\n[case9] 停車中 commit: business_distance_m += skip・distance_
   const slowGps = Object.assign({}, gpsAt(0), { speedKmh: 0.3 });
   Meter.update(slowGps);
 
-  // GPS ジッターで Worker B が 5m の commit を出した想定
+  // ★設計変更宣言 (2026-05-16・Step4 整合): Worker B が isStationary=true 受信時に
+  //   mmIncrementM=0 を出力する設計に移行。テストでは fakeWorker が「Worker B が
+  //   0 化した結果」を直接 dispatch する想定で mmIncrementM=0 を送る。
+  //   main 側のスキップ判定は撤去済 (= 無条件加算) なので 0 を送れば結果も 0 になる。
   w._dispatch({
     type: 'mmResult',
-    mmIncrementM: 5,
+    mmIncrementM: 0,
     tentativeIncrementM: 0,
     snapped: 1,
     committed: true,
@@ -470,14 +479,13 @@ console.log('\n[case9] 停車中 commit: business_distance_m += skip・distance_
     },
   });
   const s = Meter.getState();
-  // 絶対ルール準拠: distance_m (課金) は加算継続・触らない
-  assertNear(s.distance_m, 5, 0.01, '停車中でも distance_m += mmIncrementM (課金経路維持)');
-  // バグ2 対応: business_distance_m は停車中なら加算しない
+  // Worker B 0 化により distance_m と business_distance_m が両者整合
+  assertNear(s.distance_m, 0, 0.01, '停車中 Worker B 出力 0 → distance_m 加算ゼロ');
   assertNear(
     s.business_distance_m,
     0,
     0.01,
-    '停車中 (speed<2 km/h) は business_distance_m += スキップ'
+    '停車中 Worker B 出力 0 → business_distance_m 加算ゼロ (整合性確保)'
   );
 
   Meter.stop();

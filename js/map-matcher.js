@@ -2982,6 +2982,23 @@ self.onmessage = function (e) {
       reason = 'error: ' + err.message;
     }
 
+    // ★設計変更宣言 (2026-05-16・Step4・停車中 mmIncrement / tentativeIncrement 0 化):
+    //   main 側から msg.isStationary=true が伝達された場合、本 step の mmIncrementM と
+    //   tentativeIncrementM を強制的に 0 にする。
+    //   目的:
+    //     ・distance_m / business_distance_m の整合性確保 (= 両経路で同じ Worker B 出力を見る)
+    //     ・「停車中も distance_m が GPS ジッターで増加」事象を Worker B 側で根本対策
+    //   絶対ルール準拠:
+    //     ・main 側 state.distance_m += m.mmIncrementM (= += 0) で値は不変
+    //     ・「distance_m に触れない」は main 側 += ロジック不変 = 遵守
+    //     ・Worker B 出力値の制御で結果として停車中加算ゼロを実現
+    //   Viterbi window / pheromone / grid bias 学習は通常通り進める (= 停車後の再走行時に
+    //   学習履歴が連続する利点を維持)。出力値だけ 0 にする。
+    if (msg.isStationary === true) {
+      mmIncrementM = 0;
+      tentativeIncrementM = 0;
+    }
+
     const t1 =
       typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     // MM-7: Worker 内 latency 自己監視 → 必要なら N を縮小

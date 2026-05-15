@@ -372,22 +372,20 @@ const Meter = (() => {
         _haverAccumSinceLastCommit = 0;
       } else {
         // 通常: MM 優先で道路距離を課金距離に反映
-        // ★設計変更宣言 (2026-05-16・バグ2 対応・停車判定追加):
-        //   停車中 (speedKmh < 2 km/h) は Worker B が GPS ジッターで commit を出しても
-        //   業務距離 (business_distance_m) に加算しない。distance_m (課金) は触らない
-        //   = 絶対ルール「distance_m は絶対変えない」準拠。停車中の課金は現仕様維持。
-        if (!_isStationary()) {
-          // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
-          state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
-        } else if (typeof dlog === 'function') {
-          dlog(
-            '[Meter] business_distance_m skip (stationary: speed=' +
-              (state.last_speed_kmh || 0).toFixed(1) +
-              ' km/h, mmIncrement=' +
-              m.mmIncrementM.toFixed(1) +
-              'm)'
-          );
-        }
+        // ★設計変更宣言 (2026-05-16・Step4・main 側停車スキップ撤去):
+        //   旧: main 側で _isStationary() 判定して business_distance_m += スキップ
+        //       → distance_m は加算継続なので両者整合性破れ
+        //   新: Worker B 側で msg.isStationary=true なら mmIncrementM=0 を出力する設計に
+        //       移行 (map-matcher.js)。これにより停車中は m.mmIncrementM=0 となり、
+        //       business_distance_m += 0 / distance_m += 0 の両方が結果として加算 0 で整合。
+        //   絶対ルール準拠:
+        //     ・main 側 += ロジック不変 (= state.distance_m に触れない・++ 演算自体は維持)
+        //     ・Worker B 出力値 (= 0) を信頼して main は無条件加算
+        //   保険: Worker B が isStationary 受信に失敗した場合、停車中も mmIncrementM > 0 が
+        //       出ることがあり得る。その場合 main で加算されるが、これは「Worker B 判断ミス」
+        //       なので main 側で二重否定するより Worker B 側の信頼性向上が筋。
+        // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
+        state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
         if (state.running) {
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
@@ -422,6 +420,11 @@ const Meter = (() => {
     //   driveDist = distance_m + tier2_pending_m を即時更新する (= 走行距離ラグ解消)。
     //   停車中 (speedKmh < 2 km/h) は加算スキップ (バグ2 対応)。
     //   state.running=false (空車中) も加算スキップ (= 既存仕様維持・空車中 driveDist 非表示)。
+    // ★設計変更宣言 (2026-05-16・Step4・main 側 Tier 2 停車スキップ撤去):
+    //   Worker B が msg.isStationary=true 時に tentativeIncrementM=0 を返す設計に移行したため、
+    //   main 側の _isStationary 判定は冗長になり撤去。停車中は m.tentativeIncrementM=0 となり
+    //   state.tier2_pending_m += 0 = 値不変。
+    //   Tier 1 と同じく Worker B 出力を信頼。
     if (
       m.type === 'mmResult' &&
       typeof m.tentativeIncrementM === 'number' &&
@@ -430,9 +433,7 @@ const Meter = (() => {
       !_offRoadActive &&
       Date.now() >= _drainMmUntil
     ) {
-      if (!_isStationary()) {
-        state.tier2_pending_m = (state.tier2_pending_m || 0) + m.tentativeIncrementM;
-      }
+      state.tier2_pending_m = (state.tier2_pending_m || 0) + m.tentativeIncrementM;
     }
     // Phase 1.C (2026-05-10): snap miss 連続検出 → Off-Road Mode 起動
     if (m.snapped) {
@@ -754,13 +755,16 @@ const Meter = (() => {
   ) {
     if (gapSec > GAP_MAX_SEC) return null;
 
-    // 停車中（速度=0）の場合は座標差分で判断
+    // ★設計変更宣言 (2026-05-16・Step5・gap fill 経路の GPS 直線距離流入を遮断):
+    //   旧: lastSpeedKmh <= 0 のとき GPS.calcDistance (= 直線 haversine) を返却
+    //       → distance_m / business_distance_m に直線距離が課金経路で加算されていた
+    //       → 絶対ルール「GPS 直線距離での課金は禁止」に厳密解釈で抵触
+    //   新: 速度=0 のときは null 返却 (= 加算なし)
+    //       直線距離を課金経路に流さない・絶対ルール厳密準拠
+    //       過少課金リスクは許容 (= 停車中 GPS lost で実走があった場合のみ問題で
+    //       実用上稀ケース・「全加算タクシー方式」とは緩いトレードオフ)
+    //   走行中 (lastSpeedKmh > 0) の補完経路は維持 (= 速度×時間は車輪回転距離相当)。
     if (lastSpeedKmh <= 0) {
-      const coordDiff = GPS.calcDistance(prevLat, prevLng, currLat, currLng);
-      if (coordDiff >= 20) {
-        dlog(`[Meter] 停車中補完: 座標差分 ${Math.round(coordDiff)}m`);
-        return coordDiff;
-      }
       return null;
     }
 
@@ -1101,6 +1105,12 @@ const Meter = (() => {
           // 2026-05-09 (P4/P5): cellularLayerHint / accelLayerHint 廃止・layer 連続性 boost で代替
           // GPS altitude は DEM 比較用に維持
           altitude: typeof gpsResult.altitude === 'number' ? gpsResult.altitude : null,
+          // ★設計変更宣言 (2026-05-16・Step4・停車情報を Worker B に伝達):
+          //   _isStationary() の判定結果を Worker B に毎 GPS step 渡し、Worker B 内で
+          //   出力 (mmIncrementM / tentativeIncrementM) を 0 化させる。
+          //   これにより main の state.distance_m / business_distance_m が両方とも
+          //   += 0 になり整合性確保 (= 「停車中も課金される」事象の根本解消)。
+          isStationary: _isStationary(),
         });
       } catch (e) {
         // post 失敗時はメーター本体に影響を与えず inline fallback に進む

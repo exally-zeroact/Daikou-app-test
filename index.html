@@ -4238,6 +4238,10 @@
      data-registry.js + mm-data-pipeline.js) が役割を引き継ぐ。 -->
     <script src="js/data-loader.js"></script>
     <script src="js/data-registry.js"></script>
+    <!-- ★設計変更宣言 (2026-05-16・Step6・現在地県判定 API):
+         RegionHelper を mm-data-pipeline より前に load し、Step7 の cache miss
+         検知で利用可能にする。data-registry の後・mm-data-pipeline の前。 -->
+    <script src="js/region-helper.js"></script>
     <script src="js/mm-data-pipeline.js"></script>
 
     <script src="js/gps.js"></script>
@@ -5565,9 +5569,13 @@
               _gpsCallbackCount++;
               // ★設計変更宣言 (2026-05-13・大改修 C10): GPS 初回 fix 通知
               //   pipeline の Phase D (waitForGPS) を resolve
+              // ★設計変更宣言 (2026-05-16・Step7・現在地県を渡して cache 自動補修):
+              //   notifyGpsFix に lat/lng/accuracy を渡し、pipeline 側で
+              //   RegionHelper.getCurrentPref → 該当県の cache miss 自動 retry を起動。
+              //   オンライン時のみ動作・オフラインでは silent skip (= 業務継続性最優先)。
               if (window._mmPipeline && !window._mmPipeline.ready.gpsAcquired) {
                 try {
-                  window._mmPipeline.notifyGpsFix();
+                  window._mmPipeline.notifyGpsFix(g.lat, g.lng, g.accuracy);
                 } catch (_) {}
               }
               // 5秒に1回のペースで動作確認ログ（スパム防止）
@@ -5709,7 +5717,18 @@
       function startUiTimer() {
         uiTimer = setInterval(() => {
           const s = Meter.getState();
-          let fare = s.fare_yen;
+          // ★設計変更宣言 (2026-05-16・Step1・driveFare ラグ解消):
+          //   旧: let fare = s.fare_yen (= calcFare(distance_m) のみ・Tier 1 commit ラグ込み)
+          //   新: let fare = Meter.calcFare(distance_m + tier2_pending_m) で表示用に再計算
+          //   効果: driveDist (= distance_m + tier2_pending_m) と driveFare が同期し
+          //         「1.5km 走行中なのに料金 ¥1,300 のまま」事象を解消。
+          //   絶対ルール準拠:
+          //     ・state.distance_m / state.fare_yen / calcFare ロジックは完全不変
+          //     ・表示用変数 fare を再計算するだけ・課金経路には触れない
+          //     ・tier2_pending_m は差分減算で単調増加保証・表示後退なし
+          //     ・calcFare は単調非減少関数 → 表示料金も単調増加
+          //   iOS/Android 共通 (platform 分岐なし・state.tier2_pending_m は両 OS で同等)。
+          let fare = Meter.calcFare((s.distance_m || 0) + (s.tier2_pending_m || 0));
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           let total = fare + extraTotal;
@@ -6667,15 +6686,27 @@
           console.error('[RouteCard] render error:', e);
         }
         const cfg = Meter.getFareConfig();
+        // ★設計変更宣言 (2026-05-16・Step2・renderFare 表示値を Tier 2 込みに統一):
+        //   旧: 走行距離 = s.distance_m / 距離料金 = s.fare_yen - base_fare
+        //       (= Tier 1 のみ・走行中の driveDist / driveFare との乖離発生)
+        //   新: 走行距離 = (s.distance_m + s.tier2_pending_m)
+        //       距離料金 = calcFare(distance_for_calc) - base_fare
+        //   効果: 走行中表示と確定画面の整合性確保
+        //   絶対ルール準拠:
+        //     ・state.distance_m / state.fare_yen / calcFare は不変
+        //     ・onSend 側の fare 引数も同じ式 (Step2 で統一済)
+        //     ・「課金確定値」は state.distance_m ベースで Meter 内に保持されたまま
+        const distance_for_calc = (s.distance_m || 0) + (s.tier2_pending_m || 0);
+        const rawFareForDisplay = Meter.calcFare(distance_for_calc);
         let html = '';
         // 2026/05/01 仕様変更：走行情報を内訳の上に表示（分かりやすさ向上）
-        html += row('走行距離', (s.distance_m / 1000).toFixed(2) + 'km');
+        html += row('走行距離', (distance_for_calc / 1000).toFixed(2) + 'km');
         html += row('経過時間', Math.floor(s.elapsed_sec / 60) + '分');
         html += '<hr class="breakdown-divider">';
         html += row('基本料金', '¥' + cfg.base_fare.toLocaleString());
-        html += row('距離料金', '¥' + (s.fare_yen - cfg.base_fare).toLocaleString());
+        html += row('距離料金', '¥' + (rawFareForDisplay - cfg.base_fare).toLocaleString());
         if (surchargeOn) {
-          const diff = fare - s.fare_yen;
+          const diff = fare - rawFareForDisplay;
           html += row('割増', '+¥' + diff.toLocaleString(), 'surcharge');
         }
         extras.forEach((e) => {
@@ -6910,7 +6941,17 @@
           appState = 'fare';
           histSaved = false;
           const s = Meter.getState();
-          let fare = s.fare_yen;
+          // ★設計変更宣言 (2026-05-16・Step2・renderFare 計算式を startUiTimer と統一):
+          //   旧: let fare = s.fare_yen (= state.fare_yen ・Tier 1 commit ベース)
+          //   新: let fare = Meter.calcFare(distance_m + tier2_pending_m) (= 走行中表示と同一式)
+          //   効果: 確定画面の合計料金が走行中表示と一致・「走行中 ¥1,800 → 確定時 ¥1,700」
+          //         の乖離を解消。
+          //   絶対ルール準拠:
+          //     ・state.fare_yen / state.distance_m は完全不変
+          //     ・「課金確定値」は依然 state.fare_yen に保持されている (= 確定時に変わらない)
+          //     ・本変更は確定画面の「表示金額」だけ統一する
+          //     ・FB.endSession へ送る total は本表示値ベース (= 客に見える金額 = サーバー送信値)
+          let fare = Meter.calcFare((s.distance_m || 0) + (s.tier2_pending_m || 0));
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           let total = fare + extraTotal;
