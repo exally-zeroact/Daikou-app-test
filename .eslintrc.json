@@ -17,7 +17,7 @@
   "rules": {
     "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }],
     "no-undef": "error",
-    "no-console": "warn",
+    "no-console": ["error", { "allow": ["error"] }],
     "prefer-const": "error",
     "no-var": "error"
   },

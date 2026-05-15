@@ -41,7 +41,7 @@ const GPS = (() => {
         try {
           fn(getStatus());
         } catch (e) {
-          dlog('[GPS] listener error:', e);
+          console.error('[GPS] listener error:', e);
         }
       });
       if (typeof dlog === 'function') dlog('[GPS] status: ' + newState);
@@ -369,14 +369,14 @@ const GPS = (() => {
         }
       };
       worker.onerror = function (err) {
-        dlog('[GPS] Worker エラー → フォールバック:', err.message);
+        console.error('[GPS] Worker エラー → フォールバック:', err.message);
         useWorker = false;
         kalman = new KalmanGPS();
       };
       useWorker = true;
       dlog('[GPS] Web Worker起動完了');
     } catch (e) {
-      dlog('[GPS] Worker起動失敗 → フォールバック:', e.message);
+      console.error('[GPS] Worker起動失敗 → フォールバック:', e.message);
       useWorker = false;
     }
   }
@@ -708,7 +708,7 @@ const GPS = (() => {
   // 旧：console.error するだけで放置 → 「許可押したのに動かない」現象の原因
   // 新：状態管理・リトライ・リスナー通知の3点セット
   function onError(err) {
-    dlog('[GPS]', err.code, err.message);
+    console.error('[GPS]', err.code, err.message);
     if (typeof dlog === 'function') dlog('[GPS] error code=' + err.code + ' msg=' + err.message);
 
     if (err.code === 1) {
