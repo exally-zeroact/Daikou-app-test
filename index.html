@@ -9808,10 +9808,11 @@
       </div>
     </div>
     <div id="overlayHelp" class="spa-overlay" aria-hidden="true">
-      <!-- ★設計変更宣言 (2026-05-14・MA-3 help.html の body 内容を移植):
-       元 help.html (L52-123 の body 範囲) を bottom-nav 部分を除外して取り込み。
-       元 help.html は変更せず残存 (dual state・MA-6 まで bottom-nav は旧経路維持)。
-       inline onclick はそのまま (this.classList.toggle('open') で開閉)。 -->
+      <!-- ★設計変更宣言 (2026-05-15・overlayHelp 全面改訂):
+           実際の業務フロー実装に合わせてテキストを全件書直し。
+           削除済機能 (3 時間以内なら続ける / canResume / checkAutoAbandon / 時刻ベース自動リセット)
+           の言及を全て除去。実際のボタン名・画面名・操作手順と完全に一致させた。
+           HTML 構造 (acc-card / acc-head / acc-body) と onclick 開閉ロジックは無変更・テキスト差替のみ。 -->
       <div class="appbar">
         <div class="appbar-title">使い方</div>
         <div class="appbar-right"></div>
@@ -9825,7 +9826,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              下の「設定」タブ→「料金設定」を開いて、初乗り料金・加算料金を入力してください。タクシーや既存の代行業者の料金表に合わせて設定できます。
+              ① まずホーム画面に追加してください（必須）。iPhone は Safari
+              の共有ボタン →「ホーム画面に追加」、Android Chrome
+              はメニュー →「アプリをインストール」。ホーム画面追加していないと業務開始ボタンが押せません。<br />②
+              下の「設定」タブ →「料金設定」で、初乗り料金・初乗り距離・加算料金・加算距離を入力してください。同じ画面の「追加料金」タブで迎車料金・高速料金などの項目も登録できます。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -9834,7 +9838,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              起動時に位置情報の許可ダイアログが出たら「常に許可」を選んでください。バックグラウンドでも距離を計測するため必須です。
+              初回起動時に画面中央の青い「センサーを許可する」ボタンを押してください。iPhone
+              はコンパス・加速度・位置情報の許可ダイアログが順番に出るので全て「許可」を選びます。Android
+              は自動許可で位置情報のダイアログのみ出るので「許可」を選びます。許可が完了すると上部の GPS
+              バッジが「GPS待機」→「精度Xm」に変わります。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -9843,7 +9850,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              お客様を乗せたら、青い「業務開始」ボタンをタップしてください。GPS取得と料金計算が開始されます。
+              許可完了後に表示される青い「業務開始」ボタンを押します。一日の業務スタート（GPS
+              起動・画面消灯防止・集計値 0
+              リセット）が走り、空車画面に遷移します。お客様を乗せる時は空車画面の「代行開始」ボタンを押すと走行距離・料金がリアルタイム計算されます。目的地で「確定」→
+              料金画面（内訳表示）→「空車」を押して 1 trip 確定です。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -9852,8 +9862,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              深夜・悪天候時に「割増」ボタンをONにします。複数同時にONにすると倍率が掛け算されます（例：深夜×1.2
-              + 悪天候×1.1 = 1.32倍）。
+              実車中の画面上部に並ぶ「割増」ボタン群を ON / OFF
+              できます。複数同時に ON
+              にすると倍率は掛け算（深夜×1.2 + 悪天候×1.1 = 1.32 倍）。深夜・週末・冬季の自動割増は時刻
+              / 曜日 / 日付で自動判定し対象時間に入ると勝手に適用されます。割増ボタンの追加・編集は「設定」→「料金設定」→「割増」または「自動割増」タブから。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -9862,7 +9874,9 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              高速代・配車料・指名料などの追加料金は、業務中いつでもボタンをタップで即加算できます。タップした回数だけ累計されます。
+              実車中の「追加料金」ボタンを押すと項目選択モーダルが出ます。迎車料金・高速料金・キャンセル料など登録済の項目をタップで即加算。同じ項目をタップした回数だけ累計されます（例:
+              高速料金 ¥1,000 を 3 回タップで合計
+              ¥3,000）。項目自体の追加・編集は「設定」→「料金設定」→「追加料金」タブから自由にできます。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -9871,7 +9885,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              目的地到着後、「業務終了」ボタンをタップしてください。確認ダイアログが出ます。3時間以内なら「続ける」で再開できます。
+              空車画面の「業務終了」ボタンを押します。確認ダイアログが出るので「OK」で日報画面に遷移。日報画面では「続ける」（業務を再開して空車画面に戻る）と「終了」（業務開始画面に戻る）の
+              2
+              択。「終了」を押した後の業務開始画面には「業務再開」ボタンが残り、いつでもその業務を再開できます（時間制限はありません）。完全に新しい業務を始めたい場合は「業務開始」を押すと集計値が
+              0 リセットされます。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -9880,7 +9897,9 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              下の「履歴」タブで過去の業務（trip）と売上を確認できます。日別・月別の集計も表示されます。
+              下の「履歴」タブ、または空車画面の「履歴」ボタンから、当日の trip
+              一覧を確認できます。各行に開始時刻・走行距離・料金・追加料金の内訳が表示され、上部に「走行回数」「総距離」「総売上」の集計も出ます。表示は当日分のみで、日付が変わると新しい
+              1 日になります。
             </div>
           </div>
         </div>
@@ -9893,7 +9912,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              iPhone：設定アプリ→ダイコメ→位置情報→「常に」を選択。<br />Android：設定→アプリ→ダイコメ→権限→位置情報→「常に許可」を選択。
+              iPhone は「設定」アプリ → ダイコメ → 位置情報 →「常に」を選択。Android
+              は「設定」アプリ → アプリ → ダイコメ → 権限 → 位置情報
+              →「常に許可」を選択。設定変更後、ダイコメに戻ると GPS バッジが
+              「GPS待機」→「精度Xm」に変わります。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -9903,7 +9925,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              直近3時間以内なら、再起動時に「続きから再開」ボタンが表示されます。tripの途中状態（距離・料金・追加料金）も自動で復元されます。
+              業務中にタスクキルされた場合、再起動すると自動的に直前の状態（実車中・走行距離・料金・追加料金・総走行距離）に復元されます。iPhone
+              は再起動後にオレンジバナーが出るので「センサーを再起動する」ボタンを 1
+              回押せば GPS / コンパス /
+              加速度が復活し、計測が続行します。時間制限はないため、長時間後の復元でも引き継げます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -9913,7 +9938,9 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              使えます。47都道府県の道路データは初回起動時に端末内に保存されるので、地下・トンネル・電波の届かない場所でも料金計算は継続します。
+              使えます。47
+              都道府県の道路データは初回起動時に端末内に保存されるので、地下・トンネル・電波の届かない場所でも料金計算（道路に沿った距離計算）は継続します。Firebase
+              への送信は復活時にまとめて再送されます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -9923,7 +9950,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」→「料金設定」→「区間」タブで、追加料金ボタンの名前と金額を自由にカスタマイズできます。
+              「設定」タブ →「料金設定」→「追加料金」タブで、項目の名前と金額を自由に追加・編集・削除できます。実車中の「追加料金」モーダルに即時反映されます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -9933,7 +9960,9 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」→「料金設定」→「割増」タブで、割増ボタンを追加できます。名前・倍率・色を自由に設定できます。
+              「設定」タブ →「料金設定」→「割増」タブで、手動割増ボタンを追加できます。名前・倍率・色を自由に設定でき、複数 ON
+              で倍率は掛け算されます。深夜・週末・冬季の時刻ベース割増は「自動割増」タブから ON
+              / OFF と倍率設定が可能です。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -9942,7 +9971,19 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」→「料金設定」で、初乗り距離・加算距離が正しく入っているか確認してください。0や空欄のままだと料金が変わりません。
+              「設定」→「料金設定」→「基本」タブで、初乗り料金・初乗り距離・加算料金・加算距離が正しく入っているか確認してください。0
+              や空欄のままだと加算料金がカウントされません。設定変更後は「保存」ボタンを必ず押してください。
+            </div>
+          </div>
+          <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
+            <button class="acc-head" type="button">
+              <span class="acc-head-num">Q</span
+              ><span class="acc-head-text">「業務再開」ボタンとは</span
+              ><span class="acc-arrow">▾</span>
+            </button>
+            <div class="acc-body">
+              業務終了 →「終了」を押すと業務開始画面に戻りますが、画面に「前回の業務を引き継ぐ場合は」の赤い注釈と「業務再開」ボタンが残ります。これは前の業務を再開する経路です（時間制限なし）。完全に新しい業務として始めたい場合は「業務開始」を押してください（集計値が
+              0 リセット）。
             </div>
           </div>
         </div>
