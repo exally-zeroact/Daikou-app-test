@@ -1129,6 +1129,429 @@
         font-size: 15px;
         color: #aaa;
       }
+      /* ★設計変更宣言 (2026-05-15・MA Phase D・fare.html を #overlayFare に scope して移植):
+         元 fare.html (1864 行) の visible UI / JS / CSS を index.html に取り込み。
+         全 selector に #overlayFare prefix を付与し既存 .appbar / .card / .toggle 等
+         との衝突を回避。
+         元 fare.html は redirect stub に置換 (MA-7 と同パターン)。
+         料金設定 (Meter.setFareConfig 経由の業務本体) は無変更・UI 層のみ overlay 化。
+         appbar-back は hideAllOverlays() + showOverlay('settings') で設定画面に戻る。
+         旧 fare.html 内のローカル bottom-nav は移植不要 (index.html の bottom-nav が継続表示)。 */
+      #overlayFare {
+        background: #e8f4fd;
+        color: #1c1c1e;
+        font-family: 'Noto Sans JP', sans-serif;
+      }
+      #overlayFare .appbar {
+        background: #007aff;
+        padding: 12px 16px;
+        padding-top: max(12px, env(safe-area-inset-top));
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      #overlayFare .appbar-back {
+        color: #fff;
+        font-size: 16px;
+        cursor: pointer;
+        padding: 4px 8px;
+      }
+      #overlayFare .appbar-title {
+        font-size: 17px;
+        font-weight: 700;
+        color: #fff;
+        font-family: 'DM Mono', monospace;
+        letter-spacing: 1px;
+      }
+      #overlayFare .layout {
+        display: flex;
+        flex-direction: column;
+      }
+      #overlayFare .tab-nav {
+        display: flex;
+        background: #fff;
+        border-bottom: 1.5px solid #b8d9ff;
+        overflow-x: auto;
+        flex-shrink: 0;
+      }
+      #overlayFare .tab-nav::-webkit-scrollbar {
+        display: none;
+      }
+      #overlayFare .tab-btn {
+        padding: 14px 16px;
+        font-size: 13px;
+        color: #0056b3;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+        border: none;
+        background: transparent;
+        font-family: 'Noto Sans JP', sans-serif;
+        border-bottom: 3px solid transparent;
+      }
+      #overlayFare .tab-btn.active {
+        color: #1c1c1e;
+        border-bottom-color: #007aff;
+        background: #e8f4fd;
+      }
+      #overlayFare .tab-content {
+        padding: 16px;
+        padding-bottom: calc(140px + env(safe-area-inset-bottom));
+      }
+      #overlayFare .tab-pane {
+        display: none;
+      }
+      #overlayFare .tab-pane.active {
+        display: block;
+      }
+      #overlayFare .card {
+        background: #fff;
+        border: 1.5px solid #b8d9ff;
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+      }
+      #overlayFare .card-title {
+        font-size: 13px;
+        color: #0056b3;
+        font-weight: 700;
+        margin-bottom: 8px;
+        letter-spacing: 1px;
+        font-family: 'DM Mono', monospace;
+      }
+      #overlayFare .card-desc {
+        font-size: 12px;
+        color: #0056b3;
+        line-height: 1.6;
+        margin-bottom: 8px;
+      }
+      #overlayFare .form-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 0.5px solid #b8d9ff;
+        gap: 8px;
+      }
+      #overlayFare .form-row:last-child {
+        border-bottom: none;
+      }
+      #overlayFare .form-label {
+        font-size: 14px;
+        color: #1c1c1e;
+        flex: 1;
+      }
+      #overlayFare .form-input {
+        width: 120px;
+        padding: 8px 10px;
+        border: 1px solid #b8d9ff;
+        border-radius: 8px;
+        font-size: 15px;
+        font-family: 'DM Mono', monospace;
+        text-align: right;
+        background: #e8f4fd;
+        color: #1c1c1e;
+      }
+      #overlayFare .form-input.text {
+        font-family: 'Noto Sans JP', sans-serif;
+        text-align: left;
+      }
+      #overlayFare .form-input.wide {
+        width: 160px;
+      }
+      #overlayFare .form-input.fullwidth {
+        width: 100%;
+      }
+      #overlayFare .form-unit {
+        font-size: 12px;
+        color: #0056b3;
+        font-family: 'DM Mono', monospace;
+        margin-left: 4px;
+      }
+      #overlayFare .toggle {
+        width: 44px;
+        height: 26px;
+        background: #b8d9ff;
+        border-radius: 13px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.2s;
+        flex-shrink: 0;
+      }
+      #overlayFare .toggle.on {
+        background: #007aff;
+      }
+      #overlayFare .toggle::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 22px;
+        height: 22px;
+        background: #fff;
+        border-radius: 50%;
+        transition: left 0.2s;
+      }
+      #overlayFare .toggle.on::after {
+        left: 20px;
+      }
+      #overlayFare .btn-add {
+        display: block;
+        width: 100%;
+        padding: 12px;
+        background: #e8f4fd;
+        border: 1.5px dashed #007aff;
+        border-radius: 10px;
+        color: #0056b3;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: 'Noto Sans JP', sans-serif;
+        margin-top: 8px;
+      }
+      #overlayFare .btn-add:active {
+        background: #b8d9ff;
+      }
+      #overlayFare .btn-del {
+        padding: 6px 12px;
+        background: #fff;
+        border: 1px solid #ff3b30;
+        border-radius: 6px;
+        color: #ff3b30;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      #overlayFare .btn-save {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        bottom: calc(60px + max(16px, env(safe-area-inset-bottom)));
+        padding: 14px;
+        background: #007aff;
+        border: none;
+        border-radius: 12px;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 900;
+        letter-spacing: 2px;
+        cursor: pointer;
+        font-family: 'Noto Sans JP', sans-serif;
+        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
+        z-index: 110;
+        display: none;
+      }
+      #overlayFare.show .btn-save {
+        display: block;
+      }
+      #overlayFare .btn-save:active {
+        transform: scale(0.97);
+        filter: brightness(0.9);
+      }
+      #overlayFare .extra-item {
+        padding: 10px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        border-bottom: 0.5px solid #b8d9ff;
+      }
+      #overlayFare .extra-item:last-child {
+        border-bottom: none;
+      }
+      #overlayFare .extra-item-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #overlayFare .extra-name {
+        flex: 1;
+        border: 1px solid #b8d9ff;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 14px;
+        font-family: 'Noto Sans JP', sans-serif;
+        background: #e8f4fd;
+        color: #1c1c1e;
+      }
+      #overlayFare .extra-amount {
+        width: 110px;
+        border: 1px solid #b8d9ff;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 14px;
+        text-align: right;
+        font-family: 'DM Mono', monospace;
+        background: #e8f4fd;
+        color: #1c1c1e;
+      }
+      #overlayFare .extra-unit {
+        font-size: 12px;
+        color: #0056b3;
+        white-space: nowrap;
+        font-family: 'DM Mono', monospace;
+      }
+      #overlayFare .extra-del {
+        background: #fff;
+        border: 1px solid #ff3b30;
+        border-radius: 6px;
+        padding: 6px 12px;
+        color: #ff3b30;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+        white-space: nowrap;
+      }
+      #overlayFare .item-card {
+        border: 1px solid #b8d9ff;
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 10px;
+        background: #e8f4fd;
+      }
+      #overlayFare .item-card-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      #overlayFare .item-card-row:last-child {
+        margin-bottom: 0;
+      }
+      #overlayFare .color-picker {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      #overlayFare .color-swatch {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 1px #b8d9ff;
+      }
+      #overlayFare .color-swatch.selected {
+        box-shadow: 0 0 0 2px #1c1c1e;
+      }
+      #overlayFare .pill-group {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      #overlayFare .pill {
+        padding: 6px 12px;
+        border: 1.5px solid #b8d9ff;
+        border-radius: 16px;
+        background: #fff;
+        color: #0056b3;
+        font-size: 13px;
+        font-family: 'DM Mono', monospace;
+        cursor: pointer;
+      }
+      #overlayFare .pill.selected {
+        background: #007aff;
+        color: #fff;
+        border-color: #007aff;
+      }
+      #overlayFare .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'DM Mono', monospace;
+        background: #fff;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #b8d9ff;
+      }
+      #overlayFare .preview-table th,
+      #overlayFare .preview-table td {
+        padding: 10px;
+        font-size: 13px;
+        text-align: right;
+        border-bottom: 0.5px solid #b8d9ff;
+      }
+      #overlayFare .preview-table th {
+        background: #b8d9ff;
+        color: #1c1c1e;
+        font-weight: 700;
+      }
+      #overlayFare .preview-table td {
+        color: #1c1c1e;
+      }
+      #overlayFare .preview-multiplier {
+        padding: 10px;
+        background: #1c1c1e;
+        color: #b8d9ff;
+        border-radius: 8px;
+        font-family: 'DM Mono', monospace;
+        font-size: 14px;
+        text-align: center;
+        margin-bottom: 10px;
+      }
+      #overlayFare .auto-status {
+        font-size: 12px;
+        color: #007aff;
+        font-family: 'DM Mono', monospace;
+        font-weight: 700;
+        margin-top: 4px;
+      }
+      #overlayFare .auto-status.inactive {
+        color: #999;
+      }
+      #overlayFare .fare-toast {
+        position: fixed;
+        left: 50%;
+        top: max(60px, calc(env(safe-area-inset-top) + 56px));
+        transform: translateX(-50%);
+        background: #1c1c1e;
+        color: #b8d9ff;
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-size: 13px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        z-index: 1050;
+        width: 85%;
+        max-width: 360px;
+        text-align: center;
+        font-weight: 700;
+        display: none;
+        font-family: 'Noto Sans JP', sans-serif;
+      }
+      #overlayFare .fare-toast.show {
+        display: block;
+      }
+      @media (orientation: landscape) and (min-width: 700px) {
+        #overlayFare .layout {
+          flex-direction: row;
+        }
+        #overlayFare .tab-nav {
+          flex-direction: column;
+          width: 160px;
+          border-right: 1.5px solid #b8d9ff;
+          border-bottom: none;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+        #overlayFare .tab-btn {
+          text-align: left;
+          padding: 14px 16px;
+          border-bottom: 0.5px solid #b8d9ff;
+          border-left: 3px solid transparent;
+        }
+        #overlayFare .tab-btn.active {
+          border-left-color: #007aff;
+          border-bottom-color: #b8d9ff;
+        }
+        #overlayFare .tab-content {
+          padding: 24px;
+          padding-bottom: 100px;
+        }
+        #overlayFare .btn-save {
+          left: auto;
+          right: 24px;
+          width: 200px;
+        }
+      }
       .bottom-nav .nav-item {
         flex: 1;
         display: flex;
@@ -7644,7 +8067,12 @@
           history: 'overlayHistory',
           settings: 'overlaySettings',
           help: 'overlayHelp',
+          fare: 'overlayFare',
         };
+        // ★設計変更宣言 (2026-05-15・MA Phase D): fare overlay は bottom-nav slot を持たない
+        //   (overlaySettings 内「料金設定」リンク経由でのみ到達)・_NAV_INDEX 未登録のままで OK。
+        //   showOverlay('fare') 時は _setNavActive 呼出をスキップし、bottom-nav active は
+        //   元の状態 (設定タブ active) を維持する。
         const _NAV_INDEX = { history: 1, help: 2, settings: 3 };
 
         function _setNavActive(idx) {
@@ -7682,6 +8110,16 @@
               window._hist_render();
             } catch (e) {
               console.error('[SPA] _hist_render error:', e);
+            }
+          }
+          // ★設計変更宣言 (2026-05-15・MA Phase D): fare overlay は表示の都度 fresh fareConfig を再描画。
+          //   Firebase / localStorage の fareConfig が他経路で更新されている可能性があるため
+          //   showOverlay 時に毎回 _fare_load() で再ロード + 全タブ render。
+          if (name === 'fare' && typeof window._fare_load === 'function') {
+            try {
+              window._fare_load();
+            } catch (e) {
+              console.error('[SPA] _fare_load error:', e);
             }
           }
           if (typeof dlog === 'function') dlog('[SPA] showOverlay: ' + name);
@@ -8247,6 +8685,913 @@
         }
         window._hist_render = _hist_render;
       })();
+
+      // ★設計変更宣言 (2026-05-15・MA Phase D・fare overlay 動作 JS):
+      //   元 fare.html (L936-1846) の <script> ロジックを index.html に取り込み。
+      //   公開関数は window._fare_ prefix で attach し業務側 (Meter / FB / Business) との衝突を回避。
+      //   旧 fare.html の `function saveAll()` 等は本 IIFE 内に閉じ込めて window._fare_saveAll に export。
+      //   _fare_load() を showOverlay('fare') 経路から呼出し fresh fareConfig を都度ロード。
+      (function () {
+        const COLOR_PRESETS = [
+          '#007AFF',
+          '#1c1c1e',
+          '#FF9500',
+          '#FF3B30',
+          '#A0287A',
+          '#007AFF',
+          '#FFCC00',
+          '#FF6B9D',
+        ];
+        const $ = (id) => document.getElementById(id);
+        let fc = {
+          version: 2,
+          base_fare: 1300,
+          base_distance_m: 1000,
+          add_fare: 100,
+          add_distance_m: 420,
+          tiers: [],
+          tiersEnabled: false,
+          surcharges: [],
+          minFare: null,
+          maxFare: null,
+          rounding: 10,
+          autoSurcharges: {
+            night: { enabled: false, from: 22, to: 5, rate: 1.2 },
+            weekend: { enabled: false, rate: 1.1 },
+            winter: { enabled: false, from: '12-15', to: '03-15', rate: 1.1 },
+          },
+          vehicles: [],
+          vehiclesEnabled: false,
+          wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
+          zones: [],
+          zonesEnabled: false,
+        };
+        let extraItems = [];
+        let _previewActiveSurcharges = new Set();
+        let _tabsBound = false;
+
+        function _qsa(sel) {
+          return Array.prototype.slice.call(document.querySelectorAll('#overlayFare ' + sel));
+        }
+        function _bindTabsOnce() {
+          if (_tabsBound) return;
+          _tabsBound = true;
+          _qsa('.tab-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const tab = btn.dataset.tab;
+              _qsa('.tab-btn').forEach((b) => b.classList.remove('active'));
+              btn.classList.add('active');
+              _qsa('.tab-pane').forEach((p) => p.classList.remove('active'));
+              const pane = document.querySelector(
+                '#overlayFare .tab-pane[data-pane="' + tab + '"]'
+              );
+              if (pane) pane.classList.add('active');
+              if (tab === 'preview') updatePreview();
+              if (tab === 'auto') updateAutoStatus();
+            });
+          });
+        }
+        function bindToggle(elId, getter, setter) {
+          const el = $(elId);
+          if (!el) return;
+          if (getter()) el.classList.add('on');
+          else el.classList.remove('on');
+          el.onclick = () => {
+            setter(!getter());
+            if (getter()) el.classList.add('on');
+            else el.classList.remove('on');
+            if (elId.indexOf('_fare_auto') === 0) updateAutoStatus();
+          };
+        }
+
+        // ━━ 基本タブ ━━
+        function loadBasic() {
+          $('_fare_baseFare').value = fc.base_fare;
+          $('_fare_baseDistance').value = fc.base_distance_m;
+          $('_fare_addFare').value = fc.add_fare;
+          $('_fare_addDistance').value = fc.add_distance_m;
+          $('_fare_minFare').value = fc.minFare != null ? fc.minFare : '';
+          $('_fare_maxFare').value = fc.maxFare != null ? fc.maxFare : '';
+          _qsa('#_fare_roundingPills .pill').forEach((p) => {
+            if (parseInt(p.dataset.val, 10) === fc.rounding) p.classList.add('selected');
+            else p.classList.remove('selected');
+            p.onclick = () => {
+              fc.rounding = parseInt(p.dataset.val, 10);
+              _qsa('#_fare_roundingPills .pill').forEach((x) => x.classList.remove('selected'));
+              p.classList.add('selected');
+            };
+          });
+        }
+        function saveBasic() {
+          fc.base_fare = parseInt($('_fare_baseFare').value, 10) || 0;
+          fc.base_distance_m = parseInt($('_fare_baseDistance').value, 10) || 0;
+          fc.add_fare = parseInt($('_fare_addFare').value, 10) || 0;
+          fc.add_distance_m = parseInt($('_fare_addDistance').value, 10) || 0;
+          const mn = $('_fare_minFare').value;
+          fc.minFare = mn === '' ? null : parseInt(mn, 10);
+          const mx = $('_fare_maxFare').value;
+          fc.maxFare = mx === '' ? null : parseInt(mx, 10);
+        }
+
+        // ━━ 段階タブ ━━
+        function renderTiers() {
+          const root = $('_fare_tiersList');
+          if (!root) return;
+          root.innerHTML = '';
+          (fc.tiers || []).forEach((t, i) => {
+            const card = document.createElement('div');
+            card.className = 'item-card';
+            card.innerHTML =
+              '<div class="item-card-row"><span class="form-label">区間 ' +
+              (i + 1) +
+              '</span><button class="btn-del" data-i="' +
+              i +
+              '">削除</button></div>' +
+              '<div class="item-card-row"><span class="form-label">から</span><input class="form-input" type="number" data-key="from_m" value="' +
+              (t.from_m || 0) +
+              '"><span class="form-unit">m</span></div>' +
+              '<div class="item-card-row"><span class="form-label">まで</span><input class="form-input" type="number" data-key="to_m" value="' +
+              (t.to_m == null ? '' : t.to_m) +
+              '" placeholder="∞"><span class="form-unit">m</span></div>' +
+              '<div class="item-card-row"><span class="form-label">加算料金</span><input class="form-input" type="number" data-key="add_fare" value="' +
+              (t.add_fare || 0) +
+              '"><span class="form-unit">円</span></div>' +
+              '<div class="item-card-row"><span class="form-label">加算距離</span><input class="form-input" type="number" data-key="add_distance_m" value="' +
+              (t.add_distance_m || 0) +
+              '"><span class="form-unit">m</span></div>';
+            card.querySelectorAll('input').forEach((inp) => {
+              inp.oninput = () => {
+                const k = inp.dataset.key;
+                const v = inp.value;
+                if (k === 'to_m') fc.tiers[i].to_m = v === '' ? null : parseInt(v, 10);
+                else fc.tiers[i][k] = parseInt(v, 10) || 0;
+                if (k === 'to_m' && fc.tiers[i + 1]) {
+                  fc.tiers[i + 1].from_m = fc.tiers[i].to_m || 0;
+                  renderTiers();
+                }
+              };
+            });
+            card.querySelector('.btn-del').onclick = () => {
+              fc.tiers.splice(i, 1);
+              renderTiers();
+            };
+            root.appendChild(card);
+          });
+        }
+        function addTier() {
+          if (!fc.tiers) fc.tiers = [];
+          const last = fc.tiers[fc.tiers.length - 1];
+          const fromM = last ? last.to_m || 0 : fc.base_distance_m || 1000;
+          fc.tiers.push({ from_m: fromM, to_m: null, add_fare: 100, add_distance_m: 300 });
+          renderTiers();
+        }
+
+        // ━━ 割増タブ ━━
+        function renderSurcharges() {
+          const root = $('_fare_surchargesList');
+          if (!root) return;
+          root.innerHTML = '';
+          (fc.surcharges || []).forEach((s, i) => {
+            const card = document.createElement('div');
+            card.className = 'item-card';
+            let colorHtml = '<div class="color-picker">';
+            COLOR_PRESETS.forEach((c) => {
+              const sel = c === s.color ? ' selected' : '';
+              colorHtml +=
+                '<div class="color-swatch' +
+                sel +
+                '" style="background:' +
+                c +
+                '" data-color="' +
+                c +
+                '"></div>';
+            });
+            colorHtml += '</div>';
+            card.innerHTML =
+              '<div class="item-card-row"><span class="form-label">割増 ' +
+              (i + 1) +
+              '</span><button class="btn-del" data-i="' +
+              i +
+              '">削除</button></div>' +
+              '<div class="item-card-row"><span class="form-label">業務開始時 ON</span><div class="toggle ' +
+              (s.active_default ? 'on' : '') +
+              '" data-toggle="active_default"></div></div>' +
+              '<div class="item-card-row"><span class="form-label">名称</span><input class="form-input text wide" data-key="name" value="' +
+              (s.name || '') +
+              '"></div>' +
+              '<div class="item-card-row"><span class="form-label">倍率</span><input class="form-input" type="number" step="0.05" min="1.0" max="3.0" data-key="rate" value="' +
+              (s.rate || 1.2) +
+              '"><span class="form-unit">倍</span></div>' +
+              '<div class="item-card-row"><span class="form-label">色</span>' +
+              colorHtml +
+              '</div>';
+            card.querySelectorAll('input').forEach((inp) => {
+              inp.oninput = () => {
+                const k = inp.dataset.key;
+                if (k === 'rate') fc.surcharges[i].rate = parseFloat(inp.value) || 1.0;
+                else fc.surcharges[i][k] = inp.value;
+              };
+            });
+            card.querySelectorAll('.color-swatch').forEach((sw) => {
+              sw.onclick = () => {
+                fc.surcharges[i].color = sw.dataset.color;
+                card
+                  .querySelectorAll('.color-swatch')
+                  .forEach((x) => x.classList.remove('selected'));
+                sw.classList.add('selected');
+              };
+            });
+            card.querySelector('.toggle[data-toggle="active_default"]').onclick = (e) => {
+              fc.surcharges[i].active_default = !fc.surcharges[i].active_default;
+              e.currentTarget.classList.toggle('on');
+            };
+            card.querySelector('.btn-del').onclick = () => {
+              fc.surcharges.splice(i, 1);
+              renderSurcharges();
+            };
+            root.appendChild(card);
+          });
+        }
+        function addSurcharge() {
+          if (!fc.surcharges) fc.surcharges = [];
+          const id = 'sc_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+          fc.surcharges.push({
+            id: id,
+            name: '割増' + (fc.surcharges.length + 1),
+            rate: 1.2,
+            color: COLOR_PRESETS[fc.surcharges.length % COLOR_PRESETS.length],
+            active_default: false,
+          });
+          renderSurcharges();
+        }
+
+        // ━━ 自動割増タブ ━━
+        function loadAuto() {
+          const a = fc.autoSurcharges || {};
+          $('_fare_autoNightFrom').value = a.night && a.night.from != null ? a.night.from : 22;
+          $('_fare_autoNightTo').value = a.night && a.night.to != null ? a.night.to : 5;
+          $('_fare_autoNightRate').value = (a.night && a.night.rate) || 1.2;
+          $('_fare_autoWeekendRate').value = (a.weekend && a.weekend.rate) || 1.1;
+          $('_fare_autoWinterFrom').value = (a.winter && a.winter.from) || '12-15';
+          $('_fare_autoWinterTo').value = (a.winter && a.winter.to) || '03-15';
+          $('_fare_autoWinterRate').value = (a.winter && a.winter.rate) || 1.1;
+          [
+            '_fare_autoNightFrom',
+            '_fare_autoNightTo',
+            '_fare_autoNightRate',
+            '_fare_autoWeekendRate',
+            '_fare_autoWinterFrom',
+            '_fare_autoWinterTo',
+            '_fare_autoWinterRate',
+          ].forEach((k) => {
+            const el = $(k);
+            if (!el) return;
+            el.oninput = () => {
+              saveAuto();
+              updateAutoStatus();
+            };
+          });
+        }
+        function saveAuto() {
+          const a = fc.autoSurcharges || (fc.autoSurcharges = {});
+          a.night = a.night || {};
+          a.weekend = a.weekend || {};
+          a.winter = a.winter || {};
+          a.night.from = parseInt($('_fare_autoNightFrom').value, 10);
+          a.night.to = parseInt($('_fare_autoNightTo').value, 10);
+          a.night.rate = parseFloat($('_fare_autoNightRate').value) || 1.2;
+          a.weekend.rate = parseFloat($('_fare_autoWeekendRate').value) || 1.1;
+          a.winter.from = $('_fare_autoWinterFrom').value || '12-15';
+          a.winter.to = $('_fare_autoWinterTo').value || '03-15';
+          a.winter.rate = parseFloat($('_fare_autoWinterRate').value) || 1.1;
+        }
+        function updateAutoStatus() {
+          const a = fc.autoSurcharges || {};
+          const now = new Date();
+          const nE = $('_fare_autoNightStatus');
+          if (nE) {
+            if (a.night && a.night.enabled) {
+              const h = now.getHours();
+              const f = a.night.from,
+                t = a.night.to;
+              const inRange = f <= t ? h >= f && h < t : h >= f || h < t;
+              nE.textContent = inRange ? '現在 適用中 ×' + (a.night.rate || 1.2) : '現在 適用外';
+              nE.classList.toggle('inactive', !inRange);
+            } else {
+              nE.textContent = 'OFF';
+              nE.classList.add('inactive');
+            }
+          }
+          const wE = $('_fare_autoWeekendStatus');
+          if (wE) {
+            if (a.weekend && a.weekend.enabled) {
+              const dow = now.getDay();
+              const inRange = dow === 0 || dow === 6;
+              wE.textContent = inRange ? '現在 適用中 ×' + (a.weekend.rate || 1.1) : '現在 適用外';
+              wE.classList.toggle('inactive', !inRange);
+            } else {
+              wE.textContent = 'OFF';
+              wE.classList.add('inactive');
+            }
+          }
+          const xE = $('_fare_autoWinterStatus');
+          if (xE) {
+            if (a.winter && a.winter.enabled) {
+              const mmdd =
+                String(now.getMonth() + 1).padStart(2, '0') +
+                '-' +
+                String(now.getDate()).padStart(2, '0');
+              const f = a.winter.from || '12-15';
+              const t = a.winter.to || '03-15';
+              const inRange = f <= t ? mmdd >= f && mmdd <= t : mmdd >= f || mmdd <= t;
+              xE.textContent = inRange ? '現在 適用中 ×' + (a.winter.rate || 1.1) : '現在 適用外';
+              xE.classList.toggle('inactive', !inRange);
+            } else {
+              xE.textContent = 'OFF';
+              xE.classList.add('inactive');
+            }
+          }
+        }
+
+        // ━━ 車種タブ ━━
+        function renderVehicles() {
+          const root = $('_fare_vehiclesList');
+          if (!root) return;
+          root.innerHTML = '';
+          (fc.vehicles || []).forEach((v, i) => {
+            const card = document.createElement('div');
+            card.className = 'item-card';
+            card.innerHTML =
+              '<div class="item-card-row"><span class="form-label">車種 ' +
+              (i + 1) +
+              '</span><button class="btn-del" data-i="' +
+              i +
+              '">削除</button></div>' +
+              '<div class="item-card-row"><span class="form-label">デフォルト選択</span><div class="toggle ' +
+              (v.default ? 'on' : '') +
+              '" data-toggle="default"></div></div>' +
+              '<div class="item-card-row"><span class="form-label">名称</span><input class="form-input text wide" data-key="name" value="' +
+              (v.name || '') +
+              '"></div>' +
+              '<div class="item-card-row"><span class="form-label">倍率</span><input class="form-input" type="number" step="0.05" min="0.5" max="3.0" data-key="multiplier" value="' +
+              (v.multiplier || 1.0) +
+              '"><span class="form-unit">倍</span></div>' +
+              '<div class="item-card-row"><span class="form-label">追加料金</span><input class="form-input" type="number" data-key="addon" value="' +
+              (v.addon || 0) +
+              '"><span class="form-unit">円</span></div>';
+            card.querySelectorAll('input').forEach((inp) => {
+              inp.oninput = () => {
+                const k = inp.dataset.key;
+                if (k === 'multiplier') fc.vehicles[i].multiplier = parseFloat(inp.value) || 1.0;
+                else if (k === 'addon') fc.vehicles[i].addon = parseInt(inp.value, 10) || 0;
+                else fc.vehicles[i][k] = inp.value;
+              };
+            });
+            card.querySelector('.toggle[data-toggle="default"]').onclick = () => {
+              (fc.vehicles || []).forEach((x) => (x.default = false));
+              fc.vehicles[i].default = true;
+              renderVehicles();
+            };
+            card.querySelector('.btn-del').onclick = () => {
+              fc.vehicles.splice(i, 1);
+              renderVehicles();
+            };
+            root.appendChild(card);
+          });
+        }
+        function addVehicle() {
+          if (!fc.vehicles) fc.vehicles = [];
+          const id = 'v_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+          fc.vehicles.push({
+            id: id,
+            name: '車種' + (fc.vehicles.length + 1),
+            multiplier: 1.0,
+            addon: 0,
+            default: fc.vehicles.length === 0,
+          });
+          renderVehicles();
+        }
+
+        // ━━ 待機タブ ━━
+        function loadWait() {
+          const w = fc.wait || {};
+          $('_fare_waitFreeMins').value = typeof w.freeMins === 'number' ? w.freeMins : 5;
+          $('_fare_waitRate').value = typeof w.ratePerMin === 'number' ? w.ratePerMin : 100;
+          $('_fare_waitFreeMins').oninput = () => {
+            fc.wait.freeMins = parseInt($('_fare_waitFreeMins').value, 10) || 0;
+          };
+          $('_fare_waitRate').oninput = () => {
+            fc.wait.ratePerMin = parseInt($('_fare_waitRate').value, 10) || 0;
+          };
+        }
+
+        // ━━ 区間タブ ━━
+        function renderZones() {
+          const root = $('_fare_zonesList');
+          if (!root) return;
+          root.innerHTML = '';
+          (fc.zones || []).forEach((z, i) => {
+            const card = document.createElement('div');
+            card.className = 'item-card';
+            card.innerHTML =
+              '<div class="item-card-row"><span class="form-label">区間 ' +
+              (i + 1) +
+              '</span><button class="btn-del" data-i="' +
+              i +
+              '">削除</button></div>' +
+              '<div class="item-card-row"><span class="form-label">名称</span><input class="form-input text wide" data-key="name" value="' +
+              (z.name || '') +
+              '"></div>' +
+              '<div class="item-card-row"><span class="form-label">固定料金</span><input class="form-input" type="number" data-key="fare" value="' +
+              (z.fare || 0) +
+              '"><span class="form-unit">円</span></div>';
+            card.querySelectorAll('input').forEach((inp) => {
+              inp.oninput = () => {
+                const k = inp.dataset.key;
+                if (k === 'fare') fc.zones[i].fare = parseInt(inp.value, 10) || 0;
+                else fc.zones[i][k] = inp.value;
+              };
+            });
+            card.querySelector('.btn-del').onclick = () => {
+              fc.zones.splice(i, 1);
+              renderZones();
+            };
+            root.appendChild(card);
+          });
+        }
+        function addZone() {
+          if (!fc.zones) fc.zones = [];
+          fc.zones.push({ name: '区間' + (fc.zones.length + 1), fare: 5000 });
+          renderZones();
+        }
+
+        // ━━ 追加料金タブ ━━
+        function loadExtras() {
+          try {
+            const raw = localStorage.getItem('daikou_extras');
+            extraItems = raw ? JSON.parse(raw) || [] : [];
+          } catch (_) {
+            extraItems = [];
+          }
+          renderExtraItems();
+        }
+        function renderExtraItems() {
+          const el = $('_fare_extraItems');
+          if (!el) return;
+          el.innerHTML = extraItems
+            .map(
+              (item, i) =>
+                '<div class="extra-item">' +
+                '<input class="extra-name" type="text" value="' +
+                String(item.name || '').replace(/"/g, '&quot;') +
+                '" placeholder="項目名（例：迎車料金）" oninput="window._fare_setExtraName(' +
+                i +
+                ',this.value)">' +
+                '<div class="extra-item-row">' +
+                '<input class="extra-amount" type="number" value="' +
+                (item.amount || '') +
+                '" placeholder="0" inputmode="numeric" oninput="window._fare_setExtraAmount(' +
+                i +
+                ',this.value)">' +
+                '<span class="extra-unit">円</span>' +
+                '<button class="extra-del" onclick="window._fare_removeExtra(' +
+                i +
+                ')">削除</button>' +
+                '</div></div>'
+            )
+            .join('');
+        }
+        function addExtraItem() {
+          extraItems.push({ name: '', amount: 0 });
+          renderExtraItems();
+        }
+        function removeExtra(i) {
+          extraItems.splice(i, 1);
+          renderExtraItems();
+        }
+        function saveExtras() {
+          try {
+            localStorage.setItem('daikou_extras', JSON.stringify(extraItems));
+          } catch (_) {}
+        }
+
+        // ━━ プレビュータブ ━━
+        function renderPreviewSurcharges() {
+          const root = $('_fare_previewSurcharges');
+          if (!root) return;
+          root.innerHTML = '';
+          (fc.surcharges || []).forEach((s) => {
+            if (!s.id) return;
+            const wrap = document.createElement('label');
+            wrap.style.cssText =
+              'display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:14px;';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!s.active_default;
+            if (s.active_default) _previewActiveSurcharges.add(s.id);
+            cb.onchange = () => {
+              if (cb.checked) _previewActiveSurcharges.add(s.id);
+              else _previewActiveSurcharges.delete(s.id);
+              updatePreview();
+            };
+            const dot = document.createElement('span');
+            dot.style.cssText =
+              'display:inline-block;width:14px;height:14px;border-radius:50%;background:' +
+              (s.color || '#007AFF') +
+              ';';
+            const txt = document.createElement('span');
+            txt.textContent = s.name + ' ×' + s.rate;
+            wrap.appendChild(cb);
+            wrap.appendChild(dot);
+            wrap.appendChild(txt);
+            root.appendChild(wrap);
+          });
+        }
+        function _calcFareForPreview(distanceM) {
+          let fare;
+          if (Array.isArray(fc.tiers) && fc.tiers.length > 0 && fc.tiersEnabled !== false) {
+            if (distanceM <= fc.base_distance_m) {
+              fare = fc.base_fare;
+            } else {
+              fare = fc.base_fare;
+              for (const t of fc.tiers) {
+                if (!t || typeof t.from_m !== 'number') continue;
+                if (distanceM <= t.from_m) continue;
+                const tierEnd = t.to_m == null ? distanceM : Math.min(distanceM, t.to_m);
+                const tierDist = tierEnd - t.from_m;
+                if (tierDist <= 0) continue;
+                const ad = t.add_distance_m > 0 ? t.add_distance_m : 1;
+                const af = t.add_fare || 0;
+                const steps = Math.floor(tierDist / ad) + 1;
+                fare += steps * af;
+                if (t.to_m == null) break;
+                if (distanceM <= t.to_m) break;
+              }
+            }
+          } else {
+            // ★ Phase 1000m 境界 (meter.js と同期・<= 採用)
+            if (distanceM <= fc.base_distance_m) fare = fc.base_fare;
+            else {
+              const extra = distanceM - fc.base_distance_m;
+              const steps = Math.floor(extra / fc.add_distance_m) + 1;
+              fare = fc.base_fare + steps * fc.add_fare;
+            }
+          }
+          return fare;
+        }
+        function _roundFare(fare) {
+          if (typeof fc.minFare === 'number' && fc.minFare > 0 && fare < fc.minFare)
+            fare = fc.minFare;
+          if (typeof fc.maxFare === 'number' && fc.maxFare > 0 && fare > fc.maxFare)
+            fare = fc.maxFare;
+          const unit = typeof fc.rounding === 'number' && fc.rounding > 0 ? fc.rounding : 1;
+          if (unit > 1) fare = Math.round(fare / unit) * unit;
+          else fare = Math.round(fare);
+          return fare;
+        }
+        function updatePreview() {
+          renderPreviewSurcharges();
+          let mul = 1.0;
+          (fc.surcharges || []).forEach((s) => {
+            if (_previewActiveSurcharges.has(s.id) && typeof s.rate === 'number') mul *= s.rate;
+          });
+          const a = fc.autoSurcharges || {};
+          const now = new Date();
+          if (a.night && a.night.enabled) {
+            const h = now.getHours();
+            const f = a.night.from,
+              t = a.night.to;
+            const inRange = f <= t ? h >= f && h < t : h >= f || h < t;
+            if (inRange) mul *= a.night.rate || 1.2;
+          }
+          if (a.weekend && a.weekend.enabled) {
+            const dow = now.getDay();
+            if (dow === 0 || dow === 6) mul *= a.weekend.rate || 1.1;
+          }
+          if (a.winter && a.winter.enabled) {
+            const mmdd =
+              String(now.getMonth() + 1).padStart(2, '0') +
+              '-' +
+              String(now.getDate()).padStart(2, '0');
+            const f = a.winter.from || '12-15';
+            const t = a.winter.to || '03-15';
+            const inRange = f <= t ? mmdd >= f && mmdd <= t : mmdd >= f || mmdd <= t;
+            if (inRange) mul *= a.winter.rate || 1.1;
+          }
+          $('_fare_previewMultiplier').textContent = '適用倍率 ×' + mul.toFixed(2);
+
+          const baseD =
+            typeof fc.base_distance_m === 'number' && fc.base_distance_m > 0
+              ? fc.base_distance_m
+              : 1000;
+          const addD =
+            typeof fc.add_distance_m === 'number' && fc.add_distance_m > 0
+              ? fc.add_distance_m
+              : 420;
+          const stepsToShow = [0, 1, 2, 3, 5, 10, 15, 20, 30, 50];
+          const distances = stepsToShow.map((n) => baseD + n * addD);
+          const tbody = $('_fare_previewTbody');
+          tbody.innerHTML = '';
+          distances.forEach((d, idx) => {
+            const fare = _calcFareForPreview(d) * mul;
+            const rounded = _roundFare(fare);
+            const n = stepsToShow[idx];
+            const label =
+              n === 0
+                ? '初乗り (' + d.toLocaleString() + 'm)'
+                : (d >= 1000 ? (d / 1000).toFixed(2) + 'km' : d + 'm') + ' (+' + n + '段)';
+            const tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + label + '</td><td>¥' + rounded.toLocaleString() + '</td>';
+            tbody.appendChild(tr);
+          });
+
+          const ps = $('_fare_previewAutoStatus');
+          if (ps) {
+            const items = [];
+            if (a.night && a.night.enabled) {
+              const h = now.getHours();
+              const f = a.night.from,
+                t = a.night.to;
+              const inRange = f <= t ? h >= f && h < t : h >= f || h < t;
+              if (inRange) items.push('深夜 ×' + a.night.rate);
+            }
+            if (a.weekend && a.weekend.enabled) {
+              const dow = now.getDay();
+              if (dow === 0 || dow === 6) items.push('週末 ×' + a.weekend.rate);
+            }
+            if (a.winter && a.winter.enabled) {
+              const mmdd =
+                String(now.getMonth() + 1).padStart(2, '0') +
+                '-' +
+                String(now.getDate()).padStart(2, '0');
+              const f = a.winter.from || '12-15',
+                t = a.winter.to || '03-15';
+              const inRange = f <= t ? mmdd >= f && mmdd <= t : mmdd >= f || mmdd <= t;
+              if (inRange) items.push('冬季 ×' + a.winter.rate);
+            }
+            ps.textContent = items.length ? '自動適用中: ' + items.join(' / ') : '自動適用なし';
+            ps.style.color = items.length ? '#007AFF' : '#999';
+            ps.style.fontFamily = 'DM Mono,monospace';
+            ps.style.fontSize = '12px';
+          }
+          _renderPreviewDetails();
+        }
+        function _renderPreviewDetails() {
+          const esc = (s) =>
+            String(s == null ? '' : s).replace(
+              /[<>&"]/g,
+              (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]
+            );
+          const yen = (n) => '¥' + (Number(n) || 0).toLocaleString();
+          const m = (n) => (Number(n) || 0).toLocaleString() + 'm';
+          const elBasic = $('_fare_previewBasic');
+          if (elBasic)
+            elBasic.innerHTML =
+              '初乗り: ' +
+              yen(fc.base_fare) +
+              ' / ' +
+              m(fc.base_distance_m) +
+              '<br>加算: ' +
+              yen(fc.add_fare) +
+              ' / ' +
+              m(fc.add_distance_m);
+          const elTiers = $('_fare_previewTiers');
+          if (elTiers) {
+            if (!fc.tiersEnabled || !Array.isArray(fc.tiers) || fc.tiers.length === 0)
+              elTiers.innerHTML = '<span style="color:#999;">使用しない</span>';
+            else
+              elTiers.innerHTML = fc.tiers
+                .map(
+                  (t, i) =>
+                    i +
+                    1 +
+                    '. ' +
+                    (t.from_m || 0) +
+                    'm 〜 ' +
+                    (t.to_m == null ? '∞' : t.to_m + 'm') +
+                    ' : ' +
+                    yen(t.add_fare) +
+                    ' / ' +
+                    m(t.add_distance_m)
+                )
+                .join('<br>');
+          }
+          const elSur = $('_fare_previewSurchargesList');
+          if (elSur) {
+            if (!Array.isArray(fc.surcharges) || fc.surcharges.length === 0)
+              elSur.innerHTML = '<span style="color:#999;">未設定</span>';
+            else
+              elSur.innerHTML = fc.surcharges
+                .map(
+                  (s) =>
+                    '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' +
+                    (s.color || '#007AFF') +
+                    ';vertical-align:middle;margin-right:6px;"></span>' +
+                    esc(s.name) +
+                    ' ×' +
+                    (s.rate || 1.0)
+                )
+                .join('<br>');
+          }
+          const elAuto = $('_fare_previewAutoList');
+          if (elAuto) {
+            const a = fc.autoSurcharges || {};
+            const lines = [];
+            if (a.night)
+              lines.push(
+                '深夜: ' +
+                  (a.night.enabled
+                    ? '×' + a.night.rate + ' (' + a.night.from + '時〜' + a.night.to + '時)'
+                    : '<span style="color:#999;">OFF</span>')
+              );
+            if (a.weekend)
+              lines.push(
+                '週末: ' +
+                  (a.weekend.enabled
+                    ? '×' + a.weekend.rate + ' (土日)'
+                    : '<span style="color:#999;">OFF</span>')
+              );
+            if (a.winter)
+              lines.push(
+                '冬季: ' +
+                  (a.winter.enabled
+                    ? '×' + a.winter.rate + ' (' + a.winter.from + ' 〜 ' + a.winter.to + ')'
+                    : '<span style="color:#999;">OFF</span>')
+              );
+            elAuto.innerHTML = lines.length
+              ? lines.join('<br>')
+              : '<span style="color:#999;">未設定</span>';
+          }
+          const elVeh = $('_fare_previewVehicles');
+          if (elVeh) {
+            if (!fc.vehiclesEnabled || !Array.isArray(fc.vehicles) || fc.vehicles.length === 0)
+              elVeh.innerHTML = '<span style="color:#999;">使用しない</span>';
+            else
+              elVeh.innerHTML = fc.vehicles
+                .map(
+                  (v) =>
+                    esc(v.name) +
+                    ' ×' +
+                    (v.multiplier || 1.0) +
+                    (v.addon ? ' +' + yen(v.addon) : '') +
+                    (v.default ? ' <span style="color:#007AFF;">(デフォルト)</span>' : '')
+                )
+                .join('<br>');
+          }
+          const elWait = $('_fare_previewWait');
+          if (elWait) {
+            const w = fc.wait || {};
+            elWait.innerHTML = w.enabled
+              ? '無料: 最初の ' +
+                (w.freeMins || 0) +
+                ' 分<br>料金: ' +
+                yen(w.ratePerMin || 0) +
+                ' / 分'
+              : '<span style="color:#999;">使用しない</span>';
+          }
+          const elZones = $('_fare_previewZones');
+          if (elZones) {
+            if (!fc.zonesEnabled || !Array.isArray(fc.zones) || fc.zones.length === 0)
+              elZones.innerHTML = '<span style="color:#999;">使用しない</span>';
+            else
+              elZones.innerHTML = fc.zones
+                .map((z) => esc(z.from || '?') + ' → ' + esc(z.to || '?') + ' : ' + yen(z.fare || 0))
+                .join('<br>');
+          }
+          const elEx = $('_fare_previewExtras');
+          if (elEx) {
+            if (!Array.isArray(extraItems) || extraItems.length === 0)
+              elEx.innerHTML = '<span style="color:#999;">未設定</span>';
+            else
+              elEx.innerHTML =
+                extraItems
+                  .filter((x) => x && x.name)
+                  .map((x) => esc(x.name) + ' : ' + yen(x.amount || 0))
+                  .join('<br>') || '<span style="color:#999;">未設定</span>';
+          }
+          const elLim = $('_fare_previewLimits');
+          if (elLim) {
+            const minF =
+              typeof fc.minFare === 'number' && fc.minFare > 0
+                ? yen(fc.minFare)
+                : '<span style="color:#999;">なし</span>';
+            const maxF =
+              typeof fc.maxFare === 'number' && fc.maxFare > 0
+                ? yen(fc.maxFare)
+                : '<span style="color:#999;">なし</span>';
+            const rnd =
+              typeof fc.rounding === 'number' && fc.rounding > 0
+                ? fc.rounding + '円' + (fc.rounding === 1 ? ' (丸めなし)' : ' 単位で切り上げ')
+                : '1円 (丸めなし)';
+            elLim.innerHTML = '下限: ' + minF + '<br>上限: ' + maxF + '<br>丸め: ' + rnd;
+          }
+        }
+
+        // ━━ ロード / 保存 (Meter / FB / localStorage 連携) ━━
+        function _initAll() {
+          _bindTabsOnce();
+          loadBasic();
+          renderTiers();
+          renderSurcharges();
+          loadAuto();
+          renderVehicles();
+          loadWait();
+          renderZones();
+          loadExtras();
+          bindToggle(
+            '_fare_tiersEnabledToggle',
+            () => fc.tiersEnabled,
+            (v) => (fc.tiersEnabled = v)
+          );
+          bindToggle(
+            '_fare_autoNightToggle',
+            () => fc.autoSurcharges.night.enabled,
+            (v) => (fc.autoSurcharges.night.enabled = v)
+          );
+          bindToggle(
+            '_fare_autoWeekendToggle',
+            () => fc.autoSurcharges.weekend.enabled,
+            (v) => (fc.autoSurcharges.weekend.enabled = v)
+          );
+          bindToggle(
+            '_fare_autoWinterToggle',
+            () => fc.autoSurcharges.winter.enabled,
+            (v) => (fc.autoSurcharges.winter.enabled = v)
+          );
+          bindToggle(
+            '_fare_vehiclesEnabledToggle',
+            () => fc.vehiclesEnabled,
+            (v) => (fc.vehiclesEnabled = v)
+          );
+          bindToggle(
+            '_fare_waitEnabledToggle',
+            () => fc.wait.enabled,
+            (v) => (fc.wait.enabled = v)
+          );
+          bindToggle(
+            '_fare_zonesEnabledToggle',
+            () => fc.zonesEnabled,
+            (v) => (fc.zonesEnabled = v)
+          );
+          updateAutoStatus();
+        }
+        function load() {
+          if (typeof FB !== 'undefined' && FB.loadFareConfig) {
+            FB.loadFareConfig((cfg) => {
+              Object.assign(fc, cfg);
+              if (typeof fc.tiersEnabled === 'undefined')
+                fc.tiersEnabled = fc.tiers && fc.tiers.length > 0;
+              if (typeof fc.zonesEnabled === 'undefined')
+                fc.zonesEnabled = fc.zones && fc.zones.length > 0;
+              _initAll();
+            });
+          } else {
+            _initAll();
+          }
+        }
+        function saveAll() {
+          saveBasic();
+          saveAuto();
+          if (!fc.tiersEnabled) fc.tiers = [];
+          if (!fc.zonesEnabled) fc.zones = [];
+          fc.version = 2;
+          if (typeof FB !== 'undefined' && FB.saveFareConfig) {
+            FB.saveFareConfig(fc);
+          }
+          // Meter.setFareConfig が業務中なら frozen で no-op (= 旧 fare.html と等価)
+          // 業務外なら次回 calcFare 呼出から即時反映される
+          if (typeof Meter !== 'undefined' && Meter.setFareConfig) {
+            try {
+              Meter.setFareConfig(fc);
+            } catch (_) {}
+          }
+          saveExtras();
+          showToast('保存しました');
+        }
+        function showToast(msg) {
+          const t = $('_fare_toast');
+          if (!t) return;
+          t.textContent = msg;
+          t.classList.add('show');
+          setTimeout(() => t.classList.remove('show'), 2000);
+        }
+
+        // 公開 API (window._fare_ prefix)
+        window._fare_load = load;
+        window._fare_saveAll = saveAll;
+        window._fare_addTier = addTier;
+        window._fare_addSurcharge = addSurcharge;
+        window._fare_addVehicle = addVehicle;
+        window._fare_addZone = addZone;
+        window._fare_addExtraItem = addExtraItem;
+        window._fare_removeExtra = removeExtra;
+        window._fare_setExtraName = function (i, v) {
+          if (extraItems[i]) extraItems[i].name = v;
+        };
+        window._fare_setExtraAmount = function (i, v) {
+          if (extraItems[i]) extraItems[i].amount = parseInt(v, 10) || 0;
+        };
+      })();
     </script>
 
     <!-- ★設計変更宣言 (2026-05-14・MA-1 SPA overlay 基盤・静的構造のみ・未起動):
@@ -8291,10 +9636,14 @@
         <div class="appbar-title">設定</div>
       </div>
       <div class="wrap">
-        <!-- 料金設定 → fare.html -->
+        <!-- 料金設定 → #overlayFare (MA Phase D で fare.html を overlay 化) -->
         <div class="section">
           <div class="section-title">料金設定</div>
-          <div class="row" onclick="location.href = 'fare.html'" style="cursor: pointer">
+          <div
+            class="row"
+            onclick="if(typeof window.showOverlay==='function'){window.showOverlay('fare');}else{location.href='fare.html';}"
+            style="cursor: pointer"
+          >
             <div class="row-label">
               料金設定（追加料金・基本・段階・割増・自動・車種・待機・区間・確認）
             </div>
@@ -8620,6 +9969,379 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ★設計変更宣言 (2026-05-15・MA Phase D・fare.html → #overlayFare 移植):
+         元 fare.html (1864 行) の body 内容を移植。appbar-back は hideAllOverlays() →
+         showOverlay('settings') で戻り経路を維持。bottom-nav は index.html 既存のものを継続。
+         JS は IIFE で _fare_ prefix の公開関数 (_fare_load / _fare_saveAll / _fare_addTier 等)
+         に集約・既存業務側 (Meter / FB / Business) との衝突を回避。 -->
+    <div id="overlayFare" class="spa-overlay" aria-hidden="true">
+      <div class="appbar">
+        <div
+          class="appbar-back"
+          onclick="window.hideAllOverlays();window.showOverlay('settings');"
+        >
+          ＜
+        </div>
+        <div class="appbar-title">FARE CONFIG</div>
+      </div>
+      <div class="layout">
+        <nav class="tab-nav" id="_fare_tabNav">
+          <button class="tab-btn active" data-tab="extras">追加料金</button>
+          <button class="tab-btn" data-tab="basic">基本</button>
+          <button class="tab-btn" data-tab="tiers">段階</button>
+          <button class="tab-btn" data-tab="surcharges">割増</button>
+          <button class="tab-btn" data-tab="auto">自動割増</button>
+          <button class="tab-btn" data-tab="vehicles">車種</button>
+          <button class="tab-btn" data-tab="wait">待機</button>
+          <button class="tab-btn" data-tab="zones">区間</button>
+          <button class="tab-btn" data-tab="preview">確認</button>
+        </nav>
+        <div class="tab-content">
+          <section class="tab-pane" data-pane="basic">
+            <div class="card">
+              <div class="card-title">基本料金</div>
+              <div class="form-row">
+                <div class="form-label">初乗り料金</div>
+                <div>
+                  <input class="form-input" type="number" id="_fare_baseFare" min="0" /><span
+                    class="form-unit"
+                    >円</span
+                  >
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">初乗り距離</div>
+                <div>
+                  <input class="form-input" type="number" id="_fare_baseDistance" min="0" /><span
+                    class="form-unit"
+                    >m</span
+                  >
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">加算料金</div>
+                <div>
+                  <input class="form-input" type="number" id="_fare_addFare" min="0" /><span
+                    class="form-unit"
+                    >円</span
+                  >
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">加算距離</div>
+                <div>
+                  <input class="form-input" type="number" id="_fare_addDistance" min="0" /><span
+                    class="form-unit"
+                    >m</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">請求の下限・上限 (任意)</div>
+              <div class="card-desc">
+                自動計算後の料金がこの範囲を外れたら、強制的にこの金額にします。空欄なら制限なし。
+              </div>
+              <div class="form-row">
+                <div class="form-label">下限 (これ未満なら切り上げ)</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_minFare"
+                    min="0"
+                    placeholder="なし"
+                  /><span class="form-unit">円</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">上限 (これ超なら切り下げ)</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_maxFare"
+                    min="0"
+                    placeholder="なし"
+                  /><span class="form-unit">円</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">請求金額の丸め</div>
+              <div class="card-desc">
+                合計料金をこの単位で切り上げます (例: 10円 単位なら 1,387円 → 1,390円)。
+              </div>
+              <div class="pill-group" id="_fare_roundingPills">
+                <div class="pill" data-val="1">1円 (丸めなし)</div>
+                <div class="pill" data-val="10">10円</div>
+                <div class="pill" data-val="50">50円</div>
+                <div class="pill" data-val="100">100円</div>
+              </div>
+            </div>
+          </section>
+          <section class="tab-pane" data-pane="tiers">
+            <div class="card">
+              <div class="card-title">段階料金</div>
+              <div class="form-row">
+                <div class="form-label">段階料金を使用</div>
+                <div class="toggle" id="_fare_tiersEnabledToggle"></div>
+              </div>
+              <div class="card-desc">空=旧来 base+add 単純計算</div>
+            </div>
+            <div id="_fare_tiersList"></div>
+            <button class="btn-add" onclick="window._fare_addTier()">＋ 区間追加</button>
+          </section>
+          <section class="tab-pane" data-pane="surcharges">
+            <div class="card">
+              <div class="card-title">手動割増ボタン</div>
+              <div class="card-desc">業務画面で ON/OFF できる割増・複数同時で乗算</div>
+            </div>
+            <div id="_fare_surchargesList"></div>
+            <button class="btn-add" onclick="window._fare_addSurcharge()">＋ 割増追加</button>
+          </section>
+          <section class="tab-pane" data-pane="auto">
+            <div class="card">
+              <div class="card-title">深夜割増</div>
+              <div class="form-row">
+                <div class="form-label">使用</div>
+                <div class="toggle" id="_fare_autoNightToggle"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">開始時</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_autoNightFrom"
+                    min="0"
+                    max="23"
+                  /><span class="form-unit">時</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">終了時</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_autoNightTo"
+                    min="0"
+                    max="23"
+                  /><span class="form-unit">時</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">倍率</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_autoNightRate"
+                    step="0.05"
+                    min="1.0"
+                    max="3.0"
+                  /><span class="form-unit">倍</span>
+                </div>
+              </div>
+              <div class="auto-status inactive" id="_fare_autoNightStatus">現在 適用外</div>
+            </div>
+            <div class="card">
+              <div class="card-title">週末割増 (土日)</div>
+              <div class="form-row">
+                <div class="form-label">使用</div>
+                <div class="toggle" id="_fare_autoWeekendToggle"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">倍率</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_autoWeekendRate"
+                    step="0.05"
+                    min="1.0"
+                    max="3.0"
+                  /><span class="form-unit">倍</span>
+                </div>
+              </div>
+              <div class="auto-status inactive" id="_fare_autoWeekendStatus">現在 適用外</div>
+            </div>
+            <div class="card">
+              <div class="card-title">冬季割増</div>
+              <div class="form-row">
+                <div class="form-label">使用</div>
+                <div class="toggle" id="_fare_autoWinterToggle"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">開始日</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="text"
+                    id="_fare_autoWinterFrom"
+                    placeholder="12-15"
+                  />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">終了日</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="text"
+                    id="_fare_autoWinterTo"
+                    placeholder="03-15"
+                  />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">倍率</div>
+                <div>
+                  <input
+                    class="form-input"
+                    type="number"
+                    id="_fare_autoWinterRate"
+                    step="0.05"
+                    min="1.0"
+                    max="3.0"
+                  /><span class="form-unit">倍</span>
+                </div>
+              </div>
+              <div class="auto-status inactive" id="_fare_autoWinterStatus">現在 適用外</div>
+            </div>
+          </section>
+          <section class="tab-pane" data-pane="vehicles">
+            <div class="card">
+              <div class="card-title">車種別料金</div>
+              <div class="form-row">
+                <div class="form-label">車種別料金を使用</div>
+                <div class="toggle" id="_fare_vehiclesEnabledToggle"></div>
+              </div>
+              <div class="card-desc">業務開始時に車種を選択する設計</div>
+            </div>
+            <div id="_fare_vehiclesList"></div>
+            <button class="btn-add" onclick="window._fare_addVehicle()">＋ 車種追加</button>
+          </section>
+          <section class="tab-pane" data-pane="wait">
+            <div class="card">
+              <div class="card-title">待機料金</div>
+              <div class="form-row">
+                <div class="form-label">使用</div>
+                <div class="toggle" id="_fare_waitEnabledToggle"></div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">無料時間</div>
+                <div>
+                  <input class="form-input" type="number" id="_fare_waitFreeMins" min="0" /><span
+                    class="form-unit"
+                    >分</span
+                  >
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">単価</div>
+                <div>
+                  <input class="form-input" type="number" id="_fare_waitRate" min="0" /><span
+                    class="form-unit"
+                    >円/分</span
+                  >
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-label">停車判定速度</div>
+                <div><span class="form-unit" style="margin-right: 8px">3km/h 固定</span></div>
+              </div>
+            </div>
+          </section>
+          <section class="tab-pane" data-pane="zones">
+            <div class="card">
+              <div class="card-title">区間料金</div>
+              <div class="card-desc">
+                「○○エリア → ○○エリア で固定料金」の設定<br />詳細設定はPCからも可能
+              </div>
+              <div class="form-row">
+                <div class="form-label">使用</div>
+                <div class="toggle" id="_fare_zonesEnabledToggle"></div>
+              </div>
+            </div>
+            <div id="_fare_zonesList"></div>
+            <button class="btn-add" onclick="window._fare_addZone()">＋ 区間追加</button>
+          </section>
+          <section class="tab-pane active" data-pane="extras">
+            <div class="card">
+              <div class="card-title">追加料金項目 (迎車料金・キャンセル料など)</div>
+              <div class="card-desc">
+                業務画面でワンタップ加算できる項目を登録します。例: 迎車料金 1,000円 / キャンセル料
+                2,000円 / 高速料金など。
+              </div>
+              <div id="_fare_extraItems"></div>
+              <button class="btn-add" onclick="window._fare_addExtraItem()">＋ 項目を追加</button>
+            </div>
+          </section>
+          <section class="tab-pane" data-pane="preview">
+            <div class="card">
+              <div class="card-title">割増シミュレーション</div>
+              <div class="card-desc">適用した割増を組み合わせた料金プレビュー</div>
+              <div id="_fare_previewSurcharges"></div>
+              <div id="_fare_previewAutoStatus" style="margin-top: 10px"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">距離別料金</div>
+              <div class="preview-multiplier" id="_fare_previewMultiplier">適用倍率: 1.00</div>
+              <table class="preview-table">
+                <thead>
+                  <tr>
+                    <th>距離</th>
+                    <th>料金</th>
+                  </tr>
+                </thead>
+                <tbody id="_fare_previewTbody"></tbody>
+              </table>
+            </div>
+            <div class="card">
+              <div class="card-title">基本料金</div>
+              <div id="_fare_previewBasic" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">段階料金</div>
+              <div id="_fare_previewTiers" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">手動割増</div>
+              <div id="_fare_previewSurchargesList" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">自動割増</div>
+              <div id="_fare_previewAutoList" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">車種</div>
+              <div id="_fare_previewVehicles" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">待機料金</div>
+              <div id="_fare_previewWait" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">区間料金</div>
+              <div id="_fare_previewZones" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">追加料金項目</div>
+              <div id="_fare_previewExtras" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">下限・上限・丸め</div>
+              <div id="_fare_previewLimits" style="font-size: 13px; line-height: 1.8"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+      <button class="btn-save" onclick="window._fare_saveAll()">保　存</button>
+      <div class="fare-toast" id="_fare_toast"></div>
     </div>
 
     <!-- ★設計変更宣言 (2026-05-10): ボトムナビ (4 タブ)
