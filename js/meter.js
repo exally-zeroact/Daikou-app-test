@@ -282,22 +282,23 @@ const Meter = (() => {
   //   停車判定を共通化する。
   //   - business_distance_m += 加算をスキップする際に使用
   //   - distance_m (課金) への加算では使わない (絶対ルール「distance_m 変えない」)
-  //   - iOS/Android 共通 (state.last_speed_kmh は GPS layer 由来で両 OS 共通)
-  // ★設計変更宣言 (2026-05-16・閾値修正・実走テストで総走行距離が増えない事象を修正):
-  //   旧: state.last_speed_kmh < 2 km/h で停車判定
-  //       iOS Safari Geolocation API の coords.speed は走行中も null や瞬間 0 を返す
-  //       癖があり (高速道路 60km/h でも瞬間 0 km/h を返すケース)、走行中の業務距離
-  //       加算が頻繁にスキップされる事象が発生 (2026-05-16 実走テストで判明)。
-  //   新: gps.js の isStationary フラグ (= 5秒継続低速 + 3m以内の保守的判定・L621
-  //       checkStationaryFallback) を最優先に使用。
-  //       補助として state.last_speed_kmh < 0.5 km/h を「明らかに動いていない」とみなす。
-  //       → 走行中の瞬間 speed=null や 1km/h を停車誤判定しない。
-  //   両 OS で同一動作 (iOS / Android Chrome の Geolocation API 仕様共通)。
+  //   - iOS/Android 共通 (state.last_isStationary は GPS layer 由来で両 OS 共通)
+  // ★設計変更宣言 (2026-05-16・補助 speedKmh 閾値を撤去・実走テストで走行中も停車誤判定):
+  //   旧仕様 A: state.last_speed_kmh < 2 km/h (= 2km/h 閾値) → iOS speed=0 で誤判定
+  //   旧仕様 B: gps.js isStationary 優先 + speed_kmh < 0.5 補助 → 補助が依然 iOS speed=0 で
+  //            誤判定 (= GPS first fix 直後 / 屋内・低精度時 / 瞬間 null 化で speedKmh=0)
+  //   新仕様: gps.js isStationary フラグ (= 5秒継続低速 + 3m 以内・保守的判定) のみを信頼。
+  //          speedKmh 補助判定を完全撤去。
+  //   理由:
+  //     ・iOS Safari Geolocation API の coords.speed は走行中も null/0 を返す癖がある
+  //     ・gps.js の isStationary 判定は 5 秒継続 + 3m 以内で確実な「停車」のみ true 返却
+  //     ・state.last_isStationary === true のみで判定すれば iOS speed=0 ノイズに左右されない
+  //     ・undefined (= 初期化前) は false 扱い (= 業務継続性最優先・加算許容)
+  //   両 OS で同一動作 (= gps.js が両 OS 共通の isStationary 判定を提供)。
   function _isStationary() {
-    // gps.js が確定した isStationary を最優先 (= 5秒継続低速 + 3m 半径以内)
-    if (state.last_isStationary === true) return true;
-    // 補助: 明らかに動いていない極低速 (0.5 km/h 未満)
-    return (state.last_speed_kmh || 0) < 0.5;
+    // gps.js が確定した isStationary のみを信頼 (= 5秒継続低速 + 3m 半径以内)
+    // 補助の speedKmh 判定は撤去 (= iOS GPS speed=0 ノイズで Worker B 出力が常時 0 化する事象を防ぐ)
+    return state.last_isStationary === true;
   }
 
   function _calculateOffRoadIncrement(gpsResult, dtSec) {

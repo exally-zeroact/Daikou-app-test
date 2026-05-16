@@ -426,7 +426,9 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
   //     tentativeIncrementM=0 を返す設計に移行したため、main 側のスキップは撤去済。
   //     テストでは fakeWorker が「Worker B が 0 化した結果」を直接 dispatch する。
   //     停車中の Worker B 出力 = mmIncrementM=0 + tentativeIncrementM=0 を確認。
-  const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 0.3 });
+  // ★設計変更宣言 (2026-05-16・補助 speedKmh 閾値撤去): _isStationary() は
+  //     state.last_isStationary === true のみ判定するため、テストで isStationary: true を明示。
+  const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 0.3, isStationary: true });
   Meter.update(slowGps);
   // Worker B 側で 0 化されたあとの結果を dispatch (= 停車中シナリオ)
   w._dispatch({
@@ -457,8 +459,10 @@ console.log('\n[case9] Step4: 停車中は Worker B 出力 = 0 → main 加算�
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
-  // 停車中状態をセット (0.3 km/h ・新閾値 0.5 未満)
-  const slowGps = Object.assign({}, gpsAt(0), { speedKmh: 0.3 });
+  // 停車中状態をセット (isStationary=true 明示・speedKmh は 0)
+  // ★設計変更宣言 (2026-05-16・補助 speedKmh 閾値撤去): _isStationary() は
+  //   state.last_isStationary === true のみで判定するため isStationary: true を明示する。
+  const slowGps = Object.assign({}, gpsAt(0), { speedKmh: 0, isStationary: true });
   Meter.update(slowGps);
 
   // ★設計変更宣言 (2026-05-16・Step4 整合): Worker B が isStationary=true 受信時に

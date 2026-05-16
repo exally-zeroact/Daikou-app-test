@@ -258,43 +258,56 @@
     // ★設計変更宣言 (2026-05-16・Step7・現在地県の cache miss を再 fetch):
     //   オンライン時のみ動作・オフラインでは何もしない (= 既存 cache を信頼)。
     //   全 47 県戦略は維持・本機能は cache 失敗時の自動復旧のみ担当。
+    // ★設計変更宣言 (2026-05-16・Step7 拡張・全失敗県を一括 retry):
+    //   旧: 現在地県の URL のみ retry (= 隣県跨ぎで失敗継続)
+    //   新: stats.roadsFailed / auxFailed の全 URL を一括 retry
+    //   背景: 実機で roadsOk:4 (47県中4県のみ成功) が発生・43県失敗で Worker B が
+    //         動作不可になる事象。GPS first fix を契機に全失敗 URL を再 fetch し、
+    //         ネット復旧していれば全県 cache 完成 → Worker B 完全動作を目指す。
+    //   absolute ルール準拠:
+    //     ・オフライン時は何もしない (= 業務継続性最優先)
+    //     ・全 47 県 cache 戦略は不変
+    //     ・distance_m / fare_yen / 業務ロジックには触れない
+    //     ・retry は既存 enqueueRetry 経路 (= 60 秒重複防止・3 回自動 retry)
     _checkAndRetryCurrentPref(lat, lng, accuracy) {
       // オフラインなら何もしない (= 業務継続性最優先・既存 cache を使う)
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         if (typeof dlog === 'function') dlog('[Pipeline] cache 補修 skip (offline)');
         return;
       }
-      // RegionHelper 未 load なら何もしない
+      // 現在地県の判定 (= ログ用・retry 対象は全失敗 URL に拡張)
+      let currentPref = null;
       if (
-        typeof global.RegionHelper === 'undefined' ||
-        typeof global.RegionHelper.getCurrentPref !== 'function'
+        typeof global.RegionHelper !== 'undefined' &&
+        typeof global.RegionHelper.getCurrentPref === 'function'
       ) {
-        return;
+        currentPref = global.RegionHelper.getCurrentPref(lat, lng, accuracy);
       }
-      const pref = global.RegionHelper.getCurrentPref(lat, lng, accuracy);
-      if (!pref) return;
-      // 現在地県の perPref URL を全て展開
-      if (!global.DataRegistry || !global.DataRegistry.DATA_REGISTRY) return;
-      const perPref = global.DataRegistry.DATA_REGISTRY.perPref;
-      const failedRoads = this.stats.roadsFailed || [];
-      const failedAux = this.stats.auxFailed || [];
+      // ★ stats.roadsFailed / auxFailed の全 URL を一括 retry (旧版の「現在地県のみ」を拡張)
+      const failedRoads = (this.stats && this.stats.roadsFailed) || [];
+      const failedAux = (this.stats && this.stats.auxFailed) || [];
+      const allFailed = failedRoads.concat(failedAux);
       let retryCount = 0;
-      for (const def of perPref) {
-        if (!def || !def.template) continue;
-        const url = def.template.replace('{pref}', pref);
-        // failed リストに該当県の URL があれば再 enqueue
-        if (failedRoads.indexOf(url) >= 0 || failedAux.indexOf(url) >= 0) {
-          this.enqueueRetry(url).catch(function () {});
-          retryCount++;
-        }
+      for (const url of allFailed) {
+        if (!url) continue;
+        this.enqueueRetry(url).catch(function () {});
+        retryCount++;
       }
       if (typeof dlog === 'function') {
         if (retryCount > 0) {
           dlog(
-            '[Pipeline] cache 補修 起動 pref=' + pref + ' retryCount=' + retryCount + ' (online)'
+            '[Pipeline] cache 補修 起動 currentPref=' +
+              (currentPref || 'unknown') +
+              ' retryCount=' +
+              retryCount +
+              ' (online・全失敗 URL を一括 retry)'
           );
         } else {
-          dlog('[Pipeline] cache 補修 skip pref=' + pref + ' (no failed entries)');
+          dlog(
+            '[Pipeline] cache 補修 skip (no failed entries・currentPref=' +
+              (currentPref || 'unknown') +
+              ')'
+          );
         }
       }
     }
