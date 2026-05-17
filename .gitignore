@@ -43,3 +43,9 @@ input/
 /test-results/
 /playwright-report/
 /coverage/
+
+# Stryker mutation testing 生成物 (2026-05-18 追加・P5)
+# sandbox はテスト毎に dir 名がランダム生成・コミット追跡不要
+# reports/mutation/ は HTML reporter 出力先 (= stryker.config.mjs)
+.stryker-tmp/
+reports/
