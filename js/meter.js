@@ -35,18 +35,14 @@ const Meter = (() => {
     //   絶対ルール準拠: 距離計算は既存 5-tier (MM / inline / gap / off-road / GPS) と同じ道路距離。
     //   永続化: Business.onGps() 経由で daikou_business_state の state.total_distance_m に sync。
     business_distance_m: 0,
-    // ─── Tier 2 リードインジケータ用 表示先行距離 (2026-05-15 追加) ───
-    // ★設計変更宣言 (2026-05-15・走行距離表示ラグ解消・Tier 2 リードインジケータ):
-    //   問題: 課金経路 (state.distance_m) は Tier 1 (MM Worker B) Viterbi commit 発火時のみ
-    //         更新されるため、UI 反映が Android 5Hz=3s / iOS 1Hz=10s 遅れる。
-    //   対策: Tier 2 (inline 道路 snap・main thread 同期) を mmHealthy 時も毎 GPS step 並走させ、
-    //         RegionLoader.calcRoadDistance で算出した道路ジオメトリ距離を本フィールドに累積。
-    //         表示式は state.distance_m + state.tier2_pending_m (即時反映)、課金式は
-    //         state.fare_yen = calcFare(state.distance_m) のまま (Tier 1 authoritative 維持)。
-    //   commit 受領時に当該 window 期間 (cutoffTs=m.snap.observationTimestamp 以前) の tier2
-    //   セグメントを差し引いて二重課金回避・残量が次の commit 前の先行 preview として残る。
+    // ─── Tier 2 リードインジケータ用 表示先行距離 (2026-05-15 追加・2026-05-16 Worker B 経由に移行) ───
+    // ★設計変更宣言 (2026-05-17・RegionLoader 撤去対応):
+    //   Tier 2 は Worker B mmResult.tentativeIncrementM 経由で毎 GPS step 加算される (= 道路 polyline 距離)。
+    //   表示式は state.distance_m + state.tier2_pending_m (即時反映)、課金式は
+    //   state.fare_yen = calcFare(state.distance_m) のまま (Tier 1 authoritative 維持)。
+    //   commit 受領時に mmIncrementM ぶん差分減算 (0 下限 clamp・単調増加保証)。
     //   絶対ルール準拠:
-    //     ✓ 距離計算 = RegionLoader.calcRoadDistance (道路 polyline 距離)
+    //     ✓ 距離計算 = Worker B dec.calcRoadDistance (道路 polyline 距離)
     //     ✓ GPS 直線距離は経由しない (snap miss 時は加算ゼロ・据え置き)
     //     ✓ iOS / Android 両経路で同一動作 (platform 分岐なし)
     tier2_pending_m: 0,
@@ -99,13 +95,9 @@ const Meter = (() => {
   const OFFROAD_SNAP_MISS_THRESHOLD = 5;
   const OFFROAD_ABS_MAX_KMH = 160; // 物理上限
 
-  // Map Matching の内部状態（state とは別・stateはユーザー向け値のみ）
-  // MM-1 (2026-05-08): Worker 経路使用時は prevSnap は Worker 内で保持し
-  //   こちらは fallback（Worker 起動失敗時）でのみ使用される
-  let prevSnap = null;
-
   // MM-1: Worker B 参照（index.html から setMapMatcher で注入）
-  //   null の場合は既存インラインロジックにフォールバック
+  //   ★設計変更宣言 (2026-05-17・RegionLoader 撤去): null の場合の inline fallback は廃止。
+  //   Worker B 不在時は Tier 4 (gap fill) / Off-Road / 据え置きのいずれかで対応。
   let mmWorker = null;
 
   // MM-2 (2026-05-08): 評価インフラ
@@ -204,13 +196,12 @@ const Meter = (() => {
   // GPS消失補完の閾値
   const GAP_THRESHOLD_SEC = 5; // 5秒以上の空白＝GPS消失
   const GAP_MAX_SEC = 600; // 最大10分（それ以上は異常）
-  const NEAR_INFRA_RADIUS_M = 200; // 200m以内のトンネル/橋を「該当」と判定
+  // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): NEAR_INFRA_RADIUS_M / MM_MAX_SNAP_DIST_M /
+  //   MM_MAX_SEGMENT_DIST_M / MM_GAP_RESET_SEC は inline snap / tunnel-bridge polyline 経路でのみ
+  //   使用していたため削除。Worker B 側は map-matcher.js 内で独自の定数を持つ。
 
   // Map Matching 設定（2026/04/30追加）
   const MM_ENABLED = true; // Map Matching ON/OFF
-  const MM_MAX_SNAP_DIST_M = 50; // snap 許容距離（道路から離れすぎたら snap しない）
-  const MM_MAX_SEGMENT_DIST_M = 1000; // 1更新で 1km 超えは異常値（GPSジャンプ等）
-  const MM_GAP_RESET_SEC = 5; // 5秒以上空白で prevSnap リセット（連続性失う）
 
   let timer = null;
 
@@ -588,7 +579,6 @@ const Meter = (() => {
       // Tier 2 リードインジケータ (代行開始時は常に 0 から)
       tier2_pending_m: 0,
     };
-    prevSnap = null; // Map Matching 連続性リセット（fallback 用）
     // Phase 1.C 状態リセット
     _offRoadActive = false;
     _consecutiveSnapMiss = 0;
@@ -715,7 +705,6 @@ const Meter = (() => {
       // Tier 2 リードインジケータ (reset 時も 0 から)
       tier2_pending_m: 0,
     };
-    prevSnap = null;
     // Phase 1.C 状態リセット
     _offRoadActive = false;
     _consecutiveSnapMiss = 0;
@@ -736,64 +725,28 @@ const Meter = (() => {
     lastWarmupGps = null;
   }
 
-  // GPS消失時の補完（トンネル・橋データ活用）
+  // GPS消失時の補完
   // returns: 補完すべき距離(m) | null（補完しない）
-  // 2026-05-09 設計変更: ROAD_FACTOR (×1.3) 廃止。MM 優先化で道路距離は MM が
-  //   担当するため、GPS 消失時の fallback では補正係数を掛けない (=速度×時間そのまま)。
-  //   トンネル/橋データ infraLength は引き続き Math.max で採用する。
-  // トンネル/橋方向とコンパス方向の許容差（度）
-  const TUNNEL_COMPASS_THRESHOLD_DEG = 45;
-
-  function calcBearingMeter(lat1, lng1, lat2, lng2) {
-    const φ1 = (lat1 * Math.PI) / 180,
-      φ2 = (lat2 * Math.PI) / 180;
-    const Δλ = ((lng2 - lng1) * Math.PI) / 180;
-    return (
-      ((Math.atan2(
-        Math.sin(Δλ) * Math.cos(φ2),
-        Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
-      ) *
-        180) /
-        Math.PI +
-        360) %
-      360
-    );
-  }
-  function angleDiffMeter(a, b) {
-    const d = Math.abs(a - b) % 360;
-    return d > 180 ? 360 - d : d;
-  }
-
-  function calculateGapFill(
-    prevLat,
-    prevLng,
-    currLat,
-    currLng,
-    gapSec,
-    lastSpeedKmh,
-    compassHeading
-  ) {
+  // 2026-05-09 設計変更: ROAD_FACTOR (×1.3) 廃止。MM 優先化で道路距離は MM が担当するため、
+  //   GPS 消失時の fallback では補正係数を掛けない (=速度×時間そのまま)。
+  // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): トンネル/橋 polyline 距離参照を撤廃。
+  //   calcBearingMeter / angleDiffMeter / TUNNEL_COMPASS_THRESHOLD_DEG はコンパス方向と
+  //   構造物方向の照合でのみ使用していたため削除。
+  // ★設計変更宣言 (2026-05-17・RegionLoader 撤去):
+  //   旧: calculateGapFill は RegionLoader.findTunnelByPosition / findNearestBridge 等で
+  //       tunnel/bridge polyline 距離を加味して naiveDistance との max を採用していた。
+  //   新: RegionLoader が永続的に undefined のためこれらの経路は dead code 化。
+  //       速度×時間 (naiveDistance) のみで補完する設計に整理。
+  //       prevLat/prevLng/currLat/currLng/compassHeading の引数は不要になったため signature 縮小。
+  //   絶対ルール準拠: lastSpeedKmh<=0 で null 返却 (= GPS 直線距離流入遮断) は維持。
+  function calculateGapFill(gapSec, lastSpeedKmh) {
     if (gapSec > GAP_MAX_SEC) return null;
-
-    // ★設計変更宣言 (2026-05-16・Step5・gap fill 経路の GPS 直線距離流入を遮断):
-    //   旧: lastSpeedKmh <= 0 のとき GPS.calcDistance (= 直線 haversine) を返却
-    //       → distance_m / business_distance_m に直線距離が課金経路で加算されていた
-    //       → 絶対ルール「GPS 直線距離での課金は禁止」に厳密解釈で抵触
-    //   新: 速度=0 のときは null 返却 (= 加算なし)
-    //       直線距離を課金経路に流さない・絶対ルール厳密準拠
-    //       過少課金リスクは許容 (= 停車中 GPS lost で実走があった場合のみ問題で
-    //       実用上稀ケース・「全加算タクシー方式」とは緩いトレードオフ)
-    //   走行中 (lastSpeedKmh > 0) の補完経路は維持 (= 速度×時間は車輪回転距離相当)。
-    if (lastSpeedKmh <= 0) {
-      return null;
-    }
+    if (lastSpeedKmh <= 0) return null;
 
     // 走行中の補完（速度×時間）
     // D4 (2026-05-09): 道路種別ベースの最大速度を _maxSpeedFor で参照値として記録
     // F7 (2026-05-09・設計変更): gap fill の clamp は道路種別cap ではなく
-    //   160km/h 絶対上限に変更。理由: 道路種別cap=120 (motorway) で実速度 160km/h
-    //   走行中の GPS 圏外時に距離が欠落していた (= 過少課金リスク・絶対ルール「GPS 直線禁止」
-    //   と並ぶ品質要件)。ROAD_MAX_KMH_BY_TYPE 表は将来の参照用に保持。
+    //   160km/h 絶対上限に変更。
     const maxKmh = _maxSpeedFor(_lastSnapTypeCode);
     const ABS_MAX_KMH = 160;
     const clampedKmh = Math.min(lastSpeedKmh, ABS_MAX_KMH);
@@ -805,96 +758,11 @@ const Meter = (() => {
           `(absolute cap ${ABS_MAX_KMH} 適用)`
       );
     }
-
-    if (typeof RegionLoader === 'undefined') return naiveDistance;
-
-    // ★設計変更宣言 Phase 1.B (2026-05-10): GPS lost A 点・GPS recovered B 点
-    //   両方が同じ tunnel/bridge polyline 上にあれば polyline 上の A→B 実走距離で精緻化
-    //   既存 findNearestTunnel は mid から 200m 半径で短トンネル限定だったため、
-    //   findTunnelByPosition (polyline 距離ベース) を併用して長トンネルも検出
-    //   過少課金防止のため Math.max(polylineDist, naiveDistance) を採用
-    //   (polylineDist は tunnel 部分のみ・naiveDistance は前後アプローチ含む total 推定)
-    if (
-      typeof RegionLoader.findTunnelByPosition === 'function' &&
-      typeof RegionLoader.calcInfraPolylineDistance === 'function'
-    ) {
-      let infraA = RegionLoader.findTunnelByPosition(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
-      if (!infraA)
-        infraA = RegionLoader.findBridgeByPosition(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
-      let infraB = RegionLoader.findTunnelByPosition(currLat, currLng, NEAR_INFRA_RADIUS_M);
-      if (!infraB)
-        infraB = RegionLoader.findBridgeByPosition(currLat, currLng, NEAR_INFRA_RADIUS_M);
-
-      // 同じ infra (item 配列の参照一致) → polyline 上の A→B 距離
-      if (infraA && infraB && infraA.item === infraB.item) {
-        const polylineDist = RegionLoader.calcInfraPolylineDistance(
-          infraA,
-          prevLat,
-          prevLng,
-          currLat,
-          currLng
-        );
-        if (polylineDist != null && polylineDist > 0) {
-          // 物理上限 sanity (160km/h × gapSec + 余裕)
-          const physMaxM = (ABS_MAX_KMH / 3.6) * Math.max(1, gapSec) + 50;
-          if (polylineDist <= physMaxM) {
-            // 過少課金防止: polyline と naive の max
-            const filled = Math.max(polylineDist, naiveDistance);
-            dlog(
-              `[Meter] Phase1.B A→B polyline: ${polylineDist.toFixed(0)}m vs naive ${naiveDistance.toFixed(0)}m → ${filled.toFixed(0)}m (${infraA.item[0]} 全長${infraA.item[1]}m)`
-            );
-            return filled;
-          }
-        }
-      }
-    }
-
-    // 既存ロジック (fallback): A 周辺の単発 infra 検出
-    let infra = RegionLoader.findNearestTunnel(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
-    if (!infra) infra = RegionLoader.findNearestBridge(prevLat, prevLng, NEAR_INFRA_RADIUS_M);
-
-    if (infra) {
-      const infraLength = infra.item[1];
-      const infraStart = infra.item[2]; // [lat, lng]
-      const infraEnd = infra.item[3]; // [lat, lng]
-
-      // コンパス方向と構造物方向の照合
-      if (compassHeading != null) {
-        const infraBearing = calcBearingMeter(
-          infraStart[0],
-          infraStart[1],
-          infraEnd[0],
-          infraEnd[1]
-        );
-        // 双方向（順方向・逆方向）の小さい方で判定
-        const diffFwd = angleDiffMeter(compassHeading, infraBearing);
-        const diffRev = angleDiffMeter(compassHeading, (infraBearing + 180) % 360);
-        const diff = Math.min(diffFwd, diffRev);
-
-        if (diff <= TUNNEL_COMPASS_THRESHOLD_DEG) {
-          // コンパスと一致 → 構造物の実距離 vs 速度×時間 の長い方
-          const filled = Math.max(naiveDistance, infraLength);
-          dlog(
-            `[Meter] ${infra.item[0]} コンパス一致(${diff.toFixed(0)}°) → ${Math.round(filled)}m (infra=${infraLength}m, naive=${Math.round(naiveDistance)}m)`
-          );
-          return filled;
-        } else {
-          // コンパスと不一致 → 誤検出の可能性・速度×時間そのまま
-          dlog(`[Meter] ${infra.item[0]} コンパス不一致(${diff.toFixed(0)}°) → 速度補完`);
-          return naiveDistance;
-        }
-      }
-
-      // コンパスなし → 構造物長と速度×時間の長い方を採用
-      const filled = Math.max(naiveDistance, infraLength);
+    if (typeof dlog === 'function') {
       dlog(
-        `[Meter] GPS消失補完: ${gapSec.toFixed(1)}秒 → ${Math.round(filled)}m (${infra.item[0]} ${infraLength}m, naive=${Math.round(naiveDistance)}m)`
+        `[Meter] GPS消失補完: ${gapSec.toFixed(1)}秒 → ${Math.round(naiveDistance)}m (速度×時間)`
       );
-      return filled;
     }
-
-    // データなし → 速度×時間そのまま
-    dlog(`[Meter] GPS消失補完: ${gapSec.toFixed(1)}秒 → ${Math.round(naiveDistance)}m (補正なし)`);
     return naiveDistance;
   }
 
@@ -903,45 +771,13 @@ const Meter = (() => {
     state.gap_fill_total_m += filledM;
   }
 
-  // 2026-05-09 絶対ルール: 課金距離は道路距離のみ。GPS 直線距離は使わない。
-  //   inline road-snap (RegionLoader.snapToNearestRoad + calcRoadDistance) は
-  //   道路距離計算なので使用可。Worker B 不在 / silent 時の代替経路として動かす。
-  //   road データが未 load・snap miss の場合は加算せず distance_m を据え置く
-  //   (= GPS 直線距離による誤課金を絶対に発生させない)。
-  function _inlineSnapAndIncrement(gpsResult) {
-    if (typeof RegionLoader === 'undefined' || !RegionLoader.snapToNearestRoad) return null;
-    let snap;
-    try {
-      snap = RegionLoader.snapToNearestRoad(gpsResult.lat, gpsResult.lng, {
-        maxDistM: MM_MAX_SNAP_DIST_M,
-      });
-    } catch (_) {
-      return null;
-    }
-    if (!snap) return null;
-    let increment = 0;
-    if (prevSnap) {
-      const dtSec =
-        prevSnap.timestamp != null ? (gpsResult.timestamp - prevSnap.timestamp) / 1000 : 0;
-      if (dtSec > MM_GAP_RESET_SEC) {
-        prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
-        return null;
-      }
-      try {
-        const r = RegionLoader.calcRoadDistance(prevSnap, snap);
-        if (
-          r &&
-          typeof r.distanceM === 'number' &&
-          r.distanceM >= 0 &&
-          r.distanceM <= MM_MAX_SEGMENT_DIST_M
-        ) {
-          increment = r.distanceM;
-        }
-      } catch (_) {}
-    }
-    prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
-    return increment;
-  }
+  // ★設計変更宣言 (2026-05-17・RegionLoader 撤去・_inlineSnapAndIncrement 関数削除):
+  //   旧: Worker B 不在 / silent 時の代替経路として RegionLoader.snapToNearestRoad +
+  //       calcRoadDistance で道路距離を計算する設計だったが、RegionLoader は main thread に
+  //       永続的に undefined のため毎 step null 返却で実機では動作しない dead code 状態。
+  //   新: 関数自体を削除。Worker B 不在 / silent 時は Tier 4 (gap fill) / Tier 5 (Off-Road) /
+  //       距離据え置き のいずれかで対応する。
+  //   絶対ルール準拠: GPS 直線距離による誤課金経路は維持して発生しない。
 
   function update(gpsResult) {
     // ★設計変更宣言 (2026-05-14・空車中も business_distance_m を累積):
@@ -949,8 +785,8 @@ const Meter = (() => {
     //   新: state.running=false でも 5-tier 道路距離計算は行い、業務単位累積
     //       (state.business_distance_m) には加算する。state.distance_m / state.fare_yen
     //       (= trip 単位 / fare 計算入力) は state.running=true のときのみ更新。
-    //   絶対ルール準拠: 距離は既存 5-tier 道路距離 (MM / inline / gap / off-road) で計算・
-    //   GPS 直線は使わない。総走行距離 (= 業務開始から終了までの全走行) を仕様通り測る。
+    //   絶対ルール準拠: 距離は既存 4-tier 道路距離 (MM commit / MM preview / gap / off-road) で
+    //   計算・GPS 直線は使わない。総走行距離 (= 業務開始から終了までの全走行) を仕様通り測る。
     if (gpsResult.isStationary) {
       // B5 (2026-05-09): 停車中でも Worker B にハートビートを送信
       //   Viterbi 窓内の確定前候補が時間進行で commit される機会を作る
@@ -960,12 +796,10 @@ const Meter = (() => {
     }
 
     // 2026-05-09 (絶対ルール準拠): 課金距離は MM (道路距離) のみ
-    //   mmHealthy = MM Worker が直近 5 秒内に mmIncrementM>0 を返している
-    //   → distance_m への加算は _onMmWorkerMessage に任せる
-    //   不健全時 (Worker dead / 沈黙) → inline RegionLoader 道路スナップで加算
-    //     inline は GPS 直線ではなく道路距離計算なのでルール適合
-    //   inline でも snap 不可 (roads 未 load / 道路から 50m 超) → 加算しない
-    const mmHealthy = mmWorker && Date.now() - lastMmUsefulAt <= MM_SILENT_THRESHOLD_MS;
+    //   distance_m への加算は _onMmWorkerMessage に任せる
+    // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): inline fallback 経路を廃止。
+    //   Worker B 不在 / silent + 通常 dt 時は distance_m 据え置き (GPS 直線課金は絶対不可)。
+    //   Tier 4 (gap fill・dtSec>=5s) / Tier 5 (Off-Road・snap miss 連続) でのみ加算。
 
     if (state.last_gps && state.last_timestamp) {
       const dtSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
@@ -977,16 +811,7 @@ const Meter = (() => {
       // GPS消失検出：5秒以上の空白 (トンネル等で MM/GPS 共に不可)
       if (dtSec >= GAP_THRESHOLD_SEC) {
         // gap fill: 速度×時間 (タイヤ回転由来の概算・GPS 直線弦ではない)
-        //   トンネル/橋データがあれば infraLength を加味
-        const filled = calculateGapFill(
-          state.last_gps.lat,
-          state.last_gps.lng,
-          gpsResult.lat,
-          gpsResult.lng,
-          dtSec,
-          state.last_speed_kmh,
-          state.last_gps.compassHeading
-        );
+        const filled = calculateGapFill(dtSec, state.last_speed_kmh);
         if (filled !== null) {
           // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
           //   旧 (2026-05-14): running 問わず加算 / (2026-05-16) 停車判定追加
@@ -1020,36 +845,17 @@ const Meter = (() => {
             state.offroad_distance_m = (state.offroad_distance_m || 0) + inc;
           }
         }
-      } else if (!mmHealthy) {
-        // MM 不健全時の inline 道路スナップ fallback (絶対ルール: GPS 直線禁止)
-        const inc = _inlineSnapAndIncrement(gpsResult);
-        if (inc !== null && inc > 0) {
-          // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
-          //   旧 (2026-05-16): 停車判定のみガード
-          //   新: state.running===false 時は business_distance_m を加算しない。停車判定維持。
-          if (state.running && !_isStationary()) {
-            state.business_distance_m = (state.business_distance_m || 0) + inc;
-          }
-          if (state.running) {
-            state.distance_m += inc;
-            state.fare_yen = calcFare(state.distance_m);
-            state.distanceSource = 'inline';
-          }
-        }
-        // inc===null (snap miss / roads 未 load) → 加算なし・distance_m 据え置き
       }
+      // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): mmHealthy=false 時の inline 経路を削除。
+      //   通常 dt + Worker B sliently silent な場合は distance_m 据え置き (GPS 直線課金禁止)。
       // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータを Worker B 経由に完全移行):
-      //   旧: mmHealthy=true 時に main 側 _inlineSnapAndIncrement を呼出して tier2_pending_m に
-      //       累積していたが、RegionLoader が main thread に未定義のため毎 step null 返却・
-      //       Tier 2 が実機で全く動かなかった (2026-05-15 報告事象)。
-      //   新: tier2_pending_m への加算は _onMmWorkerMessage で Worker B からの
-      //       tentativeIncrementM (毎 GPS step・道路距離) を受けて行う方式に移行。
-      //       main 側の mmHealthy=true 分岐では追加処理なし (Worker B が課金経路 + preview 両方を担当)。
-      //   mmHealthy 時の課金は _onMmWorkerMessage の通常 commit で更新される。
-    } else {
-      // 初回 GPS step: 比較対象がないので加算せず prevSnap を初期化
-      _inlineSnapAndIncrement(gpsResult);
+      //   tier2_pending_m への加算は _onMmWorkerMessage で Worker B からの tentativeIncrementM
+      //   (毎 GPS step・道路距離) を受けて行う。mmHealthy 時の課金も _onMmWorkerMessage の通常
+      //   commit 経由で更新される。
     }
+    // ★設計変更宣言 (2026-05-17・RegionLoader 撤去・初回 GPS step の inline 呼出削除):
+    //   旧: 初回 GPS step では _inlineSnapAndIncrement(gpsResult) を呼んで prevSnap を初期化
+    //   新: _inlineSnapAndIncrement 自体を削除したため呼出箇所も削除 (= no-op で素通し)
     // 待機時間累積 (fareConfig v2): 速度 < 3km/h かつ業務中で wait_sec を増加
     //   wait.enabled が true でなくても累積する (= 集計用・課金は wait.enabled 時のみ)
     //   無料時間 freeMins は calcFare 側で控除する
@@ -1093,14 +899,10 @@ const Meter = (() => {
   }
 
   // Map Matching 処理（update から呼ばれる・分離して既存ロジック保護）
-  // MM-1 (2026-05-08): Worker B 経路を優先・worker 不在時は既存インライン fallback
-  //   挙動同一を担保するため、early-return 条件と各分岐を Worker / inline 双方で揃える
-  //   失敗しても state.distance_m / fare_yen は絶対に止めない（業務継続性最優先）
-  //
-  // 2026/05/03 NAV-1 修正（fallback 経路にも維持）：prevSnap に timestamp を保持
-  //   旧コードは state.last_timestamp を参照していたが update() 末尾で
-  //   gpsResult.timestamp に先に更新されるため dtSec が常に 0 になっていた。
-  //   修正：prevSnap 自身が時刻を持つ自己完結型に変更（snap オブジェクトは汚染しない）。
+  // MM-1 (2026-05-08): Worker B 経路を優先
+  // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): worker 不在時の inline fallback 削除済。
+  //   Worker B が未起動 / _workerLoadedPrefs 0 件のときは postMessage しない (= mmResult が来ない)。
+  //   GPS 直線課金は絶対不可なため fallback 経路は持たない。
   function _updateMapMatching(gpsResult) {
     if (!MM_ENABLED) return;
     if (gpsResult.isStationary) return;
@@ -1133,54 +935,16 @@ const Meter = (() => {
           isStationary: _isStationary(),
         });
       } catch (e) {
-        // post 失敗時はメーター本体に影響を与えず inline fallback に進む
+        // post 失敗はメーター本体に影響を与えない (絶対ルール: GPS 直線課金禁止のため fallback なし)
         if (typeof dlog === 'function') dlog('[MM] worker post error: ' + e.message);
       }
       return;
     }
-
-    // ── Fallback: 既存インライン処理（Worker 起動失敗時の保険） ──
-    if (typeof RegionLoader === 'undefined' || !RegionLoader.snapToNearestRoad) return;
-
-    state.mm_total_count++;
-
-    try {
-      const snap = RegionLoader.snapToNearestRoad(gpsResult.lat, gpsResult.lng, {
-        maxDistM: MM_MAX_SNAP_DIST_M,
-      });
-      if (!snap) {
-        // 道路から遠い → snap せず（駐車場・畑など）
-        // prevSnap は維持（道路に戻ったら再開）
-        return;
-      }
-
-      state.mm_snap_count++;
-
-      if (prevSnap) {
-        const dtSec =
-          prevSnap.timestamp != null ? (gpsResult.timestamp - prevSnap.timestamp) / 1000 : 0;
-        if (dtSec > MM_GAP_RESET_SEC) {
-          prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
-          return;
-        }
-
-        const r = RegionLoader.calcRoadDistance(prevSnap, snap);
-        if (r && typeof r.distanceM === 'number') {
-          if (r.distanceM >= 0 && r.distanceM <= MM_MAX_SEGMENT_DIST_M) {
-            state.mm_distance_m += r.distanceM;
-          } else {
-            state.mm_skip_count++;
-            if (typeof dlog === 'function') {
-              dlog('[MM] skip 異常距離: ' + r.distanceM.toFixed(0) + 'm');
-            }
-          }
-        }
-      }
-      prevSnap = Object.assign({}, snap, { timestamp: gpsResult.timestamp });
-    } catch (e) {
-      state.mm_skip_count++;
-      if (typeof dlog === 'function') dlog('[MM] error: ' + e.message);
-    }
+    // ★設計変更宣言 (2026-05-17・RegionLoader 撤去・inline fallback 削除):
+    //   旧: Worker B 不在 or _workerLoadedPrefs 0 件のとき RegionLoader.snapToNearestRoad で
+    //       inline road-snap する fallback があったが、RegionLoader 永続 undefined のため dead。
+    //   新: fallback 完全削除。Worker B 未起動時は何もしない (= mmResult が来ないので Tier 4/5 で
+    //       カバー or 距離据え置き)。GPS 直線課金は絶対不可。
   }
 
   // ★設計変更宣言 (2026-05-10): calcFare を v2 多段階パイプライン化

@@ -5646,8 +5646,9 @@
                   window._restoreFareYen = null;
                 }
               }
-              // RegionLoader：トンネル/橋データを動的読込（meter.jsの補完で使用）
-              if (typeof RegionLoader !== 'undefined') RegionLoader.ensureLoaded(g.lat, g.lng);
+              // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): RegionLoader.ensureLoaded 呼出削除。
+              //   js/region-loader.js は存在せず・どこからも代入されないため永続 undefined。
+              //   meter.js 側の inline snap / tunnel-bridge polyline 経路は全削除済 (= consumer 不在)。
               // ★設計変更宣言 (2026-05-13・大改修 C11): GPS callback 内の旧経路呼出を削除
               //   MMDataPipeline (C10) が起動時に全 47 県ロード済のため、走行中の追加 load は不要。
               //   旧 M1: _autoLoadNearbyRoads(g.lat, g.lng);  ← 削除済
