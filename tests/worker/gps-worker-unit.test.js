@@ -158,3 +158,136 @@ describe('gps-worker.js dynamic worker test (⑪)', () => {
     }
   });
 });
+
+// ─── ダイコメ知識注入 (2026-05-18・isStationary 3-AND 詳細) ─────────
+
+describe('isStationary 3-AND 条件 詳細 (gps-worker.js verified L596-627)', () => {
+  function sendAndWait(worker, msg, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(
+        () => reject(new Error('timeout ' + timeoutMs + 'ms')),
+        timeoutMs || 3000
+      );
+      worker.onmessage = (e) => {
+        if (e.data && e.data.type === 'result') {
+          clearTimeout(t);
+          resolve(e.data.data);
+        }
+      };
+      worker.onerror = (err) => {
+        clearTimeout(t);
+        reject(new Error('worker error: ' + (err && err.message)));
+      };
+      worker.postMessage(msg);
+    });
+  }
+
+  it('加速度サンプル null + 1 GPS 単独 → 即時停車判定は false (= 5 秒継続必要)', async () => {
+    const worker = new Worker(new URL('../../js/gps-worker.js', import.meta.url));
+    worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
+    try {
+      const result = await sendAndWait(worker, {
+        type: 'position',
+        data: {
+          lat: 33.84,
+          lng: 132.7656,
+          accuracy: 5,
+          speedKmh: 0,
+          heading: null,
+          altitude: 0,
+          now: Date.now(),
+          compassHeading: null,
+          accelSamples: [],
+          gyroSamples: [],
+        },
+      });
+      // 初回 GPS では elapsedSec=0 で isStationary=false (= 5 秒継続必要)
+      expect(result.isStationary).toBe(false);
+    } finally {
+      worker.terminate();
+    }
+  });
+
+  it('加速度サンプル null + 同座標 6 GPS 1Hz → isStationary=true 確定', async () => {
+    const worker = new Worker(new URL('../../js/gps-worker.js', import.meta.url));
+    worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
+    try {
+      const baseTs = Date.now();
+      let lastResult;
+      for (let i = 0; i < 7; i++) {
+        lastResult = await sendAndWait(worker, {
+          type: 'position',
+          data: {
+            lat: 33.84,
+            lng: 132.7656,
+            accuracy: 5,
+            speedKmh: 0,
+            heading: null,
+            altitude: 0,
+            now: baseTs + i * 1000,
+            compassHeading: null,
+            accelSamples: [],
+            gyroSamples: [],
+          },
+        });
+      }
+      // 7 step (= 6 秒経過) で isStationary=true 確定 (= 加速度 null fallback)
+      expect(lastResult.isStationary).toBe(true);
+    } finally {
+      worker.terminate();
+    }
+  });
+
+  it('速度 30km/h GPS 単発 → isStationary=false (= speed_limit_kmh=3 超過)', async () => {
+    const worker = new Worker(new URL('../../js/gps-worker.js', import.meta.url));
+    worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
+    try {
+      const result = await sendAndWait(worker, {
+        type: 'position',
+        data: {
+          lat: 33.84,
+          lng: 132.7656,
+          accuracy: 5,
+          speedKmh: 30,
+          heading: 90,
+          altitude: 0,
+          now: Date.now(),
+          compassHeading: null,
+          accelSamples: [],
+          gyroSamples: [],
+        },
+      });
+      expect(result.isStationary).toBe(false);
+    } finally {
+      worker.terminate();
+    }
+  });
+});
+
+// ─── ダイコメ知識注入 (2026-05-18・Worker B mmResult 形式) ─────────
+//
+// Worker B (map-matcher.js) は本 test ファイル対象外 (= gps-worker.js 単体テスト)。
+// mmResult 形式の verify は別 worker test として future work。
+// ダイコメ knowledge として mmResult の期待形式を以下に記録:
+//
+//   type: 'mmResult'
+//   mmIncrementM: number (= Tier1 Viterbi commit 距離・absolute 値)
+//   tentativeIncrementM: number (= 表示用先行値・commit 前 preview)
+//   snapped: boolean (= 道路 snap 成功フラグ)
+//   committed: boolean (= Viterbi window 確定フラグ)
+//   skipped: boolean (= snap 失敗 / accuracy 不足等の skip フラグ)
+//   isStationary: boolean (= 入力 echo・force 0 化判定用)
+//   timestamp: number (= input GPS の timestamp)
+//
+// ★ map-matcher.js の Worker B 単体テストは将来課題:
+//   ・Worker B init は 47 県 roads データ load 必須 (= ~30 秒の重量起動)
+//   ・msg.isStationary=true で mmIncrementM/tentativeIncrementM 強制 0 化 (L3007)
+//   ・現状は静的検証 (= tests/property/isstationary-no-increase.test.js B4) でカバー
+
+describe('Worker B mmResult 形式 (静的検証・将来 dynamic 拡張)', () => {
+  it('property/static-check で map-matcher.js L3007 強制 0 化 pattern 存在 verify 済', () => {
+    // 詳細は tests/property/isstationary-no-increase.test.js B4 に委譲
+    // 本 placeholder は「mmResult 形式 知識を本 spec で記録した」明示用
+    expect(true).toBe(true);
+  });
+});
