@@ -1,0 +1,33 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "files": {
+    "includes": [
+      "scripts/zeroact-test-commons/**/*.js",
+      "tests/property/**/*.js",
+      "tests/e2e/**/*.js"
+    ]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noConsole": "off",
+        "noExplicitAny": "off"
+      },
+      "style": {
+        "useNodejsImportProtocol": "off",
+        "useTemplate": "off"
+      },
+      "complexity": {
+        "useArrowFunction": "off"
+      }
+    }
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "javascript": {
+    "globals": ["dlog", "DEBUG", "Meter", "GPS", "FB", "fc", "describe", "it", "expect", "beforeEach", "afterEach", "beforeAll", "afterAll"]
+  }
+}
