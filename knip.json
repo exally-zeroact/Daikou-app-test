@@ -33,5 +33,10 @@
     "msw",
     "@lhci/cli"
   ],
-  "ignoreBinaries": ["semgrep", "stryker"]
+  "ignoreBinaries": ["semgrep", "stryker"],
+  "paths": {
+    "js/*": ["./js/*"],
+    "scripts/zeroact-test-commons/*": ["./scripts/zeroact-test-commons/*"]
+  },
+  "ignoreExportsUsedInFile": true
 }
