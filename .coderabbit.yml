@@ -50,5 +50,37 @@ reviews:
       instructions: |
         fast-check property test。距離 / fare 不変条件を検証。
         propertyAssert / assertMonotonic 等の共通 helper を使う。
+    - path: "tests/e2e/**"
+      instructions: |
+        Playwright E2E。permission/banner 抑制 + Meter API 直接呼出パターン推奨。
+        既存 flow-*.spec.js は無変更原則・新規 spec 冒頭に /* global ... */ 必須。
+        --retries=2 は CI flaky 吸収用 (= chromium SEGV 対策)。
+    - path: "scripts/zeroact-test-commons/ai/**"
+      instructions: |
+        AI 駆動バグ探索 / レビュー script。
+        max_tokens / temperature / Batch API 想定で cost 抑制。
+        secret 未設定時の skip / fallback 必須 (= 害なし運用)。
+    - path: "scripts/zeroact-test-commons/observability/**"
+      instructions: |
+        Sentry / Firebase RC / OpenReplay の config テンプレート。
+        DSN / API key 未設定時 silent skip 必須。
+        課金関連 (distance_m / fare_yen) は sampling bypass で force send。
+    - path: "scripts/zeroact-test-commons/glossary.yml"
+      instructions: |
+        ダイコメ変数・概念・業界用語の定義。CodeRabbit の review 根拠。
+        新規変数追加時は本ファイルも同 commit で更新推奨。
+    - path: "scripts/zeroact-test-commons/scenarios/**"
+      instructions: |
+        代行運転業務シナリオ集 (YAML)。property/e2e の入力データ生成根拠。
+    - path: "scripts/zeroact-test-commons/known-issues/**"
+      instructions: |
+        過去事例レポジトリ。同種事象再発防止の learning material。
+    - path: "scripts/zeroact-test-commons/bug-patterns/**"
+      instructions: |
+        Uber/Lyft 等業界事例ベースのバグパターン集。検出 detection_method 連動。
+    - path: "index.html"
+      instructions: |
+        index.html は原則 Sentry / AB config / configPlatform 等の minimal 配線のみ許可。
+        他箇所 (= 業務 flow / DOM 構造) の変更は alert + ★設計変更宣言が必要。
 chat:
   auto_reply: true
