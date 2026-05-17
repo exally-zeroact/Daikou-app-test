@@ -19,7 +19,10 @@
          Sentry DSN は 司さん が本番 deploy 時に Vercel env 経由で注入する想定。
          未設定時は sentry-config.js 内 getDsn() が "" を返し initSentry() が skip する。
          app-version は本番では sentry-release.yml の commit SHA で書き換える想定。 -->
-    <meta name="sentry-dsn" content="" />
+    <meta
+      name="sentry-dsn"
+      content="https://775d00adba8a9e571066831320e8d6dc@o4511406201634816.ingest.us.sentry.io/4511406221885440"
+    />
     <meta name="app-version" content="daikome@dev" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
