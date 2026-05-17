@@ -23,6 +23,19 @@ module.exports = {
         'categories:accessibility': ['warn', { minScore: 0.9 }],
         'categories:best-practices': ['warn', { minScore: 0.8 }],
         'categories:seo': ['warn', { minScore: 0.9 }],
+        // ─── ダイコメ知識注入 (2026-05-18・PWA 必須項目) ─────────────
+        // ダイコメは「全 47 県 cache + offline 業務継続」が絶対ルール。
+        // Service Worker + manifest 等の PWA 個別 audit を必須検査に追加。
+        // Lighthouse v10+ で categories:pwa は廃止・個別 audit でカバー。
+        'installable-manifest': ['warn', { minScore: 0.9 }],
+        'service-worker': ['warn', { minScore: 0.9 }],
+        'apple-touch-icon': ['warn', { minScore: 0.9 }],
+        viewport: ['warn', { minScore: 0.9 }],
+        'splash-screen': ['warn', { minScore: 0.5 }],
+        'themed-omnibox': ['warn', { minScore: 0.5 }],
+        'maskable-icon': ['warn', { minScore: 0.5 }],
+        // オフライン業務継続性 (= sw.js PRECACHE 47 県 cache の機能担保)
+        'works-offline': 'off',
       },
     },
     upload: {
