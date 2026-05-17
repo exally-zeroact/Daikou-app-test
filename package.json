@@ -31,7 +31,7 @@
       "prettier --write"
     ],
     "*.{css,html}": [
-      "stylelint --fix",
+      "stylelint --fix --allow-empty-input",
       "prettier --write"
     ]
   },

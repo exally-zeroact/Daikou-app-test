@@ -15,6 +15,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="ダイコメ" />
+    <!-- ★設計変更宣言 (2026-05-18・P3 Sentry / Firebase Remote Config 配線):
+         Sentry DSN は 司さん が本番 deploy 時に Vercel env 経由で注入する想定。
+         未設定時は sentry-config.js 内 getDsn() が "" を返し initSentry() が skip する。
+         app-version は本番では sentry-release.yml の commit SHA で書き換える想定。 -->
+    <meta name="sentry-dsn" content="" />
+    <meta name="app-version" content="daikome@dev" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link
@@ -3292,7 +3298,13 @@
       </div>
       <div style="display: flex; gap: 8px">
         <button
-          onclick="if(typeof window.showOverlay==='function'){window.showOverlay('settings');}else{location.href='settings.html#training';}"
+          onclick="
+            if (typeof window.showOverlay === 'function') {
+              window.showOverlay('settings');
+            } else {
+              location.href = 'settings.html#training';
+            }
+          "
           style="
             flex: 1;
             padding: 10px;
@@ -4190,6 +4202,26 @@
       }
     </script>
 
+    <!-- ★設計変更宣言 (2026-05-18・P3 Sentry SDK 配線):
+         Firebase init より前に Sentry を init して error capture 範囲を広げる。
+         CDN version 8.55.0 (= 2026-01 時点 stable・要に応じて司さん が更新可)。
+         crossorigin で sourcemap upload 後の stack trace symbol 解決を有効化。
+         DSN 未設定なら sentry-config.js 内で skip (= 安全 fallback)。 -->
+    <script
+      src="https://browser.sentry-cdn.com/8.55.0/bundle.min.js"
+      crossorigin="anonymous"
+    ></script>
+    <script src="scripts/zeroact-test-commons/observability/sentry-config.js"></script>
+    <script>
+      if (typeof DaikomeSentryConfig !== 'undefined') {
+        try {
+          DaikomeSentryConfig.initSentry();
+        } catch (e) {
+          console.warn('[Sentry] init failed:', e.message);
+        }
+      }
+    </script>
+
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -4228,6 +4260,26 @@
     </script>
 
     <script src="js/firebase-config.js"></script>
+
+    <!-- ★設計変更宣言 (2026-05-18・P3 A/B 実験 config 配線):
+         firebase-config.js load 後に ab-config.js を読込む (= Firebase RC instance 利用前提)。
+         initABConfig() は Remote Config fetch (未配線時 silent skip) + 決定論的 group 割当を実行。
+         Sentry tag (= daikome.exp.*) 設定で実験 group ごとのエラー集計可能。 -->
+    <script src="scripts/zeroact-test-commons/observability/ab-config.js"></script>
+    <script>
+      if (typeof DaikomeABConfig !== 'undefined') {
+        try {
+          var __abPromise = DaikomeABConfig.initABConfig({});
+          if (__abPromise && typeof __abPromise.catch === 'function') {
+            __abPromise.catch(function (e) {
+              console.warn('[ABConfig] init failed:', e.message);
+            });
+          }
+        } catch (e) {
+          console.warn('[ABConfig] init error:', e.message);
+        }
+      }
+    </script>
 
     <script src="js/roads-decoder.js"></script>
 
@@ -6092,8 +6144,14 @@
           try {
             if (typeof Business !== 'undefined' && typeof Business.onTripStart === 'function') {
               const _ms = Meter.getState();
-              const _lat = _ms && _ms.last_gps && typeof _ms.last_gps.lat === 'number' ? _ms.last_gps.lat : null;
-              const _lng = _ms && _ms.last_gps && typeof _ms.last_gps.lng === 'number' ? _ms.last_gps.lng : null;
+              const _lat =
+                _ms && _ms.last_gps && typeof _ms.last_gps.lat === 'number'
+                  ? _ms.last_gps.lat
+                  : null;
+              const _lng =
+                _ms && _ms.last_gps && typeof _ms.last_gps.lng === 'number'
+                  ? _ms.last_gps.lng
+                  : null;
               Business.onTripStart(_lat, _lng, null);
             }
             if (typeof updateWaypointCardUI === 'function') updateWaypointCardUI();
@@ -6672,9 +6730,7 @@
         }
         const parts = [];
         parts.push(
-          startAddr
-            ? _escapeHtmlForRoute(startAddr)
-            : '<span class="route-warn">⚠ 位置不明</span>'
+          startAddr ? _escapeHtmlForRoute(startAddr) : '<span class="route-warn">⚠ 位置不明</span>'
         );
         if (Array.isArray(trip.waypoints)) {
           trip.waypoints.forEach((wp) => {
@@ -6683,9 +6739,7 @@
           });
         }
         parts.push(
-          endAddr
-            ? _escapeHtmlForRoute(endAddr)
-            : '<span class="route-warn">⚠ 位置不明</span>'
+          endAddr ? _escapeHtmlForRoute(endAddr) : '<span class="route-warn">⚠ 位置不明</span>'
         );
         body.innerHTML = parts.join('<span class="route-sep">→</span>');
         card.style.display = 'flex';
@@ -9975,7 +10029,9 @@
               elZones.innerHTML = '<span style="color:#999;">使用しない</span>';
             else
               elZones.innerHTML = fc.zones
-                .map((z) => esc(z.from || '?') + ' → ' + esc(z.to || '?') + ' : ' + yen(z.fare || 0))
+                .map(
+                  (z) => esc(z.from || '?') + ' → ' + esc(z.to || '?') + ' : ' + yen(z.fare || 0)
+                )
                 .join('<br>');
           }
           const elEx = $('_fare_previewExtras');
@@ -10161,7 +10217,13 @@
           <div class="section-title">料金設定</div>
           <div
             class="row"
-            onclick="if(typeof window.showOverlay==='function'){window.showOverlay('fare');}else{location.href='fare.html';}"
+            onclick="
+              if (typeof window.showOverlay === 'function') {
+                window.showOverlay('fare');
+              } else {
+                location.href = 'fare.html';
+              }
+            "
             style="cursor: pointer"
           >
             <div class="row-label">
@@ -10368,10 +10430,11 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              ① まずホーム画面に追加してください（必須）。iPhone は Safari
-              の共有ボタン →「ホーム画面に追加」、Android Chrome
-              はメニュー →「アプリをインストール」。ホーム画面追加していないと業務開始ボタンが押せません。<br />②
-              下の「設定」タブ →「料金設定」で、初乗り料金・初乗り距離・加算料金・加算距離を入力してください。同じ画面の「追加料金」タブで迎車料金・高速料金などの項目も登録できます。
+              ① まずホーム画面に追加してください（必須）。iPhone は Safari の共有ボタン
+              →「ホーム画面に追加」、Android Chrome はメニュー
+              →「アプリをインストール」。ホーム画面追加していないと業務開始ボタンが押せません。<br />②
+              下の「設定」タブ
+              →「料金設定」で、初乗り料金・初乗り距離・加算料金・加算距離を入力してください。同じ画面の「追加料金」タブで迎車料金・高速料金などの項目も登録できます。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -10382,8 +10445,8 @@
             <div class="acc-body">
               初回起動時に画面中央の青い「センサーを許可する」ボタンを押してください。iPhone
               はコンパス・加速度・位置情報の許可ダイアログが順番に出るので全て「許可」を選びます。Android
-              は自動許可で位置情報のダイアログのみ出るので「許可」を選びます。許可が完了すると上部の GPS
-              バッジが「GPS待機」→「精度Xm」に変わります。
+              は自動許可で位置情報のダイアログのみ出るので「許可」を選びます。許可が完了すると上部の
+              GPS バッジが「GPS待機」→「精度Xm」に変わります。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -10404,10 +10467,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              実車中の画面上部に並ぶ「割増」ボタン群を ON / OFF
-              できます。複数同時に ON
-              にすると倍率は掛け算（深夜×1.2 + 悪天候×1.1 = 1.32 倍）。深夜・週末・冬季の自動割増は時刻
-              / 曜日 / 日付で自動判定し対象時間に入ると勝手に適用されます。割増ボタンの追加・編集は「設定」→「料金設定」→「割増」または「自動割増」タブから。
+              実車中の画面上部に並ぶ「割増」ボタン群を ON / OFF できます。複数同時に ON
+              にすると倍率は掛け算（深夜×1.2 + 悪天候×1.1 = 1.32
+              倍）。深夜・週末・冬季の自動割増は時刻 / 曜日 /
+              日付で自動判定し対象時間に入ると勝手に適用されます。割増ボタンの追加・編集は「設定」→「料金設定」→「割増」または「自動割増」タブから。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -10468,8 +10531,8 @@
             </button>
             <div class="acc-body">
               業務中にタスクキルされた場合、再起動すると自動的に直前の状態（実車中・走行距離・料金・追加料金・総走行距離）に復元されます。iPhone
-              は再起動後にオレンジバナーが出るので「センサーを再起動する」ボタンを 1
-              回押せば GPS / コンパス /
+              は再起動後にオレンジバナーが出るので「センサーを再起動する」ボタンを 1 回押せば GPS /
+              コンパス /
               加速度が復活し、計測が続行します。時間制限はないため、長時間後の復元でも引き継げます。
             </div>
           </div>
@@ -10492,7 +10555,8 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」タブ →「料金設定」→「追加料金」タブで、項目の名前と金額を自由に追加・編集・削除できます。実車中の「追加料金」モーダルに即時反映されます。
+              「設定」タブ
+              →「料金設定」→「追加料金」タブで、項目の名前と金額を自由に追加・編集・削除できます。実車中の「追加料金」モーダルに即時反映されます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -10502,9 +10566,10 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」タブ →「料金設定」→「割増」タブで、手動割増ボタンを追加できます。名前・倍率・色を自由に設定でき、複数 ON
-              で倍率は掛け算されます。深夜・週末・冬季の時刻ベース割増は「自動割増」タブから ON
-              / OFF と倍率設定が可能です。
+              「設定」タブ
+              →「料金設定」→「割増」タブで、手動割増ボタンを追加できます。名前・倍率・色を自由に設定でき、複数
+              ON で倍率は掛け算されます。深夜・週末・冬季の時刻ベース割増は「自動割増」タブから ON /
+              OFF と倍率設定が可能です。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -10524,7 +10589,8 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              業務終了 →「終了」を押すと業務開始画面に戻りますが、画面に「前回の業務を引き継ぐ場合は」の赤い注釈と「業務再開」ボタンが残ります。これは前の業務を再開する経路です（時間制限なし）。完全に新しい業務として始めたい場合は「業務開始」を押してください（集計値が
+              業務終了
+              →「終了」を押すと業務開始画面に戻りますが、画面に「前回の業務を引き継ぐ場合は」の赤い注釈と「業務再開」ボタンが残ります。これは前の業務を再開する経路です（時間制限なし）。完全に新しい業務として始めたい場合は「業務開始」を押してください（集計値が
               0 リセット）。
             </div>
           </div>
@@ -10541,7 +10607,10 @@
       <div class="appbar">
         <div
           class="appbar-back"
-          onclick="window.hideAllOverlays();window.showOverlay('settings');"
+          onclick="
+            window.hideAllOverlays();
+            window.showOverlay('settings');
+          "
         >
           ＜
         </div>
