@@ -99,6 +99,69 @@ function sentryIngestHandler() {
   });
 }
 
+// ─── ダイコメ知識注入 (2026-05-18・billing validation) ──────────────
+//
+// 課金値域の正常範囲 (= 物理上限 + 業務常識上限):
+//   distance_m:          0 <= x <= 1_000_000 (= 物理 1000km・1 trip 上限)
+//   business_distance_m: 0 <= x <= 10_000_000 (= 1 業務 10000km・1 夜上限)
+//   fare_yen:            0 <= x <= 1_000_000 (= 上限 100 万円・1 trip 通常 1-3 万円)
+//
+// 異常値検出時の挙動:
+//   ・負値           → 400 Bad Request (= 物理上不可能・絶対ルール違反)
+//   ・NaN / Infinity → 400 Bad Request (= 計算 bug)
+//   ・上限超過       → 400 Bad Request (= 業務外れ値)
+//
+// 用途:
+//   property/e2e test で fetch 経由の billing 値を mock する際に validation 経由。
+//   モック API が異常値を絶対返さない設計を強制 (= sandbox 安全性向上)。
+
+const BILLING_RANGE = {
+  distance_m: { min: 0, max: 1000000 },
+  business_distance_m: { min: 0, max: 10000000 },
+  fare_yen: { min: 0, max: 1000000 },
+};
+
+function validateBillingValue(key, value) {
+  const range = BILLING_RANGE[key];
+  if (!range) return { ok: false, reason: 'unknown billing key: ' + key };
+  if (typeof value !== 'number') {
+    return { ok: false, reason: key + ' must be number (got ' + typeof value + ')' };
+  }
+  if (!Number.isFinite(value)) {
+    return { ok: false, reason: key + ' must be finite (got ' + value + ')' };
+  }
+  if (value < range.min) {
+    return { ok: false, reason: key + ' below minimum: ' + value + ' < ' + range.min };
+  }
+  if (value > range.max) {
+    return { ok: false, reason: key + ' above maximum: ' + value + ' > ' + range.max };
+  }
+  return { ok: true };
+}
+
+// 仮の billing endpoint mock (= 将来 Vercel Functions / Stripe 統合時に
+// 同等 endpoint をモックする想定の reference handler)
+function billingValidationHandler(endpoint) {
+  endpoint = endpoint || 'https://example.com/api/billing';
+  return http.post(endpoint, async ({ request }) => {
+    let body;
+    try {
+      body = await request.json();
+    } catch (_e) {
+      return HttpResponse.json({ error: 'invalid JSON body' }, { status: 400 });
+    }
+    for (const key of Object.keys(body || {})) {
+      if (BILLING_RANGE[key]) {
+        const r = validateBillingValue(key, body[key]);
+        if (!r.ok) {
+          return HttpResponse.json({ error: r.reason, key }, { status: 400 });
+        }
+      }
+    }
+    return HttpResponse.json({ ok: true, accepted: body });
+  });
+}
+
 // ─── factory ──────────────────────────────────────────────────
 
 // 全 mock handler を returns (= 個別 override は呼出側で .use(...) して取捨)
@@ -138,6 +201,10 @@ module.exports = {
   anthropicMessagesHandler,
   geminiGenerateContentHandler,
   sentryIngestHandler,
+  // ダイコメ knowledge: billing validation
+  billingValidationHandler,
+  validateBillingValue,
+  BILLING_RANGE,
   // factories
   defaultHandlers,
   makeServer,
