@@ -1,5 +1,10 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "files": {
     "includes": [
       "scripts/zeroact-test-commons/**/*.js",
@@ -32,6 +37,25 @@
     "enabled": false
   },
   "javascript": {
-    "globals": ["dlog", "DEBUG", "Meter", "GPS", "FB", "fc", "describe", "it", "expect", "beforeEach", "afterEach", "beforeAll", "afterAll"]
+    "globals": [
+      "dlog",
+      "DEBUG",
+      "Meter",
+      "GPS",
+      "FB",
+      "RegionLoader",
+      "TrainingCollector",
+      "firebase",
+      "eruda",
+      "Buffer",
+      "fc",
+      "describe",
+      "it",
+      "expect",
+      "beforeEach",
+      "afterEach",
+      "beforeAll",
+      "afterAll"
+    ]
   }
 }
