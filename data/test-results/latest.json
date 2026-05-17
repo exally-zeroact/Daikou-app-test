@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-17T16:07:20.431Z",
-  "git_sha": "3d5888f62fcd04875eebf1e08fe1313fac928dae",
+  "generated_at": "2026-05-17T17:29:03.492Z",
+  "git_sha": "7adb54a31f753048a72fe54a33ebd230155ef386",
   "git_ref": "main",
   "runner": "github-actions",
   "summary": {
@@ -26,7 +26,7 @@
       "skip_count": 0,
       "layer_check_count": 0,
       "layer_hit_count": 0,
-      "elapsed_ms": 1,
+      "elapsed_ms": 2,
       "issues": []
     },
     {
@@ -42,7 +42,7 @@
       "skip_count": 0,
       "layer_check_count": 71,
       "layer_hit_count": 71,
-      "elapsed_ms": 1,
+      "elapsed_ms": 0,
       "issues": []
     },
     {
