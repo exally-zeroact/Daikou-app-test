@@ -84,3 +84,77 @@ describe('gps-worker.js 静的検証 (P11)', () => {
     }
   });
 });
+
+// ─── dynamic worker test (@vitest/web-worker 配線) ─────────────────
+
+describe('gps-worker.js dynamic worker test (⑪)', () => {
+  it('Worker 起動 + init message 送受信', async () => {
+    const workerUrl = new URL('../../js/gps-worker.js', import.meta.url);
+    const worker = new Worker(workerUrl);
+
+    // init message 送信
+    worker.postMessage({
+      type: 'init',
+      data: { config: {}, debug: false },
+    });
+
+    // 即終了 (= 起動 + postMessage 受付成功で十分・実応答は init で出ない)
+    // 短い待機で event loop が tick した後に terminate
+    await new Promise((r) => setTimeout(r, 50));
+    worker.terminate();
+  });
+
+  it('Worker 起動 + position message → result 応答受信', async () => {
+    const workerUrl = new URL('../../js/gps-worker.js', import.meta.url);
+    const worker = new Worker(workerUrl);
+
+    // init 先行
+    worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
+
+    // result 受信 promise
+    const resultPromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        worker.terminate();
+        reject(new Error('worker result timeout (3s)'));
+      }, 3000);
+      worker.onmessage = (e) => {
+        if (e.data && e.data.type === 'result') {
+          clearTimeout(timeout);
+          resolve(e.data.data);
+        }
+      };
+      worker.onerror = (err) => {
+        clearTimeout(timeout);
+        reject(new Error('worker error: ' + (err && err.message)));
+      };
+    });
+
+    // position 送信 (= 静止判定対象になりやすい低速 GPS)
+    worker.postMessage({
+      type: 'position',
+      data: {
+        lat: 33.84,
+        lng: 132.7656,
+        accuracy: 5,
+        speedKmh: 0,
+        heading: null,
+        altitude: 0,
+        now: Date.now(),
+        compassHeading: null,
+        accelSamples: [],
+        gyroSamples: [],
+      },
+    });
+
+    try {
+      const result = await resultPromise;
+      // result が返れば成功 (= 中身は Kalman 平滑後の値・ここでは存在のみ確認)
+      expect(result).toBeDefined();
+      expect(typeof result.lat).toBe('number');
+      expect(typeof result.lng).toBe('number');
+      expect(typeof result.isStationary).toBe('boolean');
+    } finally {
+      worker.terminate();
+    }
+  });
+});
