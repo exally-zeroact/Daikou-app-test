@@ -7,13 +7,17 @@
       "tests/e2e/**/*.js"
     ]
   },
+  "assist": {
+    "enabled": false
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true,
       "suspicious": {
         "noConsole": "off",
-        "noExplicitAny": "off"
+        "noExplicitAny": "off",
+        "noAssignInExpressions": "off"
       },
       "style": {
         "useNodejsImportProtocol": "off",

@@ -39,7 +39,6 @@ export default {
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
-    tsConfig: false,
     includeOnly: '^(js|scripts/zeroact-test-commons)/',
     exclude: 'node_modules|data|coverage|test-results',
     reporterOptions: {
