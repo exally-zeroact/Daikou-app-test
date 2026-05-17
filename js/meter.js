@@ -385,9 +385,16 @@ const Meter = (() => {
         //   保険: Worker B が isStationary 受信に失敗した場合、停車中も mmIncrementM > 0 が
         //       出ることがあり得る。その場合 main で加算されるが、これは「Worker B 判断ミス」
         //       なので main 側で二重否定するより Worker B 側の信頼性向上が筋。
-        // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
-        state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+        // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
+        //   旧 (2026-05-14): 業務単位累積は state.running を問わず加算 (= 空車中も累積)
+        //   新: state.running===false 時は business_distance_m を更新しない (= 代行開始前/idle 中の
+        //       GPS jitter 由来加算を遮断)。空車中累積も同時に停止される副作用あり (= 仕様変更)。
+        //   absolute ルール準拠:
+        //     ・distance_m / fare_yen / 課金ロジックには触れない
+        //     ・running=true 時の挙動は完全不変
+        //     ・iOS/Android 共通経路 (platform 分岐なし)
         if (state.running) {
+          state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = 'mm';
@@ -449,9 +456,13 @@ const Meter = (() => {
         state.offroad_count = (state.offroad_count || 0) + 1;
         // 直前 commit からの haversine 累積を retroactive で加算 (snap-miss 区間の課金漏れ防止)
         if (_haverAccumSinceLastCommit > 0) {
-          // ★設計変更宣言 (2026-05-14): retroactive 加算も業務単位累積は state.running を問わず加算
-          state.business_distance_m = (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
+          // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
+          //   旧 (2026-05-14): retroactive 加算も state.running を問わず加算
+          //   新: state.running===false 時は business_distance_m / distance_m 共に加算停止
+          //       (= 旧設計と同じ整合性: running=true のときだけ全加算)
           if (state.running) {
+            state.business_distance_m =
+              (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
             state.distance_m += _haverAccumSinceLastCommit;
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'offroad';
@@ -969,12 +980,11 @@ const Meter = (() => {
           state.last_gps.compassHeading
         );
         if (filled !== null) {
-          // ★設計変更宣言 (2026-05-14): 業務単位累積は state.running を問わず加算
-          // ★設計変更宣言 (2026-05-16・バグ2 整合・停車判定を gap fill 経路にも適用):
-          //   gap fill は GPS≥5s 空白で発火。停車中 (speed<2 km/h) は filled が微小だが
-          //   complete 0 ではない (infraLength 含む可能性) ため業務距離加算をスキップ。
-          //   distance_m への加算は維持 (= 絶対ルール「distance_m 変えない」)。
-          if (!_isStationary()) {
+          // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
+          //   旧 (2026-05-14): running 問わず加算 / (2026-05-16) 停車判定追加
+          //   新: state.running===false 時は business_distance_m を加算しない (= 代行開始前
+          //       の GPS jitter 由来加算を遮断)。停車判定は維持。
+          if (state.running && !_isStationary()) {
             state.business_distance_m = (state.business_distance_m || 0) + filled;
           }
           if (state.running) {
@@ -989,11 +999,10 @@ const Meter = (() => {
         // Phase 1.C Off-Road Mode: GPS polyline 累積で課金続行
         const inc = _calculateOffRoadIncrement(gpsResult, dtSec);
         if (inc > 0) {
-          // ★設計変更宣言 (2026-05-16・バグ2 整合・停車判定を Off-Road 経路にも適用):
-          //   _calculateOffRoadIncrement は内部で isStationary を判定するが、こちらは
-          //   state.last_speed_kmh ベースで isStationary=false / speed<2 km/h を拾う。
-          //   業務距離加算をスキップ・distance_m への加算は維持。
-          if (!_isStationary()) {
+          // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
+          //   旧 (2026-05-16): 停車判定のみガード
+          //   新: state.running===false 時は business_distance_m を加算しない。停車判定維持。
+          if (state.running && !_isStationary()) {
             state.business_distance_m = (state.business_distance_m || 0) + inc;
           }
           if (state.running) {
@@ -1007,8 +1016,10 @@ const Meter = (() => {
         // MM 不健全時の inline 道路スナップ fallback (絶対ルール: GPS 直線禁止)
         const inc = _inlineSnapAndIncrement(gpsResult);
         if (inc !== null && inc > 0) {
-          // ★設計変更宣言 (2026-05-16・バグ2 整合・停車判定を inline fallback 経路にも適用)
-          if (!_isStationary()) {
+          // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
+          //   旧 (2026-05-16): 停車判定のみガード
+          //   新: state.running===false 時は business_distance_m を加算しない。停車判定維持。
+          if (state.running && !_isStationary()) {
             state.business_distance_m = (state.business_distance_m || 0) + inc;
           }
           if (state.running) {

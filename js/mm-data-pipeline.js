@@ -435,6 +435,39 @@
             this.stats.auxFailed.length
         );
       }
+      // ★設計変更宣言 (2026-05-17・症状A 修正・Phase B/C 完了直後の自動 retry):
+      //   旧: 失敗 URL の retry trigger は notifyGpsFix() (= GPS 初回 fix) のみ。
+      //       問題: warmup() は bg fire-and-forget で実行されるため、
+      //         「GPS first fix → notifyGpsFix → _checkAndRetryCurrentPref」が
+      //         Phase B 完了前に走ると stats.roadsFailed が空で retry 起動せず、
+      //         Phase B 完了後の失敗 URL は二度と retry されない問題があった。
+      //   新: Phase B/C 完了直後に navigator.onLine===true なら全失敗 URL を retry。
+      //       既存 enqueueRetry の 60 秒 cooldown で notifyGpsFix 経由との重複防止。
+      //   absolute ルール準拠:
+      //     ・オフライン時は何もしない (= 業務継続性最優先)
+      //     ・全 47 県 cache 戦略は不変
+      //     ・distance_m / fare_yen / 業務ロジックには触れない (= データ層の補修のみ)
+      //     ・iOS/Android 共通経路 (platform 分岐なし)
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+        const _failedRoads = (this.stats && this.stats.roadsFailed) || [];
+        const _failedAux = (this.stats && this.stats.auxFailed) || [];
+        const _allFailed = _failedRoads.concat(_failedAux);
+        let _warmupRetryCount = 0;
+        for (const url of _allFailed) {
+          if (!url) continue;
+          this.enqueueRetry(url).catch(function () {});
+          _warmupRetryCount++;
+        }
+        if (typeof dlog === 'function' && _warmupRetryCount > 0) {
+          dlog(
+            '[Pipeline] warmup 完了 retry 起動 count=' +
+              _warmupRetryCount +
+              ' (Phase B/C 完了後・全失敗 URL を一括 retry)'
+          );
+        }
+      } else if (typeof dlog === 'function') {
+        dlog('[Pipeline] warmup 完了 retry skip (offline)');
+      }
       // ★設計変更宣言 (2026-05-13・Phase D/E を warmup から外す):
       //   旧: Phase D (waitForGPS) + Phase E (waitForMMWarmup) を warmup() で待つ
       //   問題: startGPS() は「業務開始」ボタンで呼ばれる仕様 (index.html:2739 参照)
