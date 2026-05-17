@@ -57,8 +57,7 @@ module.exports = {
       allowDeadHandlers: [
         // configDebug: 実機 dlog ON/OFF 切替・未配線 (デバッグログ設定固定で動作には影響なし)
         'configDebug',
-        // configPlatform: iOS 検出時 N=10 default 変更・main 送信なし (= iOS でも N=15 起動)
-        'configPlatform',
+        // ★2026-05-18 configPlatform 配線完了・index.html L4502 で _setupMmWorker 内送信開始 (削除済)
         // updateCrossUserPheromone: Firebase cross-user pheromone 受信・呼出経路なし
         'updateCrossUserPheromone',
         // configOsrm: OSRM endpoint 動的切替・osrm-client.js コメントで言及あるが未実装

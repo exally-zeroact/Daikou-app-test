@@ -4499,6 +4499,12 @@
         if (typeof Meter !== 'undefined' && Meter.setMapMatcher) {
           Meter.setMapMatcher(_mmWorker);
         }
+        // ★設計変更宣言 (2026-05-18・configPlatform 配線完了 / G6 残課題解消):
+        //   旧: configPlatform 未送信 → iOS でも Viterbi N=15 で起動 (= 初回 commit ラグ 16 秒)
+        //   新: _setupMmWorker (init / 再起動 両経路) で Worker B に platform 通知
+        //       → iOS は VITERBI_N_MIN (=10) で起動・初回 commit ラグ 11 秒に改善
+        //   Android は isIOS=false 送信・Worker B 側 handler が no-op (= 既存挙動維持)
+        _mmWorker.postMessage({ type: 'configPlatform', isIOS: _isIOS });
         // ★設計変更宣言 (2026-05-13・大改修 C11): 旧 _mmReforwardAllState() 呼出を削除
         //   再起動時の state 再 forward は新パイプライン (MMDataPipeline) の責務に移譲予定
         window._mmWorker = _mmWorker;
