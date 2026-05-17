@@ -29,9 +29,11 @@ const { http, HttpResponse } = require('msw');
 // ─── Firebase Remote Config mock ──────────────────────────────
 
 // /v1/projects/{project}/namespaces/firebase:fetch (= Firebase RC fetch endpoint)
+// MSW v2 の path-to-regexp は ":" を parameter として解釈するため URL 内 ":fetch" で
+// parse error。RegExp 直接指定で回避。
 function firebaseRemoteConfigHandler(values) {
   return http.post(
-    'https://firebaseremoteconfig.googleapis.com/v1/projects/*/namespaces/firebase:fetch',
+    /^https:\/\/firebaseremoteconfig\.googleapis\.com\/v1\/projects\/[^/]+\/namespaces\/firebase:fetch/,
     () => {
       const entries = {};
       for (const k of Object.keys(values || {})) {
@@ -68,8 +70,9 @@ function anthropicMessagesHandler(verdict, reasoning) {
 // ─── Gemini Flash API mock ────────────────────────────────────
 
 function geminiGenerateContentHandler(verdict, reasoning) {
+  // ":generateContent" を parameter として解釈されないよう RegExp 直接指定
   return http.post(
-    'https://generativelanguage.googleapis.com/v1beta/models/*:generateContent',
+    /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/[^:]+:generateContent/,
     () => {
       const text = JSON.stringify({
         verdict: verdict || 'OK',
@@ -90,7 +93,8 @@ function geminiGenerateContentHandler(verdict, reasoning) {
 // ─── Sentry ingest mock (= event 送信を吸収) ──────────────────
 
 function sentryIngestHandler() {
-  return http.post('https://*.ingest.us.sentry.io/api/*/envelope/', () => {
+  // subdomain + path wildcard を RegExp で表現
+  return http.post(/^https:\/\/[^.]+\.ingest\.[^/]+\.sentry\.io\/api\/[^/]+\/envelope\//, () => {
     return new HttpResponse(null, { status: 200 });
   });
 }
