@@ -70,6 +70,46 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ─── P14 (2026-05-18): llm-as-judge.js を呼出して仕様合致判定 ──
+      # property tests + replay-mm の結果を Gemini Flash に判定させる。
+      # GEMINI_API_KEY 未設定時は llm-as-judge.js が exit 1 で skip (= continue-on-error)
+      - name: Run replay-mm for judge input
+        id: replay
+        run: |
+          npm run test:replay 2>&1 | tee replay.log
+        continue-on-error: true
+
+      - name: Run LLM as judge
+        id: judge
+        if: steps.replay.outcome == 'success'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TEST_RESULT_PATH: data/test-results/latest.json
+        run: node scripts/zeroact-test-commons/ai/llm-as-judge.js
+        continue-on-error: true
+
+      - name: Append judge summary
+        if: always() && steps.judge.conclusion != 'skipped'
+        run: |
+          if [ -f judge_result.json ]; then
+            {
+              echo ""
+              echo "## 🧑‍⚖️ LLM as Judge"
+              echo ""
+              echo "**Outcome:** \`${{ steps.judge.outcome }}\`"
+              echo ""
+              echo '```json'
+              cat judge_result.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo ""
+              echo "## 🧑‍⚖️ LLM as Judge"
+              echo "judge_result.json was not produced (= GEMINI_API_KEY 未設定 or fetch fail)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,6 +118,8 @@ jobs:
           path: |
             property.log
             e2e.log
+            replay.log
+            judge_result.json
             test-results/
           if-no-files-found: ignore
           retention-days: 7
