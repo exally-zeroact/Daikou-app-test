@@ -66,11 +66,14 @@ jobs:
         run: |
           VERSION="daikome@${{ github.sha }}"
           # bundler 未使用のため js/*.js を生 source として upload (= rewrite なし)
-          npx @sentry/cli releases files "$VERSION" \
-            upload-sourcemaps js/ \
+          # ★ @sentry/cli 3.x で `releases files upload-sourcemaps` → `sourcemaps upload` に
+          #    サブコマンド変更されたため新形式に修正 (2026-05-18)
+          npx @sentry/cli sourcemaps upload \
+            --release "$VERSION" \
             --url-prefix '~/js' \
             --no-rewrite \
-            --ext js
+            --ext js \
+            js/
 
       - name: Finalize release
         if: steps.check.outputs.available == 'true'
