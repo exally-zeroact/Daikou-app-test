@@ -13,6 +13,7 @@
     "audit:knip": "knip --no-exit-code",
     "audit:deps": "dependency-cruiser --config dependency-cruiser.config.mjs js/ scripts/zeroact-test-commons/",
     "audit:biome": "biome check .",
+    "audit:arch": "vitest run --config vitest.arch.config.js",
     "check": "npm run lint && npm run format && npm run stylelint && npm run audit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -56,6 +57,7 @@
     "prettier": "^3.8.3",
     "stylelint": "^17.11.0",
     "stylelint-config-standard": "^40.0.0",
+    "tsarch": "^5.4.1",
     "vitest": "^4.1.6"
   }
 }
