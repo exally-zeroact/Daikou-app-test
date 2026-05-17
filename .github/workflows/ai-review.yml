@@ -13,6 +13,8 @@ on:
   pull_request:
     paths:
       - 'js/**'
+  # 手動再実行用 (= secrets 設定後の動作確認・過去 PR 再実行)
+  workflow_dispatch:
 
 jobs:
   ai-review:
@@ -33,9 +35,14 @@ jobs:
       - name: Build PR diff
         id: diff
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          git diff "$BASE_SHA" "$HEAD_SHA" -- 'js/' > pr-diff.txt
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            git diff "$BASE_SHA" "$HEAD_SHA" -- 'js/' > pr-diff.txt
+          else
+            # workflow_dispatch: 直近 commit の diff (= secrets 動作確認用)
+            git diff HEAD~1 HEAD -- 'js/' > pr-diff.txt || echo "" > pr-diff.txt
+          fi
           echo "diff_bytes=$(wc -c < pr-diff.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Run multi-LLM consensus
@@ -56,7 +63,7 @@ jobs:
           retention-days: 14
 
       - name: Comment on PR
-        if: always() && steps.diff.outputs.diff_bytes != '0'
+        if: always() && steps.diff.outputs.diff_bytes != '0' && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
