@@ -23,6 +23,31 @@ export default {
     // Vitest related 探索が機能せず No tests were found エラー。全 test 走らせる設定で対応。
     related: false,
   },
+  // ─── ダイコメ知識注入 (2026-05-18) ───────────────────────────────
+  //
+  // 【絶対ルール】distance_m は課金根拠・絶対不可侵
+  //   GPS 直線距離での課金禁止・道路ジオメトリ沿いのみ
+  //
+  // 【distance_m 更新 5 経路 (verified meter.js)】
+  //   L393:  Tier1 Worker B Viterbi commit (state.distance_m += m.mmIncrementM)
+  //   L462:  retroactive Off-Road 起動時 (= ★絶対ルール適用外区間)
+  //   L824:  gap fill GPS 消失時 (= speed × time・GPS 直線非依存)
+  //   L842:  Phase 1.C Off-Road incremental (= ★絶対ルール適用外区間)
+  //   L1172: setDistance 外部復元用
+  //
+  // 【重要変数】
+  //   distance_m: 課金根拠 (絶対不可侵)
+  //   business_distance_m: 業務単位累積距離 (running=true のみ加算)
+  //   fare_yen: 確定料金 (= calcFare(distance_m) 純粋関数)
+  //
+  // 【mutate 対象方針】
+  //   meter.js / gps.js / map-matcher.js / gps-worker.js / mm-data-pipeline.js は
+  //   絶対 mutate 不可 (= 課金根拠 distance_m コードに変更を加える行為に該当)。
+  //   司さん解釈 A 採択 (Stage 1): mutate target は test util のみで
+  //   property test の網羅性 KPI を測定する。
+  //
+  // 本体コード (= meter.js 等) の mutation testing は将来 課金根拠の
+  // 別レイヤー (= Semgrep taint rule / property test 増強) で代替する。
   mutate: ['scripts/zeroact-test-commons/property-test-helpers.js'],
   // Stryker の project file scan から除外 (= heap OOM 対策)
   ignorePatterns: [
