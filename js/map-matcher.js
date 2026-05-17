@@ -2511,6 +2511,14 @@ self.onmessage = function (e) {
 
   // MM-7: 統計取得（debug 用）
   if (msg.type === 'getMm7Stats') {
+    // ★設計変更宣言 (2026-05-17・Worker B decode 確認手段の追加):
+    //   loadedPrefs.size (実 decode 済 県数) と decoders 全体の numRoads 合計を mm7Stats に追加。
+    //   main 側から Worker B 内 RoadDecoder 構築成否を直接観測可能にする。
+    //   既存フィールドは一切変更しない (= 後方互換)。
+    let _loadedRoadsTotal = 0;
+    for (const _dec of decoders.values()) {
+      _loadedRoadsTotal += _dec && _dec.numRoads ? _dec.numRoads : 0;
+    }
     self.postMessage({
       type: 'mm7Stats',
       mcm_window_size: _viterbiN,
@@ -2522,6 +2530,8 @@ self.onmessage = function (e) {
       grid_cells_max: GRID_MAX_CELLS,
       worker_p99_ms: _calcWorkerP99(),
       worker_lat_samples: _workerLatCount,
+      loaded_prefs_count: loadedPrefs.size,
+      loaded_roads_total: _loadedRoadsTotal,
     });
     return;
   }

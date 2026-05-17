@@ -4625,6 +4625,9 @@
           // M-3: visibility 復帰時 ping への応答（pong 代わり）
           _mmHealthPongAt = Date.now();
           // MM-7: MCM/pheromone/grid 統計（debug 用 probe で取得）
+          // ★設計変更宣言 (2026-05-17・Worker B decode 確認手段の追加):
+          //   loaded=N県/M本 を末尾に追記。pheromone_prefs (Firebase cross-user 由来) と
+          //   loaded_prefs_count (実 decode 済 県数) を区別して表示可能にする。
           dlog(
             '[MM-7] N=' +
               m.mcm_window_size +
@@ -4644,7 +4647,12 @@
               ' cells' +
               ' worker_p99=' +
               m.worker_p99_ms.toFixed(2) +
-              'ms'
+              'ms' +
+              ' loaded=' +
+              (m.loaded_prefs_count != null ? m.loaded_prefs_count : '?') +
+              '県/' +
+              (m.loaded_roads_total != null ? m.loaded_roads_total : '?') +
+              '本'
           );
         } else if (m.type === 'osrmStats') {
           // MM-6: OSRM 統計（debug 用 probe で取得）
