@@ -123,6 +123,73 @@ function propertyAssert(property, options) {
   return fc.assert(property, Object.assign({ verbose: false, numRuns: 100 }, options || {}));
 }
 
+// ─── ダイコメ Step C 用追加 arbitrary (2026-05-17・Stage 1) ──────────
+
+// 停車中 GPS シーケンス (= isStationary:true 確定の 6 点 1Hz 同座標)
+// gps-worker.js L596-598 救済で加速度 null 時 GPS 判定のみで final 確定するため
+// Playwright/Vitest で確実に isStationary=true を強制できる。
+function stationaryGpsArb(opts) {
+  opts = opts || {};
+  const baseLat = opts.lat != null ? opts.lat : 33.84;
+  const baseLng = opts.lng != null ? opts.lng : 132.7656;
+  const baseTs = opts.timestamp != null ? opts.timestamp : 1714100000000;
+  return fc.integer({ min: 6, max: 30 }).chain((count) =>
+    fc.constant(
+      Array.from({ length: count }, (_, i) => ({
+        lat: baseLat,
+        lng: baseLng,
+        accuracy: 5,
+        speedKmh: 0,
+        isStationary: true,
+        timestamp: baseTs + i * 1000,
+      }))
+    )
+  );
+}
+
+// Worker B 出力 mock (= map-matcher.js mmResult message 相当)
+// 経路 1 (L393 Tier1 commit) と経路 2 (L3007 isStationary force 0) の両方を模擬
+function mmResultArb() {
+  return fc.record({
+    type: fc.constant('mmResult'),
+    mmIncrementM: fc.double({ min: 0, max: 50, noNaN: true }),
+    tentativeIncrementM: fc.double({ min: 0, max: 50, noNaN: true }),
+    snapped: fc.boolean(),
+    committed: fc.boolean(),
+    isStationary: fc.boolean(),
+    timestamp: fc.integer({ min: 1714100000000, max: 1714200000000 }),
+  });
+}
+
+// GPS 消失検出 (gap fill 発火) 用シーケンス: dtSec>=5 秒の空白を作る
+// meter.js L812 GAP_THRESHOLD_SEC=5 以上で L824 distance_m += filled 発火
+function gpsGapSequenceArb(opts) {
+  opts = opts || {};
+  return fc.record({
+    before: gpsPointArb(opts),
+    gapSec: fc.double({ min: 5, max: 60, noNaN: true }),
+    after: gpsPointArb(opts),
+  });
+}
+
+// Off-Road 起動条件シーケンス: snap miss 連続 (OFFROAD_SNAP_MISS_THRESHOLD=5)
+// 連続 5 step で skipped=true or mmIncrementM=0 を流すと _offRoadActive=true
+function offroadSequenceArb(_opts) {
+  return fc.array(
+    fc.record({
+      type: fc.constant('mmResult'),
+      mmIncrementM: fc.constant(0),
+      tentativeIncrementM: fc.constant(0),
+      snapped: fc.constant(false),
+      skipped: fc.constantFrom(true, false),
+      committed: fc.constant(false),
+      isStationary: fc.constant(false),
+      timestamp: fc.integer({ min: 1714100000000, max: 1714200000000 }),
+    }),
+    { minLength: 5, maxLength: 30 }
+  );
+}
+
 module.exports = {
   fc,
   gpsPointArb,
@@ -132,4 +199,9 @@ module.exports = {
   assertConstant,
   assertBoundedDelta,
   propertyAssert,
+  // Step C 追加 (2026-05-17)
+  stationaryGpsArb,
+  mmResultArb,
+  gpsGapSequenceArb,
+  offroadSequenceArb,
 };
