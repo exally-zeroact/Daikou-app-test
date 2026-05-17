@@ -301,6 +301,10 @@ const Meter = (() => {
     return state.last_isStationary === true;
   }
 
+  // ★絶対ルール適用外区間（明示宣言）
+  // Off-Road Mode は道路ジオメトリが利用できない区間のみ GPS polyline（短区間haversine積み上げ）を使用。
+  // GPS直線距離（出発→到着の一発計算）とは異なり1〜5秒ごとの積み上げで実走行距離を近似する。
+  // 停車中・精度50m超・物理速度上限超過は加算しない。Worker B復帰時にresetCommittedSnapで二重課金防止。
   function _calculateOffRoadIncrement(gpsResult, dtSec) {
     if (!state.last_gps) return 0;
     if (gpsResult.isStationary) return 0;
@@ -460,6 +464,7 @@ const Meter = (() => {
           //   旧 (2026-05-14): retroactive 加算も state.running を問わず加算
           //   新: state.running===false 時は business_distance_m / distance_m 共に加算停止
           //       (= 旧設計と同じ整合性: running=true のときだけ全加算)
+          // ★絶対ルール適用外区間（retroactive）停車中は_trackHaversineBetweenGpsで積算停止済のため停車区間は含まれない。
           if (state.running) {
             state.business_distance_m =
               (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
@@ -666,6 +671,9 @@ const Meter = (() => {
     //   segments キューも空にして次業務に持ち越さない。
     state.tier2_pending_m = 0;
     _tier2Segments = [];
+    _offRoadActive = false;
+    _consecutiveSnapMiss = 0;
+    _haverAccumSinceLastCommit = 0;
     // T8 (2026-05-09): 業務終了で当 session の cross-user pheromone を Firebase に push
     if (typeof FB !== 'undefined' && typeof FB.pushSessionAggregates === 'function') {
       try {
