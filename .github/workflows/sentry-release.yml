@@ -22,6 +22,8 @@ on:
       - 'js/**'
       - 'index.html'
       - 'sw.js'
+  # 手動再実行用 (= path filter 対象外の修正検証時 / 過去 commit 再走時)
+  workflow_dispatch:
 
 jobs:
   sentry-release:
@@ -30,7 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # set-commits --auto は previous release の git history を遡る必要あり。
+          # 浅い clone (fetch-depth: 2) では SHA 不明エラー → full clone (fetch-depth: 0) に変更。
+          fetch-depth: 0
 
       - name: Check Sentry secrets availability
         id: check
@@ -55,7 +59,8 @@ jobs:
         run: |
           VERSION="daikome@${{ github.sha }}"
           npx @sentry/cli releases new "$VERSION"
-          npx @sentry/cli releases set-commits "$VERSION" --auto
+          # --ignore-missing: 初回 release で previous SHA がない場合に skip (= 全 commits 含めて新規作成)
+          npx @sentry/cli releases set-commits "$VERSION" --auto --ignore-missing
 
       - name: Upload sources to Sentry
         if: steps.check.outputs.available == 'true'
