@@ -128,17 +128,18 @@ describe('ZEROact 共通テスト基盤: isStationary=true で distance_m 不変
       const source = loadSource(METER_JS_PATH);
       const lines = source.split('\n');
       // L790 周辺で `if (gpsResult.isStationary)` パターン + early return を確認
-      const window = lines.slice(785, 800).join('\n');
+      // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張 (= 775-810)
+      const window = lines.slice(775, 810).join('\n');
       if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
         throw new Error(
-          'meter.js L790 周辺に if (gpsResult.isStationary) パターン未検出 (drift detected)'
+          'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'
         );
       }
       if (!/_updateMapMatching\s*\(\s*gpsResult\s*\)/.test(window)) {
-        throw new Error('meter.js L790 周辺に _updateMapMatching(gpsResult) 呼出 未検出');
+        throw new Error('meter.js L790 周辺 (±10) に _updateMapMatching(gpsResult) 呼出 未検出');
       }
       if (!/return\s*;/.test(window)) {
-        throw new Error('meter.js L790 周辺に early return ; 未検出');
+        throw new Error('meter.js L790 周辺 (±10) に early return ; 未検出');
       }
     });
   });
@@ -150,17 +151,18 @@ describe('ZEROact 共通テスト基盤: isStationary=true で distance_m 不変
       const source = loadSource(MAP_MATCHER_JS_PATH);
       const lines = source.split('\n');
       // L3007 周辺で if (msg.isStationary === true) { mmIncrementM = 0; tentativeIncrementM = 0; }
-      const window = lines.slice(3000, 3015).join('\n');
+      // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張 (= 2990-3025)
+      const window = lines.slice(2990, 3025).join('\n');
       if (!/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(window)) {
         throw new Error(
-          'map-matcher.js L3007 周辺に if (msg.isStationary === true) pattern 未検出 (drift detected)'
+          'map-matcher.js L3007 周辺 (±10) に if (msg.isStationary === true) pattern 未検出 (drift detected)'
         );
       }
       if (!/mmIncrementM\s*=\s*0/.test(window)) {
-        throw new Error('map-matcher.js L3007 周辺に mmIncrementM = 0 代入 未検出');
+        throw new Error('map-matcher.js L3007 周辺 (±10) に mmIncrementM = 0 代入 未検出');
       }
       if (!/tentativeIncrementM\s*=\s*0/.test(window)) {
-        throw new Error('map-matcher.js L3007 周辺に tentativeIncrementM = 0 代入 未検出');
+        throw new Error('map-matcher.js L3007 周辺 (±10) に tentativeIncrementM = 0 代入 未検出');
       }
     });
   });
