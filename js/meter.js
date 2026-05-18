@@ -22,6 +22,17 @@ const Meter = (() => {
     //   理由: 後付メーター機との対等性・業務総走行距離は空車中も増加する仕様
     //   分離: distance_m (= 課金根拠) は running gate のまま・絶対不可侵
     business_active: false, // 業務中フラグ (= Business.start/end で外部設定)
+    // ★設計変更宣言 (2026-05-18・Phase 3・案G Layer 1+3・GPS predictive + Reconciliation):
+    //   旧: 表示式 = distance_m + tier2_pending_m (= Worker B 確定 + preview)
+    //       → iOS 1Hz GPS + Viterbi 窓 N=10 で 5-10 秒ラグ (= P2)
+    //       → Off-Road 復帰時 tier2 一括 0 リセットで表示 150m 急減 (= P3)
+    //   新: + gps_predictive_distance_m (= GPS speed × dt 即時加算・1 秒以内ラグ)
+    //       + display_distance_m (= Reconciliation で滑らか同期・急減ゼロ)
+    //       tier2_pending_m は通常 commit 差分減算で維持 (= 既存挙動互換)
+    //   絶対ルール準拠: 表示専用・課金経路ゼロ・distance_m は無変更。
+    gps_predictive_distance_m: 0, // GPS speed × dt 即時加算 (= P2 ラグ解消)
+    display_distance_m: 0, // Reconciliation で滑らか同期した表示用 (= P3 急減ゼロ)
+    last_display_update_time: null, // display_distance_m の前回更新時刻
     start_time: null,
     last_gps: null,
     last_timestamp: null,
@@ -358,10 +369,11 @@ const Meter = (() => {
         _offRoadActive = false;
         _consecutiveSnapMiss = 0;
         _haverAccumSinceLastCommit = 0;
-        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・Off-Road 復帰時クリア):
-        //   Off-Road 中は update() の Tier 2 並走分岐は走らないので通常 segments は空のはず。
-        //   ただし安全側として復帰時に明示的に 0 化する (Worker B resetCommittedSnap 送信と整合)。
-        state.tier2_pending_m = 0;
+        // ★設計変更宣言 (2026-05-18・Phase 3・P3 急減原因除去):
+        //   旧: Off-Road 復帰時に tier2_pending_m = 0 一括リセット
+        //       → 表示式 (= distance_m + tier2_pending_m) が 150m 急減する事象 (司さん実車テスト報告)
+        //   新: 一括リセットを削除・通常 commit 時の差分減算 (= L435 周辺) で自然減算する
+        //   絶対ルール準拠: distance_m への課金経路は無変更
         _tier2Segments = [];
         if (mmWorker) {
           try {
@@ -504,13 +516,11 @@ const Meter = (() => {
             /* noop - intentionally empty */
           }
         }
-        // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・Off-Road 起動時クリア):
-        //   Off-Road 起動後は update() の Tier 2 並走分岐が走らなくなり、Off-Road 経路
-        //   (state.distance_m += _haverAccumSinceLastCommit) が課金距離を直接更新する。
-        //   既に蓄積された tier2_pending_m を残すと UI で二重表示になるため 0 化する。
-        //   retroactive 加算は state.distance_m に既に取り込まれているので、表示式
-        //   (distance_m + tier2_pending_m) は Off-Road 経路の課金値そのまま反映する。
-        state.tier2_pending_m = 0;
+        // ★設計変更宣言 (2026-05-18・Phase 3・P3 急減原因除去):
+        //   旧: Off-Road 起動時に tier2_pending_m = 0 一括リセット
+        //       → 表示式の急減原因
+        //   新: 一括リセットを削除・通常 commit 時の差分減算 (= L435 周辺) で自然減算する
+        //   絶対ルール準拠: distance_m への課金経路は無変更
         _tier2Segments = [];
       }
     }
@@ -573,6 +583,9 @@ const Meter = (() => {
     const prevBusinessDist = (state && state.business_distance_m) || 0;
     // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
     const prevBusinessActive = !!(state && state.business_active);
+    // ★ Phase 3: gps_predictive / display も per-trip 引き継ぎ (= 業務単位・後付メーター対等)
+    const prevGpsPredictive = (state && state.gps_predictive_distance_m) || 0;
+    const prevDisplay = (state && state.display_distance_m) || 0;
     state = {
       running: true,
       distance_m: 0,
@@ -583,6 +596,10 @@ const Meter = (() => {
       elapsed_accumulated_sec: 0,
       last_resume_time: now,
       business_active: prevBusinessActive,
+      // ★ Phase 3: gps_predictive / display 引き継ぎ
+      gps_predictive_distance_m: prevGpsPredictive,
+      display_distance_m: prevDisplay,
+      last_display_update_time: null,
       start_time: now,
       // 起動時warm upでGPS取得済みなら初期値として使う（即時計測開始のため）
       // 過去の動きは加算しないよう last_timestamp は now を使用
@@ -685,6 +702,10 @@ const Meter = (() => {
     }
     state.elapsed_accumulated_sec = 0; // 業務終了で elapsed リセット (次業務に持ち越さない)
     state.business_active = false; // ★ Phase 2: 業務終了で business_active 自動 off
+    // ★ Phase 3: 業務終了で gps_predictive / display も 0 リセット (= 次業務に持ち越さない)
+    state.gps_predictive_distance_m = 0;
+    state.display_distance_m = 0;
+    state.last_display_update_time = null;
     _fareConfigFrozen = false; // F6: 業務終了で解凍
     if (mmWorker) {
       try {
@@ -721,6 +742,9 @@ const Meter = (() => {
     const prevBusinessDist = (state && state.business_distance_m) || 0;
     // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
     const prevBusinessActive = !!(state && state.business_active);
+    // ★ Phase 3: gps_predictive / display も per-trip reset で引き継ぐ
+    const prevGpsPredictive = (state && state.gps_predictive_distance_m) || 0;
+    const prevDisplay = (state && state.display_distance_m) || 0;
     state = {
       running: false,
       distance_m: 0,
@@ -731,6 +755,10 @@ const Meter = (() => {
       elapsed_accumulated_sec: 0,
       last_resume_time: null,
       business_active: prevBusinessActive,
+      // ★ Phase 3: gps_predictive / display 引き継ぎ
+      gps_predictive_distance_m: prevGpsPredictive,
+      display_distance_m: prevDisplay,
+      last_display_update_time: null,
       start_time: null,
       last_gps: null,
       last_timestamp: null,
@@ -852,6 +880,21 @@ const Meter = (() => {
 
     if (state.last_gps && state.last_timestamp) {
       const dtSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
+
+      // ★設計変更宣言 (2026-05-18・Phase 3・案G Layer 1・GPS predictive 即時加算):
+      //   GPS speed × dt で 1 秒以内ラグの表示用距離を計算 (= P2 ラグ解消)。
+      //   表示専用・課金経路ゼロ・distance_m は無変更。
+      //   business_active gate で業務単位常時加算 (= 後付メーター機対等)。
+      //   絶対ルール準拠: GPS 直線距離ではなく速度×時間 (= タイヤ回転由来の概算・既存 gap fill と同性質)。
+      if (
+        state.business_active &&
+        gpsResult.speedKmh > 0 &&
+        !gpsResult.isStationary &&
+        dtSec > 0 &&
+        dtSec < 10
+      ) {
+        state.gps_predictive_distance_m += (gpsResult.speedKmh / 3.6) * dtSec;
+      }
 
       // Phase 1.C (2026-05-10): 通常時は haversine 累積を裏で track
       //   off-road 起動時に retroactive 加算するための buffer
@@ -1196,6 +1239,39 @@ const Meter = (() => {
       state.running && state.last_resume_time !== null
         ? Math.floor((state.elapsed_accumulated_sec + (Date.now() - state.last_resume_time)) / 1000)
         : Math.floor((state.elapsed_accumulated_sec || 0) / 1000);
+
+    // ★設計変更宣言 (2026-05-18・Phase 3・Reconciliation): display_distance_m を都度計算
+    //   target = max(distance_m, gps_predictive, distance_m + tier2_pending_m)
+    //     ・3 source のうち最大値を採用 (= 最も進んでいる距離を表示)
+    //     ・distance_m を必ず含むことで「課金距離を下回らない」保証
+    //   rate = 100 m/s で前回 display_distance_m から target に滑らか追従
+    //     ・経過時間 × 100m/秒 の差分まで補正 (= 急減ゼロ・P3 解消)
+    //     ・初回は target を即時採用
+    //   絶対ルール準拠: distance_m / fare_yen は無変更・表示専用 layer
+    const now = Date.now();
+    const target = Math.max(
+      state.distance_m || 0,
+      state.gps_predictive_distance_m || 0,
+      (state.distance_m || 0) + (state.tier2_pending_m || 0)
+    );
+    let display = state.display_distance_m || 0;
+    if (state.last_display_update_time === null) {
+      display = target;
+    } else {
+      const dt = Math.max(0, (now - state.last_display_update_time) / 1000);
+      const maxDelta = dt * 100; // rate=100 m/s
+      const diff = target - display;
+      if (Math.abs(diff) <= maxDelta) {
+        display = target;
+      } else {
+        display += diff > 0 ? maxDelta : -maxDelta;
+      }
+    }
+    // 課金距離 (= state.distance_m) を下回らない max 保証
+    display = Math.max(display, state.distance_m || 0);
+    // 内部 state 更新 (= 次回計算の基準)
+    state.display_distance_m = display;
+    state.last_display_update_time = now;
     return { ...state, elapsed_sec: elapsedSec };
   }
 

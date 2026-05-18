@@ -204,14 +204,17 @@ describe('offroad-mode-activation (meter.js Phase 1.C L95/L442/L462/L833/L334)',
     expect(s.offroad_distance_m).toBe(0);
   });
 
-  it('Off-Road 起動時に state.tier2_pending_m が 0 化される (L489)', () => {
-    // tier2_pending_m が 0 でない状態を作るには tentativeIncrementM>0 mmResult が必要
+  it('★ Phase 3: Off-Road 起動時の tier2_pending_m 一括 0 化は撤廃済 (= 自然減算で対応)', () => {
+    // 2026-05-18 Phase 3 仕様変更:
+    //   旧: Off-Road 起動時に tier2_pending_m = 0 一括リセット (= 表示急減原因)
+    //   新: 一括リセット撤廃・通常 commit 時の差分減算 (= 自然減算) で対応
+    //   表示は display_distance_m (= Reconciliation 同期値) で滑らか追従
     for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50, // tier2_pending_m += 50
-      snapped: true, // _consecutiveSnapMiss reset・Off-Road 起動阻止
+      tentativeIncrementM: 50,
+      snapped: true,
     });
     expect(Meter.getState().tier2_pending_m).toBe(50);
 
@@ -219,7 +222,8 @@ describe('offroad-mode-activation (meter.js Phase 1.C L95/L442/L462/L833/L334)',
     for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
     const s = Meter.getState();
     expect(s.offroad_count).toBe(1);
-    expect(s.tier2_pending_m).toBe(0); // 起動時に 0 化
+    // ★ Phase 3: tier2_pending_m は維持 (= 一括 0 化撤廃)
+    expect(s.tier2_pending_m).toBe(50);
   });
 
   it('Off-Road 中の _trackHaversineBetweenGps は early return で haver_accum 不累積 (L251)', () => {

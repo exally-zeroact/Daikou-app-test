@@ -5853,7 +5853,8 @@
           //     ・tier2_pending_m は差分減算で単調増加保証・表示後退なし
           //     ・calcFare は単調非減少関数 → 表示料金も単調増加
           //   iOS/Android 共通 (platform 分岐なし・state.tier2_pending_m は両 OS で同等)。
-          let fare = Meter.calcFare((s.distance_m || 0) + (s.tier2_pending_m || 0));
+          // ★ Phase 3: display_distance_m を採用
+          let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           let total = fare + extraTotal;
@@ -5863,7 +5864,8 @@
           //   state.tier2_pending_m (Tier 2 inline 道路 snap 先行値・道路ジオメトリ距離) の和。
           //   commit ラグ (Android 3s / iOS 10s) を Tier 2 並走で 0.2s/1.0s まで短縮する。
           //   driveFare (= 課金額) は s.fare_yen のまま (= calcFare(state.distance_m) の結果)。
-          const displayDistM = (s.distance_m || 0) + (s.tier2_pending_m || 0);
+          // ★ Phase 3: display_distance_m (= GPS predictive + Reconciliation 同期値) 採用
+          const displayDistM = s.display_distance_m || s.distance_m || 0;
           document.getElementById('driveDist').textContent = (displayDistM / 1000).toFixed(2);
           document.getElementById('driveFare').textContent = total.toLocaleString();
           // ★設計変更宣言 (2026-05-15・住所取得 retry UI 自動追従):
@@ -6823,7 +6825,8 @@
         //     ・state.distance_m / state.fare_yen / calcFare は不変
         //     ・onSend 側の fare 引数も同じ式 (Step2 で統一済)
         //     ・「課金確定値」は state.distance_m ベースで Meter 内に保持されたまま
-        const distance_for_calc = (s.distance_m || 0) + (s.tier2_pending_m || 0);
+        // ★ Phase 3: display_distance_m (= Reconciliation 同期値) を採用
+        const distance_for_calc = s.display_distance_m || s.distance_m || 0;
         const rawFareForDisplay = Meter.calcFare(distance_for_calc);
         let html = '';
         // 2026/05/01 仕様変更：走行情報を内訳の上に表示（分かりやすさ向上）
@@ -7078,7 +7081,8 @@
           //     ・「課金確定値」は依然 state.fare_yen に保持されている (= 確定時に変わらない)
           //     ・本変更は確定画面の「表示金額」だけ統一する
           //     ・FB.endSession へ送る total は本表示値ベース (= 客に見える金額 = サーバー送信値)
-          let fare = Meter.calcFare((s.distance_m || 0) + (s.tier2_pending_m || 0));
+          // ★ Phase 3: display_distance_m を採用
+          let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           let total = fare + extraTotal;
