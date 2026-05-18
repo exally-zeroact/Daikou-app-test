@@ -12,8 +12,6 @@
 //    本 helper は加速度を mock しない = gps-worker.js L596-598 救済 path
 //    (= 加速度 null 時 GPS 単独で finalStationary 確定) を通す前提。
 
-'use strict';
-
 const USER_AGENT_IOS =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 ' +
   '(KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1';
@@ -93,7 +91,7 @@ async function mockAndroid(browser, extra) {
  * @returns {number} interval in milliseconds (default 1000)
  */
 function gpsIntervalMs(context) {
-  return (context.__platformProfile && context.__platformProfile.gpsIntervalMs) || 1000;
+  return context.__platformProfile?.gpsIntervalMs || 1000;
 }
 
 /**
@@ -102,7 +100,7 @@ function gpsIntervalMs(context) {
  * @returns {boolean}
  */
 function isIOSContext(context) {
-  return !!(context.__platformProfile && context.__platformProfile.isIOS);
+  return !!context.__platformProfile?.isIOS;
 }
 
 module.exports = {

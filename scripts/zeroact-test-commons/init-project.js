@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /* eslint-env node */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/init-project.js
@@ -84,7 +83,7 @@ function readSimpleYaml(filePath) {
   if (m) {
     for (const line of m[1].split('\n')) {
       const kv = line.match(/^[ \t]+(\w+):\s*["']?([^"'\n]*?)["']?\s*$/);
-      if (kv && kv[2]) result.project[kv[1]] = kv[2].trim();
+      if (kv?.[2]) result.project[kv[1]] = kv[2].trim();
     }
   }
   return result;

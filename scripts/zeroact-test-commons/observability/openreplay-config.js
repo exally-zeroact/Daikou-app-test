@@ -1,5 +1,4 @@
 /* eslint-env browser */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/observability/openreplay-config.js
@@ -34,20 +33,19 @@
 
 (function (global) {
   function getIngestUrl() {
-    if (typeof global !== 'undefined' && global.OPENREPLAY_INGEST_URL) {
+    if (global?.OPENREPLAY_INGEST_URL) {
       return global.OPENREPLAY_INGEST_URL;
     }
-    const meta = global.document && global.document.querySelector('meta[name="openreplay-ingest"]');
-    return (meta && meta.getAttribute('content')) || '';
+    const meta = global.document?.querySelector('meta[name="openreplay-ingest"]');
+    return meta?.getAttribute('content') || '';
   }
 
   function getProjectKey() {
-    if (typeof global !== 'undefined' && global.OPENREPLAY_PROJECT_KEY) {
+    if (global?.OPENREPLAY_PROJECT_KEY) {
       return global.OPENREPLAY_PROJECT_KEY;
     }
-    const meta =
-      global.document && global.document.querySelector('meta[name="openreplay-project-key"]');
-    return (meta && meta.getAttribute('content')) || '';
+    const meta = global.document?.querySelector('meta[name="openreplay-project-key"]');
+    return meta?.getAttribute('content') || '';
   }
 
   function initOpenReplay(extraOpts) {

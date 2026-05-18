@@ -1,5 +1,4 @@
 /* eslint-env browser */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/observability/ab-config.js
@@ -71,7 +70,7 @@
 
   function getOrCreateUserId() {
     try {
-      const existing = global.localStorage && global.localStorage.getItem(STORAGE_KEY);
+      const existing = global.localStorage?.getItem(STORAGE_KEY);
       if (existing) return existing;
     } catch (_e) {
       // localStorage access denied (= プライベート browsing 等)・無視
@@ -88,14 +87,14 @@
   // userId + experimentKey から variant index を決定論的に返す
   function pickVariantIndex(userId, experimentKey, variantCount) {
     const def = EXPERIMENT_DEFINITIONS[experimentKey];
-    const seedOffset = (def && def.seedOffset) || experimentKey;
+    const seedOffset = def?.seedOffset || experimentKey;
     const seed = userId + ':' + seedOffset;
     return hashStr(seed) % variantCount;
   }
 
   function assignVariant(userId, experimentKey) {
     const def = EXPERIMENT_DEFINITIONS[experimentKey];
-    if (!def || !def.variants || def.variants.length === 0) {
+    if (!def?.variants || def.variants.length === 0) {
       return { variant: 'control', value: EXPERIMENT_DEFAULTS[experimentKey] };
     }
     const idx = pickVariantIndex(userId, experimentKey, def.variants.length);
@@ -116,7 +115,7 @@
           if (str !== '') {
             // 数値なら parse
             const num = Number(str);
-            out[key] = Number.isFinite(num) && !isNaN(num) ? num : str;
+            out[key] = Number.isFinite(num) && !Number.isNaN(num) ? num : str;
           }
         }
       }
@@ -128,8 +127,8 @@
   }
 
   async function initABConfig(opts) {
-    const userId = (opts && opts.userId) || getOrCreateUserId();
-    const remoteRC = (opts && opts.firebaseRC) || null;
+    const userId = opts?.userId || getOrCreateUserId();
+    const remoteRC = opts?.firebaseRC || null;
 
     // 1. Firebase Remote Config 値を試行 (= サーバー override)
     const remote = await fetchRemoteValues(remoteRC);

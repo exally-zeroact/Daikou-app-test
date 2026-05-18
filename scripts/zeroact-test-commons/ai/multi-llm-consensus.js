@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /* eslint-env node */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/ai/multi-llm-consensus.js
@@ -84,7 +83,7 @@ async function callAnthropic() {
       return { error: 'Anthropic API ' + res.status + ': ' + (await res.text()).slice(0, 200) };
     }
     const data = await res.json();
-    const text = (data.content && data.content[0] && data.content[0].text) || '';
+    const text = data.content?.[0]?.text || '';
     return parseVerdict(text, 'haiku');
   } catch (e) {
     return { error: 'Anthropic fetch failed: ' + e.message };
@@ -111,14 +110,7 @@ async function callGemini() {
       return { error: 'Gemini API ' + res.status + ': ' + (await res.text()).slice(0, 200) };
     }
     const data = await res.json();
-    const text =
-      (data.candidates &&
-        data.candidates[0] &&
-        data.candidates[0].content &&
-        data.candidates[0].content.parts &&
-        data.candidates[0].content.parts[0] &&
-        data.candidates[0].content.parts[0].text) ||
-      '';
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     return parseVerdict(text, 'gemini');
   } catch (e) {
     return { error: 'Gemini fetch failed: ' + e.message };

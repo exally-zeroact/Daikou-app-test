@@ -54,7 +54,9 @@ describe('firebase retry property (㉘)', () => {
             return true;
           };
           for (let k = 0; k < 15 && state._queue.length > 0; k++) {
-            state._queue.forEach((r) => (r.nextRetryAt = 0));
+            state._queue.forEach((r) => {
+              r.nextRetryAt = 0;
+            });
             await isolatedFlushRetry(state, exec);
           }
           // 全 failure でも RETRY_MAX_COUNT 超で discard・全 success でも 1 回で削除
@@ -85,7 +87,9 @@ describe('firebase retry property (㉘)', () => {
           return true;
         };
         for (let k = 0; k < 10; k++) {
-          state._queue.forEach((r) => (r.nextRetryAt = 0));
+          state._queue.forEach((r) => {
+            r.nextRetryAt = 0;
+          });
           await isolatedFlushRetry(state, exec);
         }
         // 残った queue の id は全て初期 set の subset
@@ -114,7 +118,9 @@ describe('firebase retry property (㉘)', () => {
           throw new Error('always fail');
         };
         for (let k = 0; k < n; k++) {
-          state._queue.forEach((r) => (r.nextRetryAt = 0));
+          state._queue.forEach((r) => {
+            r.nextRetryAt = 0;
+          });
           await isolatedFlushRetry(state, exec);
         }
         // queue 内の retryCount は <= 5 (= RETRY_MAX_COUNT) or queue 空

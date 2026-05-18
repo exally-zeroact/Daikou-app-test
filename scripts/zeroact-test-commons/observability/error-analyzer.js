@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /* eslint-env node */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/observability/error-analyzer.js
@@ -71,7 +70,7 @@ function isBillingRelevant(issue) {
     ' ' +
     (issue.culprit || '') +
     ' ' +
-    ((issue.metadata && issue.metadata.value) || '')
+    (issue.metadata?.value || '')
   ).toLowerCase();
   return BILLING_KEYWORDS.some((kw) => haystack.includes(kw.toLowerCase()));
 }

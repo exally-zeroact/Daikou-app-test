@@ -1,5 +1,4 @@
 /* eslint-env browser */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/observability/sentry-config.js
@@ -29,14 +28,14 @@
 
 (function (global) {
   function getDsn() {
-    if (typeof global !== 'undefined' && global.SENTRY_DSN) return global.SENTRY_DSN;
-    const meta = global.document && global.document.querySelector('meta[name="sentry-dsn"]');
-    return (meta && meta.getAttribute('content')) || '';
+    if (global?.SENTRY_DSN) return global.SENTRY_DSN;
+    const meta = global.document?.querySelector('meta[name="sentry-dsn"]');
+    return meta?.getAttribute('content') || '';
   }
 
   function getRelease() {
-    const meta = global.document && global.document.querySelector('meta[name="app-version"]');
-    return (meta && meta.getAttribute('content')) || 'daikome@unknown';
+    const meta = global.document?.querySelector('meta[name="app-version"]');
+    return meta?.getAttribute('content') || 'daikome@unknown';
   }
 
   // 課金関連識別子・送信時に強制 force-send
@@ -50,13 +49,8 @@
 
   function isBillingRelevant(event) {
     try {
-      const msg = (event && event.message) || '';
-      const exception =
-        event &&
-        event.exception &&
-        event.exception.values &&
-        event.exception.values[0] &&
-        event.exception.values[0].value;
+      const msg = event?.message || '';
+      const exception = event?.exception?.values?.[0]?.value;
       const haystack = (msg + ' ' + (exception || '')).toLowerCase();
       return BILLING_KEYWORDS.some((kw) => haystack.includes(kw.toLowerCase()));
     } catch (_e) {
@@ -75,7 +69,7 @@
       return event;
     }
     // 非課金 GPS / Worker 等のエラー: 既知パターンを 1 issue に集約
-    if (event && event.message) {
+    if (event?.message) {
       if (/Worker.*terminated/i.test(event.message)) {
         event.fingerprint = ['daikome-worker-terminated'];
       }

@@ -19,8 +19,6 @@
 //          PWA full warmup が必要。本 helper は GPS 配送のみ提供し、
 //          Worker chain は別途 page.evaluate() で起動させる必要がある。
 
-'use strict';
-
 /**
  * 走行シミュレーション (= 直線移動・GPS 1Hz 更新)
  * @param {import('@playwright/test').BrowserContext} context Playwright context

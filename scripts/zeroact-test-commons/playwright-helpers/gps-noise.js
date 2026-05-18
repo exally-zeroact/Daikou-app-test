@@ -9,8 +9,6 @@
 //   ・GPS jump (= 物理速度上限を超える瞬間移動・160km/h + 5m clamp 確認)
 //   ・GPS drift (= 停車中の微小座標変動・isStationary 判定耐性確認)
 
-'use strict';
-
 /**
  * accuracy 値を劣化させた GPS を順次注入する。
  * meter.js L254-255 (accuracy>50m で _trackHaversineBetweenGps return) と
@@ -122,7 +120,7 @@ async function injectGpsDrift(context, opts) {
  * @param {object} opts
  * @param {number} opts.gapSec 空白秒数 (>=5 で gap fill 発火)
  */
-async function injectGpsSilence(context, opts) {
+async function injectGpsSilence(_context, opts) {
   await new Promise((r) => setTimeout(r, opts.gapSec * 1000));
   // 空白後の追加は呼出側で setGeolocation する
 }

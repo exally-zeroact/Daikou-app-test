@@ -1,5 +1,4 @@
 /* eslint-env node */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/arch-rules.test.js

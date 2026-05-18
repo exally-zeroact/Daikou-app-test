@@ -39,10 +39,15 @@ input/
 
 # Playwright / Vitest 動的解析 ② ③ 生成物 (2026-05-15)
 # 注: leading `/` を付けて repo root にアンカー。
-# data/test-results/ は CI (mm-regression.yml) が更新する追跡対象なので除外しない。
 /test-results/
 /playwright-report/
 /coverage/
+
+# test results (2026-05-18 追加・rebase conflict 防止)
+# 旧: CI (mm-regression.yml) 追跡対象として残していたが
+# 新: ローカル npm run test:replay で毎回更新・複数 push の rebase conflict 多発で除外化
+# CI artifact / Sentry release tag で代替記録
+data/test-results/
 
 # Stryker mutation testing 生成物 (2026-05-18 追加・P5)
 # sandbox はテスト毎に dir 名がランダム生成・コミット追跡不要

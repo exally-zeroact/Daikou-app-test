@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /* eslint-env node */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/ai/ai-bug-hunter.js
@@ -37,7 +36,7 @@ const TARGET_FILES = ['js/meter.js', 'js/map-matcher.js', 'js/gps-worker.js'];
 function readFileSafe(p) {
   try {
     return fs.readFileSync(p, 'utf8');
-  } catch (e) {
+  } catch (_e) {
     return null;
   }
 }
@@ -91,7 +90,7 @@ async function callAnthropic(prompt) {
       return { error: 'Anthropic API ' + res.status + ': ' + (await res.text()).slice(0, 500) };
     }
     const data = await res.json();
-    const text = (data.content && data.content[0] && data.content[0].text) || '';
+    const text = data.content?.[0]?.text || '';
     return { text };
   } catch (e) {
     return { error: 'Anthropic fetch failed: ' + e.message };

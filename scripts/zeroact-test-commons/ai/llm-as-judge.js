@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /* eslint-env node */
-'use strict';
 
 // ============================================================
 // scripts/zeroact-test-commons/ai/llm-as-judge.js
@@ -36,7 +35,7 @@ const GEMINI_MODEL = 'gemini-2.5-flash';
 function readFileSafe(p) {
   try {
     return fs.readFileSync(p, 'utf8');
-  } catch (e) {
+  } catch (_e) {
     return null;
   }
 }
@@ -62,7 +61,7 @@ function loadTestResult() {
   if (!content) return null;
   try {
     return JSON.parse(content);
-  } catch (e) {
+  } catch (_e) {
     return { _rawText: content.slice(0, 2000) };
   }
 }
@@ -87,14 +86,7 @@ async function callGemini(prompt) {
       return { error: 'Gemini API ' + res.status + ': ' + (await res.text()).slice(0, 200) };
     }
     const data = await res.json();
-    const text =
-      (data.candidates &&
-        data.candidates[0] &&
-        data.candidates[0].content &&
-        data.candidates[0].content.parts &&
-        data.candidates[0].content.parts[0] &&
-        data.candidates[0].content.parts[0].text) ||
-      '';
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     return { text };
   } catch (e) {
     return { error: 'Gemini fetch failed: ' + e.message };

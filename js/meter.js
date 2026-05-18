@@ -58,6 +58,7 @@ const Meter = (() => {
   //   (now - lastMmUsefulAt) > MM_SILENT_THRESHOLD_MS で MM "silent" と判定し
   //   GPS 直線距離を fallback として state.distance_m に加算する
   let lastMmUsefulAt = 0;
+  // eslint-disable-next-line no-unused-vars -- 将来 fallback 再活用予定 (= 旧 MM 沈黙判定 threshold)
   const MM_SILENT_THRESHOLD_MS = 2500; // A2 (2026-05-09): 5000→2500 短縮で fallback 早期化
 
   // ★設計変更宣言 (2026-05-15・代行開始直後の Worker B バッファ残骸 drain):
@@ -229,7 +230,9 @@ const Meter = (() => {
     if (mmWorker) {
       try {
         mmWorker.removeEventListener('message', _onMmWorkerMessage);
-      } catch (e) {}
+      } catch (e) {
+        /* noop - intentionally empty */
+      }
     }
     mmWorker = worker || null;
     _workerLoadedPrefs = new Set(); // 新 Worker 起動で再カウント
@@ -351,7 +354,9 @@ const Meter = (() => {
         if (mmWorker) {
           try {
             mmWorker.postMessage({ type: 'resetCommittedSnap' });
-          } catch (_) {}
+          } catch (_) {
+            /* noop - intentionally empty */
+          }
         }
         // mmIncrement は加算しない・lastMmUsefulAt も更新しない (= mmHealthy false 維持)
       } else if (Date.now() < _drainMmUntil) {
@@ -410,10 +415,7 @@ const Meter = (() => {
         //     → 表示値は単調増加 (絶対に下がらない)
         //   distance_m への加算は完全に不変 (= 絶対ルール「distance_m 変えない」準拠)
         //   _tier2Segments は引き続き未使用 (旧経路で使われていたが現在は空のまま維持)
-        state.tier2_pending_m = Math.max(
-          0,
-          (state.tier2_pending_m || 0) - (m.mmIncrementM || 0)
-        );
+        state.tier2_pending_m = Math.max(0, (state.tier2_pending_m || 0) - (m.mmIncrementM || 0));
         _tier2Segments = [];
       }
     }
@@ -478,7 +480,9 @@ const Meter = (() => {
         if (mmWorker) {
           try {
             mmWorker.postMessage({ type: 'resetCommittedSnap' });
-          } catch (_) {}
+          } catch (_) {
+            /* noop - intentionally empty */
+          }
         }
         // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・Off-Road 起動時クリア):
         //   Off-Road 起動後は update() の Tier 2 並走分岐が走らなくなり、Off-Road 経路
@@ -501,7 +505,9 @@ const Meter = (() => {
         if (typeof GPS !== 'undefined' && typeof GPS.setRoadType === 'function') {
           try {
             GPS.setRoadType(newTypeCode);
-          } catch (_) {}
+          } catch (_) {
+            /* noop - intentionally empty */
+          }
         }
       }
     }
@@ -511,7 +517,9 @@ const Meter = (() => {
       if (typeof FB !== 'undefined' && typeof FB.markVisited === 'function') {
         try {
           FB.markVisited(m.snap.prefecture, m.snap.roadIndex);
-        } catch (_) {}
+        } catch (_) {
+          /* noop - intentionally empty */
+        }
       }
     }
     if (m.snapped) state.mm_snap_count++;
@@ -621,7 +629,9 @@ const Meter = (() => {
     if (mmWorker) {
       try {
         mmWorker.postMessage({ type: 'reset' });
-      } catch (e) {}
+      } catch (e) {
+        /* noop - intentionally empty */
+      }
     }
     if (timer) clearInterval(timer);
     timer = setInterval(() => {
@@ -652,7 +662,9 @@ const Meter = (() => {
     if (mmWorker) {
       try {
         mmWorker.postMessage({ type: 'reset' });
-      } catch (e) {}
+      } catch (e) {
+        /* noop - intentionally empty */
+      }
     }
     // ★設計変更宣言 (2026-05-14): 業務終了で business_distance_m を 0 リセット。
     //   trip 単位の Meter.start() / Meter.reset() ではリセットせず、businessEnd でのみ 0 化する。
@@ -668,7 +680,9 @@ const Meter = (() => {
     if (typeof FB !== 'undefined' && typeof FB.pushSessionAggregates === 'function') {
       try {
         FB.pushSessionAggregates();
-      } catch (_) {}
+      } catch (_) {
+        /* noop - intentionally empty */
+      }
     }
   }
 
@@ -718,7 +732,9 @@ const Meter = (() => {
     if (mmWorker) {
       try {
         mmWorker.postMessage({ type: 'softReset' });
-      } catch (e) {}
+      } catch (e) {
+        /* noop - intentionally empty */
+      }
     }
     // 起動時warm up GPSもクリア（過剰課金リスク回避・2026/05/01）
     // GPS止まった状態で移動→次回代行開始時に古い座標と現在地で距離爆発するのを防ぐ
@@ -891,7 +907,9 @@ const Meter = (() => {
     ) {
       try {
         TrainingCollector.collectIfEligible(gpsResult);
-      } catch (_) {}
+      } catch (_) {
+        /* noop - intentionally empty */
+      }
     }
 
     // ━━━━━ Map Matching: Worker B にも GPS を転送 ━━━━━
@@ -1496,4 +1514,5 @@ const Meter = (() => {
 //   既存 `const Meter = (() => {...})()` IIFE は無変更。末尾に Node 環境用 module.exports を追加。
 //   browser/Worker context: module 未定義のため no-op (旧挙動と等価)。
 //   Node test context: require('./meter.js') で Meter API オブジェクトを取得可能。
+// eslint-disable-next-line no-undef -- node 環境のみ・typeof guard で browser/Worker は no-op
 if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = Meter;

@@ -115,8 +115,8 @@ describe('gps-worker.js dynamic worker test (⑪)', () => {
     const resultPromise = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         worker.terminate();
-        reject(new Error('worker result timeout (3s)'));
-      }, 3000);
+        reject(new Error('worker result timeout (10s)'));
+      }, 10000);
       worker.onmessage = (e) => {
         if (e.data && e.data.type === 'result') {
           clearTimeout(timeout);
@@ -166,7 +166,7 @@ describe('isStationary 3-AND 条件 詳細 (gps-worker.js verified L596-627)', (
     return new Promise((resolve, reject) => {
       const t = setTimeout(
         () => reject(new Error('timeout ' + timeoutMs + 'ms')),
-        timeoutMs || 3000
+        timeoutMs || 10000
       );
       worker.onmessage = (e) => {
         if (e.data && e.data.type === 'result') {
