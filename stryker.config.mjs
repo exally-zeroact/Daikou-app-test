@@ -48,7 +48,22 @@ export default {
   //
   // 本体コード (= meter.js 等) の mutation testing は将来 課金根拠の
   // 別レイヤー (= Semgrep taint rule / property test 増強) で代替する。
-  mutate: ['scripts/zeroact-test-commons/property-test-helpers.js'],
+  //
+  // ★設計変更宣言 (2026-05-18・全32件テスト追加に伴う mutate target 拡張):
+  //   旧: mutate 対象 = scripts/zeroact-test-commons/property-test-helpers.js のみ
+  //   新: + tests/integration/helpers/**/*.js + tests/property/helpers/**/*.js を追加
+  //   理由: 新規追加 integration/property test 内で共通利用される helpers 層の
+  //         論理弱点 (= テストロジック自体の bug) を mutation で検出可能にする。
+  //   注意:
+  //     ・テストファイル本体 (*.test.js) は mutate 対象外 (= 無限ループ防止)
+  //     ・helpers/ ディレクトリは未配置時も glob 上は空マッチで害なし
+  //     ・既存 property-test-helpers.js の mutate 範囲は無変更
+  //     ・本体コード (meter.js / gps.js 等) は引き続き mutate 不可 (絶対ルール)
+  mutate: [
+    'scripts/zeroact-test-commons/property-test-helpers.js',
+    'tests/integration/helpers/**/*.js',
+    'tests/property/helpers/**/*.js',
+  ],
   // Stryker の project file scan から除外 (= heap OOM 対策)
   ignorePatterns: [
     'data/**',
