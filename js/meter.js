@@ -1627,6 +1627,21 @@ const Meter = (() => {
     };
   }
 
+  // ★設計変更宣言 (2026-05-19・B-3・代行中タスクキル elapsed_sec 復元):
+  //   旧: Meter.start で elapsed_accumulated_sec=0 / last_resume_time=now
+  //       → タスクキル復帰時 checkDrivingRestore → Meter.start → elapsed 0 リセット
+  //       → 代行中の経過時間が失われる
+  //   新: 復帰時に Meter.start 後に本 API を呼んで elapsed_accumulated_sec を復元
+  //       last_resume_time=now で復元後即時カウント開始
+  //   絶対ルール準拠:
+  //     ・distance_m / fare_yen / 課金経路には触れない
+  //     ・正常起動時は呼ばれない (= タスクキル復帰時のみ)
+  function setElapsedAccumulated(savedSec) {
+    const v = typeof savedSec === 'number' && savedSec >= 0 ? savedSec : 0;
+    state.elapsed_accumulated_sec = v;
+    state.last_resume_time = Date.now();
+  }
+
   // ★設計変更宣言 (2026-05-19・B-1・業務開始時 warmup GPS prime):
   //   旧: 業務開始 (= Business.start) は Meter.start を呼ばないので・state.last_gps=null のまま
   //       → 待機中の最初の GPS update は last_gps セットのみ・haversine 加算は 2 回目から
@@ -1666,6 +1681,7 @@ const Meter = (() => {
     update,
     updateGpsOnly,
     primeFromWarmup,
+    setElapsedAccumulated,
     getState,
     getMMStats,
     setFareConfig,

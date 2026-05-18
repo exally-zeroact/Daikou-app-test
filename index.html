@@ -5368,6 +5368,16 @@
           appState = 'driving';
           Meter.start();
           Meter.setDistance(saved.distance_m);
+          // ★設計変更宣言 (2026-05-19・B-3・代行中タスクキル elapsed_sec 復元):
+          //   Meter.start() で elapsed_accumulated_sec=0 化される直後に・saved 値で再 prime。
+          //   タスクキル前の経過時間が連続して継続される (= 業務継続性向上)。
+          if (
+            typeof saved.elapsed_sec === 'number' &&
+            saved.elapsed_sec > 0 &&
+            typeof Meter.setElapsedAccumulated === 'function'
+          ) {
+            Meter.setElapsedAccumulated(saved.elapsed_sec * 1000);
+          }
           // 最終GPS状態をセット（層3・GPS消失補完を復元後に自動発火させる）
           if (saved.last_lat && saved.last_gps_at) {
             Meter.setLastGps(
@@ -6004,6 +6014,8 @@
               last_altitude: ms.last_gps ? ms.last_gps.altitude : null,
               last_speed_kmh: ms.last_speed_kmh || 0,
               last_gps_at: ms.last_timestamp || null,
+              // ★ B-3 (2026-05-19): elapsed_sec 保存 (= 代行中タスクキル復帰で経過時間継続)
+              elapsed_sec: s.elapsed_sec || 0,
               // F2 (2026-05-09): MM stats を併せて保存・復元時の動作確認用
               mm_distance_m: mmStats ? mmStats.mm_distance_m : 0,
               distance_source: mmStats ? mmStats.distance_source : null,

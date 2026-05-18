@@ -1,17 +1,5 @@
 [
   {
-    "generated_at": "2026-05-18T16:29:10.759Z",
-    "git_sha": null,
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
-    "generated_at": "2026-05-18T16:41:28.749Z",
-    "git_sha": null,
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
     "generated_at": "2026-05-18T17:20:38.047Z",
     "git_sha": null,
     "snap_rate": 1,
@@ -55,6 +43,18 @@
   },
   {
     "generated_at": "2026-05-18T18:47:29.442Z",
+    "git_sha": null,
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-18T18:51:26.907Z",
+    "git_sha": null,
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-18T18:52:49.508Z",
     "git_sha": null,
     "snap_rate": 1,
     "der": 0.0004
