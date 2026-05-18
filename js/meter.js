@@ -117,6 +117,18 @@ const Meter = (() => {
   let _haverAccumSinceLastCommit = 0; // 直近 commit からの haversine 累積 (retroactive 用)
   const OFFROAD_SNAP_MISS_THRESHOLD = 5;
   const OFFROAD_ABS_MAX_KMH = 160; // 物理上限
+  // ★設計変更宣言 (2026-05-19・R1・代行開始直後 Off-Road 起動 grace period):
+  //   旧: 代行開始直後・Worker B reset 後 commit 遅延中に snap miss 5 連続 →
+  //       Off-Road 起動 → retroactive 加算で 200m 一括飛び事象 (司さん実車報告)
+  //   新: 代行開始 (Meter.start) から 5 秒間は Off-Road 起動を skip。
+  //       Worker B が安定して commit を出し始める時間を確保し・retroactive 一括加算を防ぐ。
+  //   絶対ルール準拠:
+  //     ・distance_m / fare_yen / calcFare ロジック無変更
+  //     ・5 秒経過後は通常 Off-Road 起動ロジック発火 (= 課金漏れ防止維持)
+  //     ・grace 中の haversine 累積 buffer は維持 (= 5 秒経過後の正規 Off-Road 起動で
+  //       retroactive 加算する場合・本物の Off-Road 区間の課金漏れ防止)
+  let _offRoadGraceUntil = 0;
+  const OFFROAD_GRACE_AFTER_START_MS = 5000;
 
   // MM-1: Worker B 参照（index.html から setMapMatcher で注入）
   //   ★設計変更宣言 (2026-05-17・RegionLoader 撤去): null の場合の inline fallback は廃止。
@@ -478,7 +490,14 @@ const Meter = (() => {
       (typeof m.mmIncrementM === 'number' && m.mmIncrementM === 0 && !m.committed)
     ) {
       _consecutiveSnapMiss++;
-      if (!_offRoadActive && _consecutiveSnapMiss >= OFFROAD_SNAP_MISS_THRESHOLD) {
+      // ★設計変更宣言 (2026-05-19・R1・代行開始直後 5 秒 grace period):
+      //   代行開始 (Meter.start) 直後の Worker B reset 期間に snap miss が 5 連続発生し
+      //   retroactive 一括加算で 200m 飛びが発生する事象を防止。grace 経過後は通常起動。
+      if (
+        !_offRoadActive &&
+        _consecutiveSnapMiss >= OFFROAD_SNAP_MISS_THRESHOLD &&
+        Date.now() >= _offRoadGraceUntil
+      ) {
         _offRoadActive = true;
         state.offroad_count = (state.offroad_count || 0) + 1;
         // 直前 commit からの haversine 累積を retroactive で加算 (snap-miss 区間の課金漏れ防止)
@@ -669,6 +688,8 @@ const Meter = (() => {
     //   いずれにも加算しない (空車 phase で business 側は既加算・代行中 distance に
     //   持ち越さない)。
     _drainMmUntil = Date.now() + MM_DRAIN_AFTER_START_MS;
+    // ★ R1: 代行開始直後 5 秒間は Off-Road 起動 skip (= retroactive 一括加算で 200m 飛び防止)
+    _offRoadGraceUntil = Date.now() + OFFROAD_GRACE_AFTER_START_MS;
     // MM-1: Worker 側 prevSnap も初期化（業務開始時の連続性リセット）
     if (mmWorker) {
       try {
@@ -1634,6 +1655,15 @@ const Meter = (() => {
     //   prod コードからは呼び出さない (テスト専用 escape hatch)。
     _setDrainMmUntil: function (t) {
       _drainMmUntil = typeof t === 'number' ? t : 0;
+    },
+    // ★設計変更宣言 (2026-05-19・R1 test escape hatch):
+    //   Off-Road grace period (5 秒) は prod 環境で「代行開始直後 200m 飛び」防止のため
+    //   必須。ただし既存 offroad-mode-activation.test.js は Meter.start 直後に snap miss
+    //   5 連続で Off-Road 起動を期待しており、grace で起動しなくなる。
+    //   テスト用に _setOffRoadGraceUntil(0) で grace を即時無効化できる API を提供。
+    //   prod コードからは呼び出さない (テスト専用 escape hatch)。
+    _setOffRoadGraceUntil: function (t) {
+      _offRoadGraceUntil = typeof t === 'number' ? t : 0;
     },
     // fareConfig v2 (2026-05-10)
     setSurchargeActive,

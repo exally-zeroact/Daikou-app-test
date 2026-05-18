@@ -107,6 +107,10 @@ describe('offroad-mode-activation (meter.js Phase 1.C L95/L442/L462/L833/L334)',
     Meter.setMapMatcher(fakeWorker);
     Meter.start();
     Meter._setDrainMmUntil(0); // drain 無効化 (= drain は P0-③ 検証範囲)
+    // ★ R1 (2026-05-19): Off-Road grace 5 秒 を test では即時解除 (= Off-Road 起動を即可能に)
+    if (typeof Meter._setOffRoadGraceUntil === 'function') {
+      Meter._setOffRoadGraceUntil(0);
+    }
   });
   afterEach(() => {
     if (Meter) Meter.reset();

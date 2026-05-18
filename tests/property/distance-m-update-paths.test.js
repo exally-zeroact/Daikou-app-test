@@ -79,8 +79,10 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     // 旧 (Phase 2 後): [415, 484, 874, 893, 1239]
     // 旧 (Phase 3 後): [427, 496, 917, 936, 1315]
     // 2026-05-19 更新 (business_distance_m 完全分離): 4 加算経路から business 削除で shift。
-    // 新: [428, 495, 927, 945, 1324]
-    const expectedLines = [428, 495, 927, 945, 1324];
+    // 旧: [428, 495, 927, 945, 1324]
+    // 2026-05-19 R1 更新 (Off-Road grace period): _offRoadGraceUntil 追加で shift。
+    // 新: [440, 514, 948, 966, 1345]
+    const expectedLines = [440, 514, 948, 966, 1345];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -138,7 +140,8 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     // L257 は _trackHaversineBetweenGps 内・L305 は _calculateOffRoadIncrement 内
     // Stryker sandbox 由来 line offset 吸収のため ±10 line 許容
     // 2026-05-18 更新 (Phase 3): GPS.calcDistance も +11 shift。
-    const expectedLines = [283, 331];
+    // 2026-05-19 R1 更新 (Off-Road grace period): _offRoadGraceUntil 定数追加で shift。
+    const expectedLines = [295, 343];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 2; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
