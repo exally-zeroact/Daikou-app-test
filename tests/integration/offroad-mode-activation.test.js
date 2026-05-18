@@ -1,0 +1,247 @@
+// tests/integration/offroad-mode-activation.test.js
+// ZEROact 共通テスト基盤 (2026-05-18 新規・Step P0-④ / 全32件)
+//
+// 検証対象: meter.js Phase 1.C Off-Road Mode
+//   L95  OFFROAD_SNAP_MISS_THRESHOLD = 5
+//   L442 snap miss 連続検出 (m.snapped===false || m.skipped || (mmIncrementM===0 && !committed))
+//   L450 _offRoadActive=true 起動
+//   L462 state.distance_m += _haverAccumSinceLastCommit (= retroactive 加算)
+//   L833 _calculateOffRoadIncrement → state.distance_m += inc (= incremental 加算)
+//   L334 Worker B 復帰 (mmIncrementM>0 受信) → _offRoadActive=false + commit 無視
+//
+// 既存 (= property/distance-m-update-paths.test.js C1) は L462/L842 静的 grep のみ・実動作未検証。
+// 本 test は fake worker で snap miss / 復帰 sequence を駆動・動的検証。
+//
+// 絶対ルール準拠:
+//   js/meter.js は触らない absolute。Off-Road は ★絶対ルール適用外区間 (= retroactive / 明示宣言)。
+
+const path = require('path');
+const METER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'meter.js');
+
+function loadMeter() {
+  delete require.cache[require.resolve(METER_JS_PATH)];
+  return require(METER_JS_PATH);
+}
+
+const DEFAULT_FARE_CONFIG = {
+  version: 2,
+  base_fare: 1300,
+  base_distance_m: 1000,
+  add_fare: 100,
+  add_distance_m: 420,
+  tiers: [],
+  surcharges: [],
+  minFare: null,
+  maxFare: null,
+  rounding: 10,
+  autoSurcharges: {},
+  vehicles: [],
+  vehiclesEnabled: false,
+  wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
+};
+
+function mockGPS() {
+  globalThis.GPS = {
+    calcDistance: (lat1, lng1, lat2, lng2) => {
+      const R = 6371000;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    },
+    calcDistance3D: () => 0,
+    setRoadType: () => {},
+  };
+}
+
+function makeFakeWorker() {
+  const handlers = [];
+  return {
+    addEventListener(type, h) {
+      if (type === 'message') handlers.push(h);
+    },
+    removeEventListener(type, h) {
+      const i = handlers.indexOf(h);
+      if (i >= 0) handlers.splice(i, 1);
+    },
+    postMessage() {},
+    _dispatch(data) {
+      for (const h of handlers) h({ data });
+    },
+  };
+}
+
+// 1 step = 0.000225 度 ≈ 25m 北・1 秒間隔 (= 90 km/h・物理上限 160km/h クリア)
+function gpsAt(stepIdx, baseLat = 33.84, baseLng = 132.7656, baseTs = 1714100000000) {
+  return {
+    lat: baseLat + 0.000225 * stepIdx,
+    lng: baseLng,
+    altitude: 0,
+    accuracy: 5,
+    speedKmh: 90,
+    isStationary: false,
+    timestamp: baseTs + stepIdx * 1000,
+  };
+}
+
+function snapMiss() {
+  return { type: 'mmResult', mmIncrementM: 0, snapped: false, skipped: 1, committed: false };
+}
+
+function snapHit(mmIncrementM) {
+  return { type: 'mmResult', mmIncrementM, snapped: true, committed: true };
+}
+
+describe('offroad-mode-activation (meter.js Phase 1.C L95/L442/L462/L833/L334)', () => {
+  let Meter, fakeWorker;
+  beforeEach(() => {
+    mockGPS();
+    Meter = loadMeter();
+    Meter.setFareConfig(DEFAULT_FARE_CONFIG);
+    Meter.reset();
+    fakeWorker = makeFakeWorker();
+    Meter.setMapMatcher(fakeWorker);
+    Meter.start();
+    Meter._setDrainMmUntil(0); // drain 無効化 (= drain は P0-③ 検証範囲)
+  });
+  afterEach(() => {
+    if (Meter) Meter.reset();
+    delete globalThis.GPS;
+  });
+
+  it('snap miss 4 回連続 → Off-Road 未起動 (= OFFROAD_SNAP_MISS_THRESHOLD=5 未満)', () => {
+    // 6 GPS update (= step 0 last_gps セット + step 1-5 で haver_accum 累積)
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    // snap miss 4 回 (= 5 未満)
+    for (let k = 0; k < 4; k++) fakeWorker._dispatch(snapMiss());
+    const s = Meter.getState();
+    expect(s.offroad_count).toBe(0);
+    expect(s.distance_m).toBe(0); // retroactive 未起動・distanceSource は 'mm' に切替なし
+  });
+
+  it('snap miss 5 回連続 → Off-Road 起動 (offroad_count=1) + retroactive 加算 (L462)', () => {
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const s = Meter.getState();
+    expect(s.offroad_count).toBe(1);
+    expect(s.distanceSource).toBe('offroad');
+    // retroactive 加算: 5 step (= 約 125m haver_accum・25m/step × 5) が state.distance_m に
+    expect(s.distance_m).toBeGreaterThan(100);
+    expect(s.distance_m).toBeLessThan(150);
+    expect(s.offroad_distance_m).toBe(s.distance_m); // 全額が offroad_distance_m に記録
+    // _haverAccumSinceLastCommit は 0 reset される
+  });
+
+  it('Off-Road 起動後の追加 GPS update → incremental 加算 (L842 経路)', () => {
+    // 起動まで 5 step + snap miss 5 回
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const afterActivation = Meter.getState().distance_m;
+    expect(afterActivation).toBeGreaterThan(0);
+
+    // Off-Road 中の追加 GPS step → _calculateOffRoadIncrement で inc 計算
+    Meter.update(gpsAt(6));
+    const s = Meter.getState();
+    // 1 step (= 約 25m) が更に加算されているはず
+    expect(s.distance_m).toBeGreaterThan(afterActivation + 20);
+    expect(s.distance_m).toBeLessThan(afterActivation + 30);
+    expect(s.offroad_distance_m).toBe(s.distance_m);
+  });
+
+  it('Off-Road 中の Worker B 復帰 (mmIncrementM>0) → _offRoadActive=false + commit 無視 (L334)', () => {
+    // 起動
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const afterActivation = Meter.getState().distance_m;
+    expect(afterActivation).toBeGreaterThan(0);
+
+    // Worker B 復帰 (= snap 成功 + mmIncrementM>0)
+    fakeWorker._dispatch(snapHit(100));
+    const s = Meter.getState();
+    // L340: Worker B mmIncrement を二重課金回避のため無視
+    expect(s.distance_m).toBe(afterActivation); // 100m 加算されない
+    // ここで mm 復帰チェック自体は internal flag・state には影響しない
+  });
+
+  it('Off-Road 中の Worker B 復帰後・新規 mmResult (snap hit) は通常加算される', () => {
+    // 起動
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const afterActivation = Meter.getState().distance_m;
+
+    // 復帰 1 回目: 無視
+    fakeWorker._dispatch(snapHit(100));
+    // 復帰 2 回目: _offRoadActive=false なので通常経路・state.distance_m += 50
+    fakeWorker._dispatch(snapHit(50));
+    const s = Meter.getState();
+    expect(s.distance_m).toBe(afterActivation + 50);
+    expect(s.distanceSource).toBe('mm');
+  });
+
+  it('snap miss 5 回連続後・snapped:true で _consecutiveSnapMiss が 0 reset (L443)', () => {
+    // 4 回 snap miss → 5 回目で snap success → reset 検証
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 4; k++) fakeWorker._dispatch(snapMiss());
+    // ここで snap success
+    fakeWorker._dispatch(snapHit(50));
+    // さらに 4 回 snap miss → 累積は 4 (= 起動しない)
+    for (let k = 0; k < 4; k++) fakeWorker._dispatch(snapMiss());
+    const s = Meter.getState();
+    expect(s.offroad_count).toBe(0); // 起動していない
+  });
+
+  it('Off-Road 起動時に haver_accum=0 (= 初回 GPS のみ) なら retroactive 加算なし (L473 dlog 経路)', () => {
+    // 1 GPS のみ (= state.last_gps セット直後) で snap miss 5 回 dispatch
+    Meter.update(gpsAt(0));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const s = Meter.getState();
+    expect(s.offroad_count).toBe(1); // 起動はする
+    expect(s.distance_m).toBe(0); // retroactive 加算なし (= haver_accum=0)
+    expect(s.offroad_distance_m).toBe(0);
+  });
+
+  it('Off-Road 起動時に state.tier2_pending_m が 0 化される (L489)', () => {
+    // tier2_pending_m が 0 でない状態を作るには tentativeIncrementM>0 mmResult が必要
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 50, // tier2_pending_m += 50
+      snapped: true, // _consecutiveSnapMiss reset・Off-Road 起動阻止
+    });
+    expect(Meter.getState().tier2_pending_m).toBe(50);
+
+    // snap miss 5 回で起動
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const s = Meter.getState();
+    expect(s.offroad_count).toBe(1);
+    expect(s.tier2_pending_m).toBe(0); // 起動時に 0 化
+  });
+
+  it('Off-Road 中の _trackHaversineBetweenGps は early return で haver_accum 不累積 (L251)', () => {
+    // 起動まで
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const afterActivation = Meter.getState().distance_m;
+
+    // Off-Road 中の追加 update → incremental で加算・haver_accum は累積しない
+    Meter.update(gpsAt(6));
+    Meter.update(gpsAt(7));
+    const s = Meter.getState();
+    // 2 step 分 = 約 50m が incremental で加算
+    expect(s.distance_m - afterActivation).toBeGreaterThan(40);
+    expect(s.distance_m - afterActivation).toBeLessThan(60);
+  });
+
+  it('Off-Road 中も distanceSource は "offroad" を維持 (= ロガー / UI 識別用)', () => {
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    expect(Meter.getState().distanceSource).toBe('offroad');
+    Meter.update(gpsAt(6));
+    expect(Meter.getState().distanceSource).toBe('offroad');
+  });
+});
