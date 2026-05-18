@@ -48,14 +48,8 @@
     "der": 0.0004
   },
   {
-    "generated_at": "2026-05-18T18:04:06.549Z",
-    "git_sha": null,
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
-    "generated_at": "2026-05-18T18:06:12.716Z",
-    "git_sha": null,
+    "generated_at": "2026-05-18T18:09:47.770Z",
+    "git_sha": "f0e14aa0dc1da768bf016d0a0a2124d0db92e045",
     "snap_rate": 1,
     "der": 0.0004
   }
