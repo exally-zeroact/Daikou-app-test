@@ -417,12 +417,13 @@ const Meter = (() => {
         //     ・distance_m / fare_yen / 課金ロジックには触れない
         //     ・running=true 時の挙動は完全不変
         //     ・iOS/Android 共通経路 (platform 分岐なし)
-        // ★ Phase 2: business_distance_m と distance_m を別 gate で完全分離
-        // 業務単位累積 (= 業務中常時加算・停車中は除外)
-        if (state.business_active && !_isStationary()) {
-          state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
-        }
-        // 課金 (= 代行中のみ加算・絶対不可侵経路維持)
+        // ★設計変更宣言 (2026-05-19・business_distance_m を Worker B 経路から完全分離):
+        //   旧: 同じ m.mmIncrementM を distance_m と business_distance_m に分岐加算
+        //       → main 側 _isStationary() gate の非対称で
+        //         business_distance_m < distance_m の事象発生 (司さん実車 0.50<1.06 報告)
+        //   新: business_distance_m は Worker B 経路では加算しない (= 完全分離)
+        //       → update() L887 周辺で GPS speed × dt 独立加算経路で計上
+        //   絶対ルール準拠: distance_m += m.mmIncrementM は完全不変 (= 課金根拠不可侵)
         if (state.running) {
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
@@ -487,11 +488,9 @@ const Meter = (() => {
           //   新: state.running===false 時は business_distance_m / distance_m 共に加算停止
           //       (= 旧設計と同じ整合性: running=true のときだけ全加算)
           // ★絶対ルール適用外区間（retroactive）停車中は_trackHaversineBetweenGpsで積算停止済のため停車区間は含まれない。
-          // ★ Phase 2: business_distance_m と distance_m を別 gate で完全分離
-          if (state.business_active && !_isStationary()) {
-            state.business_distance_m =
-              (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
-          }
+          // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離・本経路から削除):
+          //   business_distance_m は update() L887 周辺で GPS speed × dt 独立加算する設計に変更。
+          //   ここでは distance_m (= 課金根拠) のみ加算 (絶対不可侵経路維持)。
           if (state.running) {
             state.distance_m += _haverAccumSinceLastCommit;
             state.fare_yen = calcFare(state.distance_m);
@@ -883,6 +882,19 @@ const Meter = (() => {
       //   表示専用・課金経路ゼロ・distance_m は無変更。
       //   business_active gate で業務単位常時加算 (= 後付メーター機対等)。
       //   絶対ルール準拠: GPS 直線距離ではなく速度×時間 (= タイヤ回転由来の概算・既存 gap fill と同性質)。
+      // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離):
+      //   旧: 4 加算経路 (mm commit / retroactive / gap fill / Off-Road incremental) で
+      //       Worker B 出力 m.mmIncrementM を distance_m と分岐して business_distance_m に加算
+      //       → main 側 _isStationary() gate の非対称で停車誤判定時 distance_m のみ加算され
+      //         business_distance_m < distance_m の事象発生 (司さん実車 0.50<1.06 報告)
+      //   新: business_distance_m は Worker B 経路から完全独立・本ブロックで GPS speed × dt 加算。
+      //       gps_predictive_distance_m (= trip 単位) と同じ計算式で同時加算するが state は別:
+      //         gps_predictive_distance_m: trip 単位 (= Meter.start で 0 化)
+      //         business_distance_m:      業務単位 (= Business.start で 0 化)
+      //   絶対ルール準拠:
+      //     ・distance_m 加算 5 経路は state.running gate で完全不変 (= 課金根拠不可侵)
+      //     ・速度×時間は GPS 直線距離禁止 rule 適用外 (= 既存 gap fill と同性質)
+      //     ・iOS / Android 両 OS 共通 (= speedKmh は両 OS で同等取得)
       if (
         state.business_active &&
         gpsResult.speedKmh > 0 &&
@@ -890,7 +902,9 @@ const Meter = (() => {
         dtSec > 0 &&
         dtSec < 10
       ) {
-        state.gps_predictive_distance_m += (gpsResult.speedKmh / 3.6) * dtSec;
+        const _inc = (gpsResult.speedKmh / 3.6) * dtSec;
+        state.gps_predictive_distance_m += _inc;
+        state.business_distance_m = (state.business_distance_m || 0) + _inc;
       }
 
       // Phase 1.C (2026-05-10): 通常時は haversine 累積を裏で track
@@ -906,10 +920,9 @@ const Meter = (() => {
           //   旧 (2026-05-14): running 問わず加算 / (2026-05-16) 停車判定追加
           //   新: state.running===false 時は business_distance_m を加算しない (= 代行開始前
           //       の GPS jitter 由来加算を遮断)。停車判定は維持。
-          // ★ Phase 2: business_active gate (= 業務中常時・停車中除外)
-          if (state.business_active && !_isStationary()) {
-            state.business_distance_m = (state.business_distance_m || 0) + filled;
-          }
+          // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離・本経路から削除):
+          //   business_distance_m は update() L887 周辺で GPS speed × dt 独立加算する設計に変更。
+          //   ここでは distance_m (= 課金根拠) のみ加算 (絶対不可侵経路維持)。
           if (state.running) {
             state.distance_m += filled;
             state.fare_yen = calcFare(state.distance_m);
@@ -925,10 +938,9 @@ const Meter = (() => {
           // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
           //   旧 (2026-05-16): 停車判定のみガード
           //   新: state.running===false 時は business_distance_m を加算しない。停車判定維持。
-          // ★ Phase 2: business_active gate (= 業務中常時・停車中除外)
-          if (state.business_active && !_isStationary()) {
-            state.business_distance_m = (state.business_distance_m || 0) + inc;
-          }
+          // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離・本経路から削除):
+          //   business_distance_m は update() L887 周辺で GPS speed × dt 独立加算する設計に変更。
+          //   ここでは distance_m (= 課金根拠) のみ加算 (絶対不可侵経路維持)。
           if (state.running) {
             state.distance_m += inc;
             state.fare_yen = calcFare(state.distance_m);

@@ -133,12 +133,16 @@ describe('mm-drain-after-start (meter.js L357 + L619 _drainMmUntil)', () => {
   });
 
   it('_setDrainMmUntil(0) で drain 即時無効化すれば mmResult が distance_m に加算される', () => {
+    // ★設計変更宣言 (2026-05-19・business_distance_m を Worker B 経路から完全分離):
+    //   旧: mm commit で distance_m と business_distance_m 両方加算
+    //   新: mm commit は distance_m のみ加算・business_distance_m は update() GPS speed×dt で独立加算
     Meter.start();
     Meter._setDrainMmUntil(0); // drain 即時無効化
     fakeWorker._dispatch(mkMmResult(100));
     const s = Meter.getState();
     expect(s.distance_m).toBe(100);
-    expect(s.business_distance_m).toBe(100);
+    // business_distance_m は mm commit に依存しない (= 完全分離・GPS update で独立加算される設計)
+    expect(s.business_distance_m).toBe(0);
   });
 
   it('Meter.start() から 500ms 以降の mmResult は加算される (= drain 期間終了)', () => {

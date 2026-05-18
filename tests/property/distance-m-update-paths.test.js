@@ -77,8 +77,10 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     }
     // 2026-05-18 更新 (Phase 3): GPS predictive + Reconciliation 追加で更に shift。
     // 旧 (Phase 2 後): [415, 484, 874, 893, 1239]
-    // 新 (Phase 3 後): [427, 496, 917, 936, 1315]
-    const expectedLines = [427, 496, 917, 936, 1315];
+    // 旧 (Phase 3 後): [427, 496, 917, 936, 1315]
+    // 2026-05-19 更新 (business_distance_m 完全分離): 4 加算経路から business 削除で shift。
+    // 新: [428, 495, 927, 945, 1324]
+    const expectedLines = [428, 495, 927, 945, 1324];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
