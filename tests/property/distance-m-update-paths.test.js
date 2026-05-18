@@ -75,9 +75,10 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
           JSON.stringify(matchedLines, null, 2)
       );
     }
-    // 2026-05-18 更新: setDistance ガード追加 (★設計変更宣言・P0) + eslint 13 errors 修正
-    // (★C 残課題) で meter.js が下方 shift。実 line に同期更新。
-    const expectedLines = [398, 464, 840, 858, 1197];
+    // 2026-05-18 更新 (Phase 1 A1): setInterval 全廃 + elapsed 都度計算で下方 shift +6〜+19。
+    // 旧 (P0/C残課題後): [398, 464, 840, 858, 1197]
+    // 新 (Phase 1 A1 後): [404, 470, 852, 870, 1216]
+    const expectedLines = [404, 470, 852, 870, 1216];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -134,8 +135,8 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     }
     // L257 は _trackHaversineBetweenGps 内・L305 は _calculateOffRoadIncrement 内
     // Stryker sandbox 由来 line offset 吸収のため ±10 line 許容
-    // 2026-05-18 更新: meter.js 下方 shift で GPS.calcDistance 呼出 line も移動。
-    const expectedLines = [260, 308];
+    // 2026-05-18 更新 (Phase 1 A1): meter.js 下方 shift で GPS.calcDistance 呼出も移動。
+    const expectedLines = [266, 314];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 2; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);

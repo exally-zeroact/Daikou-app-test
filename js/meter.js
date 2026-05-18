@@ -11,6 +11,11 @@ const Meter = (() => {
     distanceSource: 'gps', // 'mm' | 'gps' | 'gap' | 'inline' | 'offroad' 直近で distance_m を更新したソース
     fare_yen: 0,
     elapsed_sec: 0,
+    // ★設計変更宣言 (2026-05-18・Phase 1 A1 案・setInterval 全廃→都度計算):
+    //   旧: state.elapsed_sec を setInterval 1Hz で増加・ブラウザ throttle で不整合リスク
+    //   新: stop/resume の度に確定加算 + getState() で都度計算 (= 単一の真実源)
+    elapsed_accumulated_sec: 0, // 累積走行時間 (= stop / businessEnd で確定加算)
+    last_resume_time: null, // 直近 start / resume の時刻 (= 都度計算の基準)
     start_time: null,
     last_gps: null,
     last_timestamp: null,
@@ -204,7 +209,8 @@ const Meter = (() => {
   // Map Matching 設定（2026/04/30追加）
   const MM_ENABLED = true; // Map Matching ON/OFF
 
-  let timer = null;
+  // ★設計変更宣言 (2026-05-18・Phase 1 A1 案): timer 変数は setInterval 全廃で不要
+  // (旧 let timer = null は削除)
 
   // F6 (2026-05-09): 業務中の fareConfig 変更を抑制
   //   業務開始時に凍結・業務終了/idle で解凍
@@ -557,6 +563,9 @@ const Meter = (() => {
       distanceSource: 'gps',
       fare_yen: fareConfig.base_fare,
       elapsed_sec: 0,
+      // ★ A1: elapsed 累積初期化 + resume 基準時刻 = now
+      elapsed_accumulated_sec: 0,
+      last_resume_time: now,
       start_time: now,
       // 起動時warm upでGPS取得済みなら初期値として使う（即時計測開始のため）
       // 過去の動きは加算しないよう last_timestamp は now を使用
@@ -633,17 +642,15 @@ const Meter = (() => {
         /* noop - intentionally empty */
       }
     }
-    if (timer) clearInterval(timer);
-    timer = setInterval(() => {
-      if (state.running) state.elapsed_sec++;
-    }, 1000);
+    // ★ A1: 旧 setInterval は廃止 (= elapsed_sec は getState で都度計算)
   }
 
   function stop() {
     state.running = false;
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
+    // ★ A1: elapsed 確定加算 (= last_resume_time からの経過を累積に追加)
+    if (state.last_resume_time !== null) {
+      state.elapsed_accumulated_sec += Date.now() - state.last_resume_time;
+      state.last_resume_time = null;
     }
     // 注: Worker への reset 送信はしない (F5 維持)
     // 業務終了時の flush は businessEnd() で明示的に呼ぶ
@@ -654,10 +661,12 @@ const Meter = (() => {
   //   この後の getReport() で正確な合計距離を返す
   function businessEnd() {
     state.running = false;
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
+    // ★ A1: elapsed 確定加算 + 業務終了で累積もリセット
+    if (state.last_resume_time !== null) {
+      state.elapsed_accumulated_sec += Date.now() - state.last_resume_time;
+      state.last_resume_time = null;
     }
+    state.elapsed_accumulated_sec = 0; // 業務終了で elapsed リセット (次業務に持ち越さない)
     _fareConfigFrozen = false; // F6: 業務終了で解凍
     if (mmWorker) {
       try {
@@ -698,6 +707,9 @@ const Meter = (() => {
       distanceSource: 'gps',
       fare_yen: 0,
       elapsed_sec: 0,
+      // ★ A1: trip reset で elapsed 累積は 0 化・last_resume_time も null
+      elapsed_accumulated_sec: 0,
+      last_resume_time: null,
       start_time: null,
       last_gps: null,
       last_timestamp: null,
@@ -1154,7 +1166,14 @@ const Meter = (() => {
   }
 
   function getState() {
-    return { ...state };
+    // ★設計変更宣言 (2026-05-18・Phase 1 A1 案): elapsed_sec は都度計算
+    //   旧: setInterval で state.elapsed_sec をカウント
+    //   新: 累積 + 直近 resume 経過を都度計算で返す (= browser throttle / race リスクゼロ)
+    const elapsedSec =
+      state.running && state.last_resume_time !== null
+        ? Math.floor((state.elapsed_accumulated_sec + (Date.now() - state.last_resume_time)) / 1000)
+        : Math.floor((state.elapsed_accumulated_sec || 0) / 1000);
+    return { ...state, elapsed_sec: elapsedSec };
   }
 
   // MM-2 (2026-05-08): 評価インフラ用 公開 API
@@ -1216,10 +1235,8 @@ const Meter = (() => {
   function resume() {
     if (state.running) return;
     state.running = true;
-    if (timer) clearInterval(timer);
-    timer = setInterval(() => {
-      if (state.running) state.elapsed_sec++;
-    }, 1000);
+    // ★ A1: resume 時刻を記録 (= getState 都度計算の基準)
+    state.last_resume_time = Date.now();
   }
 
   // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・最近傍住所検索ヘルパ):

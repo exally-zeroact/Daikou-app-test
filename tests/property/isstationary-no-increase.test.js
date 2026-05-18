@@ -129,8 +129,8 @@ describe('ZEROact 共通テスト基盤: isStationary=true で distance_m 不変
       const lines = source.split('\n');
       // L790 周辺で `if (gpsResult.isStationary)` パターン + early return を確認
       // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張 (= 775-810)
-      // 2026-05-18 更新: meter.js 下方 shift で L790 → L806 移動・window 同期。
-      const window = lines.slice(791, 826).join('\n');
+      // 2026-05-18 更新 (Phase 1 A1): L806 → L818 (+12) 移動・window 同期。
+      const window = lines.slice(803, 838).join('\n');
       if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
         throw new Error(
           'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'
