@@ -6373,6 +6373,18 @@
           } catch (_) {}
           // ★ R3: Wake Lock API + NoSleep fallback (= 画面消灯防止・user gesture 内で発火)
           acquireWakeLock();
+          // ★設計変更宣言 (2026-05-19・B-1・業務開始時 warmup GPS prime):
+          //   warmup で取得済の GPS を Meter.state.last_gps に prime → 業務開始直後の
+          //   最初の GPS update から haversine 加算可能 (= 業務開始ラグ最小化)。
+          //   warmup が 5 秒以上古い場合は内部で false 返却・無害。
+          try {
+            if (typeof Meter !== 'undefined' && typeof Meter.primeFromWarmup === 'function') {
+              const _primed = Meter.primeFromWarmup();
+              if (typeof dlog === 'function') {
+                dlog('[Business] warmup prime: ' + (_primed ? 'OK' : 'skip (no valid warmup)'));
+              }
+            }
+          } catch (_) {}
           // 暗転タイマーリセット
           if (dimTimer) {
             clearTimeout(dimTimer);

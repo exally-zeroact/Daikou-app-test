@@ -1627,6 +1627,36 @@ const Meter = (() => {
     };
   }
 
+  // ★設計変更宣言 (2026-05-19・B-1・業務開始時 warmup GPS prime):
+  //   旧: 業務開始 (= Business.start) は Meter.start を呼ばないので・state.last_gps=null のまま
+  //       → 待機中の最初の GPS update は last_gps セットのみ・haversine 加算は 2 回目から
+  //       → 業務開始から「最初の 1〜2 秒 + GPS first fix 待ち」 のラグ発生
+  //   新: 業務開始時 (= onBusinessStart) で本 API を呼出・lastWarmupGps があれば
+  //       state.last_gps / state.last_timestamp に prime → 待機中初回 GPS update から
+  //       haversine 加算開始 (= ラグ最小化)
+  //   絶対ルール準拠:
+  //     ・5 秒以上前の warmup は使わない (= 過剰加算リスク回避・既存 WARMUP_MAX_AGE_MS 同基準)
+  //     ・distance_m / fare_yen / 課金経路には触れない (= state.running gate 経路は不変)
+  //     ・state.business_active 状態は不変 (= 業務 gate は別途 setBusinessActive で管理)
+  function primeFromWarmup() {
+    const now = Date.now();
+    const WARMUP_MAX_AGE_MS = 5000;
+    const warmupValid =
+      lastWarmupGps &&
+      lastWarmupGps.timestamp &&
+      now - lastWarmupGps.timestamp < WARMUP_MAX_AGE_MS;
+    if (!warmupValid) return false;
+    state.last_gps = {
+      lat: lastWarmupGps.lat,
+      lng: lastWarmupGps.lng,
+      altitude: lastWarmupGps.altitude,
+      compassHeading: lastWarmupGps.compassHeading || null,
+    };
+    state.last_timestamp = lastWarmupGps.timestamp;
+    state.last_speed_kmh = lastWarmupGps.speedKmh || 0;
+    return true;
+  }
+
   return {
     start,
     stop,
@@ -1635,6 +1665,7 @@ const Meter = (() => {
     resume,
     update,
     updateGpsOnly,
+    primeFromWarmup,
     getState,
     getMMStats,
     setFareConfig,
