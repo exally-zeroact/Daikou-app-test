@@ -8299,10 +8299,17 @@
           .register('/sw.js')
           .then(function (reg) {
             dlog('[SW] 登録完了:', reg.scope);
+            // ★設計変更宣言 (2026-05-19・Sentry ノイズ抑制・reg.update() Promise reject 握り潰し):
+            //   旧: try/catch で囲んでいたが reg.update() は Promise を返すため同期 throw のみ
+            //       捕捉し Promise reject (= ネットワーク一瞬断 / Vercel 一時 5xx) が
+            //       onunhandledrejection で漏れ Sentry に通知される (= 「sw.js load failed」)
+            //   新: .catch() で Promise reject を明示的に握り潰し・無害なノイズ通知を停止
+            //       他の error (= 課金 bug / Worker B 例外 / GPS 異常等) は引き続き Sentry に届く
+            //   影響: 動作変化なし (= reg.update() の失敗は元から無害・次回 polling で再試行)
             // 起動時に明示的に update check (新 SW があれば即 install 開始)
-            try {
-              reg.update();
-            } catch (_) {}
+            reg.update().catch(function () {
+              /* network blip 等で reject する場合あり・無害なので握り潰す */
+            });
             // ★設計変更宣言 (2026-05-15・SW 自動更新確実化):
             //   旧: register 直後の reg.update() 1 回のみ・以降は browser 任せ (24h cycle)
             //       → iOS PWA 長時間起動で新版 SW を取得し損ねる事象 (司さん「キャッシュクリア
@@ -8316,18 +8323,18 @@
             try {
               document.addEventListener('visibilitychange', function () {
                 if (document.visibilityState === 'visible') {
-                  try {
-                    reg.update();
-                  } catch (_) {}
+                  reg.update().catch(function () {
+                    /* network blip 握り潰し */
+                  });
                 }
               });
             } catch (_) {}
             try {
               setInterval(
                 function () {
-                  try {
-                    reg.update();
-                  } catch (_) {}
+                  reg.update().catch(function () {
+                    /* network blip 握り潰し */
+                  });
                 },
                 5 * 60 * 1000
               );
