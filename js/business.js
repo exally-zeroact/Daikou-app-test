@@ -536,7 +536,13 @@ const Business = (function () {
     if (typeof Meter !== 'undefined' && typeof Meter.getState === 'function') {
       try {
         const _ms = Meter.getState();
-        if (_ms && typeof _ms.business_distance_m === 'number') {
+        // ★設計変更宣言 (2026-05-19・混同#5 修正・getReport ガード強化):
+        //   旧: typeof === 'number' のみ → 0 でも上書き = fallback (state.total_distance_m) 失効
+        //   新: > 0 ガード追加 → 業務終了直後の businessEnd 経路で 0 上書きされても
+        //       永続化ミラー値 (state.total_distance_m) が fallback として効く保険。
+        //   注: 混同#4 修正 (businessEnd で business_distance_m=0 撤廃) で本ガードは
+        //       通常経路では発火しないが・想定外の 0 経路 (= タスクキル復帰直後等) の保険として残置。
+        if (_ms && typeof _ms.business_distance_m === 'number' && _ms.business_distance_m > 0) {
           totalM = _ms.business_distance_m;
         }
       } catch (_) {
@@ -622,6 +628,21 @@ const Business = (function () {
           Meter.setBusinessDistance(state.total_distance_m);
         } catch (_) {
           /* Meter prime failure は致命傷ではないので無視 */
+        }
+      }
+      // ★設計変更宣言 (2026-05-19・混同#6 修正・bug-2・load 配線漏れ追加):
+      //   タスクキル復帰で state.active=true なら Meter 側 business_active も true に同期。
+      //   未配線だと 4 加算経路 (mm commit / retroactive / gap fill / Off-Road incremental) が
+      //   business_active gate で停止 → 復帰後の業務単位累積が伸びない事象。
+      if (
+        state.active &&
+        typeof Meter !== 'undefined' &&
+        typeof Meter.setBusinessActive === 'function'
+      ) {
+        try {
+          Meter.setBusinessActive(true);
+        } catch (_) {
+          /* Meter 未ロード等は致命傷ではないので無視 */
         }
       }
       if (typeof dlog === 'function') dlog('[Business] loaded state');

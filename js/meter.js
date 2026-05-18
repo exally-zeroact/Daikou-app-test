@@ -583,9 +583,11 @@ const Meter = (() => {
     const prevBusinessDist = (state && state.business_distance_m) || 0;
     // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
     const prevBusinessActive = !!(state && state.business_active);
-    // ★ Phase 3: gps_predictive / display も per-trip 引き継ぎ (= 業務単位・後付メーター対等)
-    const prevGpsPredictive = (state && state.gps_predictive_distance_m) || 0;
-    const prevDisplay = (state && state.display_distance_m) || 0;
+    // ★設計変更宣言 (2026-05-19・混同#1#2 修正・gps_predictive / display を trip 単位に変更):
+    //   旧 (Phase 3): start で prevGpsPredictive / prevDisplay 引き継ぎ = 業務単位扱い
+    //                 → 代行 1 trip 開始時 driveDist が前 trip 累積値で再開・「全然変わらん」事象
+    //   新: trip 単位 0 化 = 代行 1 件の走行距離表示 (= 司さん前提・後付メーター 1 件距離計に相当)
+    //   業務単位累積は business_distance_m が別管理 (= 引き継ぎは prevBusinessDist のみ維持)
     state = {
       running: true,
       distance_m: 0,
@@ -596,9 +598,9 @@ const Meter = (() => {
       elapsed_accumulated_sec: 0,
       last_resume_time: now,
       business_active: prevBusinessActive,
-      // ★ Phase 3: gps_predictive / display 引き継ぎ
-      gps_predictive_distance_m: prevGpsPredictive,
-      display_distance_m: prevDisplay,
+      // ★ 混同#1#2 修正: gps_predictive / display は trip 単位 0 化
+      gps_predictive_distance_m: 0,
+      display_distance_m: 0,
       last_display_update_time: null,
       start_time: now,
       // 起動時warm upでGPS取得済みなら初期値として使う（即時計測開始のため）
@@ -694,18 +696,20 @@ const Meter = (() => {
   //   未確定の N 秒分を mmResult で post 返却 → state.distance_m に最終加算
   //   この後の getReport() で正確な合計距離を返す
   function businessEnd() {
+    // ★設計変更宣言 (2026-05-19・混同#3#4#8 修正・businessEnd 責務整理):
+    //   旧: businessEnd で elapsed_accumulated_sec=0 / gps_predictive=0 / display=0 /
+    //       business_distance_m=0 / tier2_pending_m=0 を実施 → 直後の getReport で
+    //       Meter.business_distance_m=0 が読まれ「総走行距離 0km」表示。
+    //   新: businessEnd は「業務 gate OFF + Worker B Viterbi flush + 内部 flag リセット」のみが責務。
+    //       業務単位 (business_distance_m) の 0 化は Business.start で実施 (= setBusinessDistance(0))。
+    //       trip 単位 (elapsed/gps_predictive/display/tier2_pending) の 0 化は次代行 Meter.start で実施。
     state.running = false;
-    // ★ A1: elapsed 確定加算 + 業務終了で累積もリセット
+    // ★ A1: elapsed 確定加算 (= 確定だけ・0 化はしない・次代行 Meter.start で 0 化)
     if (state.last_resume_time !== null) {
       state.elapsed_accumulated_sec += Date.now() - state.last_resume_time;
       state.last_resume_time = null;
     }
-    state.elapsed_accumulated_sec = 0; // 業務終了で elapsed リセット (次業務に持ち越さない)
     state.business_active = false; // ★ Phase 2: 業務終了で business_active 自動 off
-    // ★ Phase 3: 業務終了で gps_predictive / display も 0 リセット (= 次業務に持ち越さない)
-    state.gps_predictive_distance_m = 0;
-    state.display_distance_m = 0;
-    state.last_display_update_time = null;
     _fareConfigFrozen = false; // F6: 業務終了で解凍
     if (mmWorker) {
       try {
@@ -714,12 +718,6 @@ const Meter = (() => {
         /* noop - intentionally empty */
       }
     }
-    // ★設計変更宣言 (2026-05-14): 業務終了で business_distance_m を 0 リセット。
-    //   trip 単位の Meter.start() / Meter.reset() ではリセットせず、businessEnd でのみ 0 化する。
-    state.business_distance_m = 0;
-    // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ): 業務終了で表示先行値も 0 化。
-    //   segments キューも空にして次業務に持ち越さない。
-    state.tier2_pending_m = 0;
     _tier2Segments = [];
     _offRoadActive = false;
     _consecutiveSnapMiss = 0;
@@ -742,9 +740,8 @@ const Meter = (() => {
     const prevBusinessDist = (state && state.business_distance_m) || 0;
     // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
     const prevBusinessActive = !!(state && state.business_active);
-    // ★ Phase 3: gps_predictive / display も per-trip reset で引き継ぐ
-    const prevGpsPredictive = (state && state.gps_predictive_distance_m) || 0;
-    const prevDisplay = (state && state.display_distance_m) || 0;
+    // ★設計変更宣言 (2026-05-19・混同#1#2 修正): gps_predictive / display は trip 単位 0 化
+    //   reset() は trip 終了経路 (= 確定送信ボタン) のため次 trip 用に 0 化する。
     state = {
       running: false,
       distance_m: 0,
@@ -755,9 +752,9 @@ const Meter = (() => {
       elapsed_accumulated_sec: 0,
       last_resume_time: null,
       business_active: prevBusinessActive,
-      // ★ Phase 3: gps_predictive / display 引き継ぎ
-      gps_predictive_distance_m: prevGpsPredictive,
-      display_distance_m: prevDisplay,
+      // ★ 混同#1#2 修正: gps_predictive / display は trip 単位 0 化
+      gps_predictive_distance_m: 0,
+      display_distance_m: 0,
       last_display_update_time: null,
       start_time: null,
       last_gps: null,

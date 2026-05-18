@@ -120,12 +120,18 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
     expect(Meter.getState().fare_yen).toBe(0);
   });
 
-  it('Meter.businessEnd() で business_distance_m=0 に reset', () => {
+  it('Meter.businessEnd() では business_distance_m を維持 (= getReport で読まれる)', () => {
+    // ★設計変更宣言 (2026-05-19・混同#4 修正): businessEnd で 0 化は撤廃
+    //   旧: businessEnd で business_distance_m=0 → 直後 getReport で 0 上書き = 「総走行距離 0km」
+    //   新: businessEnd は業務 gate OFF + Worker B Viterbi flush + 内部 flag リセットのみ
+    //       0 化は次業務 Business.start で setBusinessDistance(0) 経由で実施
     Meter.setBusinessDistance(3000);
     Meter.start();
     expect(Meter.getState().business_distance_m).toBe(3000);
     Meter.businessEnd();
-    expect(Meter.getState().business_distance_m).toBe(0);
+    // ★ 混同#4 修正: 0 化撤廃・最後値維持 (= getReport で正しく読まれる)
+    expect(Meter.getState().business_distance_m).toBe(3000);
+    expect(Meter.getState().business_active).toBe(false); // 業務 gate OFF は維持
   });
 
   it('復帰後の trip 継続で mmIncrementM 累積が business_distance_m に加算される', () => {
@@ -189,7 +195,11 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
     expect(Meter.getState().distance_m).toBe(700); // trip B 内のみ
   });
 
-  it('businessEnd() で business_distance_m が 0・business_active=false に・次業務開始時も 0', () => {
+  it('businessEnd() で business_active=false に・business_distance_m は維持 (= getReport で読まれるため)', () => {
+    // ★設計変更宣言 (2026-05-19・混同#4 修正・businessEnd 責務整理):
+    //   旧: businessEnd で business_distance_m=0 → 直後 getReport で 0 上書きされ「総走行距離 0km」表示
+    //   新: businessEnd は「業務 gate OFF」のみが責務・0 化は Business.start で実施
+    //       (= Meter.setBusinessDistance(0) 経由)。businessEnd 直後の getReport は最後の値を読める。
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
@@ -198,10 +208,11 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
 
     // 業務終了
     Meter.businessEnd();
-    expect(Meter.getState().business_distance_m).toBe(0);
+    expect(Meter.getState().business_distance_m).toBe(800); // ★ 混同#4 修正: 0 化撤廃・最後値維持
     expect(Meter.getState().business_active).toBe(false); // ★ Phase 2: 自動 false
 
-    // 次業務開始 (= 再度 setBusinessActive(true) 必要)
+    // 次業務開始 (= Business.start 相当・setBusinessDistance(0) で明示 0 化)
+    Meter.setBusinessDistance(0);
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
