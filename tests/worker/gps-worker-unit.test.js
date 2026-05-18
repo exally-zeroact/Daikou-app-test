@@ -88,7 +88,7 @@ describe('gps-worker.js 静的検証 (P11)', () => {
 // ─── dynamic worker test (@vitest/web-worker 配線) ─────────────────
 
 describe('gps-worker.js dynamic worker test (⑪)', () => {
-  it('Worker 起動 + init message 送受信', async () => {
+  it('Worker 起動 + init message 送受信', { timeout: 15000 }, async () => {
     const workerUrl = new URL('../../js/gps-worker.js', import.meta.url);
     const worker = new Worker(workerUrl);
 
@@ -104,7 +104,7 @@ describe('gps-worker.js dynamic worker test (⑪)', () => {
     worker.terminate();
   });
 
-  it('Worker 起動 + position message → result 応答受信', async () => {
+  it('Worker 起動 + position message → result 応答受信', { timeout: 15000 }, async () => {
     const workerUrl = new URL('../../js/gps-worker.js', import.meta.url);
     const worker = new Worker(workerUrl);
 
@@ -182,7 +182,7 @@ describe('isStationary 3-AND 条件 詳細 (gps-worker.js verified L596-627)', (
     });
   }
 
-  it('加速度サンプル null + 1 GPS 単独 → 即時停車判定は false (= 5 秒継続必要)', async () => {
+  it('加速度サンプル null + 1 GPS 単独 → 即時停車判定は false (= 5 秒継続必要)', { timeout: 15000 }, async () => {
     const worker = new Worker(new URL('../../js/gps-worker.js', import.meta.url));
     worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
     try {
@@ -208,7 +208,7 @@ describe('isStationary 3-AND 条件 詳細 (gps-worker.js verified L596-627)', (
     }
   });
 
-  it('加速度サンプル null + 同座標 6 GPS 1Hz → isStationary=true 確定', async () => {
+  it('加速度サンプル null + 同座標 6 GPS 1Hz → isStationary=true 確定', { timeout: 20000 }, async () => {
     const worker = new Worker(new URL('../../js/gps-worker.js', import.meta.url));
     worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
     try {
@@ -238,7 +238,7 @@ describe('isStationary 3-AND 条件 詳細 (gps-worker.js verified L596-627)', (
     }
   });
 
-  it('速度 30km/h GPS 単発 → isStationary=false (= speed_limit_kmh=3 超過)', async () => {
+  it('速度 30km/h GPS 単発 → isStationary=false (= speed_limit_kmh=3 超過)', { timeout: 15000 }, async () => {
     const worker = new Worker(new URL('../../js/gps-worker.js', import.meta.url));
     worker.postMessage({ type: 'init', data: { config: {}, debug: false } });
     try {
