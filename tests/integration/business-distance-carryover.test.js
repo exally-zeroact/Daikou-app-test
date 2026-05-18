@@ -131,7 +131,8 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
   it('復帰後の trip 継続で mmIncrementM 累積が business_distance_m に加算される', () => {
     // 復元 (= localStorage 復帰時に相当)
     Meter.setBusinessDistance(1000);
-    Meter.start(); // state.running=true
+    Meter.setBusinessActive(true); // ★ Phase 2: 業務 active gate
+    Meter.start();
     Meter._setDrainMmUntil(0);
 
     // 復帰後の trip で mmResult 受信 → 累積
@@ -142,16 +143,32 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
     expect(Meter.getState().business_distance_m).toBe(1500);
   });
 
-  it('state.running=false で mmIncrement 受信時 business_distance_m は加算しない (L391 ガード)', () => {
+  it('★ Phase 2: business_active=false で mmIncrement 受信時 business_distance_m は加算しない', () => {
     Meter.setBusinessDistance(1000);
-    // running=false (= 業務開始してない / stop 状態)
+    // business_active=false (= 業務未開始 / 業務終了後)
+    Meter.setBusinessActive(false);
+    Meter.start(); // running=true でも business_active=false なら加算しない
     Meter._setDrainMmUntil(0);
     fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 200, snapped: true, committed: true });
-    expect(Meter.getState().business_distance_m).toBe(1000); // 不変
+    expect(Meter.getState().business_distance_m).toBe(1000); // 不変 (= business_active gate で遮断)
+    // distance_m は running=true で加算 (= 課金経路は別 gate)
+    expect(Meter.getState().distance_m).toBe(200);
+  });
+
+  it('★ Phase 2: business_active=true・running=false (= 空車中走行) でも business_distance_m 加算', () => {
+    Meter.setBusinessDistance(500);
+    Meter.setBusinessActive(true);
+    // Meter.start() を呼ばない (= running=false・空車中走行を simulate)
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 200, snapped: true, committed: true });
+    // business_distance_m は加算 (= 業務中・後付メーター機と対等)
+    expect(Meter.getState().business_distance_m).toBe(700);
+    // distance_m は running=false で加算なし (= 課金経路は代行中のみ)
     expect(Meter.getState().distance_m).toBe(0);
   });
 
   it('複数 trip 跨ぎで business_distance_m が累積する (= trip A 終了 → trip B 開始)', () => {
+    Meter.setBusinessActive(true); // ★ Phase 2: 業務 active 維持
     // trip A 開始
     Meter.start();
     Meter._setDrainMmUntil(0);
@@ -162,6 +179,7 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
     Meter.reset();
     expect(Meter.getState().distance_m).toBe(0);
     expect(Meter.getState().business_distance_m).toBe(500);
+    expect(Meter.getState().business_active).toBe(true); // ★ Phase 2: reset で引き継ぎ
 
     // trip B 開始
     Meter.start();
@@ -171,7 +189,8 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
     expect(Meter.getState().distance_m).toBe(700); // trip B 内のみ
   });
 
-  it('businessEnd() で business_distance_m が 0・次業務開始時も 0 (= 業務跨ぎは引き継がない)', () => {
+  it('businessEnd() で business_distance_m が 0・business_active=false に・次業務開始時も 0', () => {
+    Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
     fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 800, snapped: true, committed: true });
@@ -180,8 +199,10 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
     // 業務終了
     Meter.businessEnd();
     expect(Meter.getState().business_distance_m).toBe(0);
+    expect(Meter.getState().business_active).toBe(false); // ★ Phase 2: 自動 false
 
-    // 次業務開始
+    // 次業務開始 (= 再度 setBusinessActive(true) 必要)
+    Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
     fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 100, snapped: true, committed: true });
@@ -191,6 +212,7 @@ describe('business-distance-carryover (meter.js L1180 + L545/L578 + L657)', () =
 
   it('setBusinessDistance(0) 後 Meter.start() → 復元値 0 でも mm 累積で増加する', () => {
     Meter.setBusinessDistance(0);
+    Meter.setBusinessActive(true); // ★ Phase 2: 業務 active gate
     Meter.start();
     Meter._setDrainMmUntil(0);
     fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 250, snapped: true, committed: true });

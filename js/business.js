@@ -106,6 +106,15 @@ const Business = (function () {
         /* Meter 未ロード等は致命傷ではないので無視 */
       }
     }
+    // ★設計変更宣言 (2026-05-18・Phase 2・business_active gate 開始):
+    //   業務開始時に Meter 側 business_active を true 化・以降 business_distance_m が常時加算。
+    if (typeof Meter !== 'undefined' && typeof Meter.setBusinessActive === 'function') {
+      try {
+        Meter.setBusinessActive(true);
+      } catch (_) {
+        /* noop */
+      }
+    }
     save();
     if (typeof dlog === 'function') dlog('[Business] start at ' + new Date(now).toISOString());
     return true;
@@ -121,6 +130,14 @@ const Business = (function () {
     state.ended = true;
     state.ended_at = now;
     state.end_time = now;
+    // ★ Phase 2: 業務終了予約で business_active 停止 (resume() で再 true 化)
+    if (typeof Meter !== 'undefined' && typeof Meter.setBusinessActive === 'function') {
+      try {
+        Meter.setBusinessActive(false);
+      } catch (_) {
+        /* noop */
+      }
+    }
     save();
     if (typeof dlog === 'function') dlog('[Business] end (resumable for 3h)');
     return getReport();
@@ -139,6 +156,14 @@ const Business = (function () {
     //   再開時の baseline は現 Meter.distance_m に揃える (差分=0 から再開)
     state.last_meter_distance_m =
       typeof Meter !== 'undefined' && Meter.getState ? Meter.getState().distance_m || 0 : 0;
+    // ★ Phase 2: 業務再開で business_active を再 true 化
+    if (typeof Meter !== 'undefined' && typeof Meter.setBusinessActive === 'function') {
+      try {
+        Meter.setBusinessActive(true);
+      } catch (_) {
+        /* noop */
+      }
+    }
     save();
     if (typeof dlog === 'function') dlog('[Business] resume');
     return true;
@@ -171,6 +196,14 @@ const Business = (function () {
       // 経由地点 + 住所表示機能 (2026-05-15・abandon で trip 進行中なら破棄)
       current_trip: null,
     };
+    // ★ Phase 2: 業務破棄で business_active 完全停止
+    if (typeof Meter !== 'undefined' && typeof Meter.setBusinessActive === 'function') {
+      try {
+        Meter.setBusinessActive(false);
+      } catch (_) {
+        /* noop */
+      }
+    }
     save();
     if (typeof dlog === 'function') dlog('[Business] abandon (history saved)');
     return true;

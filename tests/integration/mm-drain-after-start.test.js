@@ -99,6 +99,8 @@ describe('mm-drain-after-start (meter.js L357 + L619 _drainMmUntil)', () => {
     Meter.reset();
     fakeWorker = makeFakeWorker();
     Meter.setMapMatcher(fakeWorker);
+    // ★ Phase 2: business_distance_m 加算は business_active gate に変更されたため・test 環境で true 化
+    if (typeof Meter.setBusinessActive === 'function') Meter.setBusinessActive(true);
     realDateNow = Date.now;
   });
 

@@ -16,6 +16,12 @@ const Meter = (() => {
     //   新: stop/resume の度に確定加算 + getState() で都度計算 (= 単一の真実源)
     elapsed_accumulated_sec: 0, // 累積走行時間 (= stop / businessEnd で確定加算)
     last_resume_time: null, // 直近 start / resume の時刻 (= 都度計算の基準)
+    // ★設計変更宣言 (2026-05-18・Phase 2・business_active gate 化):
+    //   旧: business_distance_m を running gate (= 代行中のみ) で加算
+    //   新: business_distance_m は business_active gate (= 業務中常時) で加算
+    //   理由: 後付メーター機との対等性・業務総走行距離は空車中も増加する仕様
+    //   分離: distance_m (= 課金根拠) は running gate のまま・絶対不可侵
+    business_active: false, // 業務中フラグ (= Business.start/end で外部設定)
     start_time: null,
     last_gps: null,
     last_timestamp: null,
@@ -399,8 +405,13 @@ const Meter = (() => {
         //     ・distance_m / fare_yen / 課金ロジックには触れない
         //     ・running=true 時の挙動は完全不変
         //     ・iOS/Android 共通経路 (platform 分岐なし)
-        if (state.running) {
+        // ★ Phase 2: business_distance_m と distance_m を別 gate で完全分離
+        // 業務単位累積 (= 業務中常時加算・停車中は除外)
+        if (state.business_active && !_isStationary()) {
           state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+        }
+        // 課金 (= 代行中のみ加算・絶対不可侵経路維持)
+        if (state.running) {
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = 'mm';
@@ -464,9 +475,12 @@ const Meter = (() => {
           //   新: state.running===false 時は business_distance_m / distance_m 共に加算停止
           //       (= 旧設計と同じ整合性: running=true のときだけ全加算)
           // ★絶対ルール適用外区間（retroactive）停車中は_trackHaversineBetweenGpsで積算停止済のため停車区間は含まれない。
-          if (state.running) {
+          // ★ Phase 2: business_distance_m と distance_m を別 gate で完全分離
+          if (state.business_active && !_isStationary()) {
             state.business_distance_m =
               (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
+          }
+          if (state.running) {
             state.distance_m += _haverAccumSinceLastCommit;
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'offroad';
@@ -557,6 +571,8 @@ const Meter = (() => {
     //   リセットは Meter.businessEnd() (業務終了) でのみ実行。初期 state.business_distance_m=0 は
     //   初回 Meter モジュール load 時に効く。
     const prevBusinessDist = (state && state.business_distance_m) || 0;
+    // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
+    const prevBusinessActive = !!(state && state.business_active);
     state = {
       running: true,
       distance_m: 0,
@@ -566,6 +582,7 @@ const Meter = (() => {
       // ★ A1: elapsed 累積初期化 + resume 基準時刻 = now
       elapsed_accumulated_sec: 0,
       last_resume_time: now,
+      business_active: prevBusinessActive,
       start_time: now,
       // 起動時warm upでGPS取得済みなら初期値として使う（即時計測開始のため）
       // 過去の動きは加算しないよう last_timestamp は now を使用
@@ -667,6 +684,7 @@ const Meter = (() => {
       state.last_resume_time = null;
     }
     state.elapsed_accumulated_sec = 0; // 業務終了で elapsed リセット (次業務に持ち越さない)
+    state.business_active = false; // ★ Phase 2: 業務終了で business_active 自動 off
     _fareConfigFrozen = false; // F6: 業務終了で解凍
     if (mmWorker) {
       try {
@@ -701,6 +719,8 @@ const Meter = (() => {
     //   reset() は onIdle (空車) 経由の trip 単位リセット・業務終了ではない。
     //   業務単位累積を引き継ぐため prevBusinessDist を保存して再代入。
     const prevBusinessDist = (state && state.business_distance_m) || 0;
+    // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
+    const prevBusinessActive = !!(state && state.business_active);
     state = {
       running: false,
       distance_m: 0,
@@ -710,6 +730,7 @@ const Meter = (() => {
       // ★ A1: trip reset で elapsed 累積は 0 化・last_resume_time も null
       elapsed_accumulated_sec: 0,
       last_resume_time: null,
+      business_active: prevBusinessActive,
       start_time: null,
       last_gps: null,
       last_timestamp: null,
@@ -845,7 +866,8 @@ const Meter = (() => {
           //   旧 (2026-05-14): running 問わず加算 / (2026-05-16) 停車判定追加
           //   新: state.running===false 時は business_distance_m を加算しない (= 代行開始前
           //       の GPS jitter 由来加算を遮断)。停車判定は維持。
-          if (state.running && !_isStationary()) {
+          // ★ Phase 2: business_active gate (= 業務中常時・停車中除外)
+          if (state.business_active && !_isStationary()) {
             state.business_distance_m = (state.business_distance_m || 0) + filled;
           }
           if (state.running) {
@@ -863,7 +885,8 @@ const Meter = (() => {
           // ★設計変更宣言 (2026-05-17・症状B 修正・running=false 時 business_distance_m 加算停止):
           //   旧 (2026-05-16): 停車判定のみガード
           //   新: state.running===false 時は business_distance_m を加算しない。停車判定維持。
-          if (state.running && !_isStationary()) {
+          // ★ Phase 2: business_active gate (= 業務中常時・停車中除外)
+          if (state.business_active && !_isStationary()) {
             state.business_distance_m = (state.business_distance_m || 0) + inc;
           }
           if (state.running) {
@@ -1225,6 +1248,15 @@ const Meter = (() => {
     state.business_distance_m = typeof m === 'number' && m >= 0 ? m : 0;
   }
 
+  // ★設計変更宣言 (2026-05-18・Phase 2・business_active gate):
+  //   業務開始/終了/再開/破棄のタイミングで Business.js から呼ばれる外部 API。
+  //   state.business_active = true なら business_distance_m が常時加算 (= 後付メーター機対等)。
+  //   false なら加算停止 (= 業務終了 / 業務未開始時)。
+  //   distance_m / fare_yen には影響しない (= 課金根拠は state.running gate で別管理)。
+  function setBusinessActive(active) {
+    state.business_active = !!active;
+  }
+
   // リロード復元用：最終GPS状態をセット（層3・GPS消失補完を復元後に発火させる）
   function setLastGps(lat, lng, altitude, speedKmh, timestamp) {
     state.last_gps = { lat, lng, altitude };
@@ -1507,6 +1539,7 @@ const Meter = (() => {
     isMmReady,
     // 業務単位累積距離 (2026-05-14)
     setBusinessDistance,
+    setBusinessActive, // ★ Phase 2: 業務 active gate 外部設定 (= Business.js から呼ぶ)
     // ★設計変更宣言 (2026-05-15・テスト用 drain window 制御 API):
     //   tests/meter-mm-priority.js 等の統合テストは Meter.start() 直後に
     //   fakeWorker._dispatch() で mmResult を同期投入する設計のため、
