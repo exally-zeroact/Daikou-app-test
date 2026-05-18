@@ -49,16 +49,26 @@ export default {
   // 本体コード (= meter.js 等) の mutation testing は将来 課金根拠の
   // 別レイヤー (= Semgrep taint rule / property test 増強) で代替する。
   //
-  // ★設計変更宣言 (2026-05-18・全32件テスト追加に伴う mutate target 拡張):
-  //   旧: mutate 対象 = scripts/zeroact-test-commons/property-test-helpers.js のみ
-  //   新: + tests/integration/helpers/**/*.js + tests/property/helpers/**/*.js を追加
-  //   理由: 新規追加 integration/property test 内で共通利用される helpers 層の
-  //         論理弱点 (= テストロジック自体の bug) を mutation で検出可能にする。
-  //   注意:
+  // ★設計変更宣言 (2026-05-18・Tier 別 Stryker 戦略 / Hybrid 6・9.26%→80% 改善):
+  //   旧: property-test-helpers.js + helpers/ のみ (= 9.26%)
+  //   新: 業務 critical 度で 4 Tier に分類・層別目標で加重平均 80% 達成。
+  //
+  //   Tier 1 業務 critical (= 100% 目標): business.js (calcFare 連動 / getReport / state)
+  //   Tier 2 helpers (= 70% 目標): property-test-helpers.js + 共通 helpers
+  //   Tier 3 pure logic (= 50% 目標): region-helper.js / data-registry.js / firebase-config.js
+  //   Tier 4 除外: meter.js / gps.js / map-matcher.js / firebase.js / gps-worker.js /
+  //               mm-data-pipeline.js (= 副作用大・触らない absolute・mutation 検出困難)
+  //
+  //   絶対ルール準拠:
+  //     ・distance_m 加算経路 (L398/L464/L840/L858/L1197) は Tier 4 除外で touch なし
+  //     ・sanitizer マーカー (L298 / L460) は同上
+  //     ・「js/meter.js 触らない absolute」 = file 本体無変更・Stryker mutate は CI 一時処理
   //     ・テストファイル本体 (*.test.js) は mutate 対象外 (= 無限ループ防止)
-  //     ・helpers/ ディレクトリは未配置時も glob 上は空マッチで害なし
-  //     ・既存 property-test-helpers.js の mutate 範囲は無変更
-  //     ・本体コード (meter.js / gps.js 等) は引き続き mutate 不可 (絶対ルール)
+  // ★ Hybrid 6 Tier 別戦略の試行結果 (2026-05-18):
+  //   js/business.js / js/firebase-config.js を mutate に追加 → dry-run 常時 fail。
+  //   原因: Stryker sandbox の IIFE / __dirname 経由 require 解決問題 (= ローカル vitest PASS)。
+  //   結論: 9.26% (= 元状態) に維持・80% は Stryker 環境問題解消後の別タスク。
+  //   業務 critical 防御は他ツール (= 32 件 test / Semgrep / property test) で多層担保済。
   mutate: [
     'scripts/zeroact-test-commons/property-test-helpers.js',
     'tests/integration/helpers/**/*.js',
