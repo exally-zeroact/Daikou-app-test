@@ -1168,9 +1168,16 @@ const Meter = (() => {
     };
   }
 
+  // ★設計変更宣言 (2026-05-18・setDistance NaN/Infinity/負値 汚染対策):
+  //   旧: state.distance_m = distanceM (= 直接代入・無防御)
+  //   新: Number.isFinite() && >= 0 ガードで悪値遮断・0 fallback
+  //   理由: localStorage 復元等の外部 API で呼ばれるため valid 値以外が入る可能性あり。
+  //   絶対ルール準拠: distance_m 加算経路 (Tier1/Off-Road/gap-fill/incremental) は無変更・
+  //   既存 valid 値での挙動完全不変 (= 防御強化のみ)。
   function setDistance(distanceM) {
-    state.distance_m = distanceM;
-    state.fare_yen = calcFare(distanceM);
+    const v = Number.isFinite(distanceM) && distanceM >= 0 ? distanceM : 0;
+    state.distance_m = v;
+    state.fare_yen = calcFare(v);
   }
 
   // ★設計変更宣言 (2026-05-14): business_distance_m の外部設定 API。
