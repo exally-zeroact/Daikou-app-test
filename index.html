@@ -82,13 +82,13 @@
       /* メーター画面（screenDriving）のスクロール制御。
    旧コードは display:block のみで overflow 未定義 → Android Chrome で
    .content (overflow:hidden) を貫通したスクロールが発生し止まらなくなることがあった。
-   flex:1 + overflow-y:auto + overscroll-behavior:contain で内側完結スクロールに固定。
+   ★設計変更宣言 (2026-05-19・UI 修正): 主要画面 スクロール不要設計。
+   overflow-y: auto → hidden に変更・全要素が画面内に収まるレイアウト。
    touch-action:pan-y で縦スワイプ以外（ピンチ・横）を抑制し誤操作を防ぐ。 */
       #screenDriving {
         flex: 1;
         min-height: 0;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
+        overflow: hidden;
         overscroll-behavior-y: contain;
         touch-action: pan-y;
       }
@@ -1697,13 +1697,19 @@
         margin-top: 4px;
       }
       /* 日時1行表示（2026/05/01仕様変更） */
+      /* ★設計変更宣言 (2026-05-19・UI 修正・横画面縦崩れ対策):
+         日付文字列「2026年5月1日（金） 15:43」が landscape の max-width: 80% 制限で
+         折返し → 縦方向崩れ事象。white-space: nowrap で 1 行強制 + overflow ellipsis。 */
       .idle-datetime-line {
         text-align: center;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 700;
         color: #111;
-        padding: 14px 0 10px;
+        padding: 10px 0 8px;
         letter-spacing: 1px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .stats-grid {
         display: grid;
@@ -1734,28 +1740,30 @@
       /* ★設計変更宣言 (2026-05-10): 縦画面で 4 カード縦積み → 2x2 grid 化
    旧: flex-direction:column で 1 列縦積み・スクロール必須
    新: grid 2x2 + 各カード 2 行 (label/value) で全 4 カードが 1 画面に収まる */
+      /* ★設計変更宣言 (2026-05-19・SE 375×667 対応): padding / font-size 縮小で
+         主要画面が SE viewport (= 約 540px usable) に収まるよう調整。 */
       .stat-card-large {
         background: #f5f5f5;
-        border-radius: 12px;
-        padding: 10px 10px;
+        border-radius: 10px;
+        padding: 8px 10px;
         text-align: center;
       }
       .stat-card-large .stat-label {
         font-size: 11px;
         color: #888;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
         letter-spacing: 0.5px;
         display: block;
       }
       .stat-card-large .stat-value {
-        font-size: 22px;
+        font-size: 20px;
         font-weight: 900;
         color: #111;
         line-height: 1.05;
         display: block;
       }
       .stat-card-large .stat-unit {
-        font-size: 12px;
+        font-size: 11px;
         color: #888;
         margin-left: 3px;
         font-weight: 600;
@@ -1763,7 +1771,7 @@
       .stats-dashboard {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 8px;
+        gap: 6px;
         padding: 0 12px;
       }
       /* 履歴ボタン（2026/05/01追加・2026-05-10 縦画面 1 画面化のため padding 縮小） */
@@ -1871,21 +1879,23 @@
       }
 
       /* 業務終了画面（日報） */
+      /* ★設計変更宣言 (2026-05-19・SE 375×667 対応): padding / font-size 縮小で
+         report-card + 続けるボタン + note + 終了ボタン が SE viewport に収まる。 */
       .report-title {
         text-align: center;
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 900;
         color: #111;
-        padding: 14px 0 8px;
+        padding: 10px 0 6px;
       }
       .report-card {
         background: #f5f5f5;
-        border-radius: 12px;
-        padding: 16px;
-        margin: 0 16px 12px;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin: 0 12px 8px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
       }
       .report-row {
         display: flex;
@@ -1912,15 +1922,18 @@
         margin: 4px 0;
       }
       /* [続ける]/[終了] ボタン：他画面のボタンとサイズ統一（btn-main / btn-business-start と同等） */
+      /* ★設計変更宣言 (2026-05-19・UI 修正): 続ける ボタン margin を底面 0 化・
+         note (= ボタン間説明) との距離を縮め「ボタン直下の説明」と認識させる。
+         業務開始画面 .btn-business-resume-start の margin-top: -18px と同じ思想。 */
       .btn-business-resume {
         width: calc(100% - 32px);
-        margin: 8px 16px 4px;
-        padding: 18px;
+        margin: 8px 16px 0;
+        padding: 14px;
         background: #007aff;
         border: none;
         border-radius: 12px;
         color: #fff;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 900;
         letter-spacing: 3px;
         font-family: 'Noto Sans JP', sans-serif;
@@ -1932,13 +1945,13 @@
       }
       .btn-business-confirm {
         width: calc(100% - 32px);
-        margin: 4px 16px 8px;
-        padding: 18px;
+        margin: 0 16px 8px;
+        padding: 14px;
         background: #fff;
-        border: 1.5px solid #ff3b30;
+        border: 2px solid #ff3b30;
         border-radius: 12px;
         color: #ff3b30;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 700;
         letter-spacing: 3px;
         font-family: 'Noto Sans JP', sans-serif;
@@ -1948,33 +1961,41 @@
         background: #fff0f0;
         transform: scale(0.97);
       }
+      /* ★設計変更宣言 (2026-05-19・UI 修正): report-note をボタン間説明に再設計。
+         業務開始画面 .resume-note と同じ赤文字・font-weight: 700 で
+         「続けるボタンの役割説明 + 終了ボタンとの区別」を明示。 */
       .report-note {
         text-align: center;
-        font-size: 11px;
-        color: #999;
-        padding: 4px 16px 16px;
+        font-size: 12px;
+        color: #ff3b30;
+        font-weight: 700;
+        padding: 6px 16px;
+        line-height: 1.4;
       }
 
       /* DRIVING */
+      /* ★設計変更宣言 (2026-05-19・SE 375×667 対応): padding / gap / font-size 縮小。
+         料金 + 走行距離 + 経由地点 + 距離ソース の 4 要素が SE viewport に収まる調整。 */
       .driving-grid {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px;
+        padding: 0 12px;
       }
       .meter-card {
         background: #f5f5f5;
-        border-radius: 12px;
-        padding: 16px;
+        border-radius: 10px;
+        padding: 10px 14px;
         text-align: center;
       }
       .meter-label {
-        font-size: 12px;
+        font-size: 11px;
         color: #aaa;
-        margin-bottom: 4px;
+        margin-bottom: 2px;
         letter-spacing: 1px;
       }
       .meter-value {
-        font-size: 42px;
+        font-size: 36px;
         font-weight: 900;
         color: #111;
         line-height: 1;
@@ -2726,12 +2747,17 @@
         }
 
         /* 2026/05/01：全画面共通の日時・stats-dashboard・履歴ボタンを中央寄せ */
+        /* ★設計変更宣言 (2026-05-19・横画面 日付縦崩れ対策): max-width: 80% +
+           white-space: nowrap (= .idle-datetime-line 共通定義) で 1 行強制・折返し防止。
+           landscape では font-size を一段縮小して appbar 40px との視覚バランスを保つ。 */
         .dateTimeLine {
           max-width: 80%;
           width: 100%;
           margin-left: auto;
           margin-right: auto;
           box-sizing: border-box;
+          font-size: 14px !important;
+          padding: 6px 0 4px !important;
         }
         .stats-dashboard {
           max-width: 80%;
@@ -3760,8 +3786,7 @@
           flex-direction: column;
           flex: 1;
           min-height: 0;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
+          overflow: hidden;
         "
       >
         <!-- 日時（1行表示・絵文字なし・2026/05/01仕様） -->
@@ -3901,8 +3926,7 @@
           flex-direction: column;
           flex: 1;
           min-height: 0;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
+          overflow: hidden;
         "
       >
         <!-- 日時（全画面共通） -->
@@ -3911,10 +3935,13 @@
         <div class="report-card" id="reportCard">
           <!-- JS で動的生成 -->
         </div>
-        <!-- 続ける／終了 ボタン -->
+        <!-- ★設計変更宣言 (2026-05-19・UI 修正):
+             続ける/終了 の間に説明テキスト挿入。業務開始画面 (= 業務開始 / 業務再開)
+             と同じ設計思想で 「続けるはメイン (青) / 終了は警告 (赤枠)」 の役割を
+             テキストで明示・押し間違い防止。 -->
         <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
-        <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
         <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
+        <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
       </div>
 
       <!-- DRIVING -->
