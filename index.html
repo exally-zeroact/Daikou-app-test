@@ -4421,7 +4421,68 @@
       // アプリ全体状態 (旧 line 1906-1918・startGPS / onBusinessStart 等が参照)
       let appState = 'idle'; // idle / driving / fare
       let histSaved = false; // 確定時の履歴保存済みフラグ
-      let noSleep = null; // NoSleepインスタンス
+      let noSleep = null; // NoSleepインスタンス (= iOS 16.3 以下 fallback)
+      // ★設計変更宣言 (2026-05-19・R3・Screen Wake Lock API 移行):
+      //   旧: NoSleep library 経由 (= iOS PWA で動作不安定・司さん実車「画面消える」報告)
+      //   新: navigator.wakeLock.request('screen') を主経路に・NoSleep を fallback として並行起動
+      //   サポート: iOS 16.4+ / Android Chrome 84+ / Edge 84+ / Firefox 128+ / Samsung 14+
+      //            iOS 16.3 以下は wakeLock 未定義 → NoSleep のみで動作 (= 既存挙動維持)
+      //   visibilitychange で sentinel が release されるため・visible 復帰時に再取得する仕様。
+      let wakeLockSentinel = null;
+      async function acquireWakeLock() {
+        // Wake Lock API 主経路
+        try {
+          if ('wakeLock' in navigator && typeof navigator.wakeLock.request === 'function') {
+            if (!wakeLockSentinel || wakeLockSentinel.released) {
+              wakeLockSentinel = await navigator.wakeLock.request('screen');
+              wakeLockSentinel.addEventListener('release', () => {
+                if (typeof dlog === 'function') dlog('[WakeLock] released (visibility change)');
+              });
+              if (typeof dlog === 'function') dlog('[WakeLock] acquired (Screen Wake Lock API)');
+            }
+          }
+        } catch (e) {
+          if (typeof dlog === 'function') dlog('[WakeLock] API error: ' + (e && e.message));
+        }
+        // NoSleep fallback (= iOS 16.3 以下・wakeLock 失敗時の保険)
+        try {
+          if (!noSleep) {
+            noSleep = new NoSleep();
+          }
+          noSleep.enable().catch((e) => {
+            if (typeof dlog === 'function') dlog('[NoSleep fallback] error: ' + (e && e.message));
+          });
+        } catch (e) {
+          if (typeof dlog === 'function') dlog('[NoSleep fallback] init error: ' + (e && e.message));
+        }
+      }
+      function releaseWakeLock() {
+        // Wake Lock API release
+        try {
+          if (wakeLockSentinel && typeof wakeLockSentinel.release === 'function') {
+            wakeLockSentinel.release();
+            wakeLockSentinel = null;
+            if (typeof dlog === 'function') dlog('[WakeLock] released (manual)');
+          }
+        } catch (_) {}
+        // NoSleep fallback disable
+        try {
+          if (noSleep && typeof noSleep.disable === 'function') {
+            noSleep.disable();
+          }
+        } catch (_) {}
+      }
+      // visibilitychange で再取得 (= Wake Lock 仕様で visible 時のみ保持される)
+      try {
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible') {
+            // 業務中 (appState !== 'businessStart') なら再取得
+            if (typeof appState !== 'undefined' && appState !== 'businessStart') {
+              acquireWakeLock();
+            }
+          }
+        });
+      } catch (_) {}
       let dimTimer = null; // 空車時の画面暗転タイマー
       const DIM_MINUTES = 300; // 空車5時間(300分)で暗転
       let surchargeOn = false;
@@ -5378,18 +5439,8 @@
       function onSensorRestoreTap() {
         if (typeof dlog === 'function') dlog('[復元] センサー再起動ボタン押下');
 
-        // NoSleep 起動（user gesture 内で確実に発火）
-        if (!noSleep) {
-          noSleep = new NoSleep();
-        }
-        noSleep
-          .enable()
-          .then(() => {
-            if (typeof dlog === 'function') dlog('[復元] NoSleep 復活');
-          })
-          .catch((e) => {
-            if (typeof dlog === 'function') dlog('[復元] NoSleep エラー: ' + e.message);
-          });
+        // ★ R3: Wake Lock API + NoSleep fallback (= user gesture 内で発火)
+        acquireWakeLock();
 
         // DeviceOrientation 許可（同期的に呼ぶ・user gesture 必須）
         if (
@@ -6179,11 +6230,8 @@
           document.getElementById('appbarTitle').textContent = '代行中';
           // 仕事開始時刻を記録（自動リセット判定用）
           localStorage.setItem('daikou_last_start', Date.now().toString());
-          // NoSleep起動（画面消灯防止）
-          if (!noSleep) {
-            noSleep = new NoSleep();
-          }
-          noSleep.enable().catch((e) => dlog('NoSleep error:', e));
+          // ★ R3: Wake Lock API + NoSleep fallback (= 画面消灯防止・user gesture 内で発火)
+          acquireWakeLock();
           // 暗転タイマーをクリア・画面を戻す
           if (dimTimer) {
             clearTimeout(dimTimer);
@@ -6323,13 +6371,8 @@
           try {
             if (typeof DataUpdateBanner !== 'undefined') DataUpdateBanner.hide(false);
           } catch (_) {}
-          // NoSleep 起動（画面消灯防止）
-          if (!noSleep) {
-            noSleep = new NoSleep();
-          }
-          noSleep.enable().catch((e) => {
-            if (typeof dlog === 'function') dlog('NoSleep error:', e);
-          });
+          // ★ R3: Wake Lock API + NoSleep fallback (= 画面消灯防止・user gesture 内で発火)
+          acquireWakeLock();
           // 暗転タイマーリセット
           if (dimTimer) {
             clearTimeout(dimTimer);
@@ -6464,10 +6507,8 @@
           ) {
             refreshSensorPermission();
           }
-          if (!noSleep) {
-            noSleep = new NoSleep();
-          }
-          noSleep.enable().catch((e) => dlog('NoSleep error:', e));
+          // ★ R3: Wake Lock API + NoSleep fallback (= 画面消灯防止・user gesture 内で発火)
+          acquireWakeLock();
           if (dimTimer) {
             clearTimeout(dimTimer);
             dimTimer = null;
@@ -6573,12 +6614,10 @@
           document.getElementById('appbarTitle').textContent = 'ダイコメ';
           // limbo state (start_time !== null && !active) なので業務再開ボタンが表示される
           updateResumeFromStartVisibility();
-          // 2026/05/02：NoSleep 解除（業務終了確定でバッテリー節約）
-          //   業務開始 → enable / 業務終了確定 → disable の自然なライフサイクル
-          if (noSleep && typeof noSleep.disable === 'function') {
-            noSleep.disable();
-            if (typeof dlog === 'function') dlog('[NoSleep] 業務終了で解除');
-          }
+          // ★ R3: Wake Lock + NoSleep 解除（業務終了確定でバッテリー節約）
+          //   業務開始 → acquire / 業務終了確定 → release の自然なライフサイクル
+          releaseWakeLock();
+          if (typeof dlog === 'function') dlog('[WakeLock] 業務終了で解除');
           if (typeof dlog === 'function')
             dlog('[Business] end (limbo・next start で abandon して履歴 push)');
         } catch (e) {
