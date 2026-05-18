@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # set-commits --auto は previous release の git history を遡る必要あり。
           # 浅い clone (fetch-depth: 2) では SHA 不明エラー → full clone (fetch-depth: 0) に変更。
