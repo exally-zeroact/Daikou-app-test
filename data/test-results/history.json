@@ -1,35 +1,5 @@
 [
   {
-    "generated_at": "2026-05-17T05:00:23.079Z",
-    "git_sha": "2d3eae9ad74727ce365812d3fd82600cbfa50c60",
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
-    "generated_at": "2026-05-17T05:05:37.727Z",
-    "git_sha": "bff139f88fffa0938674b58cd2b9ff43153f4887",
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
-    "generated_at": "2026-05-17T14:32:20.256Z",
-    "git_sha": "f5d2485f7dd9af4d23e3573f7d3750781928077b",
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
-    "generated_at": "2026-05-17T14:47:07.185Z",
-    "git_sha": "3398d521285ed44937f418528e88a1fa73d3f022",
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
-    "generated_at": "2026-05-17T14:55:32.485Z",
-    "git_sha": "eb978390e017d492b3b6909d8395de068ca934cf",
-    "snap_rate": 1,
-    "der": 0.0004
-  },
-  {
     "generated_at": "2026-05-17T16:07:20.431Z",
     "git_sha": "3d5888f62fcd04875eebf1e08fe1313fac928dae",
     "snap_rate": 1,
@@ -56,6 +26,36 @@
   {
     "generated_at": "2026-05-17T23:05:24.474Z",
     "git_sha": "f666bef6047d3ea393554e3d11ba221bc02dfb43",
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-17T23:56:11.245Z",
+    "git_sha": null,
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-18T01:41:25.063Z",
+    "git_sha": null,
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-18T02:25:04.946Z",
+    "git_sha": null,
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-18T02:25:07.380Z",
+    "git_sha": null,
+    "snap_rate": 1,
+    "der": 0.0004
+  },
+  {
+    "generated_at": "2026-05-18T04:00:46.748Z",
+    "git_sha": null,
     "snap_rate": 1,
     "der": 0.0004
   }
