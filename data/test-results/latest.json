@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-18T05:10:44.344Z",
-  "git_sha": "76b779a467febbaeb00282b29037a5a39e384fc9",
-  "git_ref": "main",
-  "runner": "github-actions",
+  "generated_at": "2026-05-18T05:07:54.485Z",
+  "git_sha": null,
+  "git_ref": null,
+  "runner": "local",
   "summary": {
     "snap_rate_overall": 1,
     "distance_error_ratio_overall": 0.0004,
