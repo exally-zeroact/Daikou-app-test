@@ -40,8 +40,20 @@ const DEFAULT_FARE_CONFIG = {
 };
 
 function mockGPS() {
+  // ★設計変更宣言 (2026-05-19・haversine 化対応): 業務単位累積が GPS.calcDistance を
+  //   呼ぶ設計に変更されたため・mock も実 haversine 計算に変更。
   globalThis.GPS = {
-    calcDistance: () => 0,
+    calcDistance: (lat1, lng1, lat2, lng2) => {
+      const R = 6371000;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    },
     calcDistance3D: () => 0,
     setRoadType: () => {},
   };

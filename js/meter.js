@@ -898,34 +898,41 @@ const Meter = (() => {
     if (state.last_gps && state.last_timestamp) {
       const dtSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
 
-      // ★設計変更宣言 (2026-05-18・Phase 3・案G Layer 1・GPS predictive 即時加算):
-      //   GPS speed × dt で 1 秒以内ラグの表示用距離を計算 (= P2 ラグ解消)。
-      //   表示専用・課金経路ゼロ・distance_m は無変更。
-      //   business_active gate で業務単位常時加算 (= 後付メーター機対等)。
-      //   絶対ルール準拠: GPS 直線距離ではなく速度×時間 (= タイヤ回転由来の概算・既存 gap fill と同性質)。
-      // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離):
-      //   旧: 4 加算経路 (mm commit / retroactive / gap fill / Off-Road incremental) で
-      //       Worker B 出力 m.mmIncrementM を distance_m と分岐して business_distance_m に加算
-      //       → main 側 _isStationary() gate の非対称で停車誤判定時 distance_m のみ加算され
-      //         business_distance_m < distance_m の事象発生 (司さん実車 0.50<1.06 報告)
-      //   新: business_distance_m は Worker B 経路から完全独立・本ブロックで GPS speed × dt 加算。
-      //       gps_predictive_distance_m (= trip 単位) と同じ計算式で同時加算するが state は別:
-      //         gps_predictive_distance_m: trip 単位 (= Meter.start で 0 化)
-      //         business_distance_m:      業務単位 (= Business.start で 0 化)
+      // ★設計変更宣言 (2026-05-19・haversine 連続点累積に移行・業界標準準拠):
+      //   旧 (Phase 3 〜 完全分離後): speedKmh × dt で計算
+      //     問題: iOS Safari coords.speed が走行中も null/0 を返す癖でノイズに脆弱
+      //           モール駐車場 / 信号停止後 / 徐行で加算停止する司さん実車事象
+      //   新: 連続点 haversine 累積 (= Strava / Garmin / 米国タクシー特許と同手法)
+      //       GPS 速度値を使わず・直前 GPS 位置 → 今 GPS 位置の距離を直接計算
+      //       速度ノイズ免疫・GPS が動けば加算・止まれば加算停止 (= 後付メーター対等)
       //   絶対ルール準拠:
+      //     ・「連続点 polyline 累積 = 許可」 (meter.js L106-108 既存明示) と完全整合
+      //     ・「A → B 一発 haversine 課金 = 禁止」とは別物 (= 連続点 1 つずつ累積)
       //     ・distance_m 加算 5 経路は state.running gate で完全不変 (= 課金根拠不可侵)
-      //     ・速度×時間は GPS 直線距離禁止 rule 適用外 (= 既存 gap fill と同性質)
-      //     ・iOS / Android 両 OS 共通 (= speedKmh は両 OS で同等取得)
+      //     ・iOS / Android 両 OS 共通 (= GPS.calcDistance は既存 Off-Road でも利用)
+      //   ガード (= 既存 _trackHaversineBetweenGps と同基準):
+      //     ・isStationary=true (= gps.js 保守的停止判定) → 加算しない
+      //     ・accuracy > 50m (= GPS 精度低下) → 加算しない
+      //     ・物理上限 160 km/h 超過 → 加算しない (= GPS jump 防御)
+      //     ・dtSec >= 10 秒 (= 長時間空白) → 加算しない (= gap fill 経路に委任)
       if (
         state.business_active &&
-        gpsResult.speedKmh > 0 &&
         !gpsResult.isStationary &&
+        gpsResult.accuracy <= 50 &&
         dtSec > 0 &&
         dtSec < 10
       ) {
-        const _inc = (gpsResult.speedKmh / 3.6) * dtSec;
-        state.gps_predictive_distance_m += _inc;
-        state.business_distance_m = (state.business_distance_m || 0) + _inc;
+        const _haver = GPS.calcDistance(
+          state.last_gps.lat,
+          state.last_gps.lng,
+          gpsResult.lat,
+          gpsResult.lng
+        );
+        const _maxDist = (160 / 3.6) * dtSec; // 物理上限 160 km/h
+        if (_haver > 0 && _haver <= _maxDist) {
+          state.gps_predictive_distance_m += _haver;
+          state.business_distance_m = (state.business_distance_m || 0) + _haver;
+        }
       }
 
       // Phase 1.C (2026-05-10): 通常時は haversine 累積を裏で track

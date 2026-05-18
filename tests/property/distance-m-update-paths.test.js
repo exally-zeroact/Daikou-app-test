@@ -81,8 +81,10 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     // 2026-05-19 更新 (business_distance_m 完全分離): 4 加算経路から business 削除で shift。
     // 旧: [428, 495, 927, 945, 1324]
     // 2026-05-19 R1 更新 (Off-Road grace period): _offRoadGraceUntil 追加で shift。
-    // 新: [440, 514, 948, 966, 1345]
-    const expectedLines = [440, 514, 948, 966, 1345];
+    // 旧: [440, 514, 948, 966, 1345]
+    // 2026-05-19 haversine 更新 (業務単位連続点累積): GPS.calcDistance 呼出追加で shift。
+    // 新: [440, 514, 955, 973, 1352]
+    const expectedLines = [440, 514, 955, 973, 1352];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -120,7 +122,11 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     }
   });
 
-  it('C3: dangerous_sources (GPS.calcDistance) は 2 箇所のみ・sanitizer 関数内のみ', () => {
+  it('C3: dangerous_sources (GPS.calcDistance) は 3 箇所・うち 2 箇所 sanitizer 内 + 1 箇所 業務単位累積 (= 連続点許可済)', () => {
+    // ★設計変更宣言 (2026-05-19・業務単位を haversine 連続点累積に移行):
+    //   業界標準 (= Strava / Garmin / 米国タクシー特許) と整合・iOS speedKmh ノイズ免疫。
+    //   ★絶対ルール「連続点 polyline 累積 = 許可」(meter.js L106-108) と完全整合。
+    //   distance_m 加算経路には触れない (= 課金根拠不可侵維持)。
     const source = loadMeterSource();
     const lines = source.split('\n');
     const calls = [];
@@ -129,21 +135,21 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
         calls.push({ lineNo: i + 1, content: lines[i].trim() });
       }
     }
-    if (calls.length !== 2) {
+    if (calls.length !== 3) {
       throw new Error(
-        'GPS.calcDistance 呼出件数違反: 期待 2 件 (L257 / L305) 実検出 ' +
+        'GPS.calcDistance 呼出件数違反: 期待 3 件 (L295 sanitizer / L343 sanitizer / L925 業務単位) 実検出 ' +
           calls.length +
           ' 件・' +
           JSON.stringify(calls)
       );
     }
-    // L257 は _trackHaversineBetweenGps 内・L305 は _calculateOffRoadIncrement 内
+    // L295 は _trackHaversineBetweenGps 内 (sanitizer)
+    // L343 は _calculateOffRoadIncrement 内 (sanitizer)
+    // L925 は業務単位 business_distance_m 連続点累積 (= 連続点累積は絶対ルール許可)
     // Stryker sandbox 由来 line offset 吸収のため ±10 line 許容
-    // 2026-05-18 更新 (Phase 3): GPS.calcDistance も +11 shift。
-    // 2026-05-19 R1 更新 (Off-Road grace period): _offRoadGraceUntil 定数追加で shift。
-    const expectedLines = [295, 343];
+    const expectedLines = [295, 343, 925];
     const LINE_TOLERANCE = 10;
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
       if (diff > LINE_TOLERANCE) {
         throw new Error(
