@@ -33,7 +33,7 @@ test('install→offline→reopen: SW + cache でオフラインでも起動可�
   const swActive = await page.evaluate(async () => {
     if (!navigator.serviceWorker) return false;
     const reg = await navigator.serviceWorker.getRegistration();
-    return reg && (reg.active || reg.installing || reg.waiting) ? true : false;
+    return !!(reg && (reg.active || reg.installing || reg.waiting));
   });
   expect(swActive).toBe(true);
 
