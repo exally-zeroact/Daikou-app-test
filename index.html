@@ -2537,19 +2537,19 @@
         .btn-area {
           grid-area: btn-area !important;
         }
-        /* ★設計変更宣言 (2026-05-19・司さん指示 履歴/業務終了 横並び):
-           screen-idle-actions を flex row で左右 50/50 配置。
-           各ボタンは flex: 1 で同幅・gap 8px で間隔。
-           portrait の display: contents を上書きして flex container 化。 */
+        /* ★設計変更宣言 (2026-05-19・司さん指示「上と同じように」):
+           stats-dashboard (= 上の 2x2 grid) と同じレイアウトに統一。
+           grid-template-columns: 1fr 1fr / gap: 6px / padding: 0 12px (= stats と完全同一)。
+           上下バランスを揃える。 */
         .screen-idle-actions {
-          display: flex !important;
-          flex-direction: row !important;
-          gap: 8px !important;
-          padding: 8px 12px 0 !important;
+          display: grid !important;
+          grid-template-columns: 1fr 1fr !important;
+          gap: 6px !important;
+          padding: 0 12px !important;
+          margin-top: 8px !important;
         }
         .screen-idle-actions > .btn-history,
         .screen-idle-actions > .btn-business-end {
-          flex: 1 !important;
           width: auto !important;
           margin: 0 !important;
         }
