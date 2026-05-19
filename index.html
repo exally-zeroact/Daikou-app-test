@@ -2548,11 +2548,12 @@
         #screenFare {
           justify-content: center !important;
         }
-        /* ★設計変更宣言 (2026-05-19・司さん指示「上と同じ幅で揃える」):
-           stats-dashboard と screen-idle-actions を完全同一 rule で grid 化・
-           幅・gap・padding すべて 1px の差もなく揃える。 */
-        .stats-dashboard,
-        .screen-idle-actions {
+        /* ★設計変更宣言 (2026-05-19・司さん指示書・空車 horizontal 統一レイアウト):
+           代行中 horizontal と同じ構造に: 左 content (= 日付・stats) + 右 btn-area (= 代行開始上・履歴中・業務終了下)。
+           screen-idle-actions (= 履歴 / 業務終了 wrap) を position: fixed で
+           btn-area area 内に視覚配置 (= HTML は screenIdle 内のまま・JS 触らず)。
+           btn-area justify-content: flex-start で代行開始を上に・screen-idle-actions が下に。 */
+        .stats-dashboard {
           display: grid !important;
           grid-template-columns: 1fr 1fr !important;
           gap: 6px !important;
@@ -2561,22 +2562,46 @@
           box-sizing: border-box !important;
           margin: 0 !important;
         }
+        .btn-area {
+          justify-content: flex-start !important;
+          padding: 16px 0 16px 0 !important;
+          gap: 8px !important;
+        }
+        .btn-area > .btn-main {
+          margin: 0 !important;
+        }
         .screen-idle-actions {
-          margin-top: 8px !important;
+          /* btn-area area 内右下に固定配置 (= 履歴・業務終了 縦並び 2 ボタン) */
+          position: fixed !important;
+          right: 16px !important;
+          bottom: 16px !important;
+          width: 144px !important;
+          display: grid !important;
+          grid-template-columns: 1fr !important;
+          gap: 8px !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          z-index: 50 !important;
         }
         .screen-idle-actions > .btn-history,
         .screen-idle-actions > .btn-business-end {
           width: 100% !important;
           margin: 0 !important;
-          padding: 8px 10px !important;
-          border-radius: 10px !important;
-          font-size: 14px !important;
-          min-height: 48px !important;
+          padding: 12px 8px !important;
+          border-radius: 12px !important;
+          font-size: 13px !important;
+          min-height: 0 !important;
           height: auto !important;
           box-sizing: border-box !important;
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
+          letter-spacing: 1px !important;
+        }
+        /* ★ 代行中 btn-row (= 追加料金 + 確定) を縦並び 2 ボタンに統一 */
+        .btn-row {
+          grid-template-columns: 1fr !important;
+          gap: 8px !important;
         }
 
         /* 2026/05/01 横画面UI修正 */
