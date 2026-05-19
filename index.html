@@ -2483,13 +2483,397 @@
       }
 
       /* 横画面対応 */
+      @media (orientation: landscape) {
+        /* ★設計変更宣言 (2026-05-19 緊急・本番 Daikou-app 5/13 動作復活):
+           旧: body { flex-direction: row; flex-wrap: wrap } で「左右分割レイアウト」
+               → iOS Safari landscape で flex-wrap 不安定・content width 計算狂い・縦書き崩れ
+               → 司さん実機画像で全画面 縦書き崩れ発生
+           新: body flex-direction 上書きを撤廃・portrait と同じ column 配置維持
+               左 sidenav (= L1642 bottom-nav 80px) + 縦並び content + btn-area
+               本番 Daikou-app 5/13 同等動作・司さん「ちゃんと出来てた」状態に復活
+           維持: 他 landscape rule (= btn-area width / appbar 40px / 各要素 landscape style) は不変 */
 
-      /* ★設計変更宣言 (2026-05-19 緊急・landscape 過剰 rule 完全削除):
-         本番 Daikou-app (= 5/13 同期・4866b38c) との比較で・本ブロック L2486-2876 (= 388 行) が
-         test 側でのみ追加された 「landscape 専用配置」rule 群と判明。
-         iOS Safari landscape で flex 計算・content width が不安定動作・縦書き崩れ発生。
-         本番は @media landscape は 2 箇所 (surcharge-group / sidenav 化) のみで・他は
-         portrait CSS のまま動作。本ブロック完全削除で本番 5/13 動作復活。 */
+        /* 2026/05/01 横画面UI修正 */
+        /* 1. 待機画面のバランス調整：btn-area を狭く */
+        .btn-area {
+          width: 180px !important;
+        }
+
+        /* 2. 縦画面用 走行に戻るボタンを完全非表示 */
+        .btn-back-portrait {
+          display: none !important;
+        }
+
+        /* 3. 横画面用 走行に戻るボタン（fare 時のみ・改行禁止・コンパクト） */
+        .btn-back-landscape.show {
+          display: block;
+          width: 100%;
+          padding: 14px 8px;
+          background: #fff;
+          border: 2px solid #ff3b30;
+          border-radius: 12px;
+          color: #ff3b30;
+          font-size: 14px;
+          font-weight: 900;
+          letter-spacing: 1px;
+          font-family: 'Noto Sans JP', sans-serif;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .btn-back-landscape:active {
+          background: #fff0f0;
+          transform: scale(0.97);
+        }
+
+        /* 4. fare 時の精算終了は[走行に戻る]から離す（誤タップ防止） */
+        .btn-back-landscape.show ~ .btn-main.show {
+          margin-top: 32px;
+          padding: 10px;
+          font-size: 13px;
+          letter-spacing: 2px;
+        }
+
+        /* 2026/05/01 追加：業務報告画面の[続ける]/[終了]を横画面では右側 btn-area に表示 */
+        /*    縦画面では screenBusinessReport 内のボタンが見える・横画面ではそれを非表示 */
+        #screenBusinessReport .btn-business-resume {
+          display: none !important;
+        }
+        #screenBusinessReport .btn-business-confirm {
+          display: none !important;
+        }
+        #screenBusinessReport .report-note {
+          display: none !important;
+        }
+        .btn-resume-landscape.show {
+          display: block;
+          width: 100%;
+          padding: 14px 8px;
+          background: #007aff;
+          border: none;
+          border-radius: 12px;
+          color: #fff;
+          font-size: 15px;
+          font-weight: 900;
+          letter-spacing: 2px;
+          font-family: 'Noto Sans JP', sans-serif;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .btn-resume-landscape:active {
+          transform: scale(0.97);
+          filter: brightness(0.85);
+        }
+        .btn-confirm-landscape.show {
+          display: block;
+          width: 100%;
+          padding: 14px 8px;
+          background: #fff;
+          border: 1.5px solid #ff3b30;
+          border-radius: 12px;
+          color: #ff3b30;
+          font-size: 15px;
+          font-weight: 700;
+          letter-spacing: 2px;
+          font-family: 'Noto Sans JP', sans-serif;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .btn-confirm-landscape:active {
+          background: #fff0f0;
+          transform: scale(0.97);
+        }
+        /* [続ける]と[終了]を離す（誤タップ防止・走行に戻ると同様） */
+        .btn-resume-landscape.show ~ .btn-confirm-landscape.show {
+          margin-top: 24px;
+        }
+
+        /* 5. 追加料金バナー（実車中の左ハンドル/深夜割増等）の幅を狭く */
+        .extras-list {
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .appbar {
+          width: 100% !important;
+          flex-shrink: 0 !important;
+          padding: 0 12px !important;
+          height: 40px !important;
+          min-height: 40px !important;
+          max-height: 40px !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
+        }
+        .appbar-title {
+          font-size: 14px !important;
+          line-height: 40px !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        .appbar-right {
+          margin: 0 !important;
+          padding: 0 !important;
+          gap: 8px !important;
+        }
+        .gps-acc {
+          font-size: 10px !important;
+        }
+        .gps-pill {
+          padding: 3px 10px !important;
+          font-size: 10px !important;
+        }
+        /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn landscape 上書き削除済 (ハンバーガーメニュー撤去) */
+
+        /* コンテンツ：左半分 */
+        .content {
+          flex: 1;
+          padding: 12px 16px;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          height: calc(100vh - 40px);
+          max-height: calc(100vh - 40px);
+          min-height: 0;
+          justify-content: center;
+        }
+
+        /* ボタンエリア：右半分（縦に並ぶ）*/
+        .btn-area {
+          width: 200px;
+          flex-shrink: 0;
+          padding: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          border-top: none;
+          border-left: 0.5px solid #f0f0f0;
+          height: calc(100vh - 40px);
+          max-height: calc(100vh - 40px);
+          justify-content: center;
+        }
+
+        /* 2026/05/01 横画面ボタン仕様統一：全ボタン縦並び・同サイズ */
+        .btn-main {
+          padding: 14px !important;
+          font-size: 15px !important;
+          border-radius: 12px !important;
+          letter-spacing: 2px !important;
+        }
+        .btn-sub {
+          padding: 14px !important;
+          font-size: 15px !important;
+          border-radius: 12px !important;
+          letter-spacing: 2px !important;
+        }
+        .btn-row {
+          grid-template-columns: 1fr !important;
+          gap: 8px !important;
+        }
+        .btn-back-landscape.show {
+          padding: 14px !important;
+          font-size: 15px !important;
+          border-radius: 12px !important;
+          letter-spacing: 1px !important;
+        }
+        /* 走行に戻ると精算終了は誤タップ防止で離す */
+        .btn-back-landscape.show ~ .btn-main.show {
+          margin-top: 32px !important;
+        }
+
+        /* 2026/05/01 横画面：業務管理ボタンも中央寄せ・サイズ統一 */
+        .btn-business-start {
+          max-width: 60% !important;
+          width: 60% !important;
+          padding: 14px !important;
+          font-size: 15px !important;
+          letter-spacing: 2px !important;
+        }
+        .btn-business-resume-start {
+          max-width: 60% !important;
+          width: 60% !important;
+          padding: 14px !important;
+          font-size: 15px !important;
+          letter-spacing: 2px !important;
+        }
+        .btn-business-resume {
+          max-width: 60% !important;
+          width: 60% !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          padding: 14px !important;
+          font-size: 15px !important;
+          letter-spacing: 2px !important;
+        }
+        .btn-business-confirm {
+          max-width: 60% !important;
+          width: 60% !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          padding: 14px !important;
+          font-size: 15px !important;
+          letter-spacing: 2px !important;
+        }
+        /* 業務終了画面の日報カードも中央寄せ */
+        .report-card {
+          max-width: 60% !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+        }
+        .report-title {
+          font-size: 16px !important;
+          padding: 8px 0 4px !important;
+        }
+        .report-note {
+          font-size: 10px !important;
+          padding: 2px 16px 8px !important;
+        }
+
+        /* IDLE：stats-grid・履歴を50%中央寄せ */
+        .idle-time {
+          font-size: 36px;
+        }
+        .stats-grid {
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+        .stat-value {
+          font-size: 18px;
+        }
+
+        /* 2026/05/01：全画面共通の日時・stats-dashboard・履歴ボタンを中央寄せ */
+        .dateTimeLine {
+          max-width: 80%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+        .stats-dashboard {
+          max-width: 80%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+          display: grid !important;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px;
+        }
+        .stat-card-large {
+          margin-bottom: 0 !important;
+          padding: 8px 10px !important;
+        }
+        .stat-card-large .stat-label {
+          font-size: 10px !important;
+          margin-bottom: 2px !important;
+        }
+        .stat-card-large .stat-value {
+          font-size: 22px !important;
+        }
+        .stat-card-large .stat-unit {
+          font-size: 11px !important;
+        }
+        .btn-history {
+          max-width: 80%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+          padding: 8px !important;
+          font-size: 13px !important;
+          margin-top: 4px !important;
+        }
+        /* 2026/05/01：[業務終了] ボタンも [履歴] と完全に同一サイズ・配置 */
+        .btn-business-end {
+          max-width: 80%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+          padding: 8px !important;
+          font-size: 13px !important;
+          margin-top: 4px !important;
+        }
+
+        /* DRIVING：meter-card 50%中央寄せ */
+        .driving-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .meter-value {
+          font-size: 32px;
+        }
+        .meter-card {
+          padding: 12px 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+        .meter-label {
+          font-size: 13px;
+          margin-bottom: 0;
+        }
+        /* ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・横画面対応):
+           既存 meter-card 50% 中央寄せレイアウトと整合させる。column flex を維持して
+           縦並び (driving-grid 直下) のまま配置する。 */
+        .waypoint-card {
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+        .route-card {
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+
+        /* FARE：fare-total・breakdown・走行に戻るボタン 50%中央寄せ */
+        #screenFare {
+          overflow-y: auto;
+        }
+        .fare-total-amount {
+          font-size: 40px;
+        }
+        .fare-total {
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+        .breakdown {
+          max-width: 50%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
+        }
+        #screenFare button {
+          margin-top: 10px;
+          display: block;
+          margin-left: auto;
+          margin-right: auto;
+        }
+      }
 
       /* ★設計変更宣言 (2026-05-15・修正2): Eruda 関連 CSS 削除済。
          本ファイル内には Eruda 本体実装 (eruda.init / ⚙️ ボタン / ?debug=eruda 経路) は
