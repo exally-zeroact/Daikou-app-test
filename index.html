@@ -1912,9 +1912,12 @@
         margin: 4px 0;
       }
       /* [続ける]/[終了] ボタン：他画面のボタンとサイズ統一（btn-main / btn-business-start と同等） */
+      /* ★設計変更宣言 (2026-05-19 再・続ける ボタン margin-bottom 0 化):
+         note をボタン直下に密着配置・「続けるボタンの説明」と認識させる。
+         業務開始画面 .resume-note (= margin-top -18px で密着) と同じ思想。 */
       .btn-business-resume {
         width: calc(100% - 32px);
-        margin: 8px 16px 4px;
+        margin: 8px 16px 0;
         padding: 18px;
         background: #007aff;
         border: none;
@@ -1932,7 +1935,7 @@
       }
       .btn-business-confirm {
         width: calc(100% - 32px);
-        margin: 4px 16px 8px;
+        margin: 0 16px 8px;
         padding: 18px;
         background: #fff;
         border: 1.5px solid #ff3b30;
@@ -1948,11 +1951,18 @@
         background: #fff0f0;
         transform: scale(0.97);
       }
+      /* ★設計変更宣言 (2026-05-19 再・report-note 赤文字強調):
+         旧: font-size 11px / color #999 (= 補助テキスト・最下部)
+         新: font-size 12px / color #ff3b30 / font-weight 700 (= ボタン間説明)
+         業務開始画面 .resume-note と同じ赤文字スタイルで統一感確保。
+         landscape は screenBusinessReport 内 .report-note display: none で無影響。 */
       .report-note {
         text-align: center;
-        font-size: 11px;
-        color: #999;
-        padding: 4px 16px 16px;
+        font-size: 12px;
+        color: #ff3b30;
+        font-weight: 700;
+        padding: 6px 16px;
+        line-height: 1.4;
       }
 
       /* DRIVING */
@@ -2423,27 +2433,37 @@
         color: #ff9500;
         font-weight: 900;
       }
+      /* ★設計変更宣言 (2026-05-19 再・modal-custom input はみ出し対策):
+         旧: input flex: 1 / box-sizing 未指定で content-box 計算により
+             padding 含めた実寸が親 modal-custom (= padding 14px) の右端を超えてはみ出る事象
+         新: 全要素 box-sizing: border-box + input に min-width: 0 で flex shrink 許容
+             span / button に flex-shrink: 0 で潰れ防止
+         modal 内のみ・portrait/landscape どちらでも安全動作。 */
       .modal-custom {
         background: #fff8f0;
         border: 0.5px solid #ffd6a5;
         border-radius: 10px;
-        padding: 14px;
+        padding: 12px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
+        box-sizing: border-box;
       }
       .modal-custom span {
         font-size: 14px;
         color: #ff9500;
         font-weight: 700;
         white-space: nowrap;
+        flex-shrink: 0;
       }
       .modal-custom input {
         flex: 1;
+        min-width: 0;
+        box-sizing: border-box;
         border: 0.5px solid #ddd;
         border-radius: 8px;
-        padding: 8px 12px;
+        padding: 8px 10px;
         font-size: 16px;
         text-align: right;
         font-family: 'Noto Sans JP', sans-serif;
@@ -2452,12 +2472,14 @@
         background: #ff9500;
         border: none;
         border-radius: 8px;
-        padding: 8px 14px;
+        padding: 8px 12px;
         color: #fff;
         font-size: 13px;
         font-weight: 700;
         cursor: pointer;
         font-family: 'Noto Sans JP', sans-serif;
+        flex-shrink: 0;
+        white-space: nowrap;
       }
 
       /* 横画面対応 */
@@ -3911,10 +3933,14 @@
         <div class="report-card" id="reportCard">
           <!-- JS で動的生成 -->
         </div>
-        <!-- 続ける／終了 ボタン -->
+        <!-- ★設計変更宣言 (2026-05-19 再・portrait 業務報告ボタン分離):
+             続ける と 終了 の間に説明テキストを挿入して押し間違い防止。
+             業務開始画面 (.resume-note) と同じ赤文字設計で統一感確保。
+             landscape は無影響 (= screenBusinessReport 内ボタン display: none で
+             btn-area の btn-resume-landscape / btn-confirm-landscape が表示される)。 -->
         <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
-        <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
         <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
+        <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
       </div>
 
       <!-- DRIVING -->
