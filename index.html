@@ -2629,8 +2629,14 @@
         /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn landscape 上書き削除済 (ハンバーガーメニュー撤去) */
 
         /* コンテンツ：左半分 */
+        /* ★設計変更宣言 (2026-05-19 緊急・iOS Safari WebKit bug #136041 回避):
+           bug: flex-direction: row + flex-wrap: wrap で min-width 未指定の flex item が
+                min-content (= 文字 1 文字幅) に潰される事象・全画面 縦書き崩れ。
+           解決: min-width: 0 を明示・flex-basis 0 で残り全部取る指定
+                (= 業界標準 / WebKit bug tracker 公式回避策)。 */
         .content {
-          flex: 1;
+          flex: 1 1 0;
+          min-width: 0;
           padding: 12px 16px;
           overflow: hidden;
           display: flex;
@@ -2643,9 +2649,11 @@
         }
 
         /* ボタンエリア：右半分（縦に並ぶ）*/
+        /* ★ iOS Safari bug 回避: flex 明示指定 (= 縮ませない) */
         .btn-area {
-          width: 200px;
-          flex-shrink: 0;
+          flex: 0 0 180px;
+          width: 180px;
+          min-width: 180px;
           padding: 12px;
           display: flex;
           flex-direction: column;
