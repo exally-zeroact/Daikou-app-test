@@ -2484,14 +2484,39 @@
 
       /* 横画面対応 */
       @media (orientation: landscape) {
-        /* ★設計変更宣言 (2026-05-19 緊急・本番 Daikou-app 5/13 動作復活):
-           旧: body { flex-direction: row; flex-wrap: wrap } で「左右分割レイアウト」
-               → iOS Safari landscape で flex-wrap 不安定・content width 計算狂い・縦書き崩れ
-               → 司さん実機画像で全画面 縦書き崩れ発生
-           新: body flex-direction 上書きを撤廃・portrait と同じ column 配置維持
-               左 sidenav (= L1642 bottom-nav 80px) + 縦並び content + btn-area
-               本番 Daikou-app 5/13 同等動作・司さん「ちゃんと出来てた」状態に復活
-           維持: 他 landscape rule (= btn-area width / appbar 40px / 各要素 landscape style) は不変 */
+        /* ★設計変更宣言 (2026-05-19・CSS Grid 3 領域に書き換え・業界標準準拠):
+           旧: body { flex-direction: row; flex-wrap: wrap } で flex-wrap 依存配置
+               → iOS Safari WebKit bug #136041 + min-content 計算狂いで縦書き崩れ
+           新: display: grid + grid-template-areas で 3 領域明示配置 (= Holy Grail / 業界標準)
+               左 sidenav (= 80px) + 中央 content (= 1fr) + 右 btn-area (= 180px) を grid で固定
+               iOS Safari の flex 不安定動作を完全回避・確実な左右分割実現。
+           参考: WebKit bug #136041 公式回避策 + matthewjamestaylor 3-column layout */
+        body {
+          display: grid;
+          grid-template-columns: 80px 1fr 180px;
+          grid-template-rows: 40px 1fr;
+          grid-template-areas:
+            "sidenav appbar appbar"
+            "sidenav content btn-area";
+          padding-left: 0;
+          height: 100vh;
+          height: 100dvh;
+        }
+        .bottom-nav {
+          grid-area: sidenav;
+          position: static;
+          width: 80px;
+          height: 100%;
+        }
+        .appbar {
+          grid-area: appbar;
+        }
+        .content {
+          grid-area: content;
+        }
+        .btn-area {
+          grid-area: btn-area;
+        }
 
         /* 2026/05/01 横画面UI修正 */
         /* 1. 待機画面のバランス調整：btn-area を狭く */
