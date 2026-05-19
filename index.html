@@ -1639,7 +1639,15 @@
         padding-bottom: calc(60px + env(safe-area-inset-bottom));
       }
       /* 横画面：左サイドナビに切替 */
-      @media (orientation: landscape) and (min-width: 700px) {
+      /* ★設計変更宣言 (2026-05-19 再・SE 横画面 sidenav 適用拡大):
+         旧: min-width 700px (= iPhone 標準 844 / Plus 932 のみ sidenav 化)
+             → SE 横画面 (= 667×375) で bottom-nav 下置きのまま縦 60px 圧迫
+         新: min-width 600px に拡大 → SE 横画面 (= 667) も sidenav 化対象
+             既存 700+ 端末 (= Pro Max 等) の sidenav 動作は完全不変
+         安全性: 600px 未満 (= 縦長 phone 旧モデル) は引き続き bottom-nav 下置き
+         注: 他の min-width 700 (= L801 #overlayHelp / L1574 #overlayFare) は overlay 専用
+             grid / layout で sidenav と無関係・変更しない */
+      @media (orientation: landscape) and (min-width: 600px) {
         body {
           padding-bottom: 0;
           padding-left: 80px;
