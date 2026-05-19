@@ -2533,9 +2533,20 @@
         }
         .content {
           grid-area: content !important;
+          /* ★設計変更宣言 (2026-05-19・縦バランス): content も btn-area と同じく縦中央配置
+             stats + 履歴/業務終了 が縦中央・代行開始ボタンと縦位置揃う */
+          justify-content: center !important;
         }
         .btn-area {
           grid-area: btn-area !important;
+        }
+        /* ★ 各画面 (screenIdle 等) も縦中央配置で上下バランス揃え */
+        #screenIdle,
+        #screenBusinessStart,
+        #screenBusinessReport,
+        #screenDriving,
+        #screenFare {
+          justify-content: center !important;
         }
         /* ★設計変更宣言 (2026-05-19・司さん指示「上と同じように」):
            stats-dashboard (= 上の 2x2 grid) と同じレイアウトに統一。
