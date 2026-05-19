@@ -2346,6 +2346,13 @@
       .btn-confirm-landscape {
         display: none;
       }
+      /* ★ 横画面 空車 idle 用 履歴/業務終了 ボタン (= portrait 非表示・landscape の @media で display: flex) */
+      .btn-history-landscape-idle {
+        display: none;
+      }
+      .btn-business-end-landscape-idle {
+        display: none;
+      }
 
       /* トースト通知 */
       .toast {
@@ -2562,16 +2569,53 @@
           box-sizing: border-box !important;
           margin: 0 !important;
         }
-        /* ★設計変更宣言 (2026-05-19・司さん指示「代行開始が下」3 ボタン縦並び):
-           上から順: 履歴 → 業務終了 → 代行開始 (大・主アクション・最下部)
-           btn-area justify-content: flex-end で代行開始を下端配置・
-           screen-idle-actions を代行開始の真上に position: fixed で配置。
-           3 ボタン同じ横幅 144px・均等間隔 12px gap・代行開始のみ大 (= 主アクション)。 */
+        /* ★設計変更宣言 (2026-05-19・司さん指示「3 ボタン 1 集合体として中央配置」):
+           btn-area 内に・履歴 + 業務終了 + 代行開始 を 1 つの flex container として
+           justify-content: center で縦中央配置。集合体全体の重心が btn-area の縦中央。
+           順序 (上から): 履歴 → 業務終了 → 代行開始 (大・主アクション最下部)。
+           3 ボタン同じ横幅 100% (= btn-area width 160 - padding 32 = 128px) / gap 12px。 */
         .btn-area {
-          justify-content: flex-end !important;
-          padding: 16px 8px 24px !important;
+          justify-content: center !important;
+          padding: 16px !important;
           gap: 12px !important;
         }
+        /* 履歴・業務終了 landscape idle 用ボタン */
+        .btn-history-landscape-idle,
+        .btn-business-end-landscape-idle {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          width: 100% !important;
+          margin: 0 !important;
+          padding: 12px 8px !important;
+          border-radius: 12px !important;
+          font-size: 14px !important;
+          font-weight: 700 !important;
+          letter-spacing: 1px !important;
+          box-sizing: border-box !important;
+          font-family: 'Noto Sans JP', sans-serif !important;
+          cursor: pointer !important;
+          -webkit-tap-highlight-color: transparent !important;
+        }
+        .btn-history-landscape-idle {
+          background: #fff !important;
+          border: 1.5px solid #007aff !important;
+          color: #007aff !important;
+        }
+        .btn-history-landscape-idle:active {
+          background: #e8f4fd !important;
+          transform: scale(0.98) !important;
+        }
+        .btn-business-end-landscape-idle {
+          background: #fff !important;
+          border: 1.5px solid #ff3b30 !important;
+          color: #ff3b30 !important;
+        }
+        .btn-business-end-landscape-idle:active {
+          background: #fff0f0 !important;
+          transform: scale(0.98) !important;
+        }
+        /* 代行開始 (= 3 ボタン最下部・大・主アクション) */
         .btn-area > .btn-main {
           margin: 0 !important;
           width: 100% !important;
@@ -2579,34 +2623,24 @@
           font-size: 16px !important;
           font-weight: 900 !important;
         }
-        .screen-idle-actions {
-          /* 代行開始の真上に履歴 + 業務終了 配置 (= bottom 96px = padding 24 + 代行開始高 60 + gap 12) */
-          position: fixed !important;
-          right: 16px !important;
-          bottom: 96px !important;
-          width: 144px !important;
-          display: grid !important;
-          grid-template-columns: 1fr !important;
-          gap: 12px !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          z-index: 50 !important;
+        /* driving 中 (= btn-row.show) は履歴・業務終了 非表示 */
+        .btn-row.show ~ .btn-history-landscape-idle,
+        .btn-row.show ~ .btn-business-end-landscape-idle {
+          display: none !important;
         }
-        .screen-idle-actions > .btn-history,
-        .screen-idle-actions > .btn-business-end {
-          width: 100% !important;
-          margin: 0 !important;
-          padding: 12px 8px !important;
-          border-radius: 12px !important;
-          font-size: 14px !important;
-          font-weight: 700 !important;
-          min-height: 0 !important;
-          height: auto !important;
-          box-sizing: border-box !important;
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          letter-spacing: 1px !important;
+        /* fare 中 (= btn-back-landscape.show) も履歴・業務終了 非表示 */
+        .btn-back-landscape.show ~ .btn-history-landscape-idle,
+        .btn-back-landscape.show ~ .btn-business-end-landscape-idle {
+          display: none !important;
+        }
+        /* businessReport 中 (= btn-resume-landscape.show) も非表示 */
+        .btn-resume-landscape.show ~ .btn-history-landscape-idle,
+        .btn-resume-landscape.show ~ .btn-business-end-landscape-idle {
+          display: none !important;
+        }
+        /* screen-idle-actions (= portrait 用) を landscape 非表示 */
+        .screen-idle-actions {
+          display: none !important;
         }
         /* ★ 代行中 btn-row (= 追加料金 + 確定) を縦並び 2 ボタンに統一 */
         .btn-row {
@@ -4242,13 +4276,20 @@
       <button class="btn-confirm-landscape" id="btnConfirmLandscape" onclick="onBusinessConfirm()">
         終了
       </button>
-      <!-- メインボタン（idle: 代行開始 / driving: 非表示 / fare: 精算終了） -->
-      <button class="btn-main" id="btnMain" onclick="onMainBtn()">代行開始</button>
-      <!-- 2列ボタン（driving のみ表示） -->
+      <!-- 2列ボタン（driving のみ表示）★順序: btn-row を btn-main より前に配置で
+           sibling combinator で 履歴/業務終了 を driving 時非表示制御可能 -->
       <div class="btn-row" id="btnRow">
         <button class="btn-sub btn-extra" onclick="openExtraModal()">追加料金</button>
         <button class="btn-sub btn-confirm" onclick="onSend()">確定</button>
       </div>
+      <!-- ★設計変更宣言 (2026-05-19・司さん指示・空車横画面 3 ボタン集合体配置):
+           landscape 空車画面用 履歴・業務終了 ボタン (= portrait では非表示)。
+           btn-area 内に btn-main と同じ container で・3 ボタンを 1 集合体として中央配置。 -->
+      <button class="btn-history-landscape-idle" type="button" onclick="onHistory()">履歴</button>
+      <button class="btn-business-end-landscape-idle" type="button" onclick="onBusinessEnd()">業務終了</button>
+      <!-- メインボタン（idle: 代行開始 / driving: 非表示 / fare: 精算終了）
+           ★ 司さん指示: 代行開始は 3 ボタン縦並びの最下部 (= 主アクション) -->
+      <button class="btn-main" id="btnMain" onclick="onMainBtn()">代行開始</button>
     </div>
 
     <!-- トースト通知 -->
