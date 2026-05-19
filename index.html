@@ -1974,13 +1974,14 @@
       }
 
       /* DRIVING */
-      /* ★設計変更宣言 (2026-05-19・SE 375×667 対応): padding / gap / font-size 縮小。
-         料金 + 走行距離 + 経由地点 + 距離ソース の 4 要素が SE viewport に収まる調整。 */
+      /* ★設計変更宣言 (2026-05-19・SE 375×667 対応 + landscape 衝突修正):
+         旧: padding: 0 12px 追加で landscape meter-card max-width: 50% と衝突し縦書き崩れ
+         新: padding 撤廃 (= 親 .content の padding: 16px に委任)・gap 縮小のみ維持
+         (= landscape 既存の左右分割レイアウト + 50% 中央寄せが正常動作) */
       .driving-grid {
         display: flex;
         flex-direction: column;
         gap: 8px;
-        padding: 0 12px;
       }
       .meter-card {
         background: #f5f5f5;
@@ -2444,27 +2445,36 @@
         color: #ff9500;
         font-weight: 900;
       }
+      /* ★設計変更宣言 (2026-05-19・任意入力 input box-sizing 修正):
+         旧: input flex: 1・box-sizing 未指定で・content-box 計算により実寸が
+             親 modal-custom (= padding 14px) の右端を超えて はみ出る事象 (司さん実機報告)
+         新: 全要素 box-sizing: border-box + min-width: 0 で flex shrink を許容・
+             モーダル幅内に確実収まる。 */
       .modal-custom {
         background: #fff8f0;
         border: 0.5px solid #ffd6a5;
         border-radius: 10px;
-        padding: 14px;
+        padding: 12px;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
+        box-sizing: border-box;
       }
       .modal-custom span {
         font-size: 14px;
         color: #ff9500;
         font-weight: 700;
         white-space: nowrap;
+        flex-shrink: 0;
       }
       .modal-custom input {
         flex: 1;
+        min-width: 0;
+        box-sizing: border-box;
         border: 0.5px solid #ddd;
         border-radius: 8px;
-        padding: 8px 12px;
+        padding: 8px 10px;
         font-size: 16px;
         text-align: right;
         font-family: 'Noto Sans JP', sans-serif;
@@ -2473,12 +2483,14 @@
         background: #ff9500;
         border: none;
         border-radius: 8px;
-        padding: 8px 14px;
+        padding: 8px 12px;
         color: #fff;
         font-size: 13px;
         font-weight: 700;
         cursor: pointer;
         font-family: 'Noto Sans JP', sans-serif;
+        flex-shrink: 0;
+        white-space: nowrap;
       }
 
       /* 横画面対応 */
@@ -2747,17 +2759,19 @@
         }
 
         /* 2026/05/01：全画面共通の日時・stats-dashboard・履歴ボタンを中央寄せ */
-        /* ★設計変更宣言 (2026-05-19・横画面 日付縦崩れ対策): max-width: 80% +
-           white-space: nowrap (= .idle-datetime-line 共通定義) で 1 行強制・折返し防止。
-           landscape では font-size を一段縮小して appbar 40px との視覚バランスを保つ。 */
+        /* ★設計変更宣言 (2026-05-19 改訂・landscape 日付省略「2…」事象修正):
+           旧 max-width: 80% は landscape content 幅で日付全文「2026年5月1日（金） 15:43」が
+           入りきらず ellipsis で省略表示・最悪「2…」と先頭 2 文字に。
+           新: max-width 制限を撤廃 + font-size 13px / letter-spacing 0 で全文 1 行表示。 */
         .dateTimeLine {
-          max-width: 80%;
+          max-width: 100%;
           width: 100%;
           margin-left: auto;
           margin-right: auto;
           box-sizing: border-box;
-          font-size: 14px !important;
-          padding: 6px 0 4px !important;
+          font-size: 13px !important;
+          padding: 6px 8px 4px !important;
+          letter-spacing: 0 !important;
         }
         .stats-dashboard {
           max-width: 80%;
@@ -2806,10 +2820,14 @@
         }
 
         /* DRIVING：meter-card 50%中央寄せ */
+        /* ★設計変更宣言 (2026-05-19・landscape 念のため padding 0 強制):
+           portrait の .driving-grid に padding 入れた場合の二重防御 (= 現状は未指定だが
+           回帰防止のため明示) */
         .driving-grid {
           display: flex;
           flex-direction: column;
           gap: 8px;
+          padding: 0 !important;
         }
         .meter-value {
           font-size: 32px;
