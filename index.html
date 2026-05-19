@@ -2492,30 +2492,38 @@
                iOS Safari の flex 不安定動作を完全回避・確実な左右分割実現。
            参考: WebKit bug #136041 公式回避策 + matthewjamestaylor 3-column layout */
         body {
-          display: grid;
-          grid-template-columns: 80px 1fr 180px;
-          grid-template-rows: 40px 1fr;
+          display: grid !important;
+          grid-template-columns: 80px 1fr 180px !important;
+          grid-template-rows: 40px 1fr !important;
           grid-template-areas:
             "sidenav appbar appbar"
-            "sidenav content btn-area";
-          padding-left: 0;
-          height: 100vh;
-          height: 100dvh;
+            "sidenav content btn-area" !important;
+          padding-left: 0 !important;
+          padding-bottom: 0 !important;
+          height: 100vh !important;
+          height: 100dvh !important;
+          flex-direction: unset !important;
+          flex-wrap: unset !important;
         }
         .bottom-nav {
-          grid-area: sidenav;
-          position: static;
-          width: 80px;
-          height: 100%;
+          grid-area: sidenav !important;
+          position: static !important;
+          width: 80px !important;
+          height: 100% !important;
+          top: auto !important;
+          left: auto !important;
+          right: auto !important;
+          bottom: auto !important;
         }
         .appbar {
-          grid-area: appbar;
+          grid-area: appbar !important;
+          position: static !important;
         }
         .content {
-          grid-area: content;
+          grid-area: content !important;
         }
         .btn-area {
-          grid-area: btn-area;
+          grid-area: btn-area !important;
         }
 
         /* 2026/05/01 横画面UI修正 */
