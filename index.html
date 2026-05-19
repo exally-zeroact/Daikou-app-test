@@ -2548,22 +2548,26 @@
         #screenFare {
           justify-content: center !important;
         }
-        /* ★設計変更宣言 (2026-05-19・司さん指示「上と同じように」):
-           stats-dashboard (= 上の 2x2 grid) と同じレイアウトに統一。
-           grid-template-columns: 1fr 1fr / gap: 6px / padding: 0 12px (= stats と完全同一)。
-           上下バランスを揃える。 */
+        /* ★設計変更宣言 (2026-05-19・司さん指示「上と同じ幅で揃える」):
+           stats-dashboard と screen-idle-actions を完全同一 rule で grid 化・
+           幅・gap・padding すべて 1px の差もなく揃える。 */
+        .stats-dashboard,
         .screen-idle-actions {
           display: grid !important;
           grid-template-columns: 1fr 1fr !important;
           gap: 6px !important;
           padding: 0 12px !important;
+          width: 100% !important;
+          box-sizing: border-box !important;
+          margin: 0 !important;
+        }
+        .screen-idle-actions {
           margin-top: 8px !important;
         }
         .screen-idle-actions > .btn-history,
         .screen-idle-actions > .btn-business-end {
-          width: auto !important;
+          width: 100% !important;
           margin: 0 !important;
-          /* ★ stat-card-large (= 上の総走行距離等 card) と box 高さ完全統一 */
           padding: 8px 10px !important;
           border-radius: 10px !important;
           font-size: 14px !important;
