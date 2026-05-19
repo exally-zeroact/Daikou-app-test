@@ -1766,6 +1766,13 @@
         gap: 8px;
         padding: 0 12px;
       }
+      /* ★設計変更宣言 (2026-05-19・司さん指示 履歴/業務終了 横並び):
+         portrait: display: contents で wrap 透過・既存縦並び挙動維持
+         landscape は後の @media で flex row + 50/50 配置 */
+      .screen-idle-actions {
+        display: contents;
+      }
+
       /* 履歴ボタン（2026/05/01追加・2026-05-10 縦画面 1 画面化のため padding 縮小） */
       .btn-history {
         width: calc(100% - 24px);
@@ -2510,6 +2517,7 @@
             "appbar appbar"
             "content btn-area" !important;
           padding-left: 0 !important;
+          padding-right: 16px !important;
           padding-bottom: 0 !important;
           height: 100vh !important;
           height: 100dvh !important;
@@ -2528,6 +2536,22 @@
         }
         .btn-area {
           grid-area: btn-area !important;
+        }
+        /* ★設計変更宣言 (2026-05-19・司さん指示 履歴/業務終了 横並び):
+           screen-idle-actions を flex row で左右 50/50 配置。
+           各ボタンは flex: 1 で同幅・gap 8px で間隔。
+           portrait の display: contents を上書きして flex container 化。 */
+        .screen-idle-actions {
+          display: flex !important;
+          flex-direction: row !important;
+          gap: 8px !important;
+          padding: 8px 12px 0 !important;
+        }
+        .screen-idle-actions > .btn-history,
+        .screen-idle-actions > .btn-business-end {
+          flex: 1 !important;
+          width: auto !important;
+          margin: 0 !important;
         }
 
         /* 2026/05/01 横画面UI修正 */
@@ -3863,10 +3887,15 @@
             <span class="stat-value">¥<span id="fareTotalYen">0</span></span>
           </div>
         </div>
-        <!-- 履歴ボタン -->
-        <button class="btn-history" onclick="onHistory()">履歴</button>
-        <!-- 業務終了ボタン（履歴の下・2026/05/01追加） -->
-        <button class="btn-business-end" onclick="onBusinessEnd()">業務終了</button>
+        <!-- ★設計変更宣言 (2026-05-19・司さん指示 履歴/業務終了 横並び):
+             portrait は display: contents で wrap div を透過・既存縦並び維持。
+             landscape は flex row で左右 50/50 横並び。 -->
+        <div class="screen-idle-actions">
+          <!-- 履歴ボタン -->
+          <button class="btn-history" onclick="onHistory()">履歴</button>
+          <!-- 業務終了ボタン（履歴の下・2026/05/01追加） -->
+          <button class="btn-business-end" onclick="onBusinessEnd()">業務終了</button>
+        </div>
       </div>
 
       <!-- BUSINESS START（業務未開始時の専用画面・2026/05/01追加） -->
