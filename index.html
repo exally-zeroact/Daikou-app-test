@@ -2484,11 +2484,14 @@
 
       /* 横画面対応 */
       @media (orientation: landscape) {
-        /* 全体：左右分割レイアウト */
-        body {
-          flex-direction: row;
-          flex-wrap: wrap;
-        }
+        /* ★設計変更宣言 (2026-05-19 緊急・本番 Daikou-app 5/13 動作復活):
+           旧: body { flex-direction: row; flex-wrap: wrap } で「左右分割レイアウト」
+               → iOS Safari landscape で flex-wrap 不安定・content width 計算狂い・縦書き崩れ
+               → 司さん実機画像で全画面 縦書き崩れ発生
+           新: body flex-direction 上書きを撤廃・portrait と同じ column 配置維持
+               左 sidenav (= L1642 bottom-nav 80px) + 縦並び content + btn-area
+               本番 Daikou-app 5/13 同等動作・司さん「ちゃんと出来てた」状態に復活
+           維持: 他 landscape rule (= btn-area width / appbar 40px / 各要素 landscape style) は不変 */
 
         /* 2026/05/01 横画面UI修正 */
         /* 1. 待機画面のバランス調整：btn-area を狭く */
