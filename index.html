@@ -2491,13 +2491,24 @@
                左 sidenav (= 80px) + 中央 content (= 1fr) + 右 btn-area (= 180px) を grid で固定
                iOS Safari の flex 不安定動作を完全回避・確実な左右分割実現。
            参考: WebKit bug #136041 公式回避策 + matthewjamestaylor 3-column layout */
+        /* ★設計変更宣言 (2026-05-19・司さん画像イメージ準拠・2 領域 grid):
+           司さん「縦画面のフッターを右に持ってくる」「バランス考えて」要求 +
+           実機画像で見る通り bottom-nav は landscape で非表示・content 広く・btn-area 狭く右に。
+           layout:
+             ┌──────────────────────────────────┐
+             │ appbar (= 40px)                   │
+             ├─────────────────────┬────────────┤
+             │ content (= 広い 1fr) │ btn-area   │
+             │ stats + 履歴 + 業務終 │ (= 160px)  │
+             │                       │ 代行開始等 │
+             └─────────────────────┴────────────┘ */
         body {
           display: grid !important;
-          grid-template-columns: 80px 1fr 180px !important;
+          grid-template-columns: 1fr 160px !important;
           grid-template-rows: 40px 1fr !important;
           grid-template-areas:
-            "sidenav appbar appbar"
-            "sidenav content btn-area" !important;
+            "appbar appbar"
+            "content btn-area" !important;
           padding-left: 0 !important;
           padding-bottom: 0 !important;
           height: 100vh !important;
@@ -2506,14 +2517,7 @@
           flex-wrap: unset !important;
         }
         .bottom-nav {
-          grid-area: sidenav !important;
-          position: static !important;
-          width: 80px !important;
-          height: 100% !important;
-          top: auto !important;
-          left: auto !important;
-          right: auto !important;
-          bottom: auto !important;
+          display: none !important;
         }
         .appbar {
           grid-area: appbar !important;

@@ -3,6 +3,11 @@
 import { test, expect } from '@playwright/test';
 
 test('flow-overlay: 設定タブ → overlaySettings 表示・URL 不変・閉じて非表示', async ({ page }) => {
+  // ★設計変更宣言 (2026-05-19・司さん指示 landscape bottom-nav 非表示対応):
+  //   司さん画像イメージ準拠で landscape では bottom-nav display: none に設定。
+  //   default Desktop Chrome viewport (= 1280×720 landscape) では bottom-nav タブが
+  //   非表示で test fail するため・portrait viewport (= 390×844) で実行。
+  await page.setViewportSize({ width: 390, height: 844 });
   // E2E 上は MM pipeline を起動しないため・各種オーバーレイ/バナーを抑止
   await page.addInitScript(() => {
     sessionStorage.setItem('sensor_permission_active', '1');
