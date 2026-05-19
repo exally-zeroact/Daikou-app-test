@@ -2562,14 +2562,14 @@
           box-sizing: border-box !important;
           margin: 0 !important;
         }
-        /* ★設計変更宣言 (2026-05-19・司さん指示書・3 ボタン縦中央均等配置):
-           btn-area を縦中央配置 (= justify-content: center)・
-           代行開始 (大・主アクション) を btn-area 縦中央に。
-           screen-idle-actions (= 履歴 + 業務終了) を代行開始の真下に position: fixed で配置。
-           3 ボタン同じ横幅 (= 144px)・均等間隔 (= 12px gap)・代行開始は他より大きく。 */
+        /* ★設計変更宣言 (2026-05-19・司さん指示「代行開始が下」3 ボタン縦並び):
+           上から順: 履歴 → 業務終了 → 代行開始 (大・主アクション・最下部)
+           btn-area justify-content: flex-end で代行開始を下端配置・
+           screen-idle-actions を代行開始の真上に position: fixed で配置。
+           3 ボタン同じ横幅 144px・均等間隔 12px gap・代行開始のみ大 (= 主アクション)。 */
         .btn-area {
-          justify-content: center !important;
-          padding: 16px 8px !important;
+          justify-content: flex-end !important;
+          padding: 16px 8px 24px !important;
           gap: 12px !important;
         }
         .btn-area > .btn-main {
@@ -2580,10 +2580,10 @@
           font-weight: 900 !important;
         }
         .screen-idle-actions {
-          /* 代行開始の真下に配置 (= top calc(50% + 30px) で代行開始下端 + gap) */
+          /* 代行開始の真上に履歴 + 業務終了 配置 (= bottom 96px = padding 24 + 代行開始高 60 + gap 12) */
           position: fixed !important;
           right: 16px !important;
-          top: calc(50% + 36px) !important;
+          bottom: 96px !important;
           width: 144px !important;
           display: grid !important;
           grid-template-columns: 1fr !important;
