@@ -1639,7 +1639,13 @@
         padding-bottom: calc(60px + env(safe-area-inset-bottom));
       }
       /* 横画面：左サイドナビに切替 */
-      @media (orientation: landscape) and (min-width: 700px) {
+      /* ★設計変更宣言 (2026-05-19・SE 横画面 sidenav 対応): min-width 700 → 600 に拡大
+         旧: 700px 以上 (= iPhone 標準 844 / Plus 932) のみ sidenav 化
+             → SE 横画面 (= 667px) で bottom-nav 下置きのまま縦圧迫 (= 375 - 40 - 60 = 275px)
+         新: 600px 以上で sidenav 化・SE 横画面 (= 667px) もカバー
+             → 縦領域 375 - 40 = 335px・主要画面が収まる余裕確保
+         安全性: 600px 未満は引き続き bottom-nav 下置き (= 縦長 phone 旧モデル等) */
+      @media (orientation: landscape) and (min-width: 600px) {
         body {
           padding-bottom: 0;
           padding-left: 80px;
@@ -1660,6 +1666,14 @@
         .bottom-nav .nav-item {
           flex: 0 0 auto;
           padding: 14px 4px;
+        }
+        /* ★設計変更宣言 (2026-05-19・sensorRestoreBanner landscape 浮き修正):
+           旧 inline top: max(60px, calc(env(safe-area-inset-top) + 56px)) は
+           portrait appbar 50px 想定。landscape appbar 40px との隙間 20px で「浮く」事象。
+           landscape では appbar 40px + 4px gap = 44px に上書き。
+           !important で inline style を上書き (= JS / HTML inline 触らない原則準拠)。 */
+        #sensorRestoreBanner {
+          top: max(44px, calc(env(safe-area-inset-top) + 40px)) !important;
         }
       }
       /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn 削除済 (≡ ハンバーガーメニュー撤去) */
@@ -2351,6 +2365,13 @@
       .btn-confirm-landscape {
         display: none;
       }
+      /* ★設計変更宣言 (2026-05-19・横画面 業務報告 ボタン間説明 default 非表示):
+         portrait では非表示 (= 業務報告画面が portrait の screenBusinessReport 内
+         報告書ボタンを使う・横画面 btn-area 内 note は無関係)。
+         landscape 専用 media query 内で btn-resume-landscape.show 連動表示。 */
+      .report-note-landscape {
+        display: none;
+      }
 
       /* トースト通知 */
       .toast {
@@ -2596,6 +2617,24 @@
         /* [続ける]と[終了]を離す（誤タップ防止・走行に戻ると同様） */
         .btn-resume-landscape.show ~ .btn-confirm-landscape.show {
           margin-top: 24px;
+        }
+        /* ★設計変更宣言 (2026-05-19・横画面 業務報告 note 表示):
+           portrait .report-note (= 赤文字・font-weight 700) と統一感あるスタイル。
+           btn-area 狭幅 (200px) に合わせて font-size 10px・padding 縮小・letter-spacing 0。
+           btn-resume-landscape.show と隣接兄弟 → businessReport 時のみ自動表示。 */
+        .btn-resume-landscape.show + .report-note-landscape {
+          display: block;
+          text-align: center;
+          font-size: 10px;
+          color: #ff3b30;
+          font-weight: 700;
+          padding: 6px 4px 0;
+          line-height: 1.3;
+          letter-spacing: 0;
+        }
+        /* note 表示時は btn-confirm-landscape の margin-top を縮小 (= note と密着配置) */
+        .btn-resume-landscape.show + .report-note-landscape + .btn-confirm-landscape.show {
+          margin-top: 4px;
         }
 
         /* 5. 追加料金バナー（実車中の左ハンドル/深夜割増等）の幅を狭く */
@@ -4120,6 +4159,13 @@
       <button class="btn-resume-landscape" id="btnResumeLandscape" onclick="onBusinessResume()">
         続ける
       </button>
+      <!-- ★設計変更宣言 (2026-05-19・横画面 業務報告 ボタン間説明 追加):
+           portrait 業務報告 .report-note と統一感を持たせて
+           landscape btn-area 内・続ける と 終了 の間に説明文を挿入。
+           隣接兄弟結合子で btn-resume-landscape.show に連動表示 (= JS 触らない)。 -->
+      <div class="report-note-landscape">
+        ※「続ける」でいつでも業務を再開できます
+      </div>
       <!-- 横画面用 業務報告 終了ボタン（businessReport時のみ表示・縦画面では非表示） -->
       <button class="btn-confirm-landscape" id="btnConfirmLandscape" onclick="onBusinessConfirm()">
         終了
