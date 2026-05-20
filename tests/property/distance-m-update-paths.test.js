@@ -83,8 +83,10 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     // 2026-05-19 R1 更新 (Off-Road grace period): _offRoadGraceUntil 追加で shift。
     // 旧: [440, 514, 948, 966, 1345]
     // 2026-05-19 haversine 更新 (業務単位連続点累積): GPS.calcDistance 呼出追加で shift。
-    // 新: [440, 514, 955, 973, 1352]
-    const expectedLines = [440, 514, 955, 973, 1352];
+    // 旧: [440, 514, 955, 973, 1352]
+    // 2026-05-20 室内停車中誤加算 bug 修正: state.last_gps accuracy 追加 + gap fill isStationary gate 追加で shift。
+    // 新: [440, 514, 961, 979, 1365]
+    const expectedLines = [440, 514, 961, 979, 1365];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;

@@ -940,7 +940,13 @@ const Meter = (() => {
       _trackHaversineBetweenGps(gpsResult, dtSec);
 
       // GPS消失検出：5秒以上の空白 (トンネル等で MM/GPS 共に不可)
-      if (dtSec >= GAP_THRESHOLD_SEC) {
+      // ★設計変更宣言 (2026-05-20・司さん指摘・室内停車中 gap fill 誤加算修正):
+      //   旧: dtSec >= GAP_THRESHOLD_SEC のみ・停車判定 gate なし
+      //   → 停車中 (= 室内/赤信号) でも state.last_speed_kmh が前フレーム値 (走行中速度)
+      //     を保持 → gap fill が「停車していない前提」で速度×時間で誤加算 (最大数十m)
+      //   新: !gpsResult.isStationary を条件に追加。停車判定中は gap fill skip。
+      //   絶対ルール準拠: 既存 += 経路自体は変更なし・gate 強化のみ。
+      if (dtSec >= GAP_THRESHOLD_SEC && !gpsResult.isStationary) {
         // gap fill: 速度×時間 (タイヤ回転由来の概算・GPS 直線弦ではない)
         const filled = calculateGapFill(dtSec, state.last_speed_kmh);
         if (filled !== null) {
@@ -998,9 +1004,16 @@ const Meter = (() => {
       }
     }
 
+    // ★設計変更宣言 (2026-05-20・司さん指摘・室内誤加算 bug 修正):
+    //   旧: state.last_gps に accuracy フィールド欠落
+    //   → _trackHaversineBetweenGps (L293) / _calculateOffRoadIncrement (L341) の
+    //     accuracy ガード (`state.last_gps.accuracy != null && > 50`) が常に false 評価
+    //   → GPS 精度低下時にも haversine 累積が止まらない
+    //   新: accuracy を保存 (= 既存 accuracy guard が機能・課金経路保護)
     state.last_gps = {
       lat: gpsResult.lat,
       lng: gpsResult.lng,
+      accuracy: gpsResult.accuracy,
       altitude: gpsResult.altitude,
       compassHeading: gpsResult.compassHeading || null,
     };
@@ -1657,9 +1670,7 @@ const Meter = (() => {
     const now = Date.now();
     const WARMUP_MAX_AGE_MS = 5000;
     const warmupValid =
-      lastWarmupGps &&
-      lastWarmupGps.timestamp &&
-      now - lastWarmupGps.timestamp < WARMUP_MAX_AGE_MS;
+      lastWarmupGps && lastWarmupGps.timestamp && now - lastWarmupGps.timestamp < WARMUP_MAX_AGE_MS;
     if (!warmupValid) return false;
     state.last_gps = {
       lat: lastWarmupGps.lat,
