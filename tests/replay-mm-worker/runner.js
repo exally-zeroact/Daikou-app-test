@@ -14,7 +14,13 @@ const path = require('path');
 const vm = require('vm');
 
 const { createMapMatcherWorker } = require('./worker-sim');
-const { createPrng, applyNoise } = require('./noise-model');
+const {
+  createPrng,
+  applyNoise,
+  generateAccelSamples,
+  defaultAccelConfigStationary,
+  defaultAccelConfigMoving,
+} = require('./noise-model');
 
 const JS_DIR = path.join(__dirname, '..', '..', 'js');
 
@@ -218,7 +224,12 @@ async function runReplay(fixture, prefRoadsData, options) {
   //    fixture.meta.stationary_step_indices (= step 番号 array) があれば・該当 step を
   //    強制 stationary (= speedKmh=0 / isStationary=true) で生成 (= low-speed-stop fixture 用)。
   //    ground_truth 側は・停車区間の lat/lng を同一座標で表現する (= t_start=t_end 等)。
-  const prng = createPrng((fixture.meta.noise_model && fixture.meta.noise_model.seed) || 42);
+  const baseSeed = (fixture.meta.noise_model && fixture.meta.noise_model.seed) || 42;
+  const prng = createPrng(baseSeed);
+  // ★ Phase 4 fidelity (2026-05-21): accel 用 prng を分離 (= GPS trace 変動防止)
+  //   既存 fixture の baseline (= seed 42 等) を不変に保つため・accel 追加で GPS prng の
+  //   消費数を変えない設計。base_seed+1000 で独立 stream。
+  const accelPrng = createPrng(baseSeed + 1000);
   const stationarySet = new Set((fixture.meta.stationary_step_indices || []).map(Number));
   const gpsSamples = trueTrace.map((tp, i) => {
     const isStationaryStep = stationarySet.has(i);
@@ -242,6 +253,15 @@ async function runReplay(fixture, prefRoadsData, options) {
       sample.isStationary = true;
     } else {
       sample.isStationary = sample.speedKmh < 3;
+    }
+    // ★ Phase 4 fidelity (2026-05-21): realistic 合成 accelSamples 追加
+    //   gps-worker.js 3-AND gate (= C-1 variance + C-2 deviation) を実機相当で動かす
+    //   ゼロ完全静止は禁止・実機相当 std で deterministic noise
+    if (fixture.meta.synthesize_accel !== false) {
+      const accelCfg = isStationaryStep
+        ? defaultAccelConfigStationary()
+        : defaultAccelConfigMoving();
+      sample.accelSamples = generateAccelSamples(sample.timestamp, accelPrng, accelCfg, 5);
     }
     return sample;
   });
@@ -349,6 +369,7 @@ async function runReplay(fixture, prefRoadsData, options) {
       altitude: 0,
       timestamp: g.timestamp,
       isStationary: g.isStationary,
+      accelSamples: g.accelSamples || null, // Phase 4 fidelity (= 3-AND gate を実機相当で)
     });
     // step ごとに・mmResult が増えていれば最新の committed snap を採用・なければ null
     if (mmResults.length > mmCountBefore) {

@@ -107,10 +107,64 @@ function applyNoise(input, prng, config) {
   };
 }
 
+// ★ Phase 4 fidelity 拡張 (2026-05-21・realism check 司さん指示):
+//   gps-worker.js の 3-AND gate (= C-1 variance + C-2 deviation・閾値 0.1 / 0.5) を・
+//   現状の合成 GPS では accelSamples 不足ゆえ・「null 救済 path」 (= L596-598) に退化。
+//   gate を実機相当で動かすため・realistic 合成 accel generator を追加。
+//
+//   ★★ 重要 (= 司さん指摘の「都合よくクリーン値」回避):
+//     ・ゼロ分散 / |a|=9.8 完全静止は・null 救済 path と同等結果・gate 差別化なし
+//     ・実機: アイドル振動・端末センサノイズ・ホルダー共振で・**停車中も variance > 0**
+//     ・設計者意図 (= gps-worker.js L223-224): 静止 ≈ 0・走行 > 0.5
+//     ・実機停車中の典型: variance 0.005-0.05 m²/s⁴・|a|平均偏差 0.05-0.2 m/s²
+//     ・実機走行中の典型: variance 0.5-5 m²/s⁴・|a|平均偏差 0.5-3 m/s²
+//
+//   本実装は・**realistic 中央値を deterministic noise + seed 固定** で生成。
+//   人工的に gate を発火させる「完全静止 accel」は提供しない。
+//
+// accel config 形式 (= fixture 側で指定・default は realistic 停車値):
+//   {
+//     mean_g: 9.8,        // 平均 |a| (= 重力 9.8 + 微小 mount offset)
+//     std_xyz_m_s2: 0.05, // 各軸 noise std (= 停車中 ≈0.05・走行中 ≈0.8)
+//     sample_rate_hz: 20, // 5 秒で 100 sample (= min 5 samples 余裕)
+//   }
+function defaultAccelConfigStationary() {
+  // 停車中: 軽微なアイドル振動相当 (= variance ~0.005-0.02 / deviation ~0.03-0.1)
+  return { mean_g: 9.8, std_xyz_m_s2: 0.05, sample_rate_hz: 20 };
+}
+function defaultAccelConfigMoving() {
+  // 走行中: 路面振動 + 加減速相当 (= variance ~0.5-2 / deviation ~0.5-1.5)
+  return { mean_g: 9.8, std_xyz_m_s2: 0.5, sample_rate_hz: 20 };
+}
+
+// 1 GPS step (= 1 秒) 分の accelSamples を生成
+//   timestampMs: 現 step の終端 timestamp (= GPS now)
+//   prng: deterministic PRNG (= seed 固定)
+//   config: accel config (stationary / moving 切替)
+//   windowSec: ウィンドウ秒数 (= calcAccelVariance の 5 秒に合わせる・default 5)
+// 戻り: [{ t, x, y, z }, ...]
+function generateAccelSamples(timestampMs, prng, config, windowSec) {
+  const w = windowSec != null ? windowSec : 5;
+  const n = Math.floor(w * config.sample_rate_hz);
+  const samples = new Array(n);
+  // 重力 z 軸固定・noise を各軸 gaussian で
+  for (let i = 0; i < n; i++) {
+    const t = timestampMs - (n - 1 - i) * (1000 / config.sample_rate_hz);
+    const nx = gaussian(prng, 0, config.std_xyz_m_s2);
+    const ny = gaussian(prng, 0, config.std_xyz_m_s2);
+    const nz = gaussian(prng, config.mean_g, config.std_xyz_m_s2);
+    samples[i] = { t, x: nx, y: ny, z: nz };
+  }
+  return samples;
+}
+
 module.exports = {
   createPrng,
   gaussian,
   offsetByMeters,
   defaultConfig,
   applyNoise,
+  defaultAccelConfigStationary,
+  defaultAccelConfigMoving,
+  generateAccelSamples,
 };

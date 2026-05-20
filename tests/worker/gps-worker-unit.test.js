@@ -604,4 +604,129 @@ describe('Phase 4: gps-worker.js 実走シナリオ (vm.runInContext 経由・dr
     // エラーなく処理されること (= return; だけなので postMessage なし・msg log でも応答なし)
     expect(true).toBe(true);
   });
+
+  // ─── ★ Phase 4 fidelity (2026-05-21・realism check 司さん指示): 3-AND gate 発火確認
+  //   stationary シナリオで・実機相当 accel (= variance ~0.02 / |a|偏差 ~0.05) を入れて
+  //   null 救済 path ではなく・3-AND gate (= GPS + C-1 + C-2) で停車判定が発火することを確認。
+  //   注意: ゼロ完全静止 accel は禁止 (= 設計者意図に反する人工 phantom 消去になる)。
+  describe('Phase 4 fidelity: realistic accelSamples で 3-AND gate 発火確認', () => {
+    // gps-worker.js と同じ ms timestamp 基準で realistic accel を生成
+    //   - 停車中: |a|≈9.8 + std 0.05 (= variance ~0.0025・閾値 0.1 未満)
+    //   - 走行中: |a|≈9.8 + std 0.5  (= variance ~0.25・閾値 0.1 超過)
+    // Mulberry32 (= noise-model.js と同形式) で deterministic
+    function makePrng(seed) {
+      let s = seed >>> 0;
+      return function () {
+        s |= 0;
+        s = (s + 0x6d2b79f5) | 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    function gauss(prng, mean, std) {
+      const u1 = Math.max(prng(), 1e-12),
+        u2 = prng();
+      return mean + std * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    }
+    function genAccel(timestampMs, prng, std_xyz, windowSec, sampleRateHz) {
+      const n = Math.floor((windowSec || 5) * (sampleRateHz || 20));
+      const samples = new Array(n);
+      for (let i = 0; i < n; i++) {
+        samples[i] = {
+          t: timestampMs - (n - 1 - i) * (1000 / (sampleRateHz || 20)),
+          x: gauss(prng, 0, std_xyz),
+          y: gauss(prng, 0, std_xyz),
+          z: gauss(prng, 9.8, std_xyz),
+        };
+      }
+      return samples;
+    }
+
+    it('④-c: 5 秒継続停車 + realistic 停車 accel (std=0.05) → 3-AND gate path で isStationary=true', () => {
+      const w = initWorker();
+      const t0 = 1700000000000;
+      const prng = makePrng(123);
+      // 同位置・1km/h・realistic 停車 accel (= std 0.05・variance ~0.0025)
+      for (let i = 0; i < 7; i++) {
+        const ts = t0 + i * 1000;
+        const accel = genAccel(ts, prng, 0.05, 5, 20);
+        w.sendMessage({
+          type: 'position',
+          data: {
+            lat: 33.84,
+            lng: 132.78,
+            accuracy: 5,
+            speedKmh: 1,
+            heading: 90,
+            altitude: 0,
+            now: ts,
+            accelSamples: accel,
+          },
+        });
+      }
+      const results = w.getResults();
+      expect(results.length).toBeGreaterThan(0);
+      const last = results[results.length - 1];
+      // 5 秒継続 (= gpsStationary=true) + realistic accel (= c1Stationary=true / c2Moving=false)
+      // → 3-AND gate で isStationary=true 発火
+      expect(last.isStationary).toBe(true);
+    });
+
+    it('④-d: 5 秒継続停車 + realistic 走行 accel (std=0.5) → 3-AND gate で c1=false → isStationary=false', () => {
+      const w = initWorker();
+      const t0 = 1700000000000;
+      const prng = makePrng(456);
+      // 同位置・1km/h (= gpsStationary=true) だが・accel は走行レベル振動
+      for (let i = 0; i < 7; i++) {
+        const ts = t0 + i * 1000;
+        const accel = genAccel(ts, prng, 0.5, 5, 20); // variance ~0.25・閾値 0.1 超過
+        w.sendMessage({
+          type: 'position',
+          data: {
+            lat: 33.84,
+            lng: 132.78,
+            accuracy: 5,
+            speedKmh: 1,
+            heading: 90,
+            altitude: 0,
+            now: ts,
+            accelSamples: accel,
+          },
+        });
+      }
+      const results = w.getResults();
+      expect(results.length).toBeGreaterThan(0);
+      const last = results[results.length - 1];
+      // gps=stationary だが・accel variance 大 → c1Stationary=false → 3-AND false
+      // (= 「GPS は停車だが・車内で何か振動している」現象を C-1 が検知)
+      expect(last.isStationary).toBe(false);
+    });
+
+    it('④-e: accelSamples 空 (= null 救済 path)・5 秒継続停車 → GPS 単独で isStationary 判定', () => {
+      const w = initWorker();
+      const t0 = 1700000000000;
+      // accelSamples 渡さない (= 既存シナリオ ④ と同じ・null 救済)
+      for (let i = 0; i < 7; i++) {
+        w.sendMessage({
+          type: 'position',
+          data: {
+            lat: 33.84,
+            lng: 132.78,
+            accuracy: 5,
+            speedKmh: 1,
+            heading: 90,
+            altitude: 0,
+            now: t0 + i * 1000,
+          },
+        });
+      }
+      const results = w.getResults();
+      expect(results.length).toBeGreaterThan(0);
+      // null 救済 path → finalStationary = gpsStationary (= 5 秒継続なので true)
+      const last = results[results.length - 1];
+      expect(typeof last.isStationary).toBe('boolean');
+    });
+  });
 });
