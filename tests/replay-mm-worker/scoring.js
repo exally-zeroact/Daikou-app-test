@@ -161,7 +161,9 @@ function calcExpectedDistancePostWarmup(segments, warmupSteps, haversineFn, deco
     const tStart = seg.t_start != null ? seg.t_start : 0;
     const tEnd = seg.t_end != null ? seg.t_end : 1;
     const n = seg.num_samples != null ? seg.num_samples : 3;
-    const segLen = haversineFn(aLat, aLng, bLat, bLng) * (tEnd - tStart);
+    // ★ Phase 1 残り 4 fixture (2026-05-21・U-turn / reverse-oneway 対応):
+    //   t_start > t_end (= 逆方向) でも実走距離は絶対値で扱う (= 全加算ルール)
+    const segLen = haversineFn(aLat, aLng, bLat, bLng) * Math.abs(tEnd - tStart);
     // この segment の step 範囲 = [cumSteps, cumSteps + n)
     const segStart = cumSteps;
     const segEnd = cumSteps + n;

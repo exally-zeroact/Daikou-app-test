@@ -115,7 +115,12 @@ function buildTrueTrace(segments, decoder, precision) {
     const tStart = seg.t_start != null ? seg.t_start : 0;
     const tEnd = seg.t_end != null ? seg.t_end : 1;
     const n = seg.num_samples != null ? seg.num_samples : 3;
-    const heading = segmentBearing(aLat, aLng, bLat, bLng);
+    // ★ Phase 1 残り 4 fixture (2026-05-21): t_start > t_end で逆方向 trace 対応
+    //   U-turn fixture (= 同 road 上で 180度反転) で・復路 ground_truth を表現するため
+    const isReverse = tStart > tEnd;
+    const heading = isReverse
+      ? segmentBearing(bLat, bLng, aLat, aLng)
+      : segmentBearing(aLat, aLng, bLat, bLng);
     for (let i = 0; i < n; i++) {
       const t = tStart + ((tEnd - tStart) * i) / Math.max(1, n - 1);
       const lat = aLat + t * (bLat - aLat);
@@ -153,6 +158,9 @@ function haversineM(lat1, lng1, lat2, lng2) {
 }
 
 function calcExpectedDistanceM(segments, decoder, precision) {
+  // ★ Phase 1 残り 4 fixture (2026-05-21・U-turn / reverse-oneway 対応):
+  //   t_start > t_end (= 逆方向 trace) でも・実走距離は **絶対値** で加算する
+  //   (= 全加算ルール: 逆走でも distance accrue する物理走行距離)
   let total = 0;
   for (const seg of segments) {
     const road = decoder.decodeRoadAt(seg.roadIndex);
@@ -166,7 +174,7 @@ function calcExpectedDistanceM(segments, decoder, precision) {
     const tStart = seg.t_start != null ? seg.t_start : 0;
     const tEnd = seg.t_end != null ? seg.t_end : 1;
     const segLen = haversineM(aLat, aLng, bLat, bLng);
-    total += segLen * (tEnd - tStart);
+    total += segLen * Math.abs(tEnd - tStart);
   }
   return total;
 }
@@ -206,20 +214,35 @@ async function runReplay(fixture, prefRoadsData, options) {
       : calcExpectedDistanceM(fixture.meta.ground_truth_segments, mainDec, prefRoadsData.precision);
 
   // 3. 合成 GPS samples 生成 (= noise model 適用)
+  //    ★ Phase 1 残り 4 fixture (2026-05-21):
+  //    fixture.meta.stationary_step_indices (= step 番号 array) があれば・該当 step を
+  //    強制 stationary (= speedKmh=0 / isStationary=true) で生成 (= low-speed-stop fixture 用)。
+  //    ground_truth 側は・停車区間の lat/lng を同一座標で表現する (= t_start=t_end 等)。
   const prng = createPrng((fixture.meta.noise_model && fixture.meta.noise_model.seed) || 42);
+  const stationarySet = new Set((fixture.meta.stationary_step_indices || []).map(Number));
   const gpsSamples = trueTrace.map((tp, i) => {
+    const isStationaryStep = stationarySet.has(i);
     const sample = applyNoise(
       {
         trueLat: tp.trueLat,
         trueLng: tp.trueLng,
         trueHeadingDeg: tp.trueHeadingDeg,
-        trueSpeedKmh: fixture.meta.true_speed_kmh != null ? fixture.meta.true_speed_kmh : 40,
+        trueSpeedKmh: isStationaryStep
+          ? 0
+          : fixture.meta.true_speed_kmh != null
+            ? fixture.meta.true_speed_kmh
+            : 40,
       },
       prng,
       fixture.meta.noise_model || {}
     );
     sample.timestamp = startTs + i * intervalMs;
-    sample.isStationary = sample.speedKmh < 3;
+    if (isStationaryStep) {
+      sample.speedKmh = 0; // 強制 (= noise が drift させても 0 維持)
+      sample.isStationary = true;
+    } else {
+      sample.isStationary = sample.speedKmh < 3;
+    }
     return sample;
   });
 
@@ -293,6 +316,12 @@ async function runReplay(fixture, prefRoadsData, options) {
   //    diagnostic: captureStateSnapshots option で・各 step 前後の state.* を snapshot
   //    観測専用 (= Meter / Worker のロジックは一切改変せず・state を read するのみ)
   currentPhase = 'gps';
+  // committedSnaps を gpsSamples と 1:1 で揃える (= 停車 step や Meter.update guard で
+  // mmResult が来ない step は null を入れる)
+  //   理由: prod では isStationary=true の GPS は・meter.js L1054 で return ・Worker B に
+  //   postMessage されない (= 停車中の Worker 起動を抑止する設計)。その結果 mmResults.length
+  //   < gpsSamples.length になり・gt との 1:1 照合が崩れる。
+  const committedSnapsByStep = [];
   const stateSnapshots = []; // [{ step, before, after, delta, mmResultIdx }]
   function _readState() {
     const s = Meter.getState();
@@ -321,6 +350,25 @@ async function runReplay(fixture, prefRoadsData, options) {
       timestamp: g.timestamp,
       isStationary: g.isStationary,
     });
+    // step ごとに・mmResult が増えていれば最新の committed snap を採用・なければ null
+    if (mmResults.length > mmCountBefore) {
+      const m = mmResults[mmResults.length - 1];
+      if (m.snapped && m.snap && m.committed) {
+        committedSnapsByStep.push({
+          roadIndex: m.snap.roadIndex,
+          segmentIndex: m.snap.segmentIndex,
+          lat: m.snap.snapLat,
+          lng: m.snap.snapLng,
+          layer: m.snap.layer != null ? m.snap.layer : 0,
+          prefecture: m.snap.prefecture,
+          _mmIncrement: m.mmIncrementM,
+        });
+      } else {
+        committedSnapsByStep.push(null);
+      }
+    } else {
+      committedSnapsByStep.push(null); // mmResult なし (= 停車 / drain / guard で skip)
+    }
     if (options.captureStateSnapshots) {
       const after = _readState();
       // 経路推定: state フィールドの delta から逆引き
@@ -356,20 +404,8 @@ async function runReplay(fixture, prefRoadsData, options) {
   Meter.businessEnd();
 
   // 8. committed snap chain 抽出 + 最終 state 取得
-  const committedSnaps = mmResults.map((m) => {
-    if (m.snapped && m.snap && m.committed) {
-      return {
-        roadIndex: m.snap.roadIndex,
-        segmentIndex: m.snap.segmentIndex,
-        lat: m.snap.snapLat,
-        lng: m.snap.snapLng,
-        layer: m.snap.layer != null ? m.snap.layer : 0,
-        prefecture: m.snap.prefecture,
-        _mmIncrement: m.mmIncrementM,
-      };
-    }
-    return null;
-  });
+  //    ★ step ごとに 1:1 で対応する committedSnapsByStep を採用 (= 停車 step null 含む)
+  const committedSnaps = committedSnapsByStep;
 
   // first_commit_step (= warmup boundary)
   let firstCommitStep = -1;
