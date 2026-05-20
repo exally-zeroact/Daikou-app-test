@@ -18,7 +18,11 @@
 export default {
   testRunner: 'vitest',
   vitest: {
-    configFile: 'vitest.config.js',
+    // ★設計変更宣言 (2026-05-21・Phase 1): Stryker 専用 vitest 設定に切替
+    //   理由: stryker sandbox は data/ を除外するため・tests/replay-mm-worker/* (= ehime data load)
+    //         を sandbox で実行不可。vitest.stryker.config.js で本 test 系を exclude する。
+    //   既存 vitest.config.js は無変更維持 (= 通常 test 実行は本 change の影響なし)。
+    configFile: 'vitest.stryker.config.js',
     // CommonJS require() 経由で property-test-helpers.js を import しているため
     // Vitest related 探索が機能せず No tests were found エラー。全 test 走らせる設定で対応。
     related: false,
