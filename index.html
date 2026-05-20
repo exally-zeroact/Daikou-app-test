@@ -4396,12 +4396,26 @@
         <button class="btn-sub btn-extra" onclick="openExtraModal()">追加料金</button>
         <button class="btn-sub btn-confirm" onclick="onSend()">確定</button>
       </div>
-      <!-- ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元):
+      <!-- ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元 + inline style 保険):
            landscape 空車時 btn-area に 履歴 → 業務終了 → 代行開始 を縦並びで表示。
            portrait は CSS で完全非表示 (= screenIdle 内で表示)。
-           JS onclick は portrait 同等 (= onHistory/onBusinessEnd) で副作用なし。 -->
-      <button class="btn-history-landscape-idle" onclick="onHistory()">履歴</button>
-      <button class="btn-business-end-landscape-idle" onclick="onBusinessEnd()">業務終了</button>
+           JS onclick は portrait 同等 (= onHistory/onBusinessEnd) で副作用なし。
+           inline style で border/color を直接指定し・CSS specificity 問題 / PWA キャッシュ問題でも
+           司さん指示の色 (履歴=青/業務終了=赤) を確実に適用。 -->
+      <button
+        class="btn-history-landscape-idle"
+        style="border: 1.5px solid #007aff; color: #007aff"
+        onclick="onHistory()"
+      >
+        履歴
+      </button>
+      <button
+        class="btn-business-end-landscape-idle"
+        style="border: 1.5px solid #ff3b30; color: #ff3b30"
+        onclick="onBusinessEnd()"
+      >
+        業務終了
+      </button>
       <!-- メインボタン（idle landscape: btn-area 内で代行開始 / portrait: btn-area ごと非表示・
            fare: 精算終了 / driving: 非表示） -->
       <button class="btn-main" id="btnMain" onclick="onMainBtn()">代行開始</button>
