@@ -4721,6 +4721,10 @@
 
     <!-- ★business.js：業務管理スーパー機能（2026/05/01追加）-->
 
+    <script src="js/page-lifecycle.js"></script>
+
+    <!-- ★page-lifecycle.js：Phase A-1（2026-05-20追加）iOS PWA freeze/kill 時の distance_m 永続化補完 -->
+
     <script>
       // ★設計変更宣言 (2026-05-10): TDZ 撲滅のため全 let/const を script 先頭に集約
       //   旧: line 1906/2254/3843/4214 等に分散・script 中盤の throw で halt すると
@@ -7823,6 +7827,18 @@
           }
         }
       });
+
+      // ─── Phase A-1 (2026-05-20): Page Lifecycle API 初期化 ───
+      // 既存 visibilitychange handler を補完して pagehide / freeze / resume / pageshow を捕捉。
+      // pagehide / freeze は bfcache 直前の最終チャンス・既存 daikou_driving_state + Business.save を呼ぶ。
+      // 復元は既存 Business.load + drivingState restore 経路に任せる (= 新規復元経路なし)。
+      try {
+        if (typeof PageLifecycle !== 'undefined' && typeof PageLifecycle.init === 'function') {
+          PageLifecycle.init();
+        }
+      } catch (e) {
+        console.error('[page-lifecycle] init error:', e);
+      }
 
       // 起動時センサーバナー表示は「センサー未許可バナー（PWA起動時）」ロジックに統合（2026/04/30）
       // drivingState の有無に関係なく、未許可なら起動のたびにバナー表示
