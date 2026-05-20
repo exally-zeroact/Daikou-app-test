@@ -2617,14 +2617,18 @@
            screen-idle-actions (= 履歴 / 業務終了 wrap) を position: fixed で
            btn-area area 内に視覚配置 (= HTML は screenIdle 内のまま・JS 触らず)。
            btn-area justify-content: flex-start で代行開始を上に・screen-idle-actions が下に。 */
+        /* ★設計変更宣言 (2026-05-20 司さん指示・統計カード中心を日時と揃える):
+           旧 margin: 0 で左寄せ・日時 (max-width 80% margin auto) と中心ズレ
+           新 max-width: 80% / margin: 0 auto で日時と同じ container 配置・水平中央揃え */
         .stats-dashboard {
           display: grid !important;
           grid-template-columns: 1fr 1fr !important;
           gap: 6px !important;
           padding: 0 12px !important;
+          max-width: 80% !important;
           width: 100% !important;
           box-sizing: border-box !important;
-          margin: 0 !important;
+          margin: 0 auto !important;
         }
         /* ★設計変更宣言 (2026-05-19・司さん指示「3 ボタン 1 集合体として中央配置」):
            btn-area 内に・履歴 + 業務終了 + 代行開始 を 1 つの flex container として
@@ -2671,15 +2675,26 @@
           font-family: 'Noto Sans JP', sans-serif !important;
           border-radius: 12px !important;
           background: #fff !important;
-          border: 1.5px solid #007aff !important;
-          color: #007aff !important;
           cursor: pointer !important;
           -webkit-tap-highlight-color: transparent !important;
         }
-        .btn-history-landscape-idle:active,
-        .btn-business-end-landscape-idle:active {
+        /* 履歴: 青枠 (= 縦画面 .btn-history と同色) */
+        .btn-history-landscape-idle {
+          border: 1.5px solid #007aff !important;
+          color: #007aff !important;
+        }
+        .btn-history-landscape-idle:active {
           background: #f0f7ff !important;
           transform: scale(0.97) !important;
+        }
+        /* 業務終了: 赤枠 (= 縦画面 .btn-business-end と同色・司さん指示 2026-05-20) */
+        .btn-business-end-landscape-idle {
+          border: 1.5px solid #ff3b30 !important;
+          color: #ff3b30 !important;
+        }
+        .btn-business-end-landscape-idle:active {
+          background: #fff0f0 !important;
+          transform: scale(0.98) !important;
         }
         /* HTML 順序 btn-area 内: btn-back-landscape → report-note-landscape → btn-resume-landscape →
            btn-confirm-landscape → btn-row → btn-history-landscape-idle → btn-business-end-landscape-idle →
@@ -2930,22 +2945,26 @@
           margin-top: 32px !important;
         }
 
-        /* ★設計変更宣言 (2026-05-20 司さん指示・ホーム横画面 ボタン幅を日時テキスト実幅と揃える):
-           旧: 80% (= .dateTimeLine container 同等) → 司さん意図と不一致
-           新: 35% (= 日時テキスト「2026年5月20日（水） HH:mm」の自然文字幅 + 余白)
-               日時テキストは font-size 18px × 約 19 文字で実幅 ~350px・1999px 画面で約 17%。
-               押しやすさのため少し広めの 35% で・画面中央バランス維持。
+        /* ★設計変更宣言 (2026-05-20 司さん指示・ホーム横ボタン 日時と幅・中心 完全一致):
+           日時 .dateTimeLine は max-width: 80% / width: 100% / margin: 0 auto で画面中央配置。
+           ボタンも完全同じ container 設定にすることで・幅・左右マージン・中心を完全一致。
            portrait は本 @media 外なので影響なし。 */
         .btn-business-start {
-          max-width: 35% !important;
-          width: 35% !important;
+          max-width: 80% !important;
+          width: 100% !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          box-sizing: border-box !important;
           padding: 14px !important;
           font-size: 15px !important;
           letter-spacing: 2px !important;
         }
         .btn-business-resume-start {
-          max-width: 35% !important;
-          width: 35% !important;
+          max-width: 80% !important;
+          width: 100% !important;
+          margin-left: auto !important;
+          margin-right: auto !important;
+          box-sizing: border-box !important;
           padding: 14px !important;
           font-size: 15px !important;
           letter-spacing: 2px !important;
