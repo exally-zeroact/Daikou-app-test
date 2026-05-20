@@ -2636,24 +2636,31 @@
           padding: 16px !important;
           gap: 12px !important;
         }
-        /* ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元):
-           旧: landscape 空車も portrait 同様 content 内縦並びだったが
-               「右カラムにボタンを配置する形式に戻す」指示で本仕様に復帰。
-           landscape 空車時:
+        /* ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元 + iOS Safari :has() bug 回避):
+           旧: body:has(#screenIdle[style*='display: flex']) で動的検出
+               → iOS Safari の :has() + 属性 selector が JS の style 属性 mutation 後に
+                  再評価されないバグで・他画面遷移後 rule が機能せず
+           新: :has() を完全に外し・@media (orientation: landscape) で
+               screen-idle-actions / btn-main-idle-portrait を **無条件** hide。
+               これらは HTML 上 screenIdle 内のみに存在するため・他画面への影響なし。
+               新規 btn-history-landscape-idle / btn-business-end-landscape-idle の
+               空車時のみ表示は sibling combinator ~ で .show 検知 (= driving/fare/businessReport
+               時の .btn-row.show / .btn-back-landscape.show / .btn-resume-landscape.show /
+               .btn-confirm-landscape.show と排他)。
+           layout:
              - content (= 左) は 日時・stats-dashboard のみ
-             - btn-area (= 右) は 履歴 (上) → 業務終了 (中) → 代行開始 (下)
+             - btn-area (= 右 ~160-180px) は 履歴 (上) → 業務終了 (中) → 代行開始 (下)
              - 3 ボタン同じ幅 (= btn-area 内 100%) / 同じ高さ
-             - 業務終了 と 代行開始 の間 最低 40px 余白
-           HTML 上 screenIdle 内の 履歴/業務終了/代行開始 は landscape で hide。 */
-        body:has(#screenIdle[style*='display: flex']) .screen-idle-actions {
+             - 業務終了 と 代行開始 の間 40px 余白 */
+        .screen-idle-actions {
           display: none !important;
         }
-        body:has(#screenIdle[style*='display: flex']) .btn-main-idle-portrait {
+        .btn-main-idle-portrait {
           display: none !important;
         }
-        /* landscape 空車時 btn-area 内 履歴/業務終了 を表示 (3 ボタン同サイズ) */
-        body:has(#screenIdle[style*='display: flex']) .btn-history-landscape-idle,
-        body:has(#screenIdle[style*='display: flex']) .btn-business-end-landscape-idle {
+        /* landscape default: 履歴/業務終了 を btn-area 右カラムに表示 (= 空車時のみ後段で他 mode 排他) */
+        .btn-history-landscape-idle,
+        .btn-business-end-landscape-idle {
           display: block !important;
           width: 100% !important;
           box-sizing: border-box !important;
@@ -2669,15 +2676,28 @@
           cursor: pointer !important;
           -webkit-tap-highlight-color: transparent !important;
         }
-        body:has(#screenIdle[style*='display: flex']) .btn-history-landscape-idle:active,
-        body:has(#screenIdle[style*='display: flex']) .btn-business-end-landscape-idle:active {
+        .btn-history-landscape-idle:active,
+        .btn-business-end-landscape-idle:active {
           background: #f0f7ff !important;
           transform: scale(0.97) !important;
         }
-        /* landscape 空車時 btn-main (= 代行開始) を 履歴/業務終了 と同じ幅・高さ・同じスタイル
-           (=色は青塗りのまま主アクション維持・40px+ 余白) */
-        body:has(#screenIdle[style*='display: flex']) .btn-main {
-          display: block !important;
+        /* HTML 順序 btn-area 内: btn-back-landscape → report-note-landscape → btn-resume-landscape →
+           btn-confirm-landscape → btn-row → btn-history-landscape-idle → btn-business-end-landscape-idle →
+           btn-main。前の兄弟に .show (= 他 mode) があれば 新規ボタン hide。 */
+        .btn-row.show ~ .btn-history-landscape-idle,
+        .btn-row.show ~ .btn-business-end-landscape-idle,
+        .btn-back-landscape.show ~ .btn-history-landscape-idle,
+        .btn-back-landscape.show ~ .btn-business-end-landscape-idle,
+        .btn-resume-landscape.show ~ .btn-history-landscape-idle,
+        .btn-resume-landscape.show ~ .btn-business-end-landscape-idle,
+        .btn-confirm-landscape.show ~ .btn-history-landscape-idle,
+        .btn-confirm-landscape.show ~ .btn-business-end-landscape-idle {
+          display: none !important;
+        }
+        /* landscape btn-main (= idle:代行開始 / fare:精算終了) の幅・高さを 履歴/業務終了 と統一。
+           idle 時 (= 前の .show なし) は margin-top 40px で押し間違い防止。
+           fare 時 (= .btn-back-landscape.show 兄弟あり) は既存 L2735 で margin-top 32px override。 */
+        .btn-main {
           width: 100% !important;
           box-sizing: border-box !important;
           padding: 14px 8px !important;
@@ -2910,20 +2930,22 @@
           margin-top: 32px !important;
         }
 
-        /* ★設計変更宣言 (2026-05-20 司さん指示・ホーム横画面 ボタン幅を日時テキストと揃える):
-           旧: max-width 60% / width 60% (= 日時 80% より狭い・違和感)
-           新: max-width 80% / width 100% (= .dateTimeLine と完全同幅・縦軸揃え)
+        /* ★設計変更宣言 (2026-05-20 司さん指示・ホーム横画面 ボタン幅を日時テキスト実幅と揃える):
+           旧: 80% (= .dateTimeLine container 同等) → 司さん意図と不一致
+           新: 35% (= 日時テキスト「2026年5月20日（水） HH:mm」の自然文字幅 + 余白)
+               日時テキストは font-size 18px × 約 19 文字で実幅 ~350px・1999px 画面で約 17%。
+               押しやすさのため少し広めの 35% で・画面中央バランス維持。
            portrait は本 @media 外なので影響なし。 */
         .btn-business-start {
-          max-width: 80% !important;
-          width: 100% !important;
+          max-width: 35% !important;
+          width: 35% !important;
           padding: 14px !important;
           font-size: 15px !important;
           letter-spacing: 2px !important;
         }
         .btn-business-resume-start {
-          max-width: 80% !important;
-          width: 100% !important;
+          max-width: 35% !important;
+          width: 35% !important;
           padding: 14px !important;
           font-size: 15px !important;
           letter-spacing: 2px !important;
