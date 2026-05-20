@@ -1958,15 +1958,15 @@
         background: #fff0f0;
         transform: scale(0.97);
       }
-      /* ★設計変更宣言 (2026-05-19 再・report-note 赤文字強調):
-         旧: font-size 11px / color #999 (= 補助テキスト・最下部)
-         新: font-size 12px / color #ff3b30 / font-weight 700 (= ボタン間説明)
-         業務開始画面 .resume-note と同じ赤文字スタイルで統一感確保。
+      /* ★設計変更宣言 (2026-05-20・司さん指示・案 D・続けるボタン上 + グレー化):
+         旧: color #ff3b30 (赤・font-weight 700・ボタン下) → 終了ボタン (赤枠) と混同
+         新: color #666666 (グレー・font-weight 700 維持・ボタン上)
+         「続ける前に読む注記」として自然位置・終了との混同完全排除。
          landscape は screenBusinessReport 内 .report-note display: none で無影響。 */
       .report-note {
         text-align: center;
         font-size: 12px;
-        color: #ff3b30;
+        color: #666666;
         font-weight: 700;
         padding: 6px 16px;
         line-height: 1.4;
@@ -2358,7 +2358,7 @@
       .btn-main-idle-portrait {
         display: none;
         width: calc(100% - 24px);
-        margin: 40px 12px 4px;  /* 上 40px 余白 (= 業務終了との間) */
+        margin: 40px 12px 4px; /* 上 40px 余白 (= 業務終了との間) */
         padding: 14px;
         background: #007aff;
         border: none;
@@ -2381,7 +2381,7 @@
         .btn-main-idle-portrait {
           display: block;
         }
-        body:has(#screenIdle[style*="display: flex"]) .btn-area > .btn-main {
+        body:has(#screenIdle[style*='display: flex']) .btn-area > .btn-main {
           display: none !important;
         }
       }
@@ -2553,8 +2553,8 @@
           grid-template-columns: 1fr 160px !important;
           grid-template-rows: 40px 1fr !important;
           grid-template-areas:
-            "appbar appbar"
-            "content btn-area" !important;
+            'appbar appbar'
+            'content btn-area' !important;
           padding-left: 0 !important;
           padding-right: 16px !important;
           padding-bottom: 0 !important;
@@ -2566,14 +2566,14 @@
         /* ★設計変更宣言 (2026-05-20・司さん指示・ホーム画面 landscape 中央配置):
            businessStart 表示時は btn-area 非表示 + content 全幅で
            業務開始・業務再開ボタンを画面水平中央に。 */
-        body:has(#screenBusinessStart[style*="display: flex"]) {
+        body:has(#screenBusinessStart[style*='display: flex']) {
           grid-template-columns: 1fr !important;
           grid-template-areas:
-            "appbar"
-            "content" !important;
+            'appbar'
+            'content' !important;
           padding-right: 0 !important;
         }
-        body:has(#screenBusinessStart[style*="display: flex"]) .btn-area {
+        body:has(#screenBusinessStart[style*='display: flex']) .btn-area {
           display: none !important;
         }
         .bottom-nav {
@@ -2628,22 +2628,22 @@
            landscape 空車画面 (= screenIdle 表示時) は btn-area 非表示・
            content 内 screen-idle-actions と btn-main-idle-portrait を表示。
            portrait と同じレイアウト (= 履歴 → 業務終了 → 代行開始 順) に統一。 */
-        body:has(#screenIdle[style*="display: flex"]) {
+        body:has(#screenIdle[style*='display: flex']) {
           grid-template-columns: 1fr !important;
           grid-template-areas:
-            "appbar"
-            "content" !important;
+            'appbar'
+            'content' !important;
           padding-right: 0 !important;
         }
-        body:has(#screenIdle[style*="display: flex"]) .btn-area {
+        body:has(#screenIdle[style*='display: flex']) .btn-area {
           display: none !important;
         }
         /* landscape 空車画面で screen-idle-actions / btn-main-idle-portrait 表示
            (= portrait と同じ縦並び・幅 calc(100% - 24px)・40px 余白) */
-        body:has(#screenIdle[style*="display: flex"]) .screen-idle-actions {
+        body:has(#screenIdle[style*='display: flex']) .screen-idle-actions {
           display: contents !important;
         }
-        body:has(#screenIdle[style*="display: flex"]) .btn-main-idle-portrait {
+        body:has(#screenIdle[style*='display: flex']) .btn-main-idle-portrait {
           display: block !important;
         }
         /* 代行中 btn-row (= 追加料金 + 確定) を縦並び 2 ボタンに統一 */
@@ -2753,22 +2753,19 @@
         .btn-resume-landscape.show ~ .btn-confirm-landscape.show {
           margin-top: 24px;
         }
-        /* ★設計変更宣言 (2026-05-20・司さん指示・業務報告 landscape note 表示):
-           続けるボタン (.show) の直後 隣接兄弟 .report-note-landscape を表示。
-           portrait .report-note と同じ赤文字・font-weight 700 で統一感確保。 */
-        .btn-resume-landscape.show + .report-note-landscape {
+        /* ★設計変更宣言 (2026-05-20・司さん指示・案 D・続けるの上に note 移動 + グレー化):
+           HTML 順序: note (グレー・上) → 続ける → 終了
+           表示制御: 後の兄弟 + で続けるが .show なら note を表示
+           (HTML 順序が note → 続ける なので・note の隣接後兄弟 .btn-resume-landscape.show を使う) */
+        .report-note-landscape:has(+ .btn-resume-landscape.show) {
           display: block !important;
           text-align: center !important;
           font-size: 11px !important;
-          color: #ff3b30 !important;
+          color: #666666 !important;
           font-weight: 700 !important;
-          padding: 8px 4px 0 !important;
+          padding: 0 4px 8px !important;
           line-height: 1.3 !important;
           letter-spacing: 0 !important;
-        }
-        /* note 表示時の btn-confirm-landscape margin-top を縮小 (= note と密着配置・既存 24px 上書き) */
-        .btn-resume-landscape.show + .report-note-landscape + .btn-confirm-landscape.show {
-          margin-top: 4px !important;
         }
 
         /* 5. 追加料金バナー（実車中の左ハンドル/深夜割増等）の幅を狭く */
@@ -4135,13 +4132,12 @@
         <div class="report-card" id="reportCard">
           <!-- JS で動的生成 -->
         </div>
-        <!-- ★設計変更宣言 (2026-05-19 再・portrait 業務報告ボタン分離):
-             続ける と 終了 の間に説明テキストを挿入して押し間違い防止。
-             業務開始画面 (.resume-note) と同じ赤文字設計で統一感確保。
-             landscape は無影響 (= screenBusinessReport 内ボタン display: none で
-             btn-area の btn-resume-landscape / btn-confirm-landscape が表示される)。 -->
-        <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
+        <!-- ★設計変更宣言 (2026-05-20・司さん指示・案 D・但し書き 続ける の上に移動 + グレー化):
+             旧: 続ける → note (赤) → 終了 で・終了ボタン (赤枠) と混同リスク。
+             新: note (グレー) → 続ける → 終了 で・「続ける前に読む注記」として自然位置。
+             終了との距離が広がり混同完全排除。 -->
         <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
+        <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
         <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
       </div>
 
@@ -4299,13 +4295,14 @@
       <button class="btn-back-landscape" id="btnBackLandscape" onclick="cancelFare()">
         ← 走行に戻る
       </button>
+      <!-- ★設計変更宣言 (2026-05-20・司さん指示・案 D・但し書き 続ける の上に移動 + グレー化):
+           旧: 続ける → note (赤) → 終了 で・終了 (赤枠) と混同リスク。
+           新: note (グレー) → 続ける → 終了 で押し間違い完全排除。 -->
+      <div class="report-note-landscape">※「続ける」でいつでも業務を再開できます</div>
       <!-- 横画面用 業務報告 続けるボタン（businessReport時のみ表示・縦画面では非表示） -->
       <button class="btn-resume-landscape" id="btnResumeLandscape" onclick="onBusinessResume()">
         続ける
       </button>
-      <!-- ★設計変更宣言 (2026-05-20・司さん指示・業務報告 landscape note 追加):
-           続けると終了の間に portrait と同じ但し書きを挟む・押し間違い防止。 -->
-      <div class="report-note-landscape">※「続ける」でいつでも業務を再開できます</div>
       <!-- 横画面用 業務報告 終了ボタン（businessReport時のみ表示・縦画面では非表示） -->
       <button class="btn-confirm-landscape" id="btnConfirmLandscape" onclick="onBusinessConfirm()">
         終了
@@ -4688,7 +4685,8 @@
             if (typeof dlog === 'function') dlog('[NoSleep fallback] error: ' + (e && e.message));
           });
         } catch (e) {
-          if (typeof dlog === 'function') dlog('[NoSleep fallback] init error: ' + (e && e.message));
+          if (typeof dlog === 'function')
+            dlog('[NoSleep fallback] init error: ' + (e && e.message));
         }
       }
       function releaseWakeLock() {
