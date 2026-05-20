@@ -1816,6 +1816,15 @@
         transform: scale(0.98);
       }
 
+      /* ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元):
+         landscape 空車専用 履歴/業務終了 ボタン (= btn-area 内)。
+         portrait では default display: none で完全非表示・landscape @media + body:has(#screenIdle) で
+         block 表示制御 (= 該当 rule は L2620 周辺 @media (orientation: landscape) 内に定義)。 */
+      .btn-history-landscape-idle,
+      .btn-business-end-landscape-idle {
+        display: none;
+      }
+
       /* 業務開始ボタン（業務未開始画面・中央配置） */
       /* 2026/05/01：[続きから再開]と同サイズに統一（司さん指示） */
       /* ★設計変更宣言 (2026-05-14): box-sizing:border-box で border 含めた寸法を統一・どんな border 設定でも .btn-business-resume-start と完全同サイズになる */
@@ -1940,9 +1949,12 @@
         transform: scale(0.97);
         filter: brightness(0.85);
       }
+      /* ★設計変更宣言 (2026-05-20 司さん指示・続ける↔終了 間隔 40px):
+         旧: margin-top 0 で 続けると密着 (= 押し間違いリスク)
+         新: margin-top 40px で十分な余白確保 (= 業務報告以外の主要画面と同等の安全間隔) */
       .btn-business-confirm {
         width: calc(100% - 32px);
-        margin: 0 16px 8px;
+        margin: 40px 16px 8px;
         padding: 18px;
         background: #fff;
         border: 1.5px solid #ff3b30;
@@ -2624,27 +2636,54 @@
           padding: 16px !important;
           gap: 12px !important;
         }
-        /* ★設計変更宣言 (2026-05-20・司さん指示・空車画面 縦横ボタン順統一):
-           landscape 空車画面 (= screenIdle 表示時) は btn-area 非表示・
-           content 内 screen-idle-actions と btn-main-idle-portrait を表示。
-           portrait と同じレイアウト (= 履歴 → 業務終了 → 代行開始 順) に統一。 */
-        body:has(#screenIdle[style*='display: flex']) {
-          grid-template-columns: 1fr !important;
-          grid-template-areas:
-            'appbar'
-            'content' !important;
-          padding-right: 0 !important;
-        }
-        body:has(#screenIdle[style*='display: flex']) .btn-area {
+        /* ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元):
+           旧: landscape 空車も portrait 同様 content 内縦並びだったが
+               「右カラムにボタンを配置する形式に戻す」指示で本仕様に復帰。
+           landscape 空車時:
+             - content (= 左) は 日時・stats-dashboard のみ
+             - btn-area (= 右) は 履歴 (上) → 業務終了 (中) → 代行開始 (下)
+             - 3 ボタン同じ幅 (= btn-area 内 100%) / 同じ高さ
+             - 業務終了 と 代行開始 の間 最低 40px 余白
+           HTML 上 screenIdle 内の 履歴/業務終了/代行開始 は landscape で hide。 */
+        body:has(#screenIdle[style*='display: flex']) .screen-idle-actions {
           display: none !important;
         }
-        /* landscape 空車画面で screen-idle-actions / btn-main-idle-portrait 表示
-           (= portrait と同じ縦並び・幅 calc(100% - 24px)・40px 余白) */
-        body:has(#screenIdle[style*='display: flex']) .screen-idle-actions {
-          display: contents !important;
-        }
         body:has(#screenIdle[style*='display: flex']) .btn-main-idle-portrait {
+          display: none !important;
+        }
+        /* landscape 空車時 btn-area 内 履歴/業務終了 を表示 (3 ボタン同サイズ) */
+        body:has(#screenIdle[style*='display: flex']) .btn-history-landscape-idle,
+        body:has(#screenIdle[style*='display: flex']) .btn-business-end-landscape-idle {
           display: block !important;
+          width: 100% !important;
+          box-sizing: border-box !important;
+          padding: 14px 8px !important;
+          font-size: 14px !important;
+          font-weight: 700 !important;
+          letter-spacing: 1px !important;
+          font-family: 'Noto Sans JP', sans-serif !important;
+          border-radius: 12px !important;
+          background: #fff !important;
+          border: 1.5px solid #007aff !important;
+          color: #007aff !important;
+          cursor: pointer !important;
+          -webkit-tap-highlight-color: transparent !important;
+        }
+        body:has(#screenIdle[style*='display: flex']) .btn-history-landscape-idle:active,
+        body:has(#screenIdle[style*='display: flex']) .btn-business-end-landscape-idle:active {
+          background: #f0f7ff !important;
+          transform: scale(0.97) !important;
+        }
+        /* landscape 空車時 btn-main (= 代行開始) を 履歴/業務終了 と同じ幅・高さ・同じスタイル
+           (=色は青塗りのまま主アクション維持・40px+ 余白) */
+        body:has(#screenIdle[style*='display: flex']) .btn-main {
+          display: block !important;
+          width: 100% !important;
+          box-sizing: border-box !important;
+          padding: 14px 8px !important;
+          font-size: 14px !important;
+          letter-spacing: 1px !important;
+          margin-top: 40px !important;
         }
         /* 代行中 btn-row (= 追加料金 + 確定) を縦並び 2 ボタンに統一 */
         .btn-row {
@@ -2871,17 +2910,20 @@
           margin-top: 32px !important;
         }
 
-        /* 2026/05/01 横画面：業務管理ボタンも中央寄せ・サイズ統一 */
+        /* ★設計変更宣言 (2026-05-20 司さん指示・ホーム横画面 ボタン幅を日時テキストと揃える):
+           旧: max-width 60% / width 60% (= 日時 80% より狭い・違和感)
+           新: max-width 80% / width 100% (= .dateTimeLine と完全同幅・縦軸揃え)
+           portrait は本 @media 外なので影響なし。 */
         .btn-business-start {
-          max-width: 60% !important;
-          width: 60% !important;
+          max-width: 80% !important;
+          width: 100% !important;
           padding: 14px !important;
           font-size: 15px !important;
           letter-spacing: 2px !important;
         }
         .btn-business-resume-start {
-          max-width: 60% !important;
-          width: 60% !important;
+          max-width: 80% !important;
+          width: 100% !important;
           padding: 14px !important;
           font-size: 15px !important;
           letter-spacing: 2px !important;
@@ -4313,9 +4355,13 @@
         <button class="btn-sub btn-extra" onclick="openExtraModal()">追加料金</button>
         <button class="btn-sub btn-confirm" onclick="onSend()">確定</button>
       </div>
-      <!-- ★ 2026-05-20 司さん指示: 空車画面は portrait/landscape 両方 screenIdle 内表示に統一・
-           btn-area 内の重複ボタン削除 (= 旧 btn-history-landscape-idle / btn-business-end-landscape-idle)。 -->
-      <!-- メインボタン（idle: btn-area 内・portrait では非表示・landscape 空車では btn-area ごと非表示・
+      <!-- ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元):
+           landscape 空車時 btn-area に 履歴 → 業務終了 → 代行開始 を縦並びで表示。
+           portrait は CSS で完全非表示 (= screenIdle 内で表示)。
+           JS onclick は portrait 同等 (= onHistory/onBusinessEnd) で副作用なし。 -->
+      <button class="btn-history-landscape-idle" onclick="onHistory()">履歴</button>
+      <button class="btn-business-end-landscape-idle" onclick="onBusinessEnd()">業務終了</button>
+      <!-- メインボタン（idle landscape: btn-area 内で代行開始 / portrait: btn-area ごと非表示・
            fare: 精算終了 / driving: 非表示） -->
       <button class="btn-main" id="btnMain" onclick="onMainBtn()">代行開始</button>
     </div>
