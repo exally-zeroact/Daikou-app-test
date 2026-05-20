@@ -2357,6 +2357,39 @@
       .report-note-landscape {
         display: none;
       }
+      /* ★ portrait 空車画面 代行開始ボタン (= stats 直下・portrait idle 時のみ表示) */
+      .btn-main-idle-portrait {
+        display: none;
+        width: calc(100% - 24px);
+        margin: 12px 12px 4px;
+        padding: 14px;
+        background: #007aff;
+        border: none;
+        border-radius: 12px;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 900;
+        letter-spacing: 2px;
+        font-family: 'Noto Sans JP', sans-serif;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        box-sizing: border-box;
+      }
+      .btn-main-idle-portrait:active {
+        transform: scale(0.98);
+        filter: brightness(0.9);
+      }
+      /* portrait のみ表示・landscape 非表示 (= landscape は既存 btn-area 内 btn-main 使用) */
+      @media (orientation: portrait) {
+        .btn-main-idle-portrait {
+          display: block;
+        }
+        /* btn-area 内 btn-main は idle 中 portrait で非表示 (= 重複防止)
+           fare 中は screenIdle 非表示 → :has() false → btn-area btn-main 表示 ✓ */
+        body:has(#screenIdle[style*="display: flex"]) .btn-area > .btn-main {
+          display: none !important;
+        }
+      }
 
       /* トースト通知 */
       .toast {
@@ -2534,6 +2567,19 @@
           height: 100dvh !important;
           flex-direction: unset !important;
           flex-wrap: unset !important;
+        }
+        /* ★設計変更宣言 (2026-05-20・司さん指示・ホーム画面 landscape 中央配置):
+           businessStart 表示時は btn-area 非表示 + content 全幅で
+           業務開始・業務再開ボタンを画面水平中央に。 */
+        body:has(#screenBusinessStart[style*="display: flex"]) {
+          grid-template-columns: 1fr !important;
+          grid-template-areas:
+            "appbar"
+            "content" !important;
+          padding-right: 0 !important;
+        }
+        body:has(#screenBusinessStart[style*="display: flex"]) .btn-area {
+          display: none !important;
         }
         .bottom-nav {
           display: none !important;
@@ -4009,6 +4055,11 @@
             <span class="stat-value">¥<span id="fareTotalYen">0</span></span>
           </div>
         </div>
+        <!-- ★設計変更宣言 (2026-05-20・司さん指示・空車縦画面 代行開始 stats 直下配置):
+             portrait で stats の直下に代行開始ボタンを配置・履歴/業務終了 はその下。
+             btn-area 内 btn-main は idle 表示中 portrait で非表示 (= 重複防止)・
+             fare 中の精算終了は引き続き btn-area 内 btn-main で機能。 -->
+        <button class="btn-main-idle-portrait" type="button" onclick="onMainBtn()">代行開始</button>
         <!-- ★設計変更宣言 (2026-05-19・司さん指示 履歴/業務終了 横並び):
              portrait は display: contents で wrap div を透過・既存縦並び維持。
              landscape は flex row で左右 50/50 横並び。 -->
@@ -6948,10 +6999,10 @@
           '<div class="report-row"><span class="lbl">実車距離</span><span class="val">' +
           actualKm +
           ' km</span></div>';
-        html +=
-          '<div class="report-row"><span class="lbl">空車距離</span><span class="val">' +
-          emptyKm +
-          ' km</span></div>';
+        // ★設計変更宣言 (2026-05-20・司さん指示・空車距離 行削除):
+        //   旧: 「空車距離」行を表示 (= emptyKm = total - actual)
+        //   新: 削除・総走行距離・実車距離・実車率 のみ表示。
+        //   注: emptyKm 算出ロジック (= L6929 周辺) は他に影響なし・維持。
         html +=
           '<div class="report-row"><span class="lbl">実車率</span><span class="val">' +
           occupancy +
