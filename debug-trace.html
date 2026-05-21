@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>GPS trace debug (noise 較正用・main 未 merge)</title>
+    <!--
+      debug-trace.html (= debug-trace-DO-NOT-MERGE-collection-20260521・2026-05-21)
+      用途: noise 較正用の実機 GPS trace 取得ツール。Vercel preview deploy のみ・main 未 push。
+      ★ prod 完全無関係: distance_m / 課金経路 / sw.js / index.html を一切触らない単独 HTML。
+      ★ watchPosition options は js/gps.js L29 と完全一致 (= enableHighAccuracy:true, timeout:3000, maximumAge:0)
+         同 device で同 options なら raw accuracy 値は prod と同等になる。
+      ★ CSV header 固定: t,lat,lng,acc,spd,hdg,alt
+    -->
+    <style>
+      :root {
+        font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #fafafa;
+      }
+
+      h1 {
+        font-size: 1.1rem;
+        margin: 0 0 12px;
+      }
+
+      .notice {
+        background: #fff7e0;
+        border: 1px solid #f5c000;
+        padding: 10px 12px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        margin-bottom: 14px;
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      button {
+        flex: 1;
+        padding: 14px 8px;
+        font-size: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+      }
+
+      .stats {
+        font-family: 'SF Mono', Menlo, Consolas, monospace;
+        background: #fff;
+        border: 1px solid #ddd;
+        padding: 10px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+      }
+
+      .stats div {
+        margin: 2px 0;
+      }
+
+      .err {
+        color: #c00;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>GPS trace debug (noise 較正用)</h1>
+    <div class="notice">
+      ★ 注意: <br />
+      1. 本番 PWA を完全 close してから本 page を開く (= App Switcher で swipe up)。<br />
+      2. 計測中は画面 sleep 防止 (= 設定 → 画面 / 自動ロック なし)・本 tab を foreground 維持。<br />
+      3. 都市部 + 郊外を mix で 1 trip (= 30 分 程度) 走る。<br />
+      4. Download CSV で・<code>t,lat,lng,acc,spd,hdg,alt</code> を取得。
+    </div>
+    <div class="row">
+      <button id="start">Start</button>
+      <button id="stop" disabled>Stop</button>
+      <button id="dl" disabled>Download CSV</button>
+    </div>
+    <div class="stats">
+      <div>state: <span id="state">idle</span></div>
+      <div>samples: <span id="count">0</span></div>
+      <div>last acc: <span id="lastAcc">-</span> m</div>
+      <div>last spd: <span id="lastSpd">-</span> m/s</div>
+      <div id="err" class="err"></div>
+    </div>
+    <script>
+      'use strict';
+      // ★ js/gps.js L29 と完全一致
+      var WATCH_OPTIONS = { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 };
+      var samples = [];
+      var watchId = null;
+      var $ = function (id) {
+        return document.getElementById(id);
+      };
+      function onPos(p) {
+        var c = p.coords;
+        samples.push({
+          t: p.timestamp,
+          lat: c.latitude,
+          lng: c.longitude,
+          acc: c.accuracy,
+          spd: c.speed,
+          hdg: c.heading,
+          alt: c.altitude,
+        });
+        $('count').textContent = samples.length;
+        $('lastAcc').textContent = c.accuracy == null ? '-' : c.accuracy.toFixed(1);
+        $('lastSpd').textContent = c.speed == null ? '-' : c.speed.toFixed(2);
+      }
+      function onErr(e) {
+        $('err').textContent = '[error ' + e.code + '] ' + e.message;
+      }
+      $('start').onclick = function () {
+        if (watchId !== null) return;
+        if (!('geolocation' in navigator)) {
+          $('err').textContent = 'geolocation 非対応';
+          return;
+        }
+        $('err').textContent = '';
+        watchId = navigator.geolocation.watchPosition(onPos, onErr, WATCH_OPTIONS);
+        $('state').textContent = 'recording';
+        $('start').disabled = true;
+        $('stop').disabled = false;
+        $('dl').disabled = false;
+      };
+      $('stop').onclick = function () {
+        if (watchId === null) return;
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        $('state').textContent = 'stopped';
+        $('start').disabled = false;
+        $('stop').disabled = true;
+      };
+      $('dl').onclick = function () {
+        if (samples.length === 0) {
+          $('err').textContent = 'no samples';
+          return;
+        }
+        var rows = ['t,lat,lng,acc,spd,hdg,alt'];
+        for (var i = 0; i < samples.length; i++) {
+          var s = samples[i];
+          rows.push(
+            [
+              s.t,
+              s.lat,
+              s.lng,
+              s.acc,
+              s.spd == null ? '' : s.spd,
+              s.hdg == null ? '' : s.hdg,
+              s.alt == null ? '' : s.alt,
+            ].join(',')
+          );
+        }
+        var blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'gps-trace-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      };
+    </script>
+  </body>
+</html>
