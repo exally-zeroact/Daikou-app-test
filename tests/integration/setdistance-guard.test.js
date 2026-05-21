@@ -11,6 +11,30 @@
 //
 // 絶対ルール準拠:
 //   既存 valid 値での挙動完全不変・distance_m 加算経路 (Tier1/Off-Road/gap-fill/incremental) 無変更。
+//
+// ─── ★ Phase 8 ①-A (2026-05-21): equivalent mutant 明記 ────────────────────────
+//
+// meter.js L1364 EqualityOperator mutation: `distanceM >= 0` → `distanceM > 0`
+//   この mutation は **数学的に等価 (equivalent mutant)** で kill 不可能:
+//
+//     条件式:        Number.isFinite(distanceM) && distanceM >= 0 ? distanceM : 0
+//     mutation 条件: Number.isFinite(distanceM) && distanceM >  0 ? distanceM : 0
+//
+//   入力ごとの v (= 三項演算子の結果) 比較:
+//     - distanceM = 0    : 旧 true → 0  /  新 false → 0 (fallback) → **同値 0**
+//     - distanceM = 0.5  : 旧 true → 0.5/  新 true  → 0.5         → **同値 0.5**
+//     - distanceM = 100  : 旧 true → 100/  新 true  → 100         → **同値 100**
+//     - distanceM = -1   : 旧 false → 0/   新 false → 0           → **同値 0**
+//     - distanceM = NaN  : 旧 false → 0/   新 false → 0           → **同値 0**
+//     - distanceM = Infinity : 旧 false → 0/  新 false → 0         → **同値 0**
+//
+//   → 全入力で v 完全同一 → state.distance_m 同一 → state.fare_yen 同一 → 観測不能
+//   → 課金 5 経路 mutation kill 率の真の分母から除外: 26 / 26 = 100% kill
+//   → Stryker survived 報告には残るが・テスト追加で kill 不可な構造的等価 mutation
+//
+// 本ファイル内の動的 test (= NaN / Infinity / 負値 fallback verify) は・既に「ガード機能の
+// 機能的正しさ」を verify している。等価 mutation の存在自体は Stryker 限界であり・
+// テスト品質の問題ではない。
 
 const path = require('path');
 const METER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'meter.js');

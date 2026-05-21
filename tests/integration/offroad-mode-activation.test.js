@@ -252,4 +252,61 @@ describe('offroad-mode-activation (meter.js Phase 1.C L95/L442/L462/L833/L334)',
     Meter.update(gpsAt(6));
     expect(Meter.getState().distanceSource).toBe('offroad');
   });
+
+  // ─── ★ Phase 8 ①-A (2026-05-21): running=false ガード mutation kill ──
+  //
+  // 目的: Stryker Pass A で survived だった ConditionalExpression mutant 2 件を kill する。
+  //   - meter.js L513: `if (state.running)` → mutation `if (true)` (retroactive Off-Road)
+  //   - meter.js L978: `if (state.running)` → mutation `if (true)` (incremental Off-Road)
+  // 両 mutant は・既存 test が running=true (= Meter.start() のみ) しか踏まないため survive。
+  //
+  // 絶対ルール準拠:
+  //   distance_m += 経路・calcFare・commit 機構 は 1 byte も変更しない (= prod 無変更)。
+  //   追加 test は「running=false で skip する既存挙動」を verify するだけ。
+  //   meter.js stop() を呼ぶことで state.running=false にして・既存 retroactive / incremental
+  //   経路が当該 step で += を skip することを確認する。
+  //
+  // L1364 (= setDistance の `>= 0` → `> 0` mutation) は・**等価 mutation (equivalent mutant)**:
+  //   全入力 (= 0 / 正値 / 負値 / NaN / Infinity) で結果同一 (= 旧 v=0 / 新 v=0・fallback で 0 同値)。
+  //   数学的に kill 不可能・課金 kill 率の真の分母から除外して 26/26 = 100% kill と評価する。
+
+  it('★ Phase 8 L513 (running=false): retroactive Off-Road 起動でも state.running=false なら distance_m 加算 skip', () => {
+    // 1. running=true で 6 GPS update を流し・_haverAccumSinceLastCommit を ~125m 蓄積
+    //    (= 既存 retroactive 加算テストと同じ setup)
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    // 2. running=false に切替 (= 空車中・代行終了直後等の現実シナリオ)
+    Meter.stop();
+    expect(Meter.getState().running).toBe(false);
+    const beforeOffroad = Meter.getState().distance_m;
+    // 3. snap miss 5 回で Off-Road 起動・retroactive 加算 trigger
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const s = Meter.getState();
+    // 4. Off-Road 起動自体はする (offroad_count=1)・但し distance_m += は L513 guard で skip
+    expect(s.offroad_count).toBe(1);
+    expect(s.distance_m).toBe(beforeOffroad); // = 0・retroactive 加算なし
+    expect(s.distance_m).toBe(0);
+    // 5. offroad_distance_m も加算されない (= 同 if (state.running) ブロック内)
+    expect(s.offroad_distance_m || 0).toBe(0);
+  });
+
+  it('★ Phase 8 L978 (running=false): Off-Road incremental でも state.running=false なら distance_m 加算 skip', () => {
+    // 1. running=true で Off-Road 起動完了 (= retroactive 加算済)
+    for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
+    for (let k = 0; k < 5; k++) fakeWorker._dispatch(snapMiss());
+    const afterActivation = Meter.getState().distance_m;
+    expect(afterActivation).toBeGreaterThan(0); // 起動段階の retroactive 加算は行われている
+    expect(Meter.getState().offroad_count).toBe(1);
+    // 2. running=false に切替 (= Off-Road 中に代行終了等のシナリオ)
+    Meter.stop();
+    expect(Meter.getState().running).toBe(false);
+    // 3. Off-Road 中の追加 GPS update → _calculateOffRoadIncrement で inc>0 計算される条件
+    //    既存 test ('Off-Road 起動後の追加 GPS update → incremental 加算') と同じ 1 step
+    Meter.update(gpsAt(6));
+    const s = Meter.getState();
+    // 4. L978 guard で incremental 加算 skip → distance_m は afterActivation のまま
+    expect(s.distance_m).toBe(afterActivation); // 加算なし
+    // 5. offroad_distance_m も同じ if (state.running) ブロック内のため・新規加算なし
+    //    afterActivation 段階の retroactive 分は維持される
+    expect(s.offroad_distance_m).toBe(afterActivation);
+  });
 });
