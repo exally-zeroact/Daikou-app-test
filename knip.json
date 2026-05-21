@@ -3,10 +3,7 @@
   "entry": [
     "index.html",
     "sw.js",
-    "tests/**/*.test.js",
-    "tests/replay-mm.js",
-    "tests/meter-mm-priority.js",
-    "scripts/zeroact-test-commons/audit-message-handlers.js"
+    "tests/**/*.test.js"
   ],
   "project": [
     "js/**/*.js",
@@ -33,7 +30,7 @@
     "msw",
     "@lhci/cli"
   ],
-  "ignoreBinaries": ["semgrep", "stryker"],
+  "ignoreBinaries": ["semgrep"],
   "paths": {
     "js/*": ["./js/*"],
     "scripts/zeroact-test-commons/*": ["./scripts/zeroact-test-commons/*"]

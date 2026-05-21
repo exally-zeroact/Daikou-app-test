@@ -19,7 +19,13 @@ test('flow-overlay: 設定タブ → overlaySettings 表示・URL 不変・閉�
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
-    const ids = ['dlOverlay', 'trainingConsentBanner', 'pwaBanner', 'apkBanner', 'sensorRestoreBanner'];
+    const ids = [
+      'dlOverlay',
+      'trainingConsentBanner',
+      'pwaBanner',
+      'apkBanner',
+      'sensorRestoreBanner',
+    ];
     ids.forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
@@ -45,7 +51,7 @@ test('flow-overlay: 設定タブ → overlaySettings 表示・URL 不変・閉�
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);
 
-  let stillShown = await overlay.evaluate((el) => el.classList.contains('show'));
+  const stillShown = await overlay.evaluate((el) => el.classList.contains('show'));
   if (stillShown) {
     // ESC で閉じなければ業務タブで閉じる (= MA-6 設計)
     await page.locator('.bottom-nav .nav-item').nth(0).click();
