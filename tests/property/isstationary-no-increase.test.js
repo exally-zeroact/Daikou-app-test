@@ -13,7 +13,6 @@
 //     → 経路 1 を bypass しても Worker B 側で 0 化されるため二重防御。
 //     Worker context 必須のため Node では実行不可・静的解析で pattern 存在を verify。
 
-const fs = require('fs');
 const path = require('path');
 const {
   fc,
@@ -21,16 +20,13 @@ const {
   stationaryGpsArb,
 } = require('../../scripts/zeroact-test-commons/property-test-helpers');
 
+// ★ Phase 6-7 (2026-05-21・(M) 分離): 静的 grep (= loadSource / MAP_MATCHER_JS_PATH / fs)
+//   は tests/drift-static/meter-isStationary-anchor.test.js 側で使用・本 file からは撤去。
 const METER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'meter.js');
-const MAP_MATCHER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'map-matcher.js');
 
 function loadMeter() {
   delete require.cache[require.resolve(METER_JS_PATH)];
   return require(METER_JS_PATH);
-}
-
-function loadSource(filePath) {
-  return fs.readFileSync(filePath, 'utf8');
 }
 
 describe('ZEROact 共通テスト基盤: isStationary=true で distance_m 不変 (Step C)', () => {
@@ -124,48 +120,13 @@ describe('ZEROact 共通テスト基盤: isStationary=true で distance_m 不変
       );
     });
 
-    it('B3: meter.js L790 に update() 入口 isStationary 早期 return が存在', () => {
-      const source = loadSource(METER_JS_PATH);
-      const lines = source.split('\n');
-      // L790 周辺で `if (gpsResult.isStationary)` パターン + early return を確認
-      // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張
-      // 2026-05-18 更新 (Phase 3): L839 → L867 (+28) 移動・window 同期。
-      // 2026-05-19 R1 更新 (Off-Road grace period): L867 → L884 (+17) 移動・window 同期。
-      const window = lines.slice(869, 904).join('\n');
-      if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
-        throw new Error(
-          'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'
-        );
-      }
-      if (!/_updateMapMatching\s*\(\s*gpsResult\s*\)/.test(window)) {
-        throw new Error('meter.js L790 周辺 (±10) に _updateMapMatching(gpsResult) 呼出 未検出');
-      }
-      if (!/return\s*;/.test(window)) {
-        throw new Error('meter.js L790 周辺 (±10) に early return ; 未検出');
-      }
-    });
+    // ★ Phase 6-7 (2026-05-21・(M) 分離): 旧 B3 (meter.js L790 ±10 静的 grep) は
+    //   tests/drift-static/meter-isStationary-anchor.test.js へ移動。
+    //   理由: Stryker instrumentation で行シフト → false-fail。byte 不変で別 file 化し
+    //         通常 vitest run では同 ±10 厳格度で実行・stryker では exclude する設計。
   });
 
-  // ─── 経路 2 (map-matcher.js L3007・静的解析): Worker B 出力強制 0 化 ──
-
-  describe('経路 2 (map-matcher.js L3007): Worker B 出力強制 0 化', () => {
-    it('B4: map-matcher.js L3007 に msg.isStationary 強制 0 化 pattern が存在', () => {
-      const source = loadSource(MAP_MATCHER_JS_PATH);
-      const lines = source.split('\n');
-      // L3007 周辺で if (msg.isStationary === true) { mmIncrementM = 0; tentativeIncrementM = 0; }
-      // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張 (= 2990-3025)
-      const window = lines.slice(2990, 3025).join('\n');
-      if (!/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(window)) {
-        throw new Error(
-          'map-matcher.js L3007 周辺 (±10) に if (msg.isStationary === true) pattern 未検出 (drift detected)'
-        );
-      }
-      if (!/mmIncrementM\s*=\s*0/.test(window)) {
-        throw new Error('map-matcher.js L3007 周辺 (±10) に mmIncrementM = 0 代入 未検出');
-      }
-      if (!/tentativeIncrementM\s*=\s*0/.test(window)) {
-        throw new Error('map-matcher.js L3007 周辺 (±10) に tentativeIncrementM = 0 代入 未検出');
-      }
-    });
-  });
+  // ★ Phase 6-7 (2026-05-21・(M) 分離): 旧 '経路 2' describe の B4 (map-matcher.js L3007 ±10) は
+  //   tests/drift-static/meter-isStationary-anchor.test.js へ移動。
+  //   '経路 2' describe は B4 単独だったため・移動後 empty となり describe ごと削除。
 });

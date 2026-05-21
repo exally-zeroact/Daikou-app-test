@@ -73,7 +73,28 @@ export default {
   //   原因: Stryker sandbox の IIFE / __dirname 経由 require 解決問題 (= ローカル vitest PASS)。
   //   結論: 9.26% (= 元状態) に維持・80% は Stryker 環境問題解消後の別タスク。
   //   業務 critical 防御は他ツール (= 32 件 test / Semgrep / property test) で多層担保済。
+  // ★設計変更宣言 Phase 6-7 (2026-05-21・in-place mutation・司さん P1 採択):
+  //   旧 (= Stage 1 / Hybrid 6 路線): test util + helpers のみ mutate (= 9.26%)
+  //   新: core 3 ファイル (= meter.js / map-matcher.js / gps-worker.js) を mutate に追加。
+  //
+  //   絶対前提 (= 不可侵):
+  //     ・prod 本体 (js/*.js) は 1 byte も触らない (= 抽出 / 改変一切なし)
+  //     ・Stryker sandbox 内の一時 copy だけが mutate される (= main の meter.js 等は無変更)
+  //     ・distance_m 加算 5 経路は mutate 対象として "テストで kill できるか" を測定する
+  //       (= 旧 Stage 1 の「触らない absolute」回避策は in-place 方式で不要・経路自体は不変)
+  //
+  //   実行方針 (= 2 Pass):
+  //     Pass A: `npx stryker run --mutate js/meter.js --coverageAnalysis perTest`
+  //             (meter.js は Node 直 require 可能・V8 coverage 計測可・perTest で高速)
+  //     Pass B: `npx stryker run --mutate js/map-matcher.js,js/gps-worker.js --coverageAnalysis off`
+  //             (vm.runInContext load ゆえ V8 coverage 不可・'off' で全 test 実行)
+  //     ★ dry-run 失敗時 (= IIFE / __dirname 解決問題) は本ファイルで coverageAnalysis 降格可能
   mutate: [
+    // ★ Phase 6-7 新規: core in-place mutation 対象
+    'js/meter.js', // Pass A 主対象 (= IIFE + module.exports・Node require 可)
+    'js/map-matcher.js', // Pass B 主対象 (= Worker / importScripts・vm.runInContext load)
+    'js/gps-worker.js', // Pass B 主対象 (= Worker / self.onmessage・vm.runInContext load)
+    // 既存 (= Stage 1 / Hybrid 6 から維持)
     'scripts/zeroact-test-commons/property-test-helpers.js',
     'tests/integration/helpers/**/*.js',
     'tests/property/helpers/**/*.js',
@@ -81,6 +102,10 @@ export default {
   // Stryker の project file scan から除外 (= heap OOM 対策)
   ignorePatterns: [
     'data/**',
+    // ★ Phase 6-7: replay-mm-worker が ehime data を vm.runInContext で読むため・1 件のみ allow
+    //   全 786 file / 16K+ から roads-ehime.js (= 4.4 MB) 単独 include で OOM 回避維持
+    //   minimatch: data/** で全除外 → '!data/roads-ehime.js' で当該 1 件のみ復帰
+    '!data/roads-ehime.js',
     'node_modules/**',
     'coverage/**',
     '.tmp/**',
@@ -95,9 +120,15 @@ export default {
   ],
   // test runner sub-process の Node heap を 8GB に拡張
   testRunnerNodeArgs: ['--max-old-space-size=8192'],
+  // ★ Phase 6-7: hang 対策
+  //   timeoutMS: vm.runInContext で無限ループ mutation を仕掛けられた場合の上限 (30 秒)
+  //   concurrency: stryker 9.6 schema は string %形式のみ受付・defaults に任せる
+  //                (= Pass A 実測で 8-core 機・default 並列で安定動作確認済)
+  timeoutMS: 30000,
   reporters: ['progress', 'clear-text', 'html'],
   thresholds: { high: 80, low: 60, break: null },
-  coverageAnalysis: 'perTest',
+  coverageAnalysis: 'perTest', // Pass A default。Pass B の 'off' 試行は・stryker-vitest plugin が
+  //   設定を ignore する仕様判明 (= 結果同一・「真の初期 score」レポート参照)
   tempDirName: '.stryker-tmp',
   cleanTempDir: true,
   htmlReporter: { fileName: 'reports/mutation/mutation.html' },

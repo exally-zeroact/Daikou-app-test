@@ -16,15 +16,10 @@
 //   map-matcher.js は触らない absolute・本 test は新規追加のみ。
 //   roads データ load を必要としない isolated simulation (= 軽量・高速)。
 
-const fs = require('fs');
-const path = require('path');
 const { fc, propertyAssert } = require('../../scripts/zeroact-test-commons/property-test-helpers');
 
-const MAP_MATCHER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'map-matcher.js');
-
-function loadSource() {
-  return fs.readFileSync(MAP_MATCHER_JS_PATH, 'utf8');
-}
+// ★ Phase 6-7 (2026-05-21・(M) 分離): loadSource / fs / MAP_MATCHER_JS_PATH は
+//   tests/drift-static/viterbi-isStationary-anchor.test.js 側で使用・本 file からは撤去。
 
 // map-matcher.js L3007 周辺の isStationary 強制 0 化ブロック (verified 2026-05-18)
 //   実コードと完全一致する形・新規実装ではなく既存ブロックの抽出。
@@ -41,64 +36,10 @@ const ISSTATIONARY_FORCE_ZERO_BLOCK = `
 const forceZeroFn = new Function('inputMm', 'inputTentative', 'msg', ISSTATIONARY_FORCE_ZERO_BLOCK);
 
 describe('map-matcher.js L3007: isStationary=true で mmIncrementM/tentativeIncrementM 強制 0 化', () => {
-  // ─── ① 静的 verify (= grep で実コード内 pattern 存在 + ±10 line drift) ──
-
-  it('B-static1: map-matcher.js L3007 周辺に強制 0 化 block 存在 (drift 検出)', () => {
-    const source = loadSource();
-    const lines = source.split('\n');
-    // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張 (= 2990-3025)
-    const window = lines.slice(2990, 3025).join('\n');
-    if (!/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(window)) {
-      throw new Error(
-        'map-matcher.js L3007 周辺 (±10) に if (msg.isStationary === true) 未検出 (drift detected)'
-      );
-    }
-    if (!/mmIncrementM\s*=\s*0/.test(window)) {
-      throw new Error('map-matcher.js L3007 周辺 (±10) に mmIncrementM = 0 代入 未検出');
-    }
-    if (!/tentativeIncrementM\s*=\s*0/.test(window)) {
-      throw new Error('map-matcher.js L3007 周辺 (±10) に tentativeIncrementM = 0 代入 未検出');
-    }
-  });
-
-  it('B-static2: 強制 0 化が postMessage 直前 (= 出力直前) に配置', () => {
-    const source = loadSource();
-    const lines = source.split('\n');
-    let forceZeroLineNo = -1;
-    let postMessageLineNo = -1;
-    for (let i = 2980; i < 3050 && i < lines.length; i++) {
-      if (/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(lines[i])) {
-        forceZeroLineNo = i + 1;
-      }
-      if (forceZeroLineNo > 0 && /self\.postMessage\s*\(/.test(lines[i])) {
-        postMessageLineNo = i + 1;
-        break;
-      }
-    }
-    if (forceZeroLineNo < 0) {
-      throw new Error('isStationary 強制 0 化 block 未検出');
-    }
-    if (postMessageLineNo < 0) {
-      throw new Error('postMessage 呼出未検出 (= 強制 0 化後の出力経路欠落)');
-    }
-    if (postMessageLineNo <= forceZeroLineNo) {
-      throw new Error(
-        '配置違反: 強制 0 化 (L' +
-          forceZeroLineNo +
-          ') の前に postMessage (L' +
-          postMessageLineNo +
-          ') が来ている'
-      );
-    }
-    // 出力直前 (= 30 line 以内) に配置されていることを確認
-    if (postMessageLineNo - forceZeroLineNo > 30) {
-      throw new Error(
-        '強制 0 化と postMessage の距離が大きすぎる (' +
-          (postMessageLineNo - forceZeroLineNo) +
-          ' lines)・出力経路に副作用が挿入された可能性'
-      );
-    }
-  });
+  // ★ Phase 6-7 (2026-05-21・(M) 分離): 旧 B-static1 / B-static2 (= 行アンカー ±10 静的 grep) は
+  //   tests/drift-static/viterbi-isStationary-anchor.test.js へ移動。
+  //   理由: Stryker instrumentation で行シフト → false-fail。byte 不変で別 file 化し
+  //         通常 vitest run では同 ±10 厳格度で実行・stryker では exclude する設計。
 
   // ─── ② 動的 property test (= 抽出 block を fast-check で網羅) ───────
 

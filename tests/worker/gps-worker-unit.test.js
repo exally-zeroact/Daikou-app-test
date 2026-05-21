@@ -40,29 +40,11 @@ describe('gps-worker.js 静的検証 (P11)', () => {
     }
   });
 
-  it('isStationary 判定 3-AND が L627 周辺に存在', () => {
-    const source = loadSource();
-    const lines = source.split('\n');
-    // Stryker sandbox の line offset 吸収のため ±10 line window
-    const window = lines.slice(617, 640).join('\n');
-    if (!/finalStationary\s*=\s*gpsStationary\s*&&\s*c1Stationary\s*&&\s*!c2Moving/.test(window)) {
-      throw new Error(
-        'gps-worker.js L627 周辺 (±10) に 3-AND 判定 pattern 未検出 (drift detected)'
-      );
-    }
-  });
-
-  it('加速度サンプル null 救済 (L596-598) が存在', () => {
-    const source = loadSource();
-    const lines = source.split('\n');
-    const window = lines.slice(586, 608).join('\n');
-    // accelVariance === null && accelDeviation === null で gpsStationary 単独採用
-    if (!/accelVariance\s*===\s*null\s*&&\s*accelDeviation\s*===\s*null/.test(window)) {
-      throw new Error(
-        'gps-worker.js L596-598 周辺 (±10) に 加速度 null 救済 pattern 未検出 (drift detected)'
-      );
-    }
-  });
+  // ★ Phase 6-7 (2026-05-21・(M) 分離): 旧 'isStationary 判定 3-AND が L627 周辺' /
+  //   '加速度サンプル null 救済 (L596-598) が存在' (= 行アンカー ±10 静的 grep) は
+  //   tests/drift-static/gps-worker-anchor.test.js へ移動。
+  //   理由: Stryker instrumentation で行シフト → false-fail。byte 不変で別 file 化し
+  //         通常 vitest run では同 ±10 厳格度で実行・stryker では exclude する設計。
 
   it('checkStationary 関数が定義されている', () => {
     const source = loadSource();
