@@ -279,22 +279,95 @@ const Business = (function () {
   //     getCurrentTrip: renderFare で経路情報を読む際に呼ぶ
   //   onTripEnd は既存 signature 維持・内部で current_trip を trips[] に統合してリセット。
   // ─────────────────────────────────────────
+  // ★設計変更宣言 (2026-05-23・住所① fine 配線 + 丁目カット表示・business.js consumer 側):
+  //   meter.js getNearestAddress は・fine hit 時に・「常盤町八丁目」(= 大字単体・市町村なし) を return。
+  //   coarse fallback 時は・「今治市 付近」(= 市町村 + " 付近")。
+  //   司さん希望「今治市常盤町」(= 市町村 + 大字・丁目カット) を実現するため・consumer 側で:
+  //     1. coarse bundle (window.ADDRESSES_COARSE_JP) から・市町村名 ("今治市") を別 query
+  //     2. fine 戻り値「常盤町五丁目」を・末尾 丁目カット → "常盤町"
+  //     3. 連結 → "今治市常盤町"
+  //   fine 未 load (= 起動直後・現在地県 priority load 前) → meter.js coarse fallback の
+  //   "今治市 付近" を・そのまま return (= graceful fallback・業務継続性最優先)。
+  //   絶対ルール準拠:
+  //     ✓ distance_m / Meter.reset / Worker B 本体: 1 byte も触らない (= 表示専用・consumer side)
+  //     ✓ meter.js は・無変更 (= getNearestAddress 戻り値を・wrap するのみ)
+  //     ✓ ADDRESSES_COARSE_JP は・PRECACHE 維持 (= 必ず load 済・data-registry 既登録)
+  //     ✓ iOS Safari / Android Chrome 共通 (= 既存 native API のみ)
+
+  // 末尾「○丁目」(漢数字・算用数字・全角算用 両対応) をカット
+  // 大字止まり (= "市坪西町") は・無変換で返却
+  function _cutChomeSuffix(name) {
+    if (!name || typeof name !== 'string') return name;
+    // 漢数字 (一二三四五六七八九十百千〇零) + 半角 0-9 + 全角 ０-９ の・1 つ以上 + "丁目" 末尾
+    return name.replace(/[一二三四五六七八九十百千〇零0-9０-９]+丁目$/, '');
+  }
+
+  // window.ADDRESSES_COARSE_JP.items から・最近傍 市町村名 を・取得 (= "今治市" 等)
+  // 半径 25km プレフィルタ + 平方距離比較 (= ms 精度不要・最近傍 1 件のみ)
+  // load 未完了 → null・consumer 側で・coarse fallback 維持
+  function _findNearestMunicipality(lat, lng) {
+    if (
+      typeof window === 'undefined' ||
+      !window.ADDRESSES_COARSE_JP ||
+      !Array.isArray(window.ADDRESSES_COARSE_JP.items)
+    ) {
+      return null;
+    }
+    const items = window.ADDRESSES_COARSE_JP.items;
+    const COORD_SCALE = 100000;
+    const targetLatI = Math.round(lat * COORD_SCALE);
+    const targetLngI = Math.round(lng * COORD_SCALE);
+    const RANGE_I = 25000; // ~25km プレフィルタ (= meter.js COARSE_RADIUS_M と整合)
+    let best = null;
+    let bestSq = Infinity;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const dLatI = it.lat - targetLatI;
+      if (dLatI > RANGE_I || dLatI < -RANGE_I) continue;
+      const dLngI = it.lng - targetLngI;
+      if (dLngI > RANGE_I || dLngI < -RANGE_I) continue;
+      const sq = dLatI * dLatI + dLngI * dLngI;
+      if (sq < bestSq) {
+        bestSq = sq;
+        best = it;
+      }
+    }
+    return best ? best.n : null;
+  }
+
   function _safeGetNearestAddress(lat, lng, accuracy) {
     // Meter モジュール経由で getNearestAddress を呼ぶ・例外は呑んで null フォールバック。
     if (
-      typeof Meter !== 'undefined' &&
-      Meter &&
-      typeof Meter.getNearestAddress === 'function' &&
-      typeof lat === 'number' &&
-      typeof lng === 'number'
+      typeof Meter === 'undefined' ||
+      !Meter ||
+      typeof Meter.getNearestAddress !== 'function' ||
+      typeof lat !== 'number' ||
+      typeof lng !== 'number'
     ) {
-      try {
-        return Meter.getNearestAddress(lat, lng, accuracy);
-      } catch (_) {
-        return null;
-      }
+      return null;
     }
-    return null;
+    let raw;
+    try {
+      raw = Meter.getNearestAddress(lat, lng, accuracy);
+    } catch (_) {
+      return null;
+    }
+    if (!raw) return null;
+    // coarse fallback (= "今治市 付近") は・そのまま返却 (= 既存挙動互換)
+    if (/ 付近$/.test(raw)) {
+      if (typeof dlog === 'function') {
+        dlog('[ADDR] coarse fallback raw=' + raw);
+      }
+      return raw;
+    }
+    // fine hit: "常盤町八丁目" 等 → 丁目カット + 市町村名 prefix
+    const cut = _cutChomeSuffix(raw);
+    const city = _findNearestMunicipality(lat, lng);
+    const result = city ? city + cut : cut;
+    if (typeof dlog === 'function') {
+      dlog('[ADDR] fine raw=' + raw + ' → cut=' + cut + ' → ' + result);
+    }
+    return result;
   }
 
   // ★設計変更宣言 (2026-05-15・住所取得 retry ロジック・data load 遅延吸収):
@@ -347,12 +420,7 @@ const Business = (function () {
         save();
         if (typeof dlog === 'function') {
           dlog(
-            '[Business] address retry resolved (kind=' +
-              kind +
-              ' attempt=' +
-              cur +
-              ') => ' +
-              addr
+            '[Business] address retry resolved (kind=' + kind + ' attempt=' + cur + ') => ' + addr
           );
         }
         // UI 通知 (browser context のみ・Node test では window 未定義で skip)
@@ -363,7 +431,9 @@ const Business = (function () {
                 detail: { kind: kind, address: addr, waypointIdx: waypointIdx },
               })
             );
-          } catch (_) {}
+          } catch (_) {
+            // CustomEvent dispatch fail (= 未対応 browser 等) → retry 解決 path に・影響なし
+          }
         }
         return; // 解決済 → retry 終了
       }
@@ -722,7 +792,9 @@ const Business = (function () {
         const filtered = list.filter((item) => item.end_time !== history.end_time);
         localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
       }
-    } catch (e) {}
+    } catch (e) {
+      // history JSON.parse fail / localStorage 失敗 → restoreFromHistory 完了に・影響なし
+    }
     save();
     if (typeof dlog === 'function') dlog('[Business] restored from history (resumed)');
     return true;
@@ -748,9 +820,19 @@ const Business = (function () {
     save,
     load,
     restoreFromHistory,
+    // ★設計変更宣言 (2026-05-23・住所① fine 配線 + 丁目カット表示・test 用 export):
+    //   _cutChomeSuffix / _findNearestMunicipality は・pure helper (= 副作用なし)。
+    //   test で・unit verify するため・public API に・1 key 経由で・export。
+    //   本番動作には・影響なし (= 既存 callers は・触らず・新 namespace のみ追加)。
+    __addressFormatter: {
+      cutChomeSuffix: _cutChomeSuffix,
+      findNearestMunicipality: _findNearestMunicipality,
+    },
   };
 })();
 
 // ★設計変更宣言 (2026-05-15・Phase C): browser global expose + Node module.exports 両対応
 if (typeof window !== 'undefined') window.Business = Business;
-if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = Business;
+// eslint-disable-next-line no-undef -- Node module 環境のみで参照・browser では typeof で skip
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined')
+  module.exports = Business;

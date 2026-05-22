@@ -199,6 +199,16 @@
     }
 
     async loadAuxData() {
+      // ★設計変更宣言 (2026-05-23・住所① fine 配線・loadAuxData に 'addresses-fine' 追加):
+      //   旧: auxKinds に・addresses-fine 無し → 起動時 background load で・fine 配線せず
+      //       → window.ADDRESSES_FINE_{PREF}=undefined → getNearestAddress coarse fallback 止まり
+      //   新: 'addresses-fine' を・auxKinds に・1 種別追加 (= data-registry L221-229 既登録)
+      //       → background load で・全 47 県 fine 配信・priority load (X4) でも fine 即時 load
+      //   絶対ルール準拠:
+      //     ✓ distance_m / calcFare / Worker B 本体 / Kalman / Viterbi: 完全無関係
+      //     ✓ Phase 制御 / load gate / postMessage は・1 byte 不変
+      //     ✓ optional=true (= data-registry 登録時に・指定済)・404 等は・graceful fallback
+      //     ✓ window.XXX 互換: addresses-fine entries は・既存 main target = global 代入で同一
       const auxKinds = [
         'tunnels',
         'bridges',
@@ -206,6 +216,7 @@
         'road-flood',
         'road-jizen',
         'road-yobo',
+        'addresses-fine',
       ];
       for (const kind of auxKinds) {
         const def = global.DataRegistry.DATA_REGISTRY.perPref.find((d) => d.kind === kind);
