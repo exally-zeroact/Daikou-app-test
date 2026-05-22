@@ -7252,20 +7252,19 @@
         document.getElementById('breakdown').innerHTML = html;
 
         // 今日の実績・履歴は1回だけ保存
+        // ★設計変更宣言 (2026-05-23・履歴3個重複バグ修正・A 案 trip_key 冪等化):
+        //   旧: histSaved=false が・cancelFare で reset → 「確定 → 走行に戻る → 再確定」
+        //       反復で・hist.push が・N 回 走り・3 個重複・todayFareYen 水増し。
+        //   新: hist entry に・trip_key (= current_trip.start_time) を付与・直前 entry の
+        //       trip_key と一致なら・上書き update (= 同一 trip の・再確定 = 最新値)。
+        //       todayDist / todayCount / todayFareYen も・差分 計算で・水増し防止。
+        //   絶対ルール準拠:
+        //     ✓ distance_m / calcFare / Meter.reset / state.trips (business.js) は・1 byte も・触らない
+        //     ✓ hist (= daikou_history) の・保存 logic のみ変更
+        //     ✓ trip_key 欠落 既存 entry は・「別 trip 扱い」自然 fallback (= 後方互換)
+        //   既存 3 個重複 entry の・cleanup は・別 STOP (= 誤判定リスク回避・修正 1+2 先行)
         if (!histSaved) {
           histSaved = true;
-          todayDist += s.distance_m;
-          todayCount += 1;
-          todayFareYen += total;
-          localStorage.setItem(
-            'daikou_today',
-            JSON.stringify({
-              date: new Date().toDateString(),
-              dist: todayDist,
-              count: todayCount,
-              fare: todayFareYen,
-            })
-          );
           const now = new Date();
           const histKey = 'daikou_history_' + now.toDateString();
           const hist = JSON.parse(localStorage.getItem(histKey) || '[]');
@@ -7279,8 +7278,10 @@
             if (typeof Business !== 'undefined' && typeof Business.getCurrentTrip === 'function') {
               _trip = Business.getCurrentTrip();
             }
-          } catch (_) {}
-          hist.push({
+          } catch (_) {
+            // Business 未 load 等 → trip null fallback
+          }
+          const newEntry = {
             time:
               now.getHours().toString().padStart(2, '0') +
               ':' +
@@ -7297,9 +7298,81 @@
                     return { address: (w && w.address) || null };
                   })
                 : [],
-          });
-          localStorage.setItem(histKey, JSON.stringify(hist));
+            // ★ trip_key: current_trip.start_time (= 1 trip の・unique id)
+            //   反復確定で・同 key → 上書き update / 別 trip → 別 key で push
+            trip_key: _trip && _trip.start_time ? _trip.start_time : null,
+          };
+          const r = _historyDedupeUpsert(
+            hist,
+            newEntry,
+            { dist: todayDist, count: todayCount, fareYen: todayFareYen },
+            s.distance_m,
+            total
+          );
+          todayDist = r.today.dist;
+          todayCount = r.today.count;
+          todayFareYen = r.today.fareYen;
+          localStorage.setItem(
+            'daikou_today',
+            JSON.stringify({
+              date: new Date().toDateString(),
+              dist: todayDist,
+              count: todayCount,
+              fare: todayFareYen,
+            })
+          );
+          localStorage.setItem(histKey, JSON.stringify(r.hist));
         }
+      }
+
+      // ★設計変更宣言 (2026-05-23・履歴3個重複バグ修正・pure helper 関数):
+      //   hist 保存 logic を・pure function に抽出・冪等化を集約。
+      //   引数:
+      //     prevHist        ・既存 localStorage hist 配列 (= 読み込み済)
+      //     newEntry        ・今回確定の・新 entry (= trip_key 付き)
+      //     prevTodayState  ・{dist, count, fareYen} (= 既存 todayDist 等)
+      //     distanceM       ・s.distance_m (= float・差分計算用)
+      //     fare            ・total (= 整数・差分計算用)
+      //   戻り値:
+      //     { hist: newHist, today: {dist, count, fareYen}, isReConfirm: bool, action: 'push'|'update' }
+      //   挙動:
+      //     ・直前 entry が・同 trip_key & trip_key != null → 上書き update (= 反復確定の最新値)
+      //       todayDist += distanceM - prev.distance_m  (= 差分のみ)
+      //       todayFareYen += fare - prev.fare           (= 差分のみ)
+      //       todayCount は・変えない (= 同 trip = 1 回)
+      //     ・違えば・新規 push (= 既存挙動・後方互換)
+      //       todayDist / todayCount / todayFareYen は・全加算
+      //   distance_m / calcFare / Meter / Worker B には・1 byte も触れない。
+      //   window._historyDedupeUpsert として export (= vitest test 用)。
+      function _historyDedupeUpsert(prevHist, newEntry, prevTodayState, distanceM, fare) {
+        const tripKey = newEntry && newEntry.trip_key;
+        const last = prevHist && prevHist.length > 0 ? prevHist[prevHist.length - 1] : null;
+        const isReConfirm = !!(last && tripKey != null && last.trip_key === tripKey);
+        const newHist = prevHist ? prevHist.slice() : [];
+        let nextDist = (prevTodayState && prevTodayState.dist) || 0;
+        let nextCount = (prevTodayState && prevTodayState.count) || 0;
+        let nextFareYen = (prevTodayState && prevTodayState.fareYen) || 0;
+        if (isReConfirm) {
+          nextDist += distanceM - (last.distance_m || 0);
+          nextFareYen += fare - (last.fare || 0);
+          // count は不変
+          newHist[newHist.length - 1] = newEntry;
+        } else {
+          nextDist += distanceM;
+          nextCount += 1;
+          nextFareYen += fare;
+          newHist.push(newEntry);
+        }
+        return {
+          hist: newHist,
+          today: { dist: nextDist, count: nextCount, fareYen: nextFareYen },
+          isReConfirm,
+          action: isReConfirm ? 'update' : 'push',
+        };
+      }
+      if (typeof window !== 'undefined') {
+        // test 用 export (= 本番動作には影響なし・read-only attach)
+        window._historyDedupeUpsert = _historyDedupeUpsert;
       }
 
       function row(lbl, val, cls = '') {
