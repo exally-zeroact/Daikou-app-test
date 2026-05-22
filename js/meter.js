@@ -1495,7 +1495,11 @@ const Meter = (() => {
     return null;
   }
   // 県別の items に対して半径 500m 以内最近傍を探す (bbox プレフィルタ + haversine)
+  // ★設計変更宣言 (2026-05-22・座標スケール統一): items は precision: 100000 形式 (= 同 COARSE)。
+  //   COORD_SCALE を function 内で明示化し・getNearestAddress と統一。
+  //   FINE は・大字レベルの・密データ (= 1 県 1000-2000 件・500m radius) のため・bbox 520 不変。
   function _searchFineItems(items, lat, lng, targetLatI, targetLngI) {
+    const COORD_SCALE = 100000;
     const FINE_RADIUS_M = 500;
     const fineRangeI = 520; // ≈ 580m 緯度方向 (経度方向は緯度依存で短くなる・広めに取って漏らさない)
     let best = null;
@@ -1506,8 +1510,8 @@ const Meter = (() => {
       if (dLatI > fineRangeI || dLatI < -fineRangeI) continue;
       const dLngI = it.lng - targetLngI;
       if (dLngI > fineRangeI || dLngI < -fineRangeI) continue;
-      const itemLat = it.lat / 100000;
-      const itemLng = it.lng / 100000;
+      const itemLat = it.lat / COORD_SCALE;
+      const itemLng = it.lng / COORD_SCALE;
       const distM = _haversineMetersForAddr(lat, lng, itemLat, itemLng);
       if (distM <= FINE_RADIUS_M && distM < bestDist) {
         bestDist = distM;
@@ -1523,12 +1527,29 @@ const Meter = (() => {
     if (typeof accuracy === 'number' && isFinite(accuracy) && accuracy > 50) {
       return null;
     }
-    const targetLatI = Math.round(lat * 100000);
-    const targetLngI = Math.round(lng * 100000);
-    const COARSE_RADIUS_M = 3000;
-    const coarseRangeI = 2800;
+    // ★設計変更宣言 (2026-05-22・実機 bug 修正・座標スケール統一 + COARSE radius 拡大):
+    //   ADDRESSES_COARSE_JP.items は・lat/lng が integer × 1e5 形式 (= 33.94 → 3393613)。
+    //   precision: 100000 の data に対し getNearestAddress は・GPS decimal を targetLatI に
+    //   ×1e5 化し・items 側は ÷1e5 を haversine で実施する・スケール統一実装。
+    //   ★ 実機 bug (= 司さん eruda 観測・愛媛今治): COARSE_RADIUS_M=3000m + coarseRangeI=2800
+    //     (= 0.028°≈3.1km) が・市域 sweep に対して狭すぎ・今治市 centroid (= 市の北部) と
+    //     user (= 市の南部) の・実距離 8.6km で・全 1919 items が bbox SKIP → null 確定。
+    //   修正: COARSE_RADIUS_M=25000m + coarseRangeI=25000 (= 0.25°≈28km) に拡大・
+    //         日本最大規模の市 (= 静岡市 1411 km²・浜松市 1558 km² 等) でも・centroid から
+    //         端までを haversine で正確に filter 可能に。
+    //   COORD_SCALE 定数化: 4 段階探索全経路 (= coarse / 県別 fine / legacy fine) で・
+    //     スケール変換を明示化し・将来 precision 変更時の・配線 mistake を防止。
+    //   絶対ルール準拠:
+    //     ✓ 住所は表示専用 (= 距離 / 課金 / Worker B / map-matcher は・無関係)
+    //     ✓ distance_m += 5 経路 (L440/L514/L961/L979/L1365) は・一切 無変更
+    //     ✓ data file は・再生成しない (= コード側でのみ ÷COORD_SCALE)
+    const COORD_SCALE = 100000;
+    const targetLatI = Math.round(lat * COORD_SCALE);
+    const targetLngI = Math.round(lng * COORD_SCALE);
+    const COARSE_RADIUS_M = 25000;
+    const coarseRangeI = 25000;
 
-    // ─── ① coarse から最近傍 (~3km 内) を引いて県コードを取得 ───
+    // ─── ① coarse から最近傍 (~25km 内) を引いて県コードを取得 ───
     let bestCoarse = null;
     let bestCoarseDistM = Infinity;
     if (
@@ -1543,8 +1564,8 @@ const Meter = (() => {
         if (dLatI > coarseRangeI || dLatI < -coarseRangeI) continue;
         const dLngI = it.lng - targetLngI;
         if (dLngI > coarseRangeI || dLngI < -coarseRangeI) continue;
-        const itemLat = it.lat / 100000;
-        const itemLng = it.lng / 100000;
+        const itemLat = it.lat / COORD_SCALE;
+        const itemLng = it.lng / COORD_SCALE;
         const distM = _haversineMetersForAddr(lat, lng, itemLat, itemLng);
         if (distM <= COARSE_RADIUS_M && distM < bestCoarseDistM) {
           bestCoarseDistM = distM;
