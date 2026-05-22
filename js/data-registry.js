@@ -252,7 +252,12 @@
   //   既存マーカー invalidate → 全クライアントで再 warmup 起動。
   // ★設計変更宣言 (2026-05-15): perPref に addresses-fine 追加で VERSION bump。
   //   既存 warmup マーカーを invalidate して全クライアントで新 perPref エントリを取得させる。
-  const VERSION = '2026-05-15-v1';
+  // ★設計変更宣言 (2026-05-23・X4 方式E・IDB parse cache + 即時+背景遅延 + priority load 導入):
+  //   data-loader.js が IDB structured clone で parse 結果を保存・mm-data-pipeline.js が
+  //   即時 (= 全国共通のみ) + 背景遅延 (= 47県 roads/aux) + priority load (= 現在地県) の
+  //   3 段階 ロードに変更。バージョン bump で既存 IDB parse cache + localStorage warmup
+  //   marker を全 invalidate → 新フローで clean start。
+  const VERSION = '2026-05-23-e1';
 
   global.DataRegistry = {
     PREFECTURES_47: PREFECTURES_47,
