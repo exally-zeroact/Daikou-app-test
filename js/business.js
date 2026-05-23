@@ -341,7 +341,9 @@ const Business = (function () {
   //   _safeGetNearestAddress が PIP 入力に・優先採用 (= GPS 揺れ吸収・川越え誤判定 軽減)。
   //   distance_m / map-matcher.js / meter.js 本体は・1 byte 不変 (= 既存出力を読むだけ)。
   let _lastMMSnap = null; // {lat, lng, t}
+  let _lastRawGps = null; // {lat, lng, t} (= snap 前 raw GPS・停止中の現在地表示用)
   const _MM_SNAP_FRESH_MS = 5000; // 5 秒以内 = fresh
+  const _RAW_GPS_FRESH_MS = 60000; // 60 秒以内 = fresh (= 屋内 GPS 停滞でも・1 分内は採用)
 
   function notifyMMSnap(lat, lng) {
     if (typeof lat !== 'number' || typeof lng !== 'number') return;
@@ -349,21 +351,47 @@ const Business = (function () {
     _lastMMSnap = { lat: lat, lng: lng, t: Date.now() };
   }
 
-  // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・カーナビ風 末尾追記用):
-  //   走行中 waypointCard 末尾に・現在地住所を・ライブ表示する用途。
-  //   既存 _lastMMSnap (= 案 C の・map-matched snap cache) を・現在地 source として使用:
-  //     ・snap fresh (= _MM_SNAP_FRESH_MS 5 秒以内) → _safeGetNearestAddress で・町名取得
-  //     ・snap stale / 未 cache → null (= 取得不可・consumer 側で・現在地行 非表示)
+  // ★設計変更宣言 (2026-05-23・住所② raw GPS 配信受信・停止中の現在地表示用):
+  //   index.html GPS callback (= L6022 周辺) から・1Hz で・raw GPS lat/lng を・受信・cache。
+  //   getCurrentLiveAddress の 3 段 fallback (= snap fresh → snap stale → raw GPS) で使用。
   //   絶対ルール準拠:
-  //     ✓ distance_m / 課金 / Worker B 本体: 完全無関係 (= 既存 _safeGetNearestAddress 流用のみ)
-  //     ✓ 新 logic ゼロ (= snap cache + 4 段 fallback 既経路を・読むだけ)
+  //     ✓ distance_m / Meter / map-matcher / Worker B: 完全無関係 (= cache 更新のみ)
+  //     ✓ gps.js / meter.js / gps-worker.js は・1 byte 不変
+  function notifyRawGps(lat, lng) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return;
+    if (!isFinite(lat) || !isFinite(lng)) return;
+    _lastRawGps = { lat: lat, lng: lng, t: Date.now() };
+  }
+
+  // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・常時表示版・3 段 fallback):
+  //   走行中 / 停止中 を問わず・経路カード末尾に・現在地住所を・常時ライブ表示する用途。
+  //   3 段 fallback で・「停止中 GPS drift で・snap 失敗」 でも・町名レベルで・必ず表示:
+  //     ① snap fresh (= _MM_SNAP_FRESH_MS 5 秒以内) → snap 位置で・町名取得 (= 走行中の常道)
+  //     ② snap stale + _lastMMSnap あり → 直近 snap 位置で・町名取得 (= 短時間停止・町名は不変)
+  //     ③ raw GPS fresh (= _RAW_GPS_FRESH_MS 60 秒以内) → raw GPS 位置で・町名取得 (= 屋内 drift)
+  //     ④ 全部無し → null (= 起動直後・GPS 未取得時のみ)
+  //   町名レベル粒度のため・屋内 30m drift でも・同町名内なら・表示は・安定 (= ドリフト影響小)。
+  //   絶対ルール準拠:
+  //     ✓ distance_m / 課金 / Worker B / isStationary: 完全無関係 (= 表示用 cache を読むだけ)
+  //     ✓ 新 logic ゼロ (= 既存 4 段 fallback _safeGetNearestAddress を・流用)
   //     ✓ 既存 onTripStart / onWaypoint / setEndAddress 等の・固定住所取得は・1 byte 不変
   //   消費側 (= index.html updateWaypointCardUI) で・既存 500ms timer から・呼び・末尾追記する。
-  //   別 GPS 取得・別 timer 不要 (= 案 C snap が・最新位置 source)・電池配慮 ≒ 既存 + ~5ms/loop。
   function getCurrentLiveAddress() {
-    if (!_lastMMSnap) return null;
-    if (Date.now() - _lastMMSnap.t >= _MM_SNAP_FRESH_MS) return null;
-    return _safeGetNearestAddress(_lastMMSnap.lat, _lastMMSnap.lng, null);
+    const now = Date.now();
+    // ① snap fresh → snap 位置で住所
+    if (_lastMMSnap && now - _lastMMSnap.t < _MM_SNAP_FRESH_MS) {
+      return _safeGetNearestAddress(_lastMMSnap.lat, _lastMMSnap.lng, null);
+    }
+    // ② snap stale + _lastMMSnap あり → 直近 snap 位置で住所 (= 短時間停止・町名不変)
+    if (_lastMMSnap) {
+      return _safeGetNearestAddress(_lastMMSnap.lat, _lastMMSnap.lng, null);
+    }
+    // ③ raw GPS fresh → raw GPS 位置で住所 (= 屋内 drift・snap 1 度も無い時)
+    if (_lastRawGps && now - _lastRawGps.t < _RAW_GPS_FRESH_MS) {
+      return _safeGetNearestAddress(_lastRawGps.lat, _lastRawGps.lng, null);
+    }
+    // ④ 全部無し
+    return null;
   }
 
   // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・(C) 1km grid index lazy build):
@@ -1034,9 +1062,17 @@ const Business = (function () {
       resetLastMMSnap: function () {
         _lastMMSnap = null;
       },
+      getLastRawGps: function () {
+        return _lastRawGps;
+      },
+      resetLastRawGps: function () {
+        _lastRawGps = null;
+      },
     },
     // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・public API)
     notifyMMSnap: notifyMMSnap,
+    // ★設計変更宣言 (2026-05-23・住所② raw GPS 配信受信・public API)
+    notifyRawGps: notifyRawGps,
     // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・public API)
     getCurrentLiveAddress: getCurrentLiveAddress,
   };

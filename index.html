@@ -2225,6 +2225,7 @@
         color: #2196f3;
         font-weight: 700;
         animation: route-live-pulse 2s ease-in-out infinite;
+        white-space: nowrap;
       }
       @keyframes route-live-pulse {
         0%,
@@ -2234,6 +2235,27 @@
         50% {
           opacity: 0.55;
         }
+      }
+      /* ★設計変更宣言 (2026-05-23・住所② 「(現在地)」 サフィックス・冗長感緩和):
+         「本町 → 📡 本町(現在地)」 と・同住所重複時も・「(現在地)」 タグで・自然に・現在地と分かる。
+         縦横UI: 小さく・色は・親 .route-live の・青継承。1 行追加分は・縦画面 wrap で・自然吸収。 */
+      .route-live-tag {
+        font-size: 11px;
+        font-weight: 600;
+        margin-left: 2px;
+        opacity: 0.85;
+      }
+      /* ★設計変更宣言 (2026-05-23・wp-sub 「タップ」 だけ赤強調・誘目強化):
+         配色 #e11d48 (= rose-600・hex 直値・CSS 変数禁止ルール準拠)。
+         縦横UI: span inline 1 単語のみ・layout 影響なし。 */
+      .waypoint-card .wp-sub-tap {
+        color: #e11d48;
+        font-weight: 800;
+      }
+      /* wp-title 縦画面 wrap 保障 (= 末尾「→ 📡 ○○(現在地)」 追加で 1 行超過時の・自然 wrap) */
+      .waypoint-card .wp-title {
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
 
       /* リロード復元バナー */
@@ -4168,7 +4190,9 @@
                    updateWaypointCardUI が startUiTimer (500ms) で Business.getCurrentTrip
                    から start_address と waypoints を読み、矢印区切りで連結描画する。 -->
               <div class="wp-title" id="waypointTitle">📍 経由地点を記録</div>
-              <div class="wp-sub" id="waypointSub">タップで現在地の住所を記録</div>
+              <div class="wp-sub" id="waypointSub">
+                <span class="wp-sub-tap">タップ</span>で現在地の住所を記録
+              </div>
             </div>
             <div class="wp-badge" id="waypointBadge">0</div>
           </div>
@@ -6080,6 +6104,16 @@
               if (typeof Business !== 'undefined' && typeof Business.onGps === 'function') {
                 Business.onGps(g);
               }
+              // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・raw GPS 配信):
+              //   走行中 / 停止中 を問わず・1Hz で・raw GPS を Business に通知・常時表示 source。
+              //   表示専用 (= distance_m / Meter / Worker B 完全無関係)。
+              if (typeof Business !== 'undefined' && typeof Business.notifyRawGps === 'function') {
+                try {
+                  Business.notifyRawGps(g.lat, g.lng);
+                } catch (_) {
+                  // Business 未 load・notifyRawGps 未実装 等 → graceful skip
+                }
+              }
               // S2 (2026-05-10) 業務開始忘れ検出: 2026-05-23 Phase 1・お節介ルール適用・削除済
               // ★設計変更宣言 (2026-05-23・Phase 2・restoreBanner 簡略化):
               //   単独「✅ 走行データを復元しました」表示は・Phase 1 で・撤去 (= 自明・冗長)。
@@ -7065,11 +7099,12 @@
           }
         } catch (_) {}
 
-        // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・カーナビ風):
-        //   wp-title の・末尾に・「→ 📡 現在地住所」を追記 (= 案 C snap cache 経由)。
-        //   Business.getCurrentLiveAddress() が・null なら・現在地行 非表示 (= 既存挙動互換)。
-        //   現在地 == 直前の・経路末尾 (= 出発 or 最終 waypoint) と・同住所の場合・重複表示を回避。
-        //   出発地取得中 case は・現在地のみ表示・retry で・出発地が・後追い更新される。
+        // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・常時表示版・作り直し):
+        //   wp-title の・末尾に・常時 「→ 📡 現在地住所(現在地)」を追記。
+        //   Business.getCurrentLiveAddress() が・3 段 fallback (= snap fresh → snap stale → raw GPS)
+        //   で・走行中も停止中も・町名レベルで・必ず返す。
+        //   重複回避は・撤去 (= 「本町 → 本町(現在地)」 も・許容・「(現在地)」 サフィックスで自然)。
+        //   出発地取得中 case は・「📍 出発地取得中... → 📡 ○○(現在地)」 と表示。
         let liveAddr = null;
         try {
           if (
@@ -7079,7 +7114,7 @@
             liveAddr = Business.getCurrentLiveAddress();
           }
         } catch (_) {
-          // getCurrentLiveAddress 失敗・snap 未 fresh 等 → null fallback
+          // getCurrentLiveAddress 失敗・全 cache null 等 → null fallback (= 起動直後のみ)
         }
 
         // wp-title 構築
@@ -7087,27 +7122,17 @@
           const ESC = typeof _escapeHtmlForRoute === 'function' ? _escapeHtmlForRoute : String;
           const WARN = '<span class="route-warn">⚠ 位置不明</span>';
           const LIVE_SEP = ' <span class="route-sep">→</span> ';
-          // 直前 (= 経路末尾) と・同住所なら・現在地行 を・省略 (= 重複回避)
-          let prevTail = null;
-          if (count > 0) {
-            const lastWp = waypoints[waypoints.length - 1];
-            prevTail = (lastWp && lastWp.address) || null;
-          } else if (startAddr) {
-            prevTail = startAddr;
-          }
-          const showLive = liveAddr && liveAddr !== prevTail;
-          const liveSuffix = showLive
-            ? LIVE_SEP + '<span class="route-live">📡 ' + ESC(liveAddr) + '</span>'
+          // 常時末尾表示 (= 重複回避なし)・「(現在地)」 サフィックスで自然
+          const liveSuffix = liveAddr
+            ? LIVE_SEP +
+              '<span class="route-live">📡 ' +
+              ESC(liveAddr) +
+              '<span class="route-live-tag">(現在地)</span></span>'
             : '';
           if (!startAddr && count === 0) {
             // 代行開始直後で出発地住所がまだ取得できていない (retry 待ち)
-            if (showLive) {
-              titleEl.innerHTML =
-                '📍 出発地取得中...' +
-                LIVE_SEP +
-                '<span class="route-live">📡 ' +
-                ESC(liveAddr) +
-                '</span>';
+            if (liveAddr) {
+              titleEl.innerHTML = '📍 出発地取得中...' + liveSuffix;
             } else {
               titleEl.textContent = '📍 出発地取得中...';
             }
@@ -7127,12 +7152,20 @@
         }
 
         // wp-sub / .recorded / badge
+        // ★設計変更宣言 (2026-05-23・「タップ」 だけ赤文字・誘目強化):
+        //   wp-sub 内の・先頭 カタカナ 「タップ」 を <span class="wp-sub-tap">…</span> で・赤強調。
+        //   配色: #e11d48 (= rose-600・hex 直値・CSS 変数禁止ルール準拠)。
         if (count > 0) {
           card.classList.add('recorded');
-          if (sub) sub.textContent = 'タップで経由地点を追加（' + count + '件）';
+          if (sub) {
+            sub.innerHTML =
+              '<span class="wp-sub-tap">タップ</span>で経由地点を追加（' + count + '件）';
+          }
         } else {
           card.classList.remove('recorded');
-          if (sub) sub.textContent = 'タップで現在地の住所を記録';
+          if (sub) {
+            sub.innerHTML = '<span class="wp-sub-tap">タップ</span>で現在地の住所を記録';
+          }
         }
         if (badge) badge.textContent = String(count);
       }
