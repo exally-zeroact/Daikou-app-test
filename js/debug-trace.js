@@ -12,8 +12,12 @@
 //   map-matcher は・**1 byte も触らない**。本 file は独立・通常時は何もしない (= 早期 return)。
 //
 //   activation:
-//     ?trace=on で 1 回起動 → localStorage に flag set → 以降・自動で sample 蓄積
-//     ?trace=off で無効化
+//     ★設計変更宣言 (2026-05-23・テストビルド常時 ON 化・noise calibration 30 日収集 加速):
+//       テストビルド (= !DEBUG.isProduction) では・既定 ON (= 司さん手動操作 不要)。
+//       本番 (= daikou-app.vercel.app 等) では・既存挙動維持 (= 既定 OFF)。
+//       ?trace=off で・テストビルドでも・明示 OFF 可能 (= localStorage に '0' 永続)。
+//       ?trace=on は・既存互換 (= 本番でも・明示 ON 可能・localStorage '1' 永続)。
+//       prod の・privacy/cost/同意 への影響なし (= 本番 既定 OFF 不変)。
 //
 //   security:
 //     Firebase RTDB の `debug_traces` スコープのみに書込・writeKey 必須・samples 5000 上限
@@ -46,24 +50,48 @@
   const WATCH_OPTIONS = { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 };
 
   // ─── Feature flag handling (= ?trace=on/off で切替) ────────
+  // ★設計変更宣言 (2026-05-23・テストビルド既定 ON):
+  //   旧: ?trace=on → '1' set / ?trace=off → removeItem(null) → 既定 OFF
+  //   新: ?trace=on → '1' set / ?trace=off → '0' set (= 明示 OFF 印・null と区別)
+  //   テストビルド (= !DEBUG.isProduction) で・stored が・null (= 未設定) なら ON 扱い。
   try {
     const params = new URLSearchParams(location.search);
     const t = params.get('trace');
     if (t === 'on') {
       localStorage.setItem(FLAG_KEY, '1');
     } else if (t === 'off') {
-      localStorage.removeItem(FLAG_KEY);
+      // 明示 OFF 印 (= '0')・null との区別で・テストビルド既定 ON を上書きできる
+      localStorage.setItem(FLAG_KEY, '0');
     }
   } catch (_) {
     // URL parse 失敗・localStorage 不可 → 静かに無視
   }
 
-  // flag OFF (= default) なら・以降何もしない (= 通常 user / 他端末で完全サイレント)
+  // ─── enabled 判定 ───
+  //   優先度:
+  //     1. localStorage = '1' (= 明示 ON) → ON
+  //     2. localStorage = '0' (= 明示 OFF) → OFF
+  //     3. localStorage = null (= 未設定):
+  //        - テストビルド (= DEBUG.isProduction !== true) → ON (= 既定 ON・noise calibration 自動収集)
+  //        - 本番 (= DEBUG.isProduction === true) → OFF (= privacy/cost/同意・既定 OFF 不変)
+  //   DEBUG global は・debug-config.js (= 先行 load) の top-level const・classic script で共有 scope。
+  //   DEBUG 参照不可 (= debug-config 未 load 等) → 安全側で OFF (= 本番扱い)。
+  let _enabled = false;
   try {
-    if (localStorage.getItem(FLAG_KEY) !== '1') return;
+    const stored = localStorage.getItem(FLAG_KEY);
+    if (stored === '1') {
+      _enabled = true;
+    } else if (stored === '0') {
+      _enabled = false;
+    } else {
+      // 未設定: テストビルド既定 ON / 本番既定 OFF
+      const _isProd = typeof DEBUG !== 'undefined' && DEBUG && DEBUG.isProduction === true;
+      _enabled = !_isProd;
+    }
   } catch (_) {
-    return; // localStorage 不可 → flag 判定不可・安全側で何もしない
+    _enabled = false; // localStorage 不可 → 安全側 OFF
   }
+  if (!_enabled) return;
 
   // ─── device_id 初回自動生成 (= 永続化・操作ゼロ) ──────────
   let deviceId;
