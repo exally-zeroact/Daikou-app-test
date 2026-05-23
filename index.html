@@ -4313,25 +4313,7 @@
               line-height: 1.4;
             "
           ></div>
-          <!-- P13 (2026-05-09): 停車 5 分以上で実車終了候補バナー -->
-          <div
-            id="stopCandidateBanner"
-            style="
-              display: none;
-              text-align: center;
-              font-size: 13px;
-              font-weight: 700;
-              padding: 10px 14px;
-              margin: 6px 12px 0;
-              border-radius: 8px;
-              background: #fff6e6;
-              color: #7a5a12;
-              border: 1px solid #e0ac2f;
-              line-height: 1.5;
-            "
-          >
-            ⏸ 停車 <span id="stopCandidateMin">5</span> 分以上 — 実車終了ですか?
-          </div>
+          <!-- P13 (2026-05-09) 停車 5 分以上で実車終了候補バナー: 2026-05-24 お節介ルール適用・完全削除 -->
           <!-- P11/P12 (2026-05-09): 道路属性警告バナー (schoolZone/冠水/事前/予防) -->
           <div
             id="roadAttrBanner"
@@ -4876,9 +4858,8 @@
       // チュートリアル状態 (旧 line 3843)
       let _tutorialPage = 0;
 
-      // 停車検出 (旧 line 4214-4215)
-      let _stopStartedAt = 0;
-      const STOP_CANDIDATE_THRESHOLD_MS = 5 * 60 * 1000;
+      // 停車検出 (旧 line 4214-4215) → 2026-05-24 stopCandidateBanner 削除に伴い・本変数も撤去
+      //   isStationary 判定本体 (= window._lastStationary / Meter._isStationary 等) は・触らず
 
       // MM 先読み 1 回限定フラグ (旧 line 4321)
       let _preloadDone = false;
@@ -8881,31 +8862,11 @@
         });
       }
 
-      // P13 (2026-05-09): 停車 5 分以上で実車終了候補バナー
-      //   driving 画面で isStationary 状態の連続秒数を track
-      //   5 分超で stopCandidateBanner を表示・走行再開で隠す
-      // (2026-05-10) _stopStartedAt / STOP_CANDIDATE_THRESHOLD_MS は script 先頭に移動済
-      setInterval(function () {
-        if (appState !== 'driving') {
-          _stopStartedAt = 0;
-          return;
-        }
-        const banner = document.getElementById('stopCandidateBanner');
-        if (!banner) return;
-        if (window._lastStationary) {
-          if (_stopStartedAt === 0) _stopStartedAt = Date.now();
-          const elapsed = Date.now() - _stopStartedAt;
-          if (elapsed >= STOP_CANDIDATE_THRESHOLD_MS) {
-            const min = Math.floor(elapsed / 60000);
-            const span = document.getElementById('stopCandidateMin');
-            if (span) span.textContent = min;
-            banner.style.display = 'block';
-          }
-        } else {
-          _stopStartedAt = 0;
-          banner.style.display = 'none';
-        }
-      }, 5000);
+      // P13 (2026-05-09) 停車 5 分以上で実車終了候補バナー setInterval:
+      //   2026-05-24 お節介ルール (= 2026-05-23 制定) 適用・完全削除済。
+      //   ★ isStationary 判定本体 (= window._lastStationary / Meter._isStationary) は・触らず ★
+      //   関連 HTML 要素 (= stopCandidateBanner / stopCandidateMin) + 変数 (= _stopStartedAt /
+      //   STOP_CANDIDATE_THRESHOLD_MS) も同時削除。実車終了の・確定操作経路は・既存 btn-row 維持。
 
       // P6 (2026-05-09): idle 画面 MM 準備状況インジケータ 1Hz 更新
       //   _forwardedPrefs Set のサイズを業務開始ボタン下に表示

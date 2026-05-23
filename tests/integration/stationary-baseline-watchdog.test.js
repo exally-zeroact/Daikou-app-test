@@ -314,3 +314,45 @@ describe('お節介バナー禁止 watchdog (= Phase 1 削除 verify)', () => {
     expect(html).toMatch(/走行データを復元しました（\+/);
   });
 });
+
+// ─── 5. stopCandidateBanner 削除 watchdog (= 2026-05-24・お節介ルール適用) ───
+describe('stopCandidateBanner 削除 watchdog (= 2026-05-24・お節介ルール適用)', () => {
+  let html;
+  beforeAll(() => {
+    html = fs.readFileSync(path.join(__dirname, '..', '..', 'index.html'), 'utf8');
+  });
+
+  it('★ stopCandidateBanner HTML element が・存在しない (= 削除確証)', () => {
+    expect(html).not.toMatch(/id="stopCandidateBanner"/);
+  });
+
+  it('★ stopCandidateMin span (= 分数表示) も・存在しない', () => {
+    expect(html).not.toMatch(/id="stopCandidateMin"/);
+  });
+
+  it('★ _stopStartedAt 変数定義が・存在しない (= setInterval ロジック撤去)', () => {
+    expect(html).not.toMatch(/let _stopStartedAt\s*=/);
+    expect(html).not.toMatch(/_stopStartedAt\s*=\s*Date\.now\(\)/);
+  });
+
+  it('★ STOP_CANDIDATE_THRESHOLD_MS 定数定義が・存在しない', () => {
+    expect(html).not.toMatch(/const STOP_CANDIDATE_THRESHOLD_MS\s*=/);
+  });
+
+  it('★ user 表示「実車終了ですか?」文言が・存在しない (= 同一行 HTML element 内容)', () => {
+    // コメント内 (= JS 履歴記録) は許可・user 表示文言は禁止
+    expect(html).not.toMatch(/>[^<>\n]*実車終了ですか[^<>\n]*</);
+  });
+
+  it('★ user 表示「停車 X 分以上」 文言が・存在しない (= 自動表示バナー禁止)', () => {
+    // 「停車 5 分以上」 等の・自動表示文言 (= 1 行 HTML 内容) が・なくなっている
+    expect(html).not.toMatch(/>[^<>\n]*停車\s*<span[^<>\n]*分以上[^<>\n]*</);
+  });
+
+  it('★ isStationary 判定本体は・1 byte 不変 (= 司さん専決・触らず)', () => {
+    // window._lastStationary 参照 (= GPS callback) は・既存通り維持
+    expect(html).toMatch(/window\._lastStationary\s*=\s*!!g\.isStationary/);
+    // stationaryHint postMessage (= Worker B ヒント) も・既存通り維持
+    expect(html).toMatch(/postMessage\(\{\s*type:\s*['"]stationaryHint['"]/);
+  });
+});
