@@ -2219,6 +2219,25 @@
         font-size: 12px;
         font-weight: 700;
       }
+      /* ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・カーナビ風 青パルス):
+         waypointCard / routeCard 末尾に・「📡 現在地住所」を・青色パルスで表示。
+         updateWaypointCardUI が・500ms timer で・Business.getCurrentLiveAddress を読み・
+         末尾に・追記する。住所表示専用・距離/課金 非連動。
+         縦横UI: 既存 .wp-title / .route-body 1 行追加のみ・縦横 layout 影響なし。 */
+      .route-live {
+        color: #2196f3;
+        font-weight: 700;
+        animation: route-live-pulse 2s ease-in-out infinite;
+      }
+      @keyframes route-live-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.55;
+        }
+      }
 
       /* リロード復元バナー */
       .restore-banner {
@@ -7159,24 +7178,64 @@
           }
         } catch (_) {}
 
+        // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・カーナビ風):
+        //   wp-title の・末尾に・「→ 📡 現在地住所」を追記 (= 案 C snap cache 経由)。
+        //   Business.getCurrentLiveAddress() が・null なら・現在地行 非表示 (= 既存挙動互換)。
+        //   現在地 == 直前の・経路末尾 (= 出発 or 最終 waypoint) と・同住所の場合・重複表示を回避。
+        //   出発地取得中 case は・現在地のみ表示・retry で・出発地が・後追い更新される。
+        let liveAddr = null;
+        try {
+          if (
+            typeof Business !== 'undefined' &&
+            typeof Business.getCurrentLiveAddress === 'function'
+          ) {
+            liveAddr = Business.getCurrentLiveAddress();
+          }
+        } catch (_) {
+          // getCurrentLiveAddress 失敗・snap 未 fresh 等 → null fallback
+        }
+
         // wp-title 構築
         if (titleEl) {
           const ESC = typeof _escapeHtmlForRoute === 'function' ? _escapeHtmlForRoute : String;
           const WARN = '<span class="route-warn">⚠ 位置不明</span>';
+          const LIVE_SEP = ' <span class="route-sep">→</span> ';
+          // 直前 (= 経路末尾) と・同住所なら・現在地行 を・省略 (= 重複回避)
+          let prevTail = null;
+          if (count > 0) {
+            const lastWp = waypoints[waypoints.length - 1];
+            prevTail = (lastWp && lastWp.address) || null;
+          } else if (startAddr) {
+            prevTail = startAddr;
+          }
+          const showLive = liveAddr && liveAddr !== prevTail;
+          const liveSuffix = showLive
+            ? LIVE_SEP + '<span class="route-live">📡 ' + ESC(liveAddr) + '</span>'
+            : '';
           if (!startAddr && count === 0) {
             // 代行開始直後で出発地住所がまだ取得できていない (retry 待ち)
-            titleEl.textContent = '📍 出発地取得中...';
+            if (showLive) {
+              titleEl.innerHTML =
+                '📍 出発地取得中...' +
+                LIVE_SEP +
+                '<span class="route-live">📡 ' +
+                ESC(liveAddr) +
+                '</span>';
+            } else {
+              titleEl.textContent = '📍 出発地取得中...';
+            }
           } else if (count === 0) {
-            titleEl.innerHTML = '📍 ' + ESC(startAddr) + ' から出発';
+            titleEl.innerHTML = '📍 ' + ESC(startAddr) + ' から出発' + liveSuffix;
           } else {
-            // 出発地 → 経由 1 → 経由 2 → ... を矢印連結
+            // 出発地 → 経由 1 → 経由 2 → ... を矢印連結 + 末尾 現在地
             const parts = [];
             parts.push(startAddr ? ESC(startAddr) : WARN);
             for (const wp of waypoints) {
               const a = wp && wp.address;
               parts.push(a ? ESC(a) : WARN);
             }
-            titleEl.innerHTML = '📍 ' + parts.join(' <span class="route-sep">→</span> ');
+            titleEl.innerHTML =
+              '📍 ' + parts.join(' <span class="route-sep">→</span> ') + liveSuffix;
           }
         }
 

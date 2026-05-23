@@ -349,6 +349,23 @@ const Business = (function () {
     _lastMMSnap = { lat: lat, lng: lng, t: Date.now() };
   }
 
+  // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・カーナビ風 末尾追記用):
+  //   走行中 waypointCard 末尾に・現在地住所を・ライブ表示する用途。
+  //   既存 _lastMMSnap (= 案 C の・map-matched snap cache) を・現在地 source として使用:
+  //     ・snap fresh (= _MM_SNAP_FRESH_MS 5 秒以内) → _safeGetNearestAddress で・町名取得
+  //     ・snap stale / 未 cache → null (= 取得不可・consumer 側で・現在地行 非表示)
+  //   絶対ルール準拠:
+  //     ✓ distance_m / 課金 / Worker B 本体: 完全無関係 (= 既存 _safeGetNearestAddress 流用のみ)
+  //     ✓ 新 logic ゼロ (= snap cache + 4 段 fallback 既経路を・読むだけ)
+  //     ✓ 既存 onTripStart / onWaypoint / setEndAddress 等の・固定住所取得は・1 byte 不変
+  //   消費側 (= index.html updateWaypointCardUI) で・既存 500ms timer から・呼び・末尾追記する。
+  //   別 GPS 取得・別 timer 不要 (= 案 C snap が・最新位置 source)・電池配慮 ≒ 既存 + ~5ms/loop。
+  function getCurrentLiveAddress() {
+    if (!_lastMMSnap) return null;
+    if (Date.now() - _lastMMSnap.t >= _MM_SNAP_FRESH_MS) return null;
+    return _safeGetNearestAddress(_lastMMSnap.lat, _lastMMSnap.lng, null);
+  }
+
   // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・(C) 1km grid index lazy build):
   //   build script では・grid を含めず・consumer 側で・初回 PIP 時に・lazy build (= cache・1 回)。
   //   key = '{tileLat}_{tileLng}' / GRID_SIZE_INT = 1000 (= int×1e5 単位の 1km 相当)
@@ -1020,6 +1037,8 @@ const Business = (function () {
     },
     // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・public API)
     notifyMMSnap: notifyMMSnap,
+    // ★設計変更宣言 (2026-05-23・住所② 現在地ライブ表示・public API)
+    getCurrentLiveAddress: getCurrentLiveAddress,
   };
 })();
 
