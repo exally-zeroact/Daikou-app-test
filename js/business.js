@@ -335,15 +335,196 @@ const Business = (function () {
     return best ? best.n : null;
   }
 
-  function _safeGetNearestAddress(lat, lng, accuracy) {
-    // Meter モジュール経由で getNearestAddress を呼ぶ・例外は呑んで null フォールバック。
+  // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・(B) map-matched snap 位置 cache):
+  //   Worker B (map-matcher.js) が postMessage する mmResult.snap.snapLat / snapLng を
+  //   index.html L5037 _mmWorkerOnMessage から・notifyMMSnap 経由で受信・cache。
+  //   _safeGetNearestAddress が PIP 入力に・優先採用 (= GPS 揺れ吸収・川越え誤判定 軽減)。
+  //   distance_m / map-matcher.js / meter.js 本体は・1 byte 不変 (= 既存出力を読むだけ)。
+  let _lastMMSnap = null; // {lat, lng, t}
+  const _MM_SNAP_FRESH_MS = 5000; // 5 秒以内 = fresh
+
+  function notifyMMSnap(lat, lng) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') return;
+    if (!isFinite(lat) || !isFinite(lng)) return;
+    _lastMMSnap = { lat: lat, lng: lng, t: Date.now() };
+  }
+
+  // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・(C) 1km grid index lazy build):
+  //   build script では・grid を含めず・consumer 側で・初回 PIP 時に・lazy build (= cache・1 回)。
+  //   key = '{tileLat}_{tileLng}' / GRID_SIZE_INT = 1000 (= int×1e5 単位の 1km 相当)
+  const _townGridCache = new WeakMap();
+  const _TOWN_GRID_SIZE_INT = 1000;
+
+  function _buildTownGrid(bundle) {
+    const grid = {};
+    const items = bundle.items;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.bbox || it.bbox.length !== 4) continue;
+      const [latMin, lngMin, latMax, lngMax] = it.bbox;
+      const tLatMin = Math.floor(latMin / _TOWN_GRID_SIZE_INT);
+      const tLatMax = Math.floor(latMax / _TOWN_GRID_SIZE_INT);
+      const tLngMin = Math.floor(lngMin / _TOWN_GRID_SIZE_INT);
+      const tLngMax = Math.floor(lngMax / _TOWN_GRID_SIZE_INT);
+      for (let tlat = tLatMin; tlat <= tLatMax; tlat++) {
+        for (let tlng = tLngMin; tlng <= tLngMax; tlng++) {
+          const key = tlat + '_' + tlng;
+          if (!grid[key]) grid[key] = [];
+          grid[key].push(i);
+        }
+      }
+    }
+    return grid;
+  }
+
+  function _getTownGrid(bundle) {
+    if (!bundle) return null;
+    let grid = _townGridCache.get(bundle);
+    if (!grid) {
+      grid = _buildTownGrid(bundle);
+      _townGridCache.set(bundle, grid);
+    }
+    return grid;
+  }
+
+  // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・point-in-polygon ray casting):
+  //   ring = [[latI, lngI], ...] (= 既存 build-town-polygons.js の・int×1e5 quantize 後形式)
+  //   標準 ray casting・closed ring 想定 (= 開閉自動 補正)
+  function _pointInPolygon(latI, lngI, ring) {
+    if (!ring || ring.length < 3) return false;
+    let inside = false;
+    const n = ring.length;
+    let j = n - 1;
+    for (let i = 0; i < n; i++) {
+      const iLat = ring[i][0];
+      const iLng = ring[i][1];
+      const jLat = ring[j][0];
+      const jLng = ring[j][1];
+      if (
+        iLng > lngI !== jLng > lngI &&
+        latI < ((jLat - iLat) * (lngI - iLng)) / (jLng - iLng) + iLat
+      ) {
+        inside = !inside;
+      }
+      j = i;
+    }
+    return inside;
+  }
+
+  // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・PIP wrapper):
+  //   bundle.items の・各 polygon (= 複数 ring・外周 + 穴) に・point-in-polygon。
+  //   外周 hit ∧ 穴 hit でない → 採用。多 polygon 候補 grid 絞り後・最初 hit 採用。
+  //   戻り値: { n: '本町七丁目', c: '今治市' } or null
+  function _findTownPolygonAddress(lat, lng, bundle) {
+    if (!bundle || !Array.isArray(bundle.items) || bundle.items.length === 0) return null;
+    const COORD_SCALE = bundle.precision || 100000;
+    const latI = Math.round(lat * COORD_SCALE);
+    const lngI = Math.round(lng * COORD_SCALE);
+    const grid = _getTownGrid(bundle);
+    const tLat = Math.floor(latI / _TOWN_GRID_SIZE_INT);
+    const tLng = Math.floor(lngI / _TOWN_GRID_SIZE_INT);
+    const candidates = (grid && grid[tLat + '_' + tLng]) || null;
+    const iterIdx = candidates || bundle.items.map((_, i) => i);
+    for (let k = 0; k < iterIdx.length; k++) {
+      const it = bundle.items[iterIdx[k]];
+      if (!it || !it.bbox) continue;
+      // bbox プレフィルタ (= 候補絞り)
+      if (latI < it.bbox[0] || latI > it.bbox[2] || lngI < it.bbox[1] || lngI > it.bbox[3])
+        continue;
+      if (!it.rings || it.rings.length === 0) continue;
+      // 外周 ring (= rings[0]) hit 判定
+      if (_pointInPolygon(latI, lngI, it.rings[0])) {
+        // 穴 (= rings[1..]) で・点が入ってるなら・除外
+        let inHole = false;
+        for (let r = 1; r < it.rings.length; r++) {
+          if (_pointInPolygon(latI, lngI, it.rings[r])) {
+            inHole = true;
+            break;
+          }
+        }
+        if (!inHole) {
+          return { n: it.n, c: it.c };
+        }
+      }
+    }
+    return null;
+  }
+
+  // 県名 → bundle 解決 (= window.TOWN_POLYGONS_{PREF})
+  function _resolveTownBundle(prefName) {
+    if (typeof window === 'undefined' || !prefName) return null;
+    const key = 'TOWN_POLYGONS_' + prefName.toUpperCase();
+    return window[key] || null;
+  }
+
+  // coarse JIS 5 桁 から・pref 名解決 (= 既存 RegionHelper 利用・なければ・先頭 2 桁 mapping)
+  function _prefNameFromCoarseCity(cityName, lat, lng) {
+    // RegionHelper.getCurrentPref を・優先 (= 既存 X4 で・利用)
     if (
-      typeof Meter === 'undefined' ||
-      !Meter ||
-      typeof Meter.getNearestAddress !== 'function' ||
-      typeof lat !== 'number' ||
-      typeof lng !== 'number'
+      typeof window !== 'undefined' &&
+      window.RegionHelper &&
+      typeof window.RegionHelper.getCurrentPref === 'function'
     ) {
+      try {
+        const p = window.RegionHelper.getCurrentPref(lat, lng, null);
+        if (p) return p;
+      } catch (_) {
+        // RegionHelper fail → fallback below
+      }
+    }
+    return null;
+  }
+
+  function _safeGetNearestAddress(lat, lng, accuracy) {
+    // 入力 validate
+    if (typeof lat !== 'number' || typeof lng !== 'number' || !isFinite(lat) || !isFinite(lng)) {
+      return null;
+    }
+
+    // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・4 段 fallback):
+    //   1. _lastMMSnap fresh (5 秒以内) → snap 位置で PIP (= GPS 揺れ吸収)
+    //   2. snap stale / なし → raw GPS で PIP
+    //   3. PIP miss → 既存 fine 最近傍 (= Meter.getNearestAddress 経路) で・大字単独取得
+    //   4. fine 未 load / null → coarse「市町村 付近」(= meter.js coarse fallback)
+    //   絶対ルール準拠:
+    //     ✓ distance_m / meter.js / map-matcher.js / Worker B 本体には・1 byte も触れない
+    //     ✓ 表示専用・PIP 結果は・既存 _cutChomeSuffix で・丁目カット
+    //     ✓ ADDRESSES_COARSE_JP 未 load → _findNearestMunicipality null → city prefix 省略
+
+    // pref 名解決 (= PIP bundle 選択用)
+    const prefName = _prefNameFromCoarseCity(null, lat, lng);
+    const bundle = _resolveTownBundle(prefName);
+
+    // ─── 段階 1: snap fresh → snap 位置で PIP ───
+    if (bundle && _lastMMSnap && Date.now() - _lastMMSnap.t < _MM_SNAP_FRESH_MS) {
+      const r = _findTownPolygonAddress(_lastMMSnap.lat, _lastMMSnap.lng, bundle);
+      if (r && r.n) {
+        const cut = _cutChomeSuffix(r.n);
+        const city = r.c || _findNearestMunicipality(_lastMMSnap.lat, _lastMMSnap.lng) || '';
+        const result = city + cut;
+        if (typeof dlog === 'function') {
+          dlog('[ADDR] snap PIP hit "' + result + '"');
+        }
+        return result;
+      }
+    }
+
+    // ─── 段階 2: raw GPS で PIP ───
+    if (bundle) {
+      const r = _findTownPolygonAddress(lat, lng, bundle);
+      if (r && r.n) {
+        const cut = _cutChomeSuffix(r.n);
+        const city = r.c || _findNearestMunicipality(lat, lng) || '';
+        const result = city + cut;
+        if (typeof dlog === 'function') {
+          dlog('[ADDR] raw PIP hit "' + result + '"');
+        }
+        return result;
+      }
+    }
+
+    // ─── 段階 3: PIP miss → 既存 fine 最近傍 (= 住所① 経路・Meter.getNearestAddress) ───
+    if (typeof Meter === 'undefined' || !Meter || typeof Meter.getNearestAddress !== 'function') {
       return null;
     }
     let raw;
@@ -353,19 +534,19 @@ const Business = (function () {
       return null;
     }
     if (!raw) return null;
-    // coarse fallback (= "今治市 付近") は・そのまま返却 (= 既存挙動互換)
+    // 段階 4: coarse fallback (= "今治市 付近") は・そのまま返却
     if (/ 付近$/.test(raw)) {
       if (typeof dlog === 'function') {
         dlog('[ADDR] coarse fallback raw=' + raw);
       }
       return raw;
     }
-    // fine hit: "常盤町八丁目" 等 → 丁目カット + 市町村名 prefix
+    // fine hit (= 段階 3 結果): "常盤町八丁目" 等 → 丁目カット + 市町村名 prefix
     const cut = _cutChomeSuffix(raw);
     const city = _findNearestMunicipality(lat, lng);
     const result = city ? city + cut : cut;
     if (typeof dlog === 'function') {
-      dlog('[ADDR] fine raw=' + raw + ' → cut=' + cut + ' → ' + result);
+      dlog('[ADDR] fine fallback raw=' + raw + ' → cut=' + cut + ' → ' + result);
     }
     return result;
   }
@@ -827,12 +1008,25 @@ const Business = (function () {
     __addressFormatter: {
       cutChomeSuffix: _cutChomeSuffix,
       findNearestMunicipality: _findNearestMunicipality,
+      pointInPolygon: _pointInPolygon,
+      findTownPolygonAddress: _findTownPolygonAddress,
+      buildTownGrid: _buildTownGrid,
+      getLastMMSnap: function () {
+        return _lastMMSnap;
+      },
+      resetLastMMSnap: function () {
+        _lastMMSnap = null;
+      },
     },
+    // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・public API)
+    notifyMMSnap: notifyMMSnap,
   };
 })();
 
 // ★設計変更宣言 (2026-05-15・Phase C): browser global expose + Node module.exports 両対応
 if (typeof window !== 'undefined') window.Business = Business;
-// eslint-disable-next-line no-undef -- Node module 環境のみで参照・browser では typeof で skip
-if (typeof module !== 'undefined' && typeof module.exports !== 'undefined')
+/* eslint-disable no-undef -- Node module 環境のみで参照・browser では typeof で skip */
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
   module.exports = Business;
+}
+/* eslint-enable no-undef */

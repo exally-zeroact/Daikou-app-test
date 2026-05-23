@@ -217,6 +217,11 @@
         'road-jizen',
         'road-yobo',
         'addresses-fine',
+        // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・town-polygons 配線):
+        //   data-registry 既登録の・町丁字 polygon を・auxKinds に追加。
+        //   background load + priority load (= X4 _getPrefEntries) 両経路で・配信。
+        //   business.js PIP 入力 = 住所判定主経路。distance_m / Worker B 本体は不変。
+        'town-polygons',
       ];
       for (const kind of auxKinds) {
         const def = global.DataRegistry.DATA_REGISTRY.perPref.find((d) => d.kind === kind);

@@ -5048,7 +5048,28 @@
         ) {
           try {
             window._mmPipeline.notifyMMCommit();
-          } catch (_) {}
+          } catch (_) {
+            // pipeline 未 ready 等は・致命傷ではない・graceful skip
+          }
+        }
+        // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・B 配線・map-matched snap 位置を Business に通知):
+        //   Worker B が既に postMessage 済の snap 座標 (= mmResult.snap.snapLat / snapLng) を
+        //   Business 側に・1 行 通知。Business._safeGetNearestAddress が・PIP 入力に・優先使用。
+        //   業務は・読むだけ・Worker B / meter.js / map-matcher.js 本体は 1 byte 不変。
+        //   distance_m / 課金 / Meter.reset には・完全無関係 (= 表示専用)。
+        if (
+          m.type === 'mmResult' &&
+          m.snap &&
+          typeof m.snap.snapLat === 'number' &&
+          typeof m.snap.snapLng === 'number'
+        ) {
+          try {
+            if (typeof Business !== 'undefined' && typeof Business.notifyMMSnap === 'function') {
+              Business.notifyMMSnap(m.snap.snapLat, m.snap.snapLng);
+            }
+          } catch (_) {
+            // Business 未 load・notifyMMSnap 未実装 等 → graceful skip
+          }
         }
         if (typeof dlog !== 'function') return;
         if (m.type === 'roadsLoaded') {

@@ -227,6 +227,21 @@
         target: 'main',
         optional: true,
       },
+      // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・町丁字 polygon 配線):
+      //   NII Geoshape 国勢調査町丁・字等境界 2020 (CC BY 4.0) を・適応簡略化 + quantize 後
+      //   47 県別 bundle で配信。business.js (PIP + 4 段 fallback) で・住所判定の・主経路に。
+      //   target='main': window.TOWN_POLYGONS_{PREF} として main thread に load
+      //   optional=true: load 失敗 (= 404 / ネット異常) → 既存 fine 最近傍 fallback で・業務継続
+      //   出典: 『国勢調査町丁・字等別境界データセット』(CODH 作成) + 令和2年国勢調査町丁・字等別境界データ (e-Stat)
+      {
+        kind: 'town-polygons',
+        template: '/data/town-polygons-{pref}.js',
+        globalKeyFn: function (pref) {
+          return 'TOWN_POLYGONS_' + _prefUpper(pref);
+        },
+        target: 'main',
+        optional: true,
+      },
     ],
   };
 
