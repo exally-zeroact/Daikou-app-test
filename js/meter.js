@@ -68,6 +68,16 @@ const Meter = (() => {
     //     ✓ GPS 直線距離は経由しない (snap miss 時は加算ゼロ・据え置き)
     //     ✓ iOS / Android 両経路で同一動作 (platform 分岐なし)
     tier2_pending_m: 0,
+    // ★設計変更宣言 (2026-05-24・司さん採用指示・business preview 完全別回路):
+    //   旧: business_distance_m の表示は・確定値のみ・Viterbi ~15 秒ラグで・走行中フリーズ感
+    //   新: 業務専用 preview state を・新設・課金 tier2_pending_m とは・完全独立
+    //   絶対原則: 仕組み(暫定値+確定減算で即時表示)は課金と同じだが・回路は完全独立
+    //     ・課金 tier2_pending_m の・宣言/累積/確定減算/表示は・1 byte 不変
+    //     ・1 つの if 文や式に・課金 / business を・相乗りさせない (= 完全別ブロック・別変数)
+    //     ・課金回路の・中間変数を・business が・間借りすることを禁止
+    //   表示式: 総走行距離 = business_distance_m + business_tier2_pending_m (= 業務 driveDist 相当)
+    //   永続化: state.business_distance_m のみ (= preview は・揮発・state 再構築で 0)
+    business_tier2_pending_m: 0,
   };
 
   // Tier 2 リードインジケータ用 道路 snap セグメントキュー (2026-05-15 追加)
@@ -304,6 +314,48 @@ const Meter = (() => {
     _haverAccumSinceLastCommit += d;
   }
 
+  // ★設計変更宣言 (2026-05-24・候補 A・business_distance_m 専用 連続点 ZUPT):
+  //   ★ business_distance_m += 経路 (L934) 専用のガード追加 ★
+  //   ・distance_m 5 経路 (L440/514/961/979/1365): 1 byte 不変 (= 課金根拠不可侵)
+  //   ・isStationary 判定本体 (= gps.js / Worker A / Meter._isStationary): 1 byte 不変 (= 司さん専決)
+  //   ・判定: (直近 30 秒 net 変位 < 10 m) AND (現 sample haversine < 5 m) なら「微動」と判定し
+  //          business_distance_m += skip。AND 条件で・「停車→急発進境界」 の誤 skip を回避。
+  //   閾値根拠 (= 走行中 skip ゼロ・絶対担保):
+  //     v1 (= net のみ): 急発進境界で・119 km/h sample も skip (= 不適合) → 棄却
+  //     v2 (= net AND 現 haver): 14.64 km/h で・skip 残存 (= 急発進低速 sample)
+  //   走行中 skip 評価 (= trace -OtKTB5jBfoqcNsgeU5v):
+  //     24 km/h 以上: 1 秒 6.7m+ → 現 haver 5m+ 確実 → ★ skip ゼロ ★
+  //     徐行 14 km/h: 急発進境界 (= 信号停止 25s + 加速 5s) で・skip 残存 (= 司さん判断要)
+  //   buffer warmup safety:
+  //     直近 5 sample 未満 / buffer 最古 t < 10 秒 → 判定不可・false (= 既存挙動維持)
+  const ZUPT_WINDOW_MS = 30000;
+  const ZUPT_NET_THRESHOLD_M = 10;
+  const ZUPT_INSTANT_HAVER_THRESHOLD_M = 5; // 現 sample haversine >= 5m なら・即走行扱い
+  const ZUPT_MIN_SAMPLES = 5;
+  const ZUPT_MIN_BUFFER_AGE_MS = 10000;
+  const _zuptHistory = []; // [{lat, lng, t}]
+
+  function _updateZuptHistory(gpsResult) {
+    const now = gpsResult.timestamp;
+    // 古い entry (= 30 秒以上前) を shift
+    while (_zuptHistory.length > 0 && now - _zuptHistory[0].t > ZUPT_WINDOW_MS) {
+      _zuptHistory.shift();
+    }
+    _zuptHistory.push({ lat: gpsResult.lat, lng: gpsResult.lng, t: now });
+  }
+
+  function _isBusinessZuptMicroMotion(gpsResult, currentHaverM) {
+    // 直近 30 秒 net 変位 < 10 m AND 現 sample haversine < 5 m → true (= 微動)
+    // buffer warmup 中 (= sample < 5 / 古い側 < 10 秒) は false (= 既存挙動維持)
+    if (_zuptHistory.length < ZUPT_MIN_SAMPLES) return false;
+    const oldest = _zuptHistory[0];
+    if (gpsResult.timestamp - oldest.t < ZUPT_MIN_BUFFER_AGE_MS) return false;
+    // 現 sample が・閾値以上動いていれば・即走行扱い (= 急発進境界・5+ m/s = 18 km/h 以上)
+    if (currentHaverM >= ZUPT_INSTANT_HAVER_THRESHOLD_M) return false;
+    const netDist = GPS.calcDistance(oldest.lat, oldest.lng, gpsResult.lat, gpsResult.lng);
+    return netDist < ZUPT_NET_THRESHOLD_M;
+  }
+
   //   Off-Road 中に毎フレーム加算する 1 step distance
   //   Kalman 平滑化済 GPS 連続点の haversine = polyline 累積の 1 区間
   // ★設計変更宣言 (2026-05-16・距離計算精査・停車判定共通ヘルパ):
@@ -436,10 +488,22 @@ const Meter = (() => {
         //   新: business_distance_m は Worker B 経路では加算しない (= 完全分離)
         //       → update() L887 周辺で GPS speed × dt 独立加算経路で計上
         //   絶対ルール準拠: distance_m += m.mmIncrementM は完全不変 (= 課金根拠不可侵)
+        // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成に変更):
+        //   過去 dac45f03 の真因 = 「business 側のみ・!_isStationary() 追加ガード」 = 100%
+        //   今回・「全く同じ構造で・gate だけ business_active」 で・非対称ガード構造的に解消。
+        //   Worker B は・既に「停車中 mmIncrementM = 0」 設計 (= 2026-05-16 Step4) のため
+        //   main 側で・追加 isStationary 判定不要・Worker B 出力を信頼。
+        //   絶対ルール準拠:
+        //     ・distance_m += m.mmIncrementM (= L487) は・1 byte 不変 (= 課金根拠不可侵)
+        //     ・state.running gate も・1 byte 不変
+        //     ・追加するのは・state.business_active gate の・並記のみ・他条件なし
         if (state.running) {
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = 'mm';
+        }
+        if (state.business_active) {
+          state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
         }
         lastMmUsefulAt = Date.now();
         // 参照値も並行更新 (旧設計互換・stats 表示用)
@@ -461,6 +525,23 @@ const Meter = (() => {
         _tier2Segments = [];
       }
     }
+    // ★設計変更宣言 (2026-05-24・business preview 別回路・mm commit 時の・★ 業務専用 ★ 確定減算):
+    //   ★絶対原則: 課金 tier2_pending_m とは・完全に別ブロック・別行・別変数 ★
+    //   ・上記 L519 課金確定減算は・1 byte 不変・touch せず
+    //   ・本ブロックは・mmIncrementM > 0 commit 時のみ・state.business_active gate で・business 減算
+    //   ・単調増加保証: Math.max(0, ...) で・負値防止 (= 課金と同仕組み・別計算)
+    //   ・課金変数 (= state.tier2_pending_m) を・read/write しない (= 完全非共有)
+    if (
+      m.type === 'mmResult' &&
+      typeof m.mmIncrementM === 'number' &&
+      m.mmIncrementM > 0 &&
+      state.business_active
+    ) {
+      state.business_tier2_pending_m = Math.max(
+        0,
+        (state.business_tier2_pending_m || 0) - m.mmIncrementM
+      );
+    }
     // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ・Worker B 経由 preview):
     //   mmIncrementM === 0 でも tentativeIncrementM > 0 を毎 GPS step 受信する設計。
     //   commit を待たず state.tier2_pending_m に加算し、表示式
@@ -481,6 +562,25 @@ const Meter = (() => {
       Date.now() >= _drainMmUntil
     ) {
       state.tier2_pending_m = (state.tier2_pending_m || 0) + m.tentativeIncrementM;
+    }
+    // ★設計変更宣言 (2026-05-24・business preview 別回路・tentativeIncrementM 受信時の・★ 業務専用 ★ 累積):
+    //   ★絶対原則: 課金 tier2_pending_m とは・完全に別 if ブロック・別行・別変数 ★
+    //   ・上記 課金 preview 累積 (= state.tier2_pending_m += tentativeIncrementM) は・1 byte 不変
+    //   ・本ブロックは・state.business_active gate で・business preview 累積
+    //     (= 課金は・state.running gate / business は・state.business_active gate・空車中も加算)
+    //   ・Off-Road active 中は・累積 skip (= Worker B 確定不可・preview 不能)
+    //   ・drain 中も・累積 skip (= 代行開始直後 0.17km 等の・残骸防止・課金 preview と同様)
+    //   ・課金変数 (= state.tier2_pending_m) を・read/write しない (= 完全非共有)
+    if (
+      m.type === 'mmResult' &&
+      typeof m.tentativeIncrementM === 'number' &&
+      m.tentativeIncrementM > 0 &&
+      state.business_active &&
+      !_offRoadActive &&
+      Date.now() >= _drainMmUntil
+    ) {
+      state.business_tier2_pending_m =
+        (state.business_tier2_pending_m || 0) + m.tentativeIncrementM;
     }
     // Phase 1.C (2026-05-10): snap miss 連続検出 → Off-Road Mode 起動
     if (m.snapped) {
@@ -510,11 +610,18 @@ const Meter = (() => {
           // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離・本経路から削除):
           //   business_distance_m は update() L887 周辺で GPS speed × dt 独立加算する設計に変更。
           //   ここでは distance_m (= 課金根拠) のみ加算 (絶対不可侵経路維持)。
+          // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成に変更・本経路にも並記):
+          //   distance_m と・同じ retroactive 補完を・business_distance_m にも適用。
+          //   gate のみ・state.business_active で分岐 (= 他条件・距離計算は・全く同じ)。
           if (state.running) {
             state.distance_m += _haverAccumSinceLastCommit;
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'offroad';
             state.offroad_distance_m = (state.offroad_distance_m || 0) + _haverAccumSinceLastCommit;
+          }
+          if (state.business_active) {
+            state.business_distance_m =
+              (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
           }
           if (typeof dlog === 'function') {
             dlog(
@@ -601,6 +708,9 @@ const Meter = (() => {
     const prevBusinessDist = (state && state.business_distance_m) || 0;
     // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
     const prevBusinessActive = !!(state && state.business_active);
+    // ★設計変更宣言 (2026-05-24・business preview 別回路・per-trip 引き継ぎ):
+    //   business_distance_m と同じ・per-trip reset で引き継ぎ (= 業務単位累積)。
+    const prevBusinessTier2Pending = (state && state.business_tier2_pending_m) || 0;
     // ★設計変更宣言 (2026-05-19・混同#1#2 修正・gps_predictive / display を trip 単位に変更):
     //   旧 (Phase 3): start で prevGpsPredictive / prevDisplay 引き継ぎ = 業務単位扱い
     //                 → 代行 1 trip 開始時 driveDist が前 trip 累積値で再開・「全然変わらん」事象
@@ -649,6 +759,8 @@ const Meter = (() => {
       business_distance_m: prevBusinessDist,
       // Tier 2 リードインジケータ (代行開始時は常に 0 から)
       tier2_pending_m: 0,
+      // ★ business preview 別回路 (= per-trip 引き継ぎ・business_distance_m と同じ仕様)
+      business_tier2_pending_m: prevBusinessTier2Pending,
     };
     // Phase 1.C 状態リセット
     _offRoadActive = false;
@@ -760,6 +872,9 @@ const Meter = (() => {
     const prevBusinessDist = (state && state.business_distance_m) || 0;
     // ★ Phase 2: business_active は per-trip reset で引き継ぐ (= 業務継続中)
     const prevBusinessActive = !!(state && state.business_active);
+    // ★設計変更宣言 (2026-05-24・business preview 別回路・per-trip 引き継ぎ):
+    //   business_distance_m と同じ・per-trip reset で引き継ぎ (= 業務単位累積)。
+    const prevBusinessTier2Pending = (state && state.business_tier2_pending_m) || 0;
     // ★設計変更宣言 (2026-05-19・混同#1#2 修正): gps_predictive / display は trip 単位 0 化
     //   reset() は trip 終了経路 (= 確定送信ボタン) のため次 trip 用に 0 化する。
     state = {
@@ -796,6 +911,8 @@ const Meter = (() => {
       business_distance_m: prevBusinessDist,
       // Tier 2 リードインジケータ (reset 時も 0 から)
       tier2_pending_m: 0,
+      // ★ business preview 別回路 (= per-trip 引き継ぎ・business_distance_m と同じ仕様)
+      business_tier2_pending_m: prevBusinessTier2Pending,
     };
     // Phase 1.C 状態リセット
     _offRoadActive = false;
@@ -915,6 +1032,19 @@ const Meter = (() => {
       //     ・accuracy > 50m (= GPS 精度低下) → 加算しない
       //     ・物理上限 160 km/h 超過 → 加算しない (= GPS jump 防御)
       //     ・dtSec >= 10 秒 (= 長時間空白) → 加算しない (= gap fill 経路に委任)
+      // ★設計変更宣言 (2026-05-24・候補 A・連続点 ZUPT buffer 更新):
+      //   business_distance_m 専用 ZUPT 判定の・buffer 更新を・常時実行 (= ガード前)。
+      //   buffer 更新は・副作用なし (= 配列 push/shift のみ・state 変更なし)。
+      //   isStationary / accuracy / dtSec 条件に関わらず・連続点を蓄積し・判定時点で参照。
+      //   ★2026-05-24・道路 snap 構成変更後・Off-Road incremental の・business 側 屋内対策で・継続使用★
+      _updateZuptHistory(gpsResult);
+
+      // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成変更):
+      //   旧 (= 候補A v2): GPS haversine 直接 += business_distance_m (= L991 周辺)
+      //   新: business_distance_m は・道路 snap 5 経路 (L487 / L549 retro / L967 gap / L988 offroad)
+      //       で・state.business_active gate 並記で・加算する設計に移行。
+      //   本ブロックでは・gps_predictive_distance_m += のみ・残す (= 表示用・trip 単位・既存仕様)。
+      //   business_distance_m += は・本経路から・削除 (= 5 経路に移譲)。
       if (
         state.business_active &&
         !gpsResult.isStationary &&
@@ -931,7 +1061,7 @@ const Meter = (() => {
         const _maxDist = (160 / 3.6) * dtSec; // 物理上限 160 km/h
         if (_haver > 0 && _haver <= _maxDist) {
           state.gps_predictive_distance_m += _haver;
-          state.business_distance_m = (state.business_distance_m || 0) + _haver;
+          // business_distance_m += は・道路 snap 5 経路で並記 (= 上記設計宣言)
         }
       }
 
@@ -957,11 +1087,17 @@ const Meter = (() => {
           // ★設計変更宣言 (2026-05-19・business_distance_m 完全分離・本経路から削除):
           //   business_distance_m は update() L887 周辺で GPS speed × dt 独立加算する設計に変更。
           //   ここでは distance_m (= 課金根拠) のみ加算 (絶対不可侵経路維持)。
+          // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成に変更・本経路にも並記):
+          //   distance_m と・同じ gap fill 補完を・business_distance_m にも適用。
+          //   gate のみ・state.business_active で分岐 (= 他条件・距離計算は・全く同じ)。
           if (state.running) {
             state.distance_m += filled;
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'gap';
             _recordGapFill(filled);
+          }
+          if (state.business_active) {
+            state.business_distance_m = (state.business_distance_m || 0) + filled;
           }
           _haverAccumSinceLastCommit = 0; // gap fill で確定したのでバッファ reset
         }
@@ -980,6 +1116,17 @@ const Meter = (() => {
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'offroad';
             state.offroad_distance_m = (state.offroad_distance_m || 0) + inc;
+          }
+          // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成・本経路に・★屋内対策 ZUPT★):
+          //   distance_m と同じ Off-Road incremental を・business_distance_m にも適用。
+          //   ただし・本経路は・「snap miss 連続 = Off-Road active」 状態で・GPS haversine 直接加算するため
+          //   屋内駐車 (= business_active=true / state.running=false / isStationary=false drift 状態) で
+          //   drift haversine を・business_distance_m に・積む潜在問題あり。
+          //   ★ 業務側のみ・追加 ZUPT ガード (= 直近 30 秒 net 変位 < 10m AND 現 haver < 5m → skip) ★
+          //   ★ distance_m 側は・1 byte 不変 (= 課金根拠不可侵・running gate で・空車中既 skip) ★
+          //   屋外走行 Off-Road (= 道路外通過 5+ 秒) は・連続点 net 変位大・ZUPT 不発・通常加算。
+          if (state.business_active && !_isBusinessZuptMicroMotion(gpsResult, inc)) {
+            state.business_distance_m = (state.business_distance_m || 0) + inc;
           }
         }
       }

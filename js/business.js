@@ -841,6 +841,19 @@ const Business = (function () {
         if (_ms && typeof _ms.business_distance_m === 'number' && _ms.business_distance_m > 0) {
           totalM = _ms.business_distance_m;
         }
+        // ★設計変更宣言 (2026-05-24・business preview 完全別回路・表示式 即時化):
+        //   業務総走行距離 = business_distance_m + business_tier2_pending_m (= preview 込み即時表示)
+        //   ・state.total_distance_m mirror sync (= L244 周辺) は・素のまま (= 永続化用)
+        //   ・getReport (= 表示用) のみ・preview 込みで返す
+        //   ・課金 driveDist = distance_m + tier2_pending_m とは・完全別計算
+        //   ・課金変数 tier2_pending_m は・本ブロックでも・touch しない
+        if (
+          _ms &&
+          typeof _ms.business_tier2_pending_m === 'number' &&
+          _ms.business_tier2_pending_m > 0
+        ) {
+          totalM = (totalM || 0) + _ms.business_tier2_pending_m;
+        }
       } catch (_) {
         /* Meter.getState 失敗時は state.total_distance_m (ミラー値) を返す */
       }

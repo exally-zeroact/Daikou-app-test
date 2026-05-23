@@ -37,7 +37,7 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     }
     if (matchedLines.length !== 5) {
       throw new Error(
-        '述語 C 違反: distance_m 書込経路 5 経路 (L393/L462/L824/L842/L1172) を逸脱。検出: ' +
+        '述語 C 違反: distance_m 書込経路 5 経路 (L496/L576/L1043/L1064/L1461) を逸脱。検出: ' +
           JSON.stringify(matchedLines, null, 2)
       );
     }
@@ -51,8 +51,12 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-19 haversine 更新 (業務単位連続点累積): GPS.calcDistance 呼出追加で shift。
     // 旧: [440, 514, 955, 973, 1352]
     // 2026-05-20 室内停車中誤加算 bug 修正: state.last_gps accuracy 追加 + gap fill isStationary gate 追加で shift。
-    // 新: [440, 514, 961, 979, 1365]
-    const expectedLines = [440, 514, 961, 979, 1365];
+    // 旧: [440, 514, 961, 979, 1365]
+    // 2026-05-24 道路 snap 構成 (= 司さん採用指示): business_active gate 並記 + ZUPT helper 追加で shift。
+    // 旧: [496, 576, 1043, 1064, 1461]
+    // 2026-05-24 business preview 別回路 (= business_tier2_pending_m): state 追加 + 別 if ブロック 2 件で shift。
+    // 新: [506, 622, 1099, 1120, 1517]
+    const expectedLines = [506, 622, 1099, 1120, 1517];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -76,11 +80,15 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     }
   });
 
-  it('C3: dangerous_sources (GPS.calcDistance) は 3 箇所・うち 2 箇所 sanitizer 内 + 1 箇所 業務単位累積 (= 連続点許可済)', () => {
+  it('C3: dangerous_sources (GPS.calcDistance) は 4 箇所・うち 2 箇所 sanitizer 内 + 1 箇所 ZUPT helper + 1 箇所 gps_predictive (= 連続点許可済)', () => {
     // ★設計変更宣言 (2026-05-19・業務単位を haversine 連続点累積に移行):
     //   業界標準 (= Strava / Garmin / 米国タクシー特許) と整合・iOS speedKmh ノイズ免疫。
     //   ★絶対ルール「連続点 polyline 累積 = 許可」(meter.js L106-108) と完全整合。
     //   distance_m 加算経路には触れない (= 課金根拠不可侵維持)。
+    // ★設計変更宣言 (2026-05-24・道路 snap 構成・ZUPT helper 追加):
+    //   business_distance_m の・Off-Road incremental 屋内対策で・連続点 ZUPT 判定用に
+    //   GPS.calcDistance 呼出 1 箇所追加 (= _isBusinessZuptMicroMotion 内)。
+    //   gps_predictive_distance_m の・連続点 haversine も維持 (= 表示用・trip 単位)。
     const source = loadMeterSource();
     const lines = source.split('\n');
     const calls = [];
@@ -89,21 +97,21 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
         calls.push({ lineNo: i + 1, content: lines[i].trim() });
       }
     }
-    if (calls.length !== 3) {
+    if (calls.length !== 4) {
       throw new Error(
-        'GPS.calcDistance 呼出件数違反: 期待 3 件 (L295 sanitizer / L343 sanitizer / L925 業務単位) 実検出 ' +
+        'GPS.calcDistance 呼出件数違反: 期待 4 件 (L305 sanitizer / L355 ZUPT helper / L400 sanitizer / L1060 gps_predictive) 実検出 ' +
           calls.length +
           ' 件・' +
           JSON.stringify(calls)
       );
     }
-    // L295 は _trackHaversineBetweenGps 内 (sanitizer)
-    // L343 は _calculateOffRoadIncrement 内 (sanitizer)
-    // L925 は業務単位 business_distance_m 連続点累積 (= 連続点累積は絶対ルール許可)
-    // Stryker sandbox 由来 line offset 吸収のため ±10 line 許容
-    const expectedLines = [295, 343, 925];
+    // L305 は _trackHaversineBetweenGps 内 (sanitizer)
+    // L355 は _isBusinessZuptMicroMotion 内 (ZUPT helper・道路 snap 構成屋内対策)
+    // L400 は _calculateOffRoadIncrement 内 (sanitizer)
+    // L1060 は gps_predictive_distance_m 連続点累積 (= 表示用・trip 単位・連続点累積は絶対ルール許可)
+    const expectedLines = [305, 355, 400, 1060];
     const LINE_TOLERANCE = 10;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
       if (diff > LINE_TOLERANCE) {
         throw new Error(

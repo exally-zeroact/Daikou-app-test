@@ -1,18 +1,26 @@
 // tests/integration/business-distance-carryover.test.js
-// ZEROact 共通テスト基盤 (2026-05-19 仕様更新・business_distance_m 完全分離後)
+// ZEROact 共通テスト基盤 (2026-05-24 仕様更新・道路 snap 構成に変更)
 //
-// 検証対象: meter.js business_distance_m の独立加算経路 + trip 跨ぎ carry-over
+// 検証対象: meter.js business_distance_m の道路 snap 5 経路加算 + trip 跨ぎ carry-over
 //
-// ★設計変更宣言 (2026-05-19・business_distance_m を Worker B 経路から完全分離):
-//   旧: Worker B mm commit (= mmIncrementM) を distance_m と business_distance_m に分岐加算
-//       → main 側 _isStationary() gate 非対称で business < distance の事象発生
-//   新: business_distance_m は Worker B 経路では加算しない・update() 内 GPS speed × dt で独立加算
-//       gate: state.business_active && speedKmh>0 && !gpsResult.isStationary && 0<dtSec<10
-//       distance_m (= 課金根拠) は state.running gate で 5 経路加算・絶対不変
+// ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成に変更):
+//   旧 (2026-05-19 dac45f03): GPS haversine 直接 += (= L991 周辺)
+//   新: distance_m と同じ道路 snap 5 経路 (mm commit / Off-Road retro / gap fill / Off-Road incremental
+//       / setBusinessDistance) で・state.business_active gate 並記で加算
+//   非対称ガード解消の根拠:
+//     過去 dac45f03 真因 = 「business 側のみ !_isStationary() 追加ガード」 = 100%
+//     今回・「全く同じ構造で・gate だけ business_active」 で・構造的に解消
+//     Worker B は・既に「停車中 mmIncrementM = 0」 (= 2026-05-16 Step4) のため
+//     main 側で・追加 isStationary 判定不要・Worker B 出力を信頼
+//   屋内対策:
+//     Off-Road incremental (= L1078) のみ・business 側に・追加 ZUPT ガード
+//     (= 直近 30 秒 net 変位 < 10m AND 現 haver < 5m → skip)
+//     distance_m 側は・1 byte 不変 (= 課金根拠不可侵・running gate で空車中既 skip)
 //
 // 絶対ルール準拠:
-//   js/meter.js 触る範囲は司さん許可済 (= business_distance_m 完全分離リファクタ)・
-//   distance_m 加算 5 経路は完全不変。
+//   distance_m 加算 5 経路は完全不変 (= L496/L576/L1043/L1064/L1461)
+//   Worker B (= map-matcher.js) / gps-worker.js / sw.js: untouched
+//   isStationary 判定本体: 1 byte 不変 (= 司さん専決)
 
 const path = require('path');
 const METER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'meter.js');
@@ -40,8 +48,6 @@ const DEFAULT_FARE_CONFIG = {
 };
 
 function mockGPS() {
-  // ★設計変更宣言 (2026-05-19・haversine 化対応): 業務単位累積が GPS.calcDistance を
-  //   呼ぶ設計に変更されたため・mock も実 haversine 計算に変更。
   globalThis.GPS = {
     calcDistance: (lat1, lng1, lat2, lng2) => {
       const R = 6371000;
@@ -76,8 +82,6 @@ function makeFakeWorker() {
   };
 }
 
-// 1 step = 90km/h × 1 秒 = 25m 加算想定
-// (speedKmh=90 / 3.6) × 1 秒 = 25.0 m
 function gpsAt(stepIdx, baseLat = 33.84, baseLng = 132.7656, baseTs = 1714100000000) {
   return {
     lat: baseLat + 0.000225 * stepIdx,
@@ -90,19 +94,7 @@ function gpsAt(stepIdx, baseLat = 33.84, baseLng = 132.7656, baseTs = 1714100000
   };
 }
 
-function gpsStationaryAt(stepIdx, baseTs = 1714100000000) {
-  return {
-    lat: 33.84,
-    lng: 132.7656,
-    altitude: 0,
-    accuracy: 5,
-    speedKmh: 0,
-    isStationary: true,
-    timestamp: baseTs + stepIdx * 1000,
-  };
-}
-
-describe('business-distance-carryover (完全分離後・GPS speed×dt 独立加算)', () => {
+describe('business-distance-carryover (道路 snap 構成・2026-05-24)', () => {
   let Meter, fakeWorker;
   beforeEach(() => {
     mockGPS();
@@ -155,9 +147,7 @@ describe('business-distance-carryover (完全分離後・GPS speed×dt 独立加
     Meter.setBusinessDistance(2000);
     expect(Meter.getState().business_distance_m).toBe(2000);
     Meter.reset();
-    // trip 単位 reset では business は引き継ぐ (prevBusinessDist)
     expect(Meter.getState().business_distance_m).toBe(2000);
-    // ただし distance_m / fare_yen は 0 化
     expect(Meter.getState().distance_m).toBe(0);
     expect(Meter.getState().fare_yen).toBe(0);
   });
@@ -167,101 +157,83 @@ describe('business-distance-carryover (完全分離後・GPS speed×dt 独立加
     Meter.start();
     expect(Meter.getState().business_distance_m).toBe(3000);
     Meter.businessEnd();
-    // ★ 混同#4 修正: 0 化撤廃・最後値維持 (= getReport で正しく読まれる)
     expect(Meter.getState().business_distance_m).toBe(3000);
-    expect(Meter.getState().business_active).toBe(false); // 業務 gate OFF は維持
+    expect(Meter.getState().business_active).toBe(false);
   });
 
-  // ─── 完全分離: Worker B mm commit は business_distance_m に加算しない ─
+  // ─── ★ 道路 snap 構成: Worker B mm commit で business_distance_m も加算 ─
 
-  it('★ 完全分離: Worker B mm commit (mmIncrementM>0) は business_distance_m に加算しない', () => {
+  it('★ 道路 snap: Worker B mm commit (mmIncrementM>0) で business_distance_m に加算 (= business_active 時)', () => {
     Meter.setBusinessDistance(1000);
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
-    // mm commit を流す → distance_m のみ加算・business_distance_m は不変
     fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 200, snapped: true, committed: true });
-    expect(Meter.getState().distance_m).toBe(200); // 課金は加算
-    expect(Meter.getState().business_distance_m).toBe(1000); // 業務は不変 (= 完全分離)
+    // ★ 道路 snap 構成: business も distance と同じく mmIncrementM 加算 ★
+    expect(Meter.getState().distance_m).toBe(200);
+    expect(Meter.getState().business_distance_m).toBe(1200); // 1000 + 200
   });
 
-  // ─── 完全分離: GPS update で speed × dt 独立加算 ──────────────────
+  // ─── gate 検証: business_active=false ─────────────────────────────
 
-  it('★ 完全分離: GPS update (speedKmh×dt) で business_distance_m が独立加算される', () => {
-    Meter.setBusinessDistance(0);
-    Meter.setBusinessActive(true);
-    Meter.start();
-    // 1 step = 25m (= 90km/h × 1 秒)
-    Meter.update(gpsAt(0)); // last_gps セット
-    Meter.update(gpsAt(1)); // +25m
-    Meter.update(gpsAt(2)); // +25m
-    // 業務単位は 50m 累積 (= 2 step × 25m)
-    expect(Meter.getState().business_distance_m).toBeCloseTo(50, 0);
-  });
-
-  // ─── gate 検証: business_active=false ──────────────────
-
-  it('★ business_active=false なら GPS update でも business_distance_m 加算しない', () => {
+  it('★ business_active=false なら mm commit でも business_distance_m 加算しない', () => {
     Meter.setBusinessDistance(1000);
-    Meter.setBusinessActive(false); // 業務未開始 / 業務終了後
+    Meter.setBusinessActive(false);
     Meter.start();
-    Meter.update(gpsAt(0));
-    Meter.update(gpsAt(1));
-    Meter.update(gpsAt(2));
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 200, snapped: true, committed: true });
     expect(Meter.getState().business_distance_m).toBe(1000); // 不変
+    expect(Meter.getState().distance_m).toBe(200); // distance は加算 (= running=true)
   });
 
   // ─── gate 検証: 空車中 (= running=false) でも業務単位は加算 ──────────
 
-  it('★ business_active=true・running=false (= 空車中走行) でも business_distance_m 加算', () => {
+  it('★ business_active=true・running=false (= 空車中) で mm commit でも business に加算', () => {
     Meter.setBusinessDistance(500);
     Meter.setBusinessActive(true);
-    // Meter.start() を呼ばない (= running=false・空車中走行を simulate)
-    Meter.update(gpsAt(0));
-    Meter.update(gpsAt(1));
-    Meter.update(gpsAt(2));
-    // 業務単位は加算 (= 後付メーター機と対等)
-    expect(Meter.getState().business_distance_m).toBeCloseTo(550, 0); // 500 + 50
-    // distance_m は running=false で加算なし (= 課金経路は代行中のみ)
+    // Meter.start() を呼ばない (= running=false・空車中)
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 300, snapped: true, committed: true });
+    // ★ business は・business_active gate で加算 (= 空車中も) ★
+    expect(Meter.getState().business_distance_m).toBe(800); // 500 + 300
+    // ★ distance は・running=false で加算なし (= 課金経路は代行中のみ) ★
     expect(Meter.getState().distance_m).toBe(0);
   });
 
-  // ─── gate 検証: 停車中は加算しない ──────────────────
+  // ─── gate 検証: 停車中 (= Worker B が mmIncrementM=0 出力) ──────────
 
-  it('★ isStationary=true なら business_distance_m 加算しない', () => {
+  it('★ Worker B が・停車中 mmIncrementM=0 を返す時・business_distance_m 加算しない', () => {
     Meter.setBusinessDistance(1000);
     Meter.setBusinessActive(true);
     Meter.start();
-    Meter.update(gpsStationaryAt(0));
-    Meter.update(gpsStationaryAt(1));
-    Meter.update(gpsStationaryAt(2));
+    Meter._setDrainMmUntil(0);
+    // 停車中は Worker B が・mmIncrementM=0 を返す (= 2026-05-16 Step4 設計)
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 0, snapped: true, committed: true });
     expect(Meter.getState().business_distance_m).toBe(1000); // 不変
   });
 
-  // ─── trip 跨ぎ carryover (= 完全分離後も維持) ──────────────────
+  // ─── trip 跨ぎ carryover (= 道路 snap 構成後も維持) ──────────────────
 
   it('複数 trip 跨ぎで business_distance_m が累積する (= trip A 終了 → trip B 開始)', () => {
     Meter.setBusinessActive(true);
-    // trip A 開始
     Meter.start();
-    Meter.update(gpsAt(0));
-    Meter.update(gpsAt(1));
-    Meter.update(gpsAt(2));
+    Meter._setDrainMmUntil(0);
+    // trip A: mm commit で 500m
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 500, snapped: true, committed: true });
     const afterA = Meter.getState().business_distance_m;
-    expect(afterA).toBeCloseTo(50, 0); // 2 step × 25m
+    expect(afterA).toBe(500);
 
-    // trip A 終了 (= Meter.reset で trip 内 distance_m リセット・business は引き継ぐ)
     Meter.reset();
     expect(Meter.getState().distance_m).toBe(0);
-    expect(Meter.getState().business_distance_m).toBeCloseTo(50, 0);
-    expect(Meter.getState().business_active).toBe(true); // reset で引き継ぎ
+    expect(Meter.getState().business_distance_m).toBe(500); // 維持
+    expect(Meter.getState().business_active).toBe(true);
 
-    // trip B 開始 (= Meter.reset で last_gps null 化されるので・初回 update は last_gps セットのみ)
+    // trip B: mm commit で 300m
     Meter.start();
-    Meter.update(gpsAt(3)); // last_gps セット (加算なし)
-    Meter.update(gpsAt(4)); // +25m
-    // trip A 50m + trip B 25m = 75m
-    expect(Meter.getState().business_distance_m).toBeCloseTo(75, 0);
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 300, snapped: true, committed: true });
+    // trip A 500 + trip B 300 = 800
+    expect(Meter.getState().business_distance_m).toBe(800);
   });
 
   // ─── businessEnd 後の次業務開始 ──────────────────
@@ -269,46 +241,265 @@ describe('business-distance-carryover (完全分離後・GPS speed×dt 独立加
   it('businessEnd 後 setBusinessDistance(0)・新業務開始で 0 から累積', () => {
     Meter.setBusinessActive(true);
     Meter.start();
-    Meter.update(gpsAt(0));
-    Meter.update(gpsAt(1));
-    Meter.update(gpsAt(2));
-    expect(Meter.getState().business_distance_m).toBeCloseTo(50, 0);
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 500, snapped: true, committed: true });
+    expect(Meter.getState().business_distance_m).toBe(500);
 
-    // 業務終了
     Meter.businessEnd();
-    expect(Meter.getState().business_distance_m).toBeCloseTo(50, 0); // 0 化撤廃・維持
+    expect(Meter.getState().business_distance_m).toBe(500); // 0 化撤廃・維持
     expect(Meter.getState().business_active).toBe(false);
 
-    // 次業務開始 (= Business.start 相当)
+    // 次業務開始
     Meter.setBusinessDistance(0);
     Meter.setBusinessActive(true);
     Meter.start();
-    Meter.update(gpsAt(10)); // last_gps セット (= timestamp 飛ぶ)
-    Meter.update(gpsAt(11));
-    // 新業務は 0 + 25m 累積
-    expect(Meter.getState().business_distance_m).toBeCloseTo(25, 0);
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 250, snapped: true, committed: true });
+    expect(Meter.getState().business_distance_m).toBe(250); // 新業務 0 + 250
   });
 
   // ─── 司さん実車事象の回帰防止: business >= distance を保証 ──────────
 
-  it('★ 回帰防止: 代行中 GPS update + mm commit 同時受信で business >= distance を保証', () => {
-    // 司さん実車テストで business_distance_m=0.50 < distance=1.06 の事象が
-    // main 側 _isStationary() gate 非対称で発生していた。完全分離後は
-    // business は GPS speed × dt のみで加算され・mm commit に依存しない。
+  it('★ 回帰防止: 代行中 mm commit で business と distance が同じ値で増加 (= 非対称ガード解消)', () => {
+    // 過去 dac45f03 真因: business 側のみ !_isStationary() 追加ガード → 非対称累積
+    // 道路 snap 構成: gate だけ business_active/running の違い・他条件は全く同じ
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
-
-    // GPS update で business +25m
-    Meter.update(gpsAt(0));
-    Meter.update(gpsAt(1));
-    // mm commit で distance +500m
     fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 500, snapped: true, committed: true });
     const s = Meter.getState();
-    // business は GPS で 25m 加算 (= mm commit に依存しない)
-    expect(s.business_distance_m).toBeCloseTo(25, 0);
-    // distance は mm commit で 500m 加算 (= 完全分離)
-    expect(s.distance_m).toBe(500);
-    // 両者は独立計算・main 側 _isStationary 非対称の影響を受けない
+    expect(s.business_distance_m).toBe(500); // 道路 snap 加算
+    expect(s.distance_m).toBe(500); // 道路 snap 加算 (= 同じ値)
+    expect(s.business_distance_m).toBeGreaterThanOrEqual(s.distance_m);
+  });
+
+  // ─── ★ GPS update 単独 (= mm commit なし) では business 加算しない (= 道路 snap 主源) ─
+
+  it('★ GPS update 単独 (= mm commit 受信なし) では business_distance_m 加算しない', () => {
+    Meter.setBusinessActive(true);
+    Meter.start();
+    Meter._setDrainMmUntil(0);
+    // GPS update のみ・mm commit なし
+    Meter.update(gpsAt(0));
+    Meter.update(gpsAt(1));
+    Meter.update(gpsAt(2));
+    // GPS haversine 直接 += は・撤去済 (= 道路 snap 5 経路で並記)
+    expect(Meter.getState().business_distance_m).toBe(0);
+    // mm commit を 1 度 dispatch → business 加算
+    fakeWorker._dispatch({ type: 'mmResult', mmIncrementM: 100, snapped: true, committed: true });
+    expect(Meter.getState().business_distance_m).toBe(100);
+  });
+});
+
+// ─── ★ business preview 別回路 (= 2026-05-24・business_tier2_pending_m) ─
+
+describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と完全非共有)', () => {
+  let Meter, fakeWorker;
+  beforeEach(() => {
+    mockGPS();
+    Meter = loadMeter();
+    Meter.setFareConfig(DEFAULT_FARE_CONFIG);
+    Meter.reset();
+    fakeWorker = makeFakeWorker();
+    Meter.setMapMatcher(fakeWorker);
+  });
+  afterEach(() => {
+    if (Meter) Meter.reset();
+    delete globalThis.GPS;
+  });
+
+  it('初期 state.business_tier2_pending_m = 0', () => {
+    expect(Meter.getState().business_tier2_pending_m).toBe(0);
+  });
+
+  it('★ tentativeIncrementM 受信時・business_active=true で・business_tier2_pending_m += 加算', () => {
+    Meter.setBusinessActive(true);
+    Meter.start();
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 50,
+      snapped: true,
+    });
+    expect(Meter.getState().business_tier2_pending_m).toBe(50);
+  });
+
+  it('★ business_active=false なら・tentativeIncrementM 受信でも・business_tier2_pending_m 加算しない', () => {
+    Meter.setBusinessActive(false);
+    Meter.start();
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 50,
+      snapped: true,
+    });
+    expect(Meter.getState().business_tier2_pending_m).toBe(0);
+  });
+
+  it('★ mm commit (mmIncrementM>0) で・business_tier2_pending_m 確定減算 (= 単調増加保証)', () => {
+    Meter.setBusinessActive(true);
+    Meter.start();
+    Meter._setDrainMmUntil(0);
+    // preview 100m 累積
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 100,
+      snapped: true,
+    });
+    expect(Meter.getState().business_tier2_pending_m).toBe(100);
+    // commit 60m 受信 → preview -60 = 40
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 60,
+      snapped: true,
+      committed: true,
+    });
+    expect(Meter.getState().business_tier2_pending_m).toBe(40);
+    // business_distance_m も・mm commit で +60
+    expect(Meter.getState().business_distance_m).toBe(60);
+  });
+
+  it('★ mm commit > preview なら・business_tier2_pending_m = 0 (= Math.max 0 下限)', () => {
+    Meter.setBusinessActive(true);
+    Meter.start();
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 30,
+      snapped: true,
+    });
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 100,
+      snapped: true,
+      committed: true,
+    });
+    expect(Meter.getState().business_tier2_pending_m).toBe(0); // 30 - 100 → 0
+  });
+
+  it('★ 完全非共有 verify: 課金 tier2_pending_m と business_tier2_pending_m は・独立計算', () => {
+    Meter.setBusinessActive(true); // business gate ON
+    Meter.start(); // running gate ON
+    Meter._setDrainMmUntil(0);
+    // tentativeIncrementM 受信 → 両方加算 (= ただし別 if ブロック)
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 50,
+      snapped: true,
+    });
+    const s = Meter.getState();
+    expect(s.tier2_pending_m).toBe(50); // 課金 preview
+    expect(s.business_tier2_pending_m).toBe(50); // business preview
+    // 両者は・独立変数・互いに影響なし
+  });
+
+  it('★ 非対称 gate: running=true・business_active=false なら・課金 preview のみ加算 / business は 0', () => {
+    Meter.setBusinessActive(false); // business gate OFF
+    Meter.start(); // running gate ON
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 50,
+      snapped: true,
+    });
+    const s = Meter.getState();
+    expect(s.tier2_pending_m).toBe(50); // 課金 preview (= running gate)
+    expect(s.business_tier2_pending_m).toBe(0); // business preview (= business_active gate skip)
+  });
+
+  it('★ 非対称 gate: running=false・business_active=true (= 空車中) なら・business preview のみ加算', () => {
+    Meter.setBusinessActive(true);
+    Meter._setDrainMmUntil(0);
+    // Meter.start() を呼ばない (= running=false・空車中)
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 50,
+      snapped: true,
+    });
+    const s = Meter.getState();
+    expect(s.tier2_pending_m).toBe(0); // 課金 preview (= running=false で skip)
+    expect(s.business_tier2_pending_m).toBe(50); // business preview (= business_active=true で加算)
+  });
+
+  it('★ per-trip reset で・business_tier2_pending_m は・引き継ぎ (= business_distance_m と同仕様)', () => {
+    Meter.setBusinessActive(true);
+    Meter.start();
+    Meter._setDrainMmUntil(0);
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeIncrementM: 30,
+      snapped: true,
+    });
+    expect(Meter.getState().business_tier2_pending_m).toBe(30);
+    Meter.reset();
+    expect(Meter.getState().business_tier2_pending_m).toBe(30); // 引き継ぎ
+    Meter.start();
+    expect(Meter.getState().business_tier2_pending_m).toBe(30); // start でも引き継ぎ
+    expect(Meter.getState().tier2_pending_m).toBe(0); // 課金 preview は・per-trip 0 化 (= 既存)
+  });
+});
+
+// ─── ★ 完全非共有 verify: source code 静的 verify (= 課金変数 read/write ゼロ) ─
+
+describe('課金 / business 完全非共有 verify (= source 静的)', () => {
+  it('★ 課金 tier2_pending_m の・実コード書込は・既存 2 経路のみ (= 確定減算 + tentative 累積)', () => {
+    const fs = require('fs');
+    const meterSrc = fs.readFileSync(
+      require('path').join(__dirname, '..', '..', 'js', 'meter.js'),
+      'utf8'
+    );
+    // 実コード行 (= コメント除外・行頭から state.tier2_pending_m 直接書込) のみ
+    const lines = meterSrc.split('\n');
+    const codeWrites = [];
+    for (let i = 0; i < lines.length; i++) {
+      const codePart = lines[i].split('//')[0]; // // コメント除外
+      if (/^\s*state\.tier2_pending_m\s*[+]?=(?!=)/.test(codePart)) {
+        codeWrites.push({ lineNo: i + 1, content: lines[i].trim() });
+      }
+    }
+    if (codeWrites.length !== 2) {
+      throw new Error(
+        '課金 tier2_pending_m 書込違反: 期待 2 件 (確定減算 + tentative 累積)・実検出 ' +
+          codeWrites.length +
+          ' 件: ' +
+          JSON.stringify(codeWrites)
+      );
+    }
+  });
+
+  it('★ business 回路で・課金 tier2_pending_m を read していない (= 同一 if 内 相互参照ゼロ)', () => {
+    const fs = require('fs');
+    const meterSrc = fs.readFileSync(
+      require('path').join(__dirname, '..', '..', 'js', 'meter.js'),
+      'utf8'
+    );
+    // business_tier2_pending_m 周辺 (= 同行/前後 5 行) に・課金 tier2_pending_m 参照なし
+    const lines = meterSrc.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (/business_tier2_pending_m/.test(lines[i])) {
+        // 同行 + 同 ブロック内に・「state.tier2_pending_m」 (= business 接頭辞なし) なし
+        // ※ コメント行は・許可 (= 設計説明で参照する場合あり)
+        const codePart = lines[i].split('//')[0]; // コメント除外
+        if (
+          /state\.tier2_pending_m\b/.test(codePart) &&
+          !/business_tier2_pending_m/.test(codePart.replace(/business_tier2_pending_m/g, 'X'))
+        ) {
+          throw new Error(
+            'L' +
+              (i + 1) +
+              ' で・business_tier2_pending_m と・課金 tier2_pending_m が・同行に・存在: ' +
+              lines[i].trim()
+          );
+        }
+      }
+    }
   });
 });

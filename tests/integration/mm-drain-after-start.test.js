@@ -132,17 +132,20 @@ describe('mm-drain-after-start (meter.js L357 + L619 _drainMmUntil)', () => {
     expect(s.mm_distance_m).toBe(100);
   });
 
-  it('_setDrainMmUntil(0) で drain 即時無効化すれば mmResult が distance_m に加算される', () => {
-    // ★設計変更宣言 (2026-05-19・business_distance_m を Worker B 経路から完全分離):
-    //   旧: mm commit で distance_m と business_distance_m 両方加算
-    //   新: mm commit は distance_m のみ加算・business_distance_m は update() GPS speed×dt で独立加算
+  it('_setDrainMmUntil(0) で drain 即時無効化すれば mmResult が distance_m / business_distance_m に加算', () => {
+    // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成):
+    //   mm commit で・distance_m / business_distance_m 両方加算する設計に変更。
+    //   gate: distance_m = state.running / business_distance_m = state.business_active
+    //   本 test は・beforeEach で・setBusinessActive(true) 設定済 (= 業務 active 模擬)
+    //   Meter.start() で・running=true
+    //   → 両方加算される
     Meter.start();
     Meter._setDrainMmUntil(0); // drain 即時無効化
     fakeWorker._dispatch(mkMmResult(100));
     const s = Meter.getState();
     expect(s.distance_m).toBe(100);
-    // business_distance_m は mm commit に依存しない (= 完全分離・GPS update で独立加算される設計)
-    expect(s.business_distance_m).toBe(0);
+    // ★ 道路 snap 構成: business_active=true で・mm commit で 100 加算 ★
+    expect(s.business_distance_m).toBe(100);
   });
 
   it('Meter.start() から 500ms 以降の mmResult は加算される (= drain 期間終了)', () => {
