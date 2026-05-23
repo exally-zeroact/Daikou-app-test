@@ -51,13 +51,10 @@
         box-sizing: border-box;
         -webkit-tap-highlight-color: transparent;
       }
-      /* ★設計変更宣言 (2026-05-11): 走行検知バナーを UI 上は完全非表示
-   検知ロジック (S2 _checkBusinessForgot 等) は無変更のまま動作継続。
-   JS が banner.style.display='block' をセットしても CSS !important で
-   常に display:none が勝つ。ロジック側のログ・state 更新は引き続き行う。 */
-      #businessForgotBanner {
-        display: none !important;
-      }
+      /* ★設計変更宣言 (2026-05-23・Phase 1・お節介バナー禁止ルール適用):
+         businessForgotBanner (= 「業務開始していますか?」問いかけ) を・HTML/CSS/JS 完全削除。
+         旧 S2 (2026-05-10) 検知バナーは・旧 (2026-05-11) で CSS で・display:none 化済・
+         本 commit で・残骸 完全撤去。距離 / 業務 / GPS / 課金 logic には・触れない。 */
       body {
         font-family: 'Noto Sans JP', sans-serif;
         background: #fff;
@@ -3318,65 +3315,7 @@
       ⚠️ 別のタブで業務中です。このタブでは操作できません。
     </div>
 
-    <!-- S2 (2026-05-10): 業務開始忘れ警告バナー -->
-    <!-- GPS 速度 5km/h+ × 10 秒+ × accuracy<=50m × 業務外 で表示 -->
-    <div
-      id="businessForgotBanner"
-      style="
-        display: none;
-        position: fixed;
-        left: 12px;
-        right: 12px;
-        top: max(12px, env(safe-area-inset-top));
-        z-index: 9998;
-        background: #ff9500;
-        color: #fff;
-        padding: 14px 16px;
-        border-radius: 10px;
-        font-family: 'Noto Sans JP', sans-serif;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-      "
-    >
-      <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px">🚗 走行を検知しました</div>
-      <div style="font-size: 12px; line-height: 1.5; margin-bottom: 10px">
-        業務開始していますか?
-      </div>
-      <div style="display: flex; gap: 8px">
-        <button
-          onclick="dismissBusinessForgotBanner()"
-          style="
-            flex: 1;
-            padding: 9px;
-            background: transparent;
-            border: 1px solid #fff;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 13px;
-            cursor: pointer;
-            font-family: inherit;
-          "
-        >
-          閉じる
-        </button>
-        <button
-          onclick="startBusinessFromForgotBanner()"
-          style="
-            flex: 2;
-            padding: 9px;
-            background: #fff;
-            border: none;
-            border-radius: 8px;
-            color: #ff9500;
-            font-size: 13px;
-            font-weight: 700;
-            cursor: pointer;
-            font-family: inherit;
-          "
-        >
-          業務開始する
-        </button>
-      </div>
-    </div>
+    <!-- S2 (2026-05-10) 業務開始忘れ警告バナー: 2026-05-23 Phase 1 で・お節介ルール適用・完全削除 -->
 
     <!-- S3 (2026-05-10): 1 trip 上限警告バナー (500km 超) -->
     <div
@@ -3490,64 +3429,10 @@
         window._daikomeTabId = TAB_ID;
       })();
 
-      // ━━ S2 (2026-05-10): 業務開始忘れ警告 ━━
-      //   GPS 5km/h+ が 10 秒以上継続 + 業務外 + accuracy<=50m で警告表示
-      //   1 回閉じたら 5 分間抑制
-      let _gpsHighSpeedStart = null;
-      let _businessForgotSnoozeUntil = 0;
-      let _businessForgotShown = false;
-
-      function _checkBusinessForgot(gpsResult) {
-        if (window._tabReadOnly) return; // S1 連携: 閲覧専用は警告も表示しない
-        if (!gpsResult || gpsResult.accuracy == null) return;
-        if (gpsResult.accuracy > 50) return;
-        if (typeof Meter === 'undefined') return;
-        const state = Meter.getState();
-        if (state.running) {
-          // 業務中 → 警告非表示・state リセット
-          if (_businessForgotShown) {
-            const banner = document.getElementById('businessForgotBanner');
-            if (banner) banner.style.display = 'none';
-            _businessForgotShown = false;
-          }
-          _gpsHighSpeedStart = null;
-          return;
-        }
-        if (Date.now() < _businessForgotSnoozeUntil) return;
-        if (_businessForgotShown) return; // 既に表示中
-        const speedKmh = gpsResult.speedKmh || 0;
-        if (speedKmh < 5) {
-          _gpsHighSpeedStart = null;
-          return;
-        }
-        // 5km/h 以上
-        if (_gpsHighSpeedStart === null) {
-          _gpsHighSpeedStart = Date.now();
-        } else if (Date.now() - _gpsHighSpeedStart >= 10000) {
-          // 10 秒継続 → 警告表示
-          const banner = document.getElementById('businessForgotBanner');
-          if (banner) banner.style.display = 'block';
-          _businessForgotShown = true;
-          if (typeof dlog === 'function') dlog('[BusinessForgot] 警告表示 (走行 10 秒継続)');
-        }
-      }
-
-      function dismissBusinessForgotBanner() {
-        const banner = document.getElementById('businessForgotBanner');
-        if (banner) banner.style.display = 'none';
-        _businessForgotShown = false;
-        _gpsHighSpeedStart = null;
-        _businessForgotSnoozeUntil = Date.now() + 5 * 60 * 1000; // 5 分抑制
-        if (typeof dlog === 'function') dlog('[BusinessForgot] 5 分間抑制');
-      }
-
-      function startBusinessFromForgotBanner() {
-        const banner = document.getElementById('businessForgotBanner');
-        if (banner) banner.style.display = 'none';
-        _businessForgotShown = false;
-        _gpsHighSpeedStart = null;
-        if (typeof onBusinessStart === 'function') onBusinessStart();
-      }
+      // ━━ S2 業務開始忘れ警告: 2026-05-23 Phase 1 で・お節介ルール適用・完全削除 ━━
+      //   旧仕様 (2026-05-10): GPS 5km/h+ 10 秒継続 + 業務外 で・「業務開始していますか?」問いかけ表示
+      //   削除理由: 「お節介バナー全面禁止」恒久ルール (= 2026-05-23 制定) 該当
+      //   業務開始フローへの影響: なし (= 既存の・業務開始 button 経路 onBusinessStart() で・通常 trigger)
 
       // ━━ S3 (2026-05-10): 1 trip 上限警告 (500km 超) ━━
       let _tripLimitWarningShown = false;
@@ -5781,8 +5666,9 @@
           //   GPS は btnSensorPermission 押下経由でのみ起動する設計に変更
           //   旧: startGPS();  ← 自動発火 (driving 復元時)
           startUiTimer();
-          // 緑バナー表示（復元できたことを通知するだけ）
-          document.getElementById('restoreBanner').classList.add('show');
+          // ★設計変更宣言 (2026-05-23・Phase 1・restoreBanner 単独 show 撤去・お節介ルール適用):
+          //   旧: 「✅ 走行データを復元しました」単独 show (= 自明・冗長・走行画面が・既に・走行状態 表示)
+          //   新: 初回 show は・行わず・GPS 再取得後・addedM > 0 検知時のみ・初めて show (= L6092)
           dlog('[復元] 走行を再開しました');
           // ★設計変更宣言 (2026-05-14・checkDrivingRestore での GPS 自動起動を復活):
           //   2026-05-10 (d7a47fd8) で「user gesture 必須」として startGPS() を削除したが、
@@ -6194,11 +6080,11 @@
               if (typeof Business !== 'undefined' && typeof Business.onGps === 'function') {
                 Business.onGps(g);
               }
-              // S2 (2026-05-10): 業務開始忘れ検出
-              try {
-                _checkBusinessForgot(g);
-              } catch (_) {}
-              // 復元後の補完検知：距離・料金が変わったらバナーを更新
+              // S2 (2026-05-10) 業務開始忘れ検出: 2026-05-23 Phase 1・お節介ルール適用・削除済
+              // ★設計変更宣言 (2026-05-23・Phase 2・restoreBanner 簡略化):
+              //   単独「✅ 走行データを復元しました」表示は・Phase 1 で・撤去 (= 自明・冗長)。
+              //   GPS 再取得後・実 距離加算 (= addedM > 0) を検知した時のみ・初めて show class 追加+
+              //   「+Xm・¥Y 補完」追記で・表示する (= user の・操作判断に必要な事実通知のみ)。
               if (window._restoreDistanceM != null) {
                 const cur = Meter.getState();
                 const addedM = Math.round(cur.distance_m - window._restoreDistanceM);
@@ -6211,6 +6097,7 @@
                     'm・¥' +
                     addedYen.toLocaleString() +
                     '補完）';
+                  banner.classList.add('show');
                   window._restoreDistanceM = null;
                   window._restoreFareYen = null;
                 }
@@ -7705,12 +7592,14 @@
             DIM_MINUTES * 60 * 1000
           );
           // 走行中・確定中なら復帰補正を発火
+          // ★設計変更宣言 (2026-05-23・Phase 1・page resume 時 単独 show 撤去・お節介ルール適用):
+          //   旧: page resume 時に・「✅ 走行データを復元しました」単独 show + textContent
+          //   新: _restoreDistanceM / _restoreFareYen は・保持 (= GPS 再取得後 補完検知に・必要)・
+          //       banner show は・行わず・補完検知時 (= addedM > 0) のみ・初めて show する。
           if (appState === 'driving' || appState === 'fare') {
             const s = Meter.getState();
             window._restoreDistanceM = s.distance_m;
             window._restoreFareYen = s.fare_yen;
-            document.getElementById('restoreBanner').classList.add('show');
-            document.getElementById('restoreBanner').textContent = '✅ 走行データを復元しました';
           }
         }
       }
