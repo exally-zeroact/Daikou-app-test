@@ -33,8 +33,9 @@ test('flow-overlay: 設定タブ → overlaySettings 表示・URL 不変・閉�
   });
   const startUrl = page.url();
 
-  // bottom-nav 設定タブ (index 3) をタップ
-  const navSettings = page.locator('.bottom-nav .nav-item').nth(3);
+  // bottom-nav 設定タブ (index 2) をタップ
+  //   ★2026-05-23・ナビ再設計: 履歴タブ削除で nav-item index 詰まり [0]業務/[1]使い方/[2]設定。
+  const navSettings = page.locator('.bottom-nav .nav-item').nth(2);
   await navSettings.waitFor({ state: 'visible', timeout: 10000 });
   await navSettings.click();
 

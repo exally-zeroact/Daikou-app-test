@@ -1047,6 +1047,17 @@
         gap: 16px;
         padding-bottom: 40px;
       }
+      /* ★設計変更宣言 (2026-05-23・履歴画面 横画面 左右余白・サイドレール込み調和):
+         縦画面 padding 16px と整合・横画面はレール 64px の・更に内側に・適度な余白追加。
+         max-width 720px + margin auto で・大画面でも・カードが・横に伸び過ぎず・読みやすい。 */
+      @media (orientation: landscape) {
+        #overlayHistory .wrap {
+          padding-left: 32px;
+          padding-right: 32px;
+          max-width: 720px;
+          margin: 0 auto;
+        }
+      }
       #overlayHistory .date-header {
         font-size: 13px;
         font-weight: 700;
@@ -1635,28 +1646,54 @@
       body {
         padding-bottom: calc(60px + env(safe-area-inset-bottom));
       }
-      /* 横画面：左サイドナビに切替 */
-      @media (orientation: landscape) and (min-width: 700px) {
-        body {
+      /* ★設計変更宣言 (2026-05-23・ナビ再設計・横画面サイドレール 64px・overlay 連動):
+         司さんとモック合意済の最終方針。
+         切替条件:
+           ・portrait                          → 下部 60px・3 タブ均等 (= bottom-nav 既定)
+           ・landscape + overlay 表示時         → 左 64px サイドレール (= 本 rule)
+           ・landscape + 業務画面 (= overlay非)  → bottom-nav 非表示 (= 後段 L2628 既存維持)
+         レール幅 64px = タップターゲット 44pt + 縦並び label 余白 + 縦画面 60px と整合。
+         min-width 条件は撤去 (= 全 landscape 機種で適用)・iOS Safari 15.4+ / Chrome 105+ の
+         :has() 対応に依存 (= ダイコメ PWA モダンブラウザ前提)。
+         アクティブ表現: 既存 #007aff 色 + 左端 3px バー (::before・横画面のみ追加)。 */
+      @media (orientation: landscape) {
+        body:has(.spa-overlay.show) {
           padding-bottom: 0;
-          padding-left: 80px;
+          padding-left: 64px;
         }
-        .bottom-nav {
+        body:has(.spa-overlay.show) .bottom-nav {
+          display: flex !important;
           position: fixed;
           top: 0;
           left: 0;
           right: auto;
           bottom: 0;
-          width: 80px;
+          width: 64px;
           flex-direction: column;
           border-top: none;
           border-right: 1px solid #c6c6c8;
           padding-bottom: 0;
           padding-top: env(safe-area-inset-top);
+          z-index: 100;
         }
-        .bottom-nav .nav-item {
+        body:has(.spa-overlay.show) .bottom-nav .nav-item {
           flex: 0 0 auto;
           padding: 14px 4px;
+          position: relative;
+        }
+        body:has(.spa-overlay.show) .bottom-nav .nav-item.active::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 14px;
+          bottom: 14px;
+          width: 3px;
+          background: #007aff;
+          border-radius: 0 2px 2px 0;
+        }
+        /* overlay 自身の・左端を・レール分ずらす (= 重なり防止) */
+        body:has(.spa-overlay.show) .spa-overlay.show {
+          left: 64px;
         }
       }
       /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn 削除済 (≡ ハンバーガーメニュー撤去) */
@@ -9129,7 +9166,9 @@
       //   - showOverlay(name): 該当 overlay に .show + aria-hidden='false'・他は逆。
       //                       bottom-nav の .nav-item.active を該当 button (index) に移動。
       //   - hideAllOverlays(): 全 overlay の .show 削除・aria-hidden='true'・nav active を業務 (index 0) へ。
-      //   nav-item の順序: [0]業務 / [1]履歴 / [2]使い方 / [3]設定 (index.html:4590-4593・MA-6 まで固定)。
+      //   nav-item の順序: [0]業務 / [1]使い方 / [2]設定 (2026-05-23・ナビ再設計・履歴タブ削除)。
+      //   履歴 overlay は・nav slot を持たない (= screenIdle 内 .btn-history 等で到達)。
+      //   showOverlay('history') 時は・_setNavActive 呼出をスキップし、業務タブ active を維持。
       (function () {
         const _OVERLAYS = {
           history: 'overlayHistory',
@@ -9139,9 +9178,9 @@
         };
         // ★設計変更宣言 (2026-05-15・MA Phase D): fare overlay は bottom-nav slot を持たない
         //   (overlaySettings 内「料金設定」リンク経由でのみ到達)・_NAV_INDEX 未登録のままで OK。
-        //   showOverlay('fare') 時は _setNavActive 呼出をスキップし、bottom-nav active は
-        //   元の状態 (設定タブ active) を維持する。
-        const _NAV_INDEX = { history: 1, help: 2, settings: 3 };
+        // ★設計変更宣言 (2026-05-23・ナビ再設計): history も・nav slot 撤廃。
+        //   showOverlay('history') / showOverlay('fare') は・_setNavActive 呼出をスキップ。
+        const _NAV_INDEX = { help: 1, settings: 2 };
 
         function _setNavActive(idx) {
           const items = document.querySelectorAll('.bottom-nav .nav-item');
@@ -11615,12 +11654,16 @@
        設定 → window.showOverlay('settings')  (#overlaySettings)
      active class は showOverlay/hideAllOverlays 内部の _setNavActive(idx) が制御。
      dual state は MA-7 で旧 html を redirect 化するまで維持 (直 URL 叩き対策)。 -->
+    <!-- ★設計変更宣言 (2026-05-23・ナビ再設計・3 タブ均等):
+         司さんとモック合意済の最終方針: 履歴タブを縦横とも削除・履歴は独立画面として残す。
+         3 タブ均等配置: [0]業務 / [1]使い方 / [2]設定。
+         履歴アクセス導線は・screenIdle 内 .btn-history (= 縦画面) /
+         .btn-history-landscape-idle (= 横画面) で確保 (= 業務終了後の振り返り運用)。
+         代行中 (= screenDriving) / 料金 (= screenFare) は・運転中ナビ不要 (= 2026-05-19 司さん指示準拠)。
+         横画面 overlay 表示時 (= 履歴/使い方/設定) は・左サイドレール 64px に切替 (= 後段 CSS @media)。 -->
     <nav class="bottom-nav">
       <button class="nav-item active" type="button" onclick="window.hideAllOverlays()">
         <span class="nav-icon">●</span><span class="nav-label">業務</span>
-      </button>
-      <button class="nav-item" type="button" onclick="window.showOverlay('history')">
-        <span class="nav-icon">≡</span><span class="nav-label">履歴</span>
       </button>
       <button class="nav-item" type="button" onclick="window.showOverlay('help')">
         <span class="nav-icon">?</span><span class="nav-label">使い方</span>
