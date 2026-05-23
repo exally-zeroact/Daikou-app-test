@@ -168,7 +168,78 @@ describe('6. 履歴画面 横画面 左右余白 verify', () => {
   });
 });
 
-describe('7. 不可侵境界 verify (= 触らないファイル untouched・本 test では・index.html のみ確認)', () => {
+describe('7. 横画面サイドレール拡張 verify (= 2026-05-24・screenIdle + screenBusinessStart)', () => {
+  it('showScreen 関数で・body.classList.toggle 5 件 (= screen-idle/driving/fare/businessstart/businessreport)', () => {
+    const m = html.match(/function showScreen\(name\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
+    expect(m).not.toBeNull();
+    const body = m[0];
+    expect(body).toMatch(/classList\.toggle\(['"]screen-idle['"],\s*name\s*===\s*['"]idle['"]\)/);
+    expect(body).toMatch(
+      /classList\.toggle\(['"]screen-driving['"],\s*name\s*===\s*['"]driving['"]\)/
+    );
+    expect(body).toMatch(/classList\.toggle\(['"]screen-fare['"],\s*name\s*===\s*['"]fare['"]\)/);
+    expect(body).toMatch(
+      /classList\.toggle\(['"]screen-businessstart['"],\s*name\s*===\s*['"]businessStart['"]\)/
+    );
+    expect(body).toMatch(
+      /classList\.toggle\(['"]screen-businessreport['"],\s*name\s*===\s*['"]businessReport['"]\)/
+    );
+  });
+
+  it('body.screen-idle / body.screen-businessstart 横画面で・サイドレール 64px 表示 rule', () => {
+    expect(html).toMatch(
+      /body\.screen-idle,\s*\n\s*body\.screen-businessstart\s*\{[^}]*padding-left:\s*64px/
+    );
+    expect(html).toMatch(
+      /body\.screen-idle \.bottom-nav,\s*\n\s*body\.screen-businessstart \.bottom-nav\s*\{[^}]*display:\s*flex\s*!important/
+    );
+    expect(html).toMatch(
+      /body\.screen-idle \.bottom-nav,\s*\n\s*body\.screen-businessstart \.bottom-nav\s*\{[^}]*width:\s*64px/
+    );
+  });
+
+  it('body.screen-idle / body.screen-businessstart アクティブ表現: 左端 3px バー + #007aff', () => {
+    const m = html.match(
+      /body\.screen-idle \.bottom-nav \.nav-item\.active::before,\s*\n\s*body\.screen-businessstart \.bottom-nav \.nav-item\.active::before\s*\{[^}]*\}/
+    );
+    expect(m).not.toBeNull();
+    expect(m[0]).toMatch(/width:\s*3px/);
+    expect(m[0]).toMatch(/#007aff/i);
+    expect(m[0]).not.toMatch(/var\(/); // CSS 変数禁止
+  });
+
+  it('body.screen-businessstart grid 1fr rule (= iOS Safari :has() bug 回避・class detection 並記)', () => {
+    // body.screen-businessstart は・2 か所に・別 block:
+    //   ① サイドレール用 (= padding-left:64px・共通)
+    //   ② grid 1fr 用 (= 大ボタン中央配置・businessStart 専用)
+    // ② を直接 hit (= block 内 grid-template-columns 含む 行で・正規表現 anchor)
+    expect(html).toMatch(
+      /body\.screen-businessstart\s*\{[^}]*grid-template-columns:\s*1fr\s*!important/
+    );
+    expect(html).toMatch(/body\.screen-businessstart\s*\{[^}]*padding-right:\s*0\s*!important/);
+  });
+
+  it('body.screen-businessstart .btn-area 非表示 rule', () => {
+    expect(html).toMatch(
+      /body\.screen-businessstart \.btn-area\s*\{[^}]*display:\s*none\s*!important/
+    );
+  });
+
+  it('既存 body:has(#screenBusinessStart...) :has() rule は・並記維持 (= 1 byte 不変)', () => {
+    expect(html).toMatch(
+      /body:has\(#screenBusinessStart\[style\*='display: flex'\]\)\s*\{[^}]*grid-template-columns:\s*1fr\s*!important/
+    );
+  });
+
+  it('screenDriving / screenFare 用・body class rule なし (= 触らず維持・bottom-nav 非表示)', () => {
+    // body.screen-driving / body.screen-fare を・selector に使う CSS rule は・存在しない
+    expect(html).not.toMatch(/body\.screen-driving\s*\{/);
+    expect(html).not.toMatch(/body\.screen-fare\s*\{/);
+    // ただし JS の・classList.toggle 内には・含まれる (= 上の test で・既に verify)
+  });
+});
+
+describe('8. 不可侵境界 verify (= 触らないファイル untouched・本 test では・index.html のみ確認)', () => {
   it('distance_m 文字列 grep で・index.html に・追加なし (= 表示専用)', () => {
     // distance_m 単独で・新規追加されてないか (= 既存使用箇所のみ存続)
     const matches = (html.match(/distance_m/g) || []).length;

@@ -1695,6 +1695,50 @@
         body:has(.spa-overlay.show) .spa-overlay.show {
           left: 64px;
         }
+        /* ★設計変更宣言 (2026-05-24・空車 + 業務開始 横画面・サイドレール拡張):
+           司さん承認 (= 選択肢 A 採用)・screenIdle / screenBusinessStart 横画面でも・サイドレール表示。
+           class detection (= body.screen-xxx) で・iOS Safari :has() + 属性 selector bug 回避。
+           既存 overlay 用 rule と・同仕様 (= 64px / #007aff / 3px バー):
+             ・screenIdle = 待機系・履歴/業務終了/代行開始 (= 右 btn-area) は・触らず維持
+             ・screenBusinessStart = 業務開始 大ボタン中央配置 (= align-items:center) と・干渉なし */
+        body.screen-idle,
+        body.screen-businessstart {
+          padding-bottom: 0;
+          padding-left: 64px;
+        }
+        body.screen-idle .bottom-nav,
+        body.screen-businessstart .bottom-nav {
+          display: flex !important;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: auto;
+          bottom: 0;
+          width: 64px;
+          flex-direction: column;
+          border-top: none;
+          border-right: 1px solid #c6c6c8;
+          padding-bottom: 0;
+          padding-top: env(safe-area-inset-top);
+          z-index: 100;
+        }
+        body.screen-idle .bottom-nav .nav-item,
+        body.screen-businessstart .bottom-nav .nav-item {
+          flex: 0 0 auto;
+          padding: 14px 4px;
+          position: relative;
+        }
+        body.screen-idle .bottom-nav .nav-item.active::before,
+        body.screen-businessstart .bottom-nav .nav-item.active::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 14px;
+          bottom: 14px;
+          width: 3px;
+          background: #007aff;
+          border-radius: 0 2px 2px 0;
+        }
       }
       /* ★設計変更宣言 (2026-05-15・修正1): .menu-btn 削除済 (≡ ハンバーガーメニュー撤去) */
       .surcharge-badge span {
@@ -2661,6 +2705,23 @@
           padding-right: 0 !important;
         }
         body:has(#screenBusinessStart[style*='display: flex']) .btn-area {
+          display: none !important;
+        }
+        /* ★設計変更宣言 (2026-05-24・iOS Safari :has() + 属性 selector bug 回避・class detection 並記):
+           iOS Safari は・body:has(#xxx[style*='display: flex']) を・JS の style 属性 mutation 後
+           再評価しない bug あり (= L2685 既存コメント根拠)。
+           class detection (= body.screen-businessstart) を・並記して・iOS Safari でも・
+           grid-template-columns:1fr 等が・確実に適用されるよう・safety 確保。
+           class 付与は showScreen 関数 (= L7841 周辺・body.classList.toggle) で実施。
+           既存 :has() rule は・触らず維持 (= 他環境では・既存通り動作)。 */
+        body.screen-businessstart {
+          grid-template-columns: 1fr !important;
+          grid-template-areas:
+            'appbar'
+            'content' !important;
+          padding-right: 0 !important;
+        }
+        body.screen-businessstart .btn-area {
           display: none !important;
         }
         .bottom-nav {
@@ -7836,6 +7897,22 @@
         const elBReport = document.getElementById('screenBusinessReport');
         if (elBStart) elBStart.style.display = name === 'businessStart' ? 'flex' : 'none';
         if (elBReport) elBReport.style.display = name === 'businessReport' ? 'flex' : 'none';
+
+        // ★設計変更宣言 (2026-05-24・横画面サイドレール + grid・iOS Safari :has() bug 回避):
+        //   body.classList で screen 状態を class detection 化。既存 :has() rule は・触らず並記。
+        //   理由: iOS Safari の :has() + style 属性 selector mutation 後 再評価されない既知 bug
+        //         (= L2685 既存コメント根拠) を・class mutation 経由で・安全に・回避。
+        //   - body.screen-idle / body.screen-businessstart 横画面 → サイドレール 64px 表示
+        //   - body.screen-businessstart 横画面 → grid-template-columns: 1fr (= 大ボタン中央配置確保)
+        //   - body.screen-driving / body.screen-fare → サイドレール非表示維持 (= 運転中ナビ不要)
+        const _body = document.body;
+        if (_body && _body.classList) {
+          _body.classList.toggle('screen-idle', name === 'idle');
+          _body.classList.toggle('screen-driving', name === 'driving');
+          _body.classList.toggle('screen-fare', name === 'fare');
+          _body.classList.toggle('screen-businessstart', name === 'businessStart');
+          _body.classList.toggle('screen-businessreport', name === 'businessReport');
+        }
 
         // 全ボタンのリセット
         const btnMain = document.getElementById('btnMain');
