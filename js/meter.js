@@ -68,6 +68,24 @@ const Meter = (() => {
     //     ✓ GPS 直線距離は経由しない (snap miss 時は加算ゼロ・据え置き)
     //     ✓ iOS / Android 両経路で同一動作 (platform 分岐なし)
     tier2_pending_m: 0,
+    // ★設計変更宣言 (2026-05-24・表示層 予測補間・実距離値 1 byte 不変):
+    //   GPS 1Hz 物理限界 + UI 500ms refresh の・stair-step (= カクカク) 解消用 state。
+    //   target_velocity_mps = 直近 1 秒の target 増分 / dt で・自己整合算出
+    //     (= GPS speed 依存なし・屋内 drift で・target 0 進捗なら velocity 0・予測ゼロ)
+    //   予測 = velocity × min(1.0, 経過時間) で・display を・滑らかに先取り表示
+    //   絶対ルール準拠:
+    //     ・state.distance_m / business_distance_m / tier2_pending_m / business_tier2_pending_m:
+    //       1 byte 不変 (= 実距離値・課金根拠不可侵)
+    //     ・本 state は・表示専用 layer (= display_distance_m 同様・課金経路ゼロ)
+    _prev_target_distance_m: 0, // 課金 display 用・直近 target 値
+    _prev_target_time: null, // 課金 display 用・直近 target 更新時刻
+    _target_velocity_mps: 0, // 課金 display 用・直近 1 秒の・target 速度 m/sec
+    // ★ business preview 別回路の・表示用 display (= 業務 totalDist 用)
+    business_display_distance_m: 0, // 表示用・business_distance_m + business_tier2_pending_m 滑らか追従
+    last_business_display_update_time: null,
+    _prev_business_target_distance_m: 0,
+    _prev_business_target_time: null,
+    _business_target_velocity_mps: 0,
     // ★設計変更宣言 (2026-05-24・司さん採用指示・business preview 完全別回路):
     //   旧: business_distance_m の表示は・確定値のみ・Viterbi ~15 秒ラグで・走行中フリーズ感
     //   新: 業務専用 preview state を・新設・課金 tier2_pending_m とは・完全独立
@@ -761,6 +779,16 @@ const Meter = (() => {
       tier2_pending_m: 0,
       // ★ business preview 別回路 (= per-trip 引き継ぎ・business_distance_m と同じ仕様)
       business_tier2_pending_m: prevBusinessTier2Pending,
+      // ★設計変更宣言 (2026-05-24・表示層 予測補間): trip 単位 0 化 (= display と同期)
+      _prev_target_distance_m: 0,
+      _prev_target_time: null,
+      _target_velocity_mps: 0,
+      // ★ business display: per-trip 引き継ぎ (= business_distance_m と同期)
+      business_display_distance_m: prevBusinessTier2Pending + prevBusinessDist,
+      last_business_display_update_time: null,
+      _prev_business_target_distance_m: prevBusinessTier2Pending + prevBusinessDist,
+      _prev_business_target_time: null,
+      _business_target_velocity_mps: 0,
     };
     // Phase 1.C 状態リセット
     _offRoadActive = false;
@@ -913,6 +941,16 @@ const Meter = (() => {
       tier2_pending_m: 0,
       // ★ business preview 別回路 (= per-trip 引き継ぎ・business_distance_m と同じ仕様)
       business_tier2_pending_m: prevBusinessTier2Pending,
+      // ★設計変更宣言 (2026-05-24・表示層 予測補間): trip 単位 0 化
+      _prev_target_distance_m: 0,
+      _prev_target_time: null,
+      _target_velocity_mps: 0,
+      // ★ business display: per-trip 引き継ぎ
+      business_display_distance_m: prevBusinessTier2Pending + prevBusinessDist,
+      last_business_display_update_time: null,
+      _prev_business_target_distance_m: prevBusinessTier2Pending + prevBusinessDist,
+      _prev_business_target_time: null,
+      _business_target_velocity_mps: 0,
     };
     // Phase 1.C 状態リセット
     _offRoadActive = false;
@@ -1445,30 +1483,102 @@ const Meter = (() => {
     //     ・経過時間 × 100m/秒 の差分まで補正 (= 急減ゼロ・P3 解消)
     //     ・初回は target を即時採用
     //   絶対ルール準拠: distance_m / fare_yen は無変更・表示専用 layer
+    // ★設計変更宣言 (2026-05-24・表示層 予測補間・実距離値 1 byte 不変):
+    //   GPS 1Hz 物理限界 + UI 500ms refresh の・stair-step (= カクカク) 解消。
+    //   target_velocity_mps = 直近 1 秒の target 増分 / dt (= 自己整合・GPS speed 依存なし)
+    //   予測 = velocity × min(1.0, 経過時間) で・GPS 待ち間も・display を・滑らかに先取り表示。
+    //   屋内駐車 (= target 0 進捗) → velocity 0 → 予測 0 → 屋内ガード壊さない。
+    //   停車中 (= target 0 進捗) → velocity 0 → 予測 0。
+    //   絶対ルール準拠:
+    //     ・state.distance_m / business_distance_m / tier2 系: 1 byte 不変 (= 実値・課金根拠)
+    //     ・表示専用 layer・display_distance_m / business_display_distance_m を・滑らかに表示
+    //     ・予測は・後退禁止・実値下回り禁止 (= 単調増加 + max(display, target))
     const now = Date.now();
     const target = Math.max(
       state.distance_m || 0,
       state.gps_predictive_distance_m || 0,
       (state.distance_m || 0) + (state.tier2_pending_m || 0)
     );
+    // 予測 velocity 更新: 1 秒経過 or target 進捗時に・直近速度算出
+    if (state._prev_target_time === null) {
+      state._prev_target_distance_m = target;
+      state._prev_target_time = now;
+      state._target_velocity_mps = 0;
+    } else {
+      const tdt = (now - state._prev_target_time) / 1000;
+      if (tdt >= 1.0) {
+        const tdelta = Math.max(0, target - state._prev_target_distance_m);
+        // 物理上限 60 m/sec (= 216 km/h) で・mm commit 一括加算の・暴走防止
+        state._target_velocity_mps = Math.min(60, tdt > 0 ? tdelta / tdt : 0);
+        state._prev_target_distance_m = target;
+        state._prev_target_time = now;
+      }
+    }
+    // 予測増分: 直近 target 更新から・最大 1 秒の・線形先取り
+    const target_elapsed = Math.min(1.0, (now - (state._prev_target_time || now)) / 1000);
+    const predicted_target = target + state._target_velocity_mps * target_elapsed;
     let display = state.display_distance_m || 0;
     if (state.last_display_update_time === null) {
-      display = target;
+      display = predicted_target;
     } else {
       const dt = Math.max(0, (now - state.last_display_update_time) / 1000);
       const maxDelta = dt * 100; // rate=100 m/s
-      const diff = target - display;
-      if (Math.abs(diff) <= maxDelta) {
-        display = target;
-      } else {
-        display += diff > 0 ? maxDelta : -maxDelta;
+      const diff = predicted_target - display;
+      if (diff > 0 && diff <= maxDelta) {
+        display = predicted_target;
+      } else if (diff > 0) {
+        display += maxDelta;
       }
+      // diff <= 0: display 維持 (= 単調増加・後退禁止)
     }
     // 課金距離 (= state.distance_m) を下回らない max 保証
     display = Math.max(display, state.distance_m || 0);
     // 内部 state 更新 (= 次回計算の基準)
     state.display_distance_m = display;
     state.last_display_update_time = now;
+
+    // ★設計変更宣言 (2026-05-24・業務 display 滑らか化・別回路):
+    //   business_display_distance_m を・課金 display と・同仕様で計算。
+    //   target = business_distance_m + business_tier2_pending_m (= 業務側・道路 snap + preview)
+    //   予測 velocity は・別 state (_business_target_velocity_mps) で独立管理。
+    //   絶対ルール準拠: business_distance_m / business_tier2_pending_m: 1 byte 不変。
+    const business_target =
+      (state.business_distance_m || 0) + (state.business_tier2_pending_m || 0);
+    if (state._prev_business_target_time === null) {
+      state._prev_business_target_distance_m = business_target;
+      state._prev_business_target_time = now;
+      state._business_target_velocity_mps = 0;
+    } else {
+      const btdt = (now - state._prev_business_target_time) / 1000;
+      if (btdt >= 1.0) {
+        const btdelta = Math.max(0, business_target - state._prev_business_target_distance_m);
+        state._business_target_velocity_mps = Math.min(60, btdt > 0 ? btdelta / btdt : 0);
+        state._prev_business_target_distance_m = business_target;
+        state._prev_business_target_time = now;
+      }
+    }
+    const btarget_elapsed = Math.min(1.0, (now - (state._prev_business_target_time || now)) / 1000);
+    const predicted_business_target =
+      business_target + state._business_target_velocity_mps * btarget_elapsed;
+    let bdisplay = state.business_display_distance_m || 0;
+    if (state.last_business_display_update_time === null) {
+      bdisplay = predicted_business_target;
+    } else {
+      const bdt = Math.max(0, (now - state.last_business_display_update_time) / 1000);
+      const bmaxDelta = bdt * 100; // rate=100 m/s (= 課金 display と同)
+      const bdiff = predicted_business_target - bdisplay;
+      if (bdiff > 0 && bdiff <= bmaxDelta) {
+        bdisplay = predicted_business_target;
+      } else if (bdiff > 0) {
+        bdisplay += bmaxDelta;
+      }
+      // bdiff <= 0: 後退禁止
+    }
+    // 実値下回り防止
+    bdisplay = Math.max(bdisplay, business_target);
+    state.business_display_distance_m = bdisplay;
+    state.last_business_display_update_time = now;
+
     return { ...state, elapsed_sec: elapsedSec };
   }
 

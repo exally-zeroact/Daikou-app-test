@@ -41,7 +41,8 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // 2026-05-19 R1 更新 (Off-Road grace period): L867 → L884 (+17) 移動・window 同期。
     // 2026-05-24 更新 (道路 snap 構成・ZUPT helper 追加): L884 → L950 (+66) 移動・window 同期。
     // 2026-05-24 更新 (business preview 別回路・state 追加 + 別 if ブロック): L950 → L1006 (+56) 移動。
-    const window = lines.slice(990, 1025).join('\n');
+    // 2026-05-24 更新 (表示層 予測補間・state 追加 + 別ブロック): L1006 → L1039 (+33) 移動。
+    const window = lines.slice(1024, 1058).join('\n');
     if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
       throw new Error(
         'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'

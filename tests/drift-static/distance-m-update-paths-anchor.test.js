@@ -55,8 +55,10 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-24 道路 snap 構成 (= 司さん採用指示): business_active gate 並記 + ZUPT helper 追加で shift。
     // 旧: [496, 576, 1043, 1064, 1461]
     // 2026-05-24 business preview 別回路 (= business_tier2_pending_m): state 追加 + 別 if ブロック 2 件で shift。
-    // 新: [506, 622, 1099, 1120, 1517]
-    const expectedLines = [506, 622, 1099, 1120, 1517];
+    // 旧: [506, 622, 1099, 1120, 1517]
+    // 2026-05-24 表示層 予測補間 (= business_display_distance_m + _target_velocity_mps state 追加) で shift。
+    // 新: [519, 635, 1132, 1153, 1625]
+    const expectedLines = [519, 635, 1132, 1153, 1625];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -99,17 +101,17 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     }
     if (calls.length !== 4) {
       throw new Error(
-        'GPS.calcDistance 呼出件数違反: 期待 4 件 (L305 sanitizer / L355 ZUPT helper / L400 sanitizer / L1060 gps_predictive) 実検出 ' +
+        'GPS.calcDistance 呼出件数違反: 期待 4 件 (L323 sanitizer / L373 ZUPT helper / L413 sanitizer / L1093 gps_predictive) 実検出 ' +
           calls.length +
           ' 件・' +
           JSON.stringify(calls)
       );
     }
-    // L305 は _trackHaversineBetweenGps 内 (sanitizer)
-    // L355 は _isBusinessZuptMicroMotion 内 (ZUPT helper・道路 snap 構成屋内対策)
-    // L400 は _calculateOffRoadIncrement 内 (sanitizer)
-    // L1060 は gps_predictive_distance_m 連続点累積 (= 表示用・trip 単位・連続点累積は絶対ルール許可)
-    const expectedLines = [305, 355, 400, 1060];
+    // L323 は _trackHaversineBetweenGps 内 (sanitizer)
+    // L373 は _isBusinessZuptMicroMotion 内 (ZUPT helper・道路 snap 構成屋内対策)
+    // L413 は _calculateOffRoadIncrement 内 (sanitizer)
+    // L1093 は gps_predictive_distance_m 連続点累積 (= 表示用・trip 単位・連続点累積は絶対ルール許可)
+    const expectedLines = [323, 373, 413, 1093];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 4; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);

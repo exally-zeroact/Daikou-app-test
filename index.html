@@ -6285,6 +6285,12 @@
 
       // ─── UIタイマー ───
       function startUiTimer() {
+        // ★設計変更宣言 (2026-05-24・表示層 滑らか化・refresh 高頻度):
+        //   旧: 500ms (= 2Hz)・GPS 1Hz の・2 倍・stair-step 体感「カクカク」
+        //   新: 100ms (= 10Hz)・予測補間 (= Meter display) を・10Hz で・滑らか反映
+        //   バッテリー影響: getState 計算 5× 増 (= ~30 行追加・軽量)・体感影響小
+        //   実距離計算頻度 (= GPS 1Hz / Worker B 受信時) は・変更なし
+        //   絶対ルール準拠: 実距離値・課金経路・1 byte 不変・表示頻度のみ高頻度化
         uiTimer = setInterval(() => {
           const s = Meter.getState();
           // ★設計変更宣言 (2026-05-16・Step1・driveFare ラグ解消):
@@ -6406,7 +6412,7 @@
               mm_snap_rate: mmStats ? mmStats.snap_rate : 0,
             })
           );
-        }, 500);
+        }, 100);
       }
 
       // ★設計変更宣言 (2026-05-10): 同名 extras をグループ化・押下回数 / 累計を表示

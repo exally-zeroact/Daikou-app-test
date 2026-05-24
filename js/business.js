@@ -847,11 +847,24 @@ const Business = (function () {
         //   ・getReport (= 表示用) のみ・preview 込みで返す
         //   ・課金 driveDist = distance_m + tier2_pending_m とは・完全別計算
         //   ・課金変数 tier2_pending_m は・本ブロックでも・touch しない
+        // ★設計変更宣言 (2026-05-24・表示層 予測補間・business_display_distance_m 採用):
+        //   業務 totalDist を・滑らか化するため・Meter.business_display_distance_m を・優先採用。
+        //   business_display_distance_m = max(business_distance_m + business_tier2_pending_m,
+        //                                     予測補間値) で・stair-step 解消・単調増加保証。
+        //   ★ business_distance_m / business_tier2_pending_m の・実値は・1 byte 不変 ★
+        //   ★ Meter 未提供時 / 0 時は・既存 totalM (= 素の合算) fallback ★
         if (
+          _ms &&
+          typeof _ms.business_display_distance_m === 'number' &&
+          _ms.business_display_distance_m > 0
+        ) {
+          totalM = _ms.business_display_distance_m;
+        } else if (
           _ms &&
           typeof _ms.business_tier2_pending_m === 'number' &&
           _ms.business_tier2_pending_m > 0
         ) {
+          // fallback: business_display 未提供時・preview 込み素合算
           totalM = (totalM || 0) + _ms.business_tier2_pending_m;
         }
       } catch (_) {
