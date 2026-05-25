@@ -4848,6 +4848,17 @@
       //   新: renderFare で todayFareYen += total を蓄積・updateBusinessDashboard で Math.max fallback
       let todayFareYen = 0;
       let uiTimer = null;
+      // ★設計変更宣言 (2026-05-24・案 B・rAF 描画ループ・60Hz 高頻度描画):
+      //   司さん指示「バッテリーは気にしなくてよい・出来る最高峰で滑らかに」 採用。
+      //   既存 setInterval (= L6296・100ms) と並行追加・driveDist/driveFare/totalDist のみ rAF 60Hz 更新。
+      //   重い処理 (= localStorage save / Firebase 送信 / waypointCard) は・既存 setInterval 維持 (= 分離)。
+      //   getState 内・予測補間ロジック (= velocity/predicted_target/display 追従) は・1 byte 不変。
+      //   rAF 仕様: visibilitychange 自動 stop/resume (= 追加 logic 不要)。
+      //   前回値 textContent 比較で・無駄 DOM 書込 防止。
+      let _rafDisplayId = null;
+      let _lastDriveDistKm = null;
+      let _lastDriveFareYen = null;
+      let _lastTotalDistKm = null;
       let vehicleId = 'v1';
 
       // GPS 状態 (旧 line 2254-2257)
@@ -6283,6 +6294,80 @@
         }
       }
 
+      // ─── rAF 描画ループ (= 2026-05-24・案 B・60Hz 滑らか化) ───
+      //   毎 frame: Meter.getState() → driveDist/driveFare/totalDist 更新 (= textContent 比較で・無駄 skip)
+      //   getState 内・予測補間は・now=Date.now() ベース・rAF 高頻度でも・滑らか連続加算
+      //   業務画面以外で・display 不変 → textContent 比較で・DOM 書込ゼロ・無駄なし
+      //   ★ 実距離値・課金経路・予測補間ロジック: 1 byte 不変 ★
+      function _rafDisplayTick() {
+        try {
+          if (typeof Meter === 'undefined' || typeof Meter.getState !== 'function') {
+            // Meter 未 load 時・graceful skip・次 frame 再 schedule
+            _rafDisplayId = requestAnimationFrame(_rafDisplayTick);
+            return;
+          }
+          const s = Meter.getState();
+          // driveDist (= 課金 display)
+          const displayDistM = s.display_distance_m || s.distance_m || 0;
+          const distKm = (displayDistM / 1000).toFixed(2);
+          if (distKm !== _lastDriveDistKm) {
+            const elDist = document.getElementById('driveDist');
+            if (elDist) elDist.textContent = distKm;
+            _lastDriveDistKm = distKm;
+          }
+          // driveFare (= 料金・surchargeOn + extras 反映)
+          let fare = Meter.calcFare(displayDistM);
+          if (typeof surchargeOn !== 'undefined' && surchargeOn) {
+            fare = Math.round(fare * surchargeRate);
+          }
+          const extraTotal =
+            typeof extras !== 'undefined' && Array.isArray(extras)
+              ? extras.reduce((a, b) => a + b.amount, 0)
+              : 0;
+          const total = fare + extraTotal;
+          const fareStr = total.toLocaleString();
+          if (fareStr !== _lastDriveFareYen) {
+            const elFare = document.getElementById('driveFare');
+            if (elFare) elFare.textContent = fareStr;
+            _lastDriveFareYen = fareStr;
+          }
+          // totalDist (= 業務総走行・Business.getReport 経由・preview 込み)
+          if (typeof Business !== 'undefined' && typeof Business.getReport === 'function') {
+            try {
+              const r = Business.getReport();
+              const totalDistKm = ((r.total_distance_m || 0) / 1000).toFixed(2);
+              if (totalDistKm !== _lastTotalDistKm) {
+                const elTotal = document.getElementById('totalDist');
+                if (elTotal) elTotal.textContent = totalDistKm;
+                _lastTotalDistKm = totalDistKm;
+              }
+            } catch (_) {
+              /* Business.getReport 失敗・graceful skip */
+            }
+          }
+        } catch (_) {
+          /* rAF tick エラー・graceful skip・次 frame 継続 */
+        }
+        _rafDisplayId = requestAnimationFrame(_rafDisplayTick);
+      }
+
+      function startRafDisplay() {
+        if (_rafDisplayId !== null) return; // 既に走行中
+        if (typeof requestAnimationFrame === 'undefined') return; // 環境非対応
+        _rafDisplayId = requestAnimationFrame(_rafDisplayTick);
+      }
+
+      function stopRafDisplay() {
+        if (_rafDisplayId === null) return;
+        if (typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(_rafDisplayId);
+        }
+        _rafDisplayId = null;
+        _lastDriveDistKm = null;
+        _lastDriveFareYen = null;
+        _lastTotalDistKm = null;
+      }
+
       // ─── UIタイマー ───
       function startUiTimer() {
         // ★設計変更宣言 (2026-05-24・表示層 滑らか化・refresh 高頻度):
@@ -6291,6 +6376,11 @@
         //   バッテリー影響: getState 計算 5× 増 (= ~30 行追加・軽量)・体感影響小
         //   実距離計算頻度 (= GPS 1Hz / Worker B 受信時) は・変更なし
         //   絶対ルール準拠: 実距離値・課金経路・1 byte 不変・表示頻度のみ高頻度化
+        // ★設計変更宣言 (2026-05-24・案 B・rAF 60Hz 描画並行追加):
+        //   startUiTimer 内で・rAF 描画ループも・並行 start (= driveDist/driveFare/totalDist のみ高頻度)
+        //   既存 setInterval (= 100ms) は・1 byte 不変・重い処理 (save 等) は・既存維持。
+        //   rAF / setInterval 二重更新は・textContent 比較で・無駄 DOM 書込ゼロ。
+        startRafDisplay();
         uiTimer = setInterval(() => {
           const s = Meter.getState();
           // ★設計変更宣言 (2026-05-16・Step1・driveFare ラグ解消):
@@ -7545,6 +7635,9 @@
             clearInterval(uiTimer);
             uiTimer = null;
           }
+          // ★設計変更宣言 (2026-05-24・案 B・rAF 描画ループ stop):
+          //   uiTimer stop と・同じタイミングで・rAF も停止 (= 待機画面で・無駄 frame 抑制)
+          stopRafDisplay();
         }
         appState = 'idle';
         extras = [];
