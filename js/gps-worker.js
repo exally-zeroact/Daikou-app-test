@@ -543,7 +543,18 @@ function processPosition(data) {
     if (movedDistance >= CONFIG.heading_check_min_distance_m) {
       const movementBearing = calcBearing(lastPosition.lat, lastPosition.lng, lat, lng);
       const diff = angleDiff(effectiveHeading, movementBearing);
-      if (diff > CONFIG.heading_diff_threshold_deg) {
+      // ★設計変更宣言 Phase A-3 (2026-05-26・後退検出・タクシーメーター標準準拠):
+      //   後退駐車中 (= diff ≈ 180°・低速 0.5〜10 km/h) は・GPS 点を・reject せず採用。
+      //   後退距離は・既存 Worker B route distance / Off-Road retroactive で・distance_m に正常加算。
+      //   高速時 (= speedKmh >= 10) で・diff ≈ 180° は・「真の異常 GPS」 (= multipath 等) と・判定し reject 維持。
+      //   絶対ルール準拠:
+      //     ・calcFare / distance_m 加算 5 経路: 1 byte 不変 (= 既存救済機構で距離反映)
+      //     ・Worker B: 1 byte 不変
+      //     ・既存コンパス融合 Q (= L558-573) は・isReverse 時も・matchRatio 負値で Q 大 (= GPS 信頼) と・妥当動作
+      //   誤検出リスク:
+      //     ・スマホ逆向き設置 + 低速走行のみ・誤加算量 数 m (= 低速時・許容)
+      const isReverse = Math.abs(diff - 180) < 30 && speedKmh >= 0.5 && speedKmh < 10;
+      if (!isReverse && diff > CONFIG.heading_diff_threshold_deg) {
         wlog(
           '[GPS] 方向不整合: ' +
             diff.toFixed(0) +
@@ -551,6 +562,15 @@ function processPosition(data) {
             (compassHeading != null ? '（コンパス）' : '（GPS）')
         );
         return null;
+      }
+      if (isReverse) {
+        wlog(
+          '[GPS] 後退検出: diff=' +
+            diff.toFixed(0) +
+            '° speed=' +
+            speedKmh.toFixed(1) +
+            'km/h・GPS 点採用 (= 後退距離加算)'
+        );
       }
       // コンパスとGPS移動方向の一致度でKalman_Qを動的調整
       // 一致（diff小）→ Q小さく（より強くフィルター・ノイズ除去）

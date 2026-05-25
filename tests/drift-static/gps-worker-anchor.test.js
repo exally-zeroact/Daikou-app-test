@@ -27,7 +27,8 @@ describe('drift-static: gps-worker.js 3-AND gate / 加速度 null 救済 line an
     const source = loadSource();
     const lines = source.split('\n');
     // Stryker sandbox の line offset 吸収のため ±10 line window
-    const window = lines.slice(617, 640).join('\n');
+    // 2026-05-26 更新 (Phase A-3 後退検出 追加): L627 → L647 (+20) 移動・window 同期。
+    const window = lines.slice(637, 660).join('\n');
     if (!/finalStationary\s*=\s*gpsStationary\s*&&\s*c1Stationary\s*&&\s*!c2Moving/.test(window)) {
       throw new Error(
         'gps-worker.js L627 周辺 (±10) に 3-AND 判定 pattern 未検出 (drift detected)'
@@ -38,7 +39,8 @@ describe('drift-static: gps-worker.js 3-AND gate / 加速度 null 救済 line an
   it('加速度サンプル null 救済 (L596-598) が存在', () => {
     const source = loadSource();
     const lines = source.split('\n');
-    const window = lines.slice(586, 608).join('\n');
+    // 2026-05-26 更新 (Phase A-3 後退検出 追加): L596 → L616 (+20) 移動・window 同期。
+    const window = lines.slice(606, 628).join('\n');
     // accelVariance === null && accelDeviation === null で gpsStationary 単独採用
     if (!/accelVariance\s*===\s*null\s*&&\s*accelDeviation\s*===\s*null/.test(window)) {
       throw new Error(
