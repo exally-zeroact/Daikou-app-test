@@ -1506,7 +1506,7 @@ const Meter = (() => {
       state._target_velocity_mps = 0;
     } else {
       const tdt = (now - state._prev_target_time) / 1000;
-      if (tdt >= 1.0) {
+      if (tdt >= 0.1) {
         const tdelta = Math.max(0, target - state._prev_target_distance_m);
         // 物理上限 60 m/sec (= 216 km/h) で・mm commit 一括加算の・暴走防止
         state._target_velocity_mps = Math.min(60, tdt > 0 ? tdelta / tdt : 0);
@@ -1550,7 +1550,7 @@ const Meter = (() => {
       state._business_target_velocity_mps = 0;
     } else {
       const btdt = (now - state._prev_business_target_time) / 1000;
-      if (btdt >= 1.0) {
+      if (btdt >= 0.1) {
         const btdelta = Math.max(0, business_target - state._prev_business_target_distance_m);
         state._business_target_velocity_mps = Math.min(60, btdt > 0 ? btdelta / btdt : 0);
         state._prev_business_target_distance_m = business_target;
