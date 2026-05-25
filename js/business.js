@@ -937,7 +937,7 @@ const Business = (function () {
         //   save() は state 全体を JSON.stringify するが・load() の・必須プロパティ補完で・本プロパティが・抜けていた。
         //   タスクキル → 再起動で・出発地住所・経由地点リスト・カウントが・巻き戻る現象の・根本原因。
         //   絶対ルール準拠: distance_m / 課金 / 他 state / Meter には・触らない・1 行追加のみ。
-        //   null/undefined/object 全パターン安全 (= `|| null` で吸収・参照 18 箇所は全て null ガード済)。
+        //   null/undefined/object 全パターン安全 (= '|| null' で吸収・参照 18 箇所は全て null ガード済)。
         current_trip: parsed.current_trip || null,
       };
       // ★設計変更宣言 (2026-05-14): ロード後の自動 abandon (checkAutoAbandon) は撤去。
