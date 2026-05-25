@@ -6117,96 +6117,6 @@
       setInterval(updateBusinessDashboard, 1000);
       updateBusinessDashboard();
 
-      // ─── ★ S1+S2+S3 先行起動 (= 2026-05-25・センサー / GPS / Worker A 準備前倒し) ───
-      //   司さん指示: 業務開始ボタン押下時の・cold start を短縮するため・
-      //   permission 済の・既知端末で・「リスナー登録 + Worker A spawn + GPS prime」 を・
-      //   アプリ起動時に・先行実行。
-      //
-      //   ★絶対前提 (= 1 byte 不変)★:
-      //     ・GPS 取得パラメータ (_WATCH_OPTIONS: enableHighAccuracy/timeout/maximumAge) 不変
-      //     ・accelBuffer / gyroBuffer のサンプリング・上限 不変
-      //     ・isStationary 判定本体・Worker A/B の判定ロジック 不変
-      //     ・distance_m 課金経路 不変
-      //
-      //   ★安全担保★:
-      //     ・蓄積 gate: GPS.startCompass / startMotion 内で・_isBizActive=false の間は・データ蓄積しない
-      //       (= 既存 仕様維持・リスナー登録のみ・蓄積は GPS.start で _isBizActive=true 後)
-      //     ・二重 spawn 防止: GPS.initWorker 内の if (!worker) gate で・複数回呼んでも単一 spawn
-      //     ・二重登録防止: _compassListenerAdded / _motionListenerAdded で・複数回呼んでも単一登録
-      //     ・gpsStarted=false 維持: 本関数では watchPosition を・呼ばない (= startGPS で初起動)
-      //     ・iOS permission: localStorage 'compass_granted' === '1' AND 'motion_granted' === '1'
-      //       (= permission 既存済) のみ・リスナー先行登録 (= 未許可端末では skip)
-      function _earlyWarmupSensorsAndGps() {
-        try {
-          // S2: Worker A 先行 spawn (= permission 不要・常時実行)
-          if (typeof GPS !== 'undefined' && typeof GPS.initWorker === 'function') {
-            GPS.initWorker();
-            if (typeof dlog === 'function')
-              dlog('[Warmup] S2: GPS.initWorker (Worker A 先行 spawn)');
-          }
-        } catch (_) {
-          /* graceful skip */
-        }
-        try {
-          // S1: センサーリスナー先行登録 (= permission 既存済のみ)
-          const _compassOk =
-            typeof localStorage !== 'undefined' && localStorage.getItem('compass_granted') === '1';
-          const _motionOk =
-            typeof localStorage !== 'undefined' && localStorage.getItem('motion_granted') === '1';
-          if (typeof GPS !== 'undefined' && _compassOk && typeof GPS.startCompass === 'function') {
-            GPS.startCompass();
-            if (typeof dlog === 'function') dlog('[Warmup] S1: GPS.startCompass (先行登録)');
-          }
-          if (typeof GPS !== 'undefined' && _motionOk && typeof GPS.startMotion === 'function') {
-            GPS.startMotion();
-            if (typeof dlog === 'function') dlog('[Warmup] S1: GPS.startMotion (先行登録)');
-          }
-        } catch (_) {
-          /* graceful skip */
-        }
-        try {
-          // S3: lastWarmupGps prime 前倒し (= permission 済・getCurrentPosition 単発・既存 _WATCH_OPTIONS 同等値)
-          //   既存 _WATCH_OPTIONS = { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 } と同等
-          //   ★新規パラメータ作らない・既存と同値で 1 回呼出★
-          if (
-            typeof navigator !== 'undefined' &&
-            navigator.geolocation &&
-            typeof Meter !== 'undefined' &&
-            typeof Meter.updateGpsOnly === 'function'
-          ) {
-            navigator.geolocation.getCurrentPosition(
-              function (pos) {
-                if (!pos || !pos.coords) return;
-                try {
-                  Meter.updateGpsOnly({
-                    lat: pos.coords.latitude,
-                    lng: pos.coords.longitude,
-                    altitude: pos.coords.altitude || 0,
-                    speedKmh: pos.coords.speed != null ? pos.coords.speed * 3.6 : 0,
-                    timestamp: pos.timestamp || Date.now(),
-                    compassHeading: null,
-                  });
-                  if (typeof dlog === 'function')
-                    dlog(
-                      '[Warmup] S3: lastWarmupGps 先行 prime OK (lat=' +
-                        pos.coords.latitude.toFixed(5) +
-                        ')'
-                    );
-                } catch (_) {
-                  /* graceful skip */
-                }
-              },
-              function () {
-                /* GPS 失敗・graceful skip (= 既存 watchPosition で・後追い取得) */
-              },
-              { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 }
-            );
-          }
-        } catch (_) {
-          /* graceful skip */
-        }
-      }
-
       // ─── GPS（代行開始時に初めて起動） ───
       // (2026-05-10) gpsStarted / _lastGpsLogAt / _gpsCallbackCount は
       // script 先頭に移動済 (TDZ 対策・startGPS が appState 等を参照する前に確実に初期化)
@@ -9385,17 +9295,6 @@
           setTimeout(_checkCrashAndReport, 2000);
         }
       })();
-
-      // ★ S1+S2+S3 先行起動 呼出 (= 2026-05-25・センサー / GPS / Worker A 準備前倒し):
-      //   DOMContentLoaded で・1 度だけ呼出・既存挙動への影響ゼロ
-      //   (= 二重 spawn / 二重登録 防止フラグ・gpsStarted 不変・watchPosition 開始しない)
-      if (typeof _earlyWarmupSensorsAndGps === 'function') {
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', _earlyWarmupSensorsAndGps);
-        } else {
-          _earlyWarmupSensorsAndGps();
-        }
-      }
 
       // ★設計変更宣言 (2026-05-14・MA-2 SPA overlay JS API・呼出元なし・Console テスト用):
       //   MA-1 で追加した #overlayHistory / #overlaySettings / #overlayHelp を切替する API。

@@ -65,9 +65,7 @@ const GPS = (() => {
     // 登録直後に現在状態を通知
     try {
       fn(getStatus());
-    } catch (e) {
-      /* ignore */
-    }
+    } catch (e) {}
   }
 
   // 手動再試行（UIの[再試行]ボタンから呼ぶ）
@@ -80,9 +78,7 @@ const GPS = (() => {
     if (!navigator.geolocation) return false;
     try {
       navigator.geolocation.clearWatch(watchId);
-    } catch (e) {
-      /* ignore */
-    }
+    } catch (e) {}
     try {
       watchId = navigator.geolocation.watchPosition(onPosition, onError, _WATCH_OPTIONS);
       if (typeof dlog === 'function')
@@ -787,12 +783,6 @@ const GPS = (() => {
     startMotion,
     // T5 (2026-05-09): Adaptive Kalman Q (道路種別連動) 用 API
     setRoadType,
-    // ★設計変更宣言 (2026-05-25・S2 Worker A 先行 spawn):
-    //   アプリ起動時 (= 業務開始ボタン押下前) で・Worker A を・idle 状態で spawn する用途。
-    //   先行 spawn のみで・処理は GPS.start まで開始しない (= 既存挙動と・同一)。
-    //   ★ Worker A の判定ロジック / isStationary 判定本体: 1 byte 不変 ★
-    //   重複 init 防止: 既存 if (!worker) gate (= initWorker 内) で・二重 spawn しない。
-    initWorker,
   };
 })();
 
@@ -800,5 +790,4 @@ const GPS = (() => {
 //   既存 `const GPS = (() => {...})()` IIFE は無変更。末尾に Node 環境用 module.exports を追加。
 //   browser context: module 未定義のため no-op (旧挙動と等価)。
 //   Node test context: require('./gps.js') で GPS API オブジェクトを取得可能。
-/* eslint-disable-next-line no-undef -- Node test 環境で module.exports 経由 require 可能化（既存・2026-05-15） */
 if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = GPS;
