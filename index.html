@@ -4740,6 +4740,196 @@
          距離機構 / 課金経路 / Worker B / map-matcher は完全不変 (= 独立 watchPosition で並行 subscribe) -->
 
     <script>
+      // ============================================================
+      // ★設計変更宣言 (2026-05-25・起動計測ログ Phase 0・主因確定用):
+      //   起動の「遅い」 主因 (= JS parse / 初期化 / GPS first fix / 描画) を
+      //   実機 performance API で計測・憶測実装の空振り (04bbe630) 防止のため
+      //   まず測る。read-only 計測のみ・既存処理 1 byte 不変・mark 差し込みのみ。
+      //
+      //   絶対前提 (= 1 byte 不変):
+      //     ・distance_m / 課金経路 / running gate / Worker B / isStationary 本体
+      //     ・_WATCH_OPTIONS / accelBuffer / gyroBuffer / getState 予測補間
+      //     ・巻き戻り修正 (dde124ad business.js current_trip)
+      //
+      //   Firebase 書き込み先: 既存 /debug_traces.json 配下 (= 既存 rules 内・
+      //     debug-trace.js 同 path・追加 rules 設定 不要・writeKey 共通)
+      //   schema: 既存 debug-trace.js samples 構造互換 + meta.kind='startup_metrics'
+      //
+      //   bytecode cache 仮説検証用: 起動回数を localStorage で累積記録・
+      //     初回 vs 2 回目以降の・eval 区間 ms 差異を比較可能化。
+      //
+      //   失敗時挙動: 全 try/catch・performance/sendBeacon 無い環境でも落ちない
+      //     業務挙動・課金・距離計測に・一切影響しない。
+      // ============================================================
+      (function _startupMetrics() {
+        'use strict';
+        if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
+        try {
+          performance.mark('inline-script-eval-start');
+        } catch (_) {
+          return;
+        }
+        // 起動回数 (= bytecode cache 仮説 検証用・初回/2 回目以降区別)
+        let startupCount = 1;
+        try {
+          const stored = localStorage.getItem('daikome_startup_count');
+          const parsed = stored ? parseInt(stored, 10) : 0;
+          startupCount = Number.isFinite(parsed) && parsed >= 0 ? parsed + 1 : 1;
+          localStorage.setItem('daikome_startup_count', String(startupCount));
+        } catch (_) {
+          /* localStorage 不可 → デフォルト 1 */
+        }
+        const PHASES = [
+          'inline-script-eval-start',
+          'inline-script-eval-end',
+          'dom-content-loaded',
+          'mm-warmup-done',
+          'first-business-start-click',
+          'first-gps-fix',
+        ];
+        let sent = false;
+        // DOMContentLoaded mark
+        try {
+          if (document.readyState === 'loading') {
+            document.addEventListener(
+              'DOMContentLoaded',
+              function () {
+                try {
+                  performance.mark('dom-content-loaded');
+                } catch (_) {
+                  /* ignore */
+                }
+              },
+              { once: true }
+            );
+          } else {
+            performance.mark('dom-content-loaded');
+          }
+        } catch (_) {
+          /* ignore */
+        }
+        function _collectAndSend() {
+          if (sent) return;
+          sent = true;
+          try {
+            const baseline = (performance.timeOrigin || 0) | 0;
+            const entries =
+              typeof performance.getEntriesByType === 'function'
+                ? performance.getEntriesByType('mark') || []
+                : [];
+            const phaseMs = {};
+            for (let i = 0; i < entries.length; i++) {
+              const e = entries[i];
+              if (PHASES.indexOf(e.name) >= 0 && phaseMs[e.name] == null) {
+                phaseMs[e.name] = Math.round(e.startTime * 100) / 100;
+              }
+            }
+            let firstPaintMs = null;
+            let fcpMs = null;
+            try {
+              const paint =
+                typeof performance.getEntriesByType === 'function'
+                  ? performance.getEntriesByType('paint') || []
+                  : [];
+              for (let i = 0; i < paint.length; i++) {
+                if (paint[i].name === 'first-paint') {
+                  firstPaintMs = Math.round(paint[i].startTime * 100) / 100;
+                } else if (paint[i].name === 'first-contentful-paint') {
+                  fcpMs = Math.round(paint[i].startTime * 100) / 100;
+                }
+              }
+            } catch (_) {
+              /* paint timing 未対応・skip */
+            }
+            let deviceId = '';
+            try {
+              deviceId = localStorage.getItem('DAIKOME_DEVICE_ID') || '';
+            } catch (_) {
+              /* ignore */
+            }
+            if (!deviceId) return; // device_id 未生成 (= debug-trace 未動作環境) → 送信 skip
+            let label = '';
+            try {
+              label = localStorage.getItem('DAIKOME_DEVICE_LABEL') || '';
+            } catch (_) {
+              /* ignore */
+            }
+            const body = {
+              meta: {
+                device_id: deviceId,
+                device_label: label,
+                userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+                started_at: baseline,
+                ended_at: Date.now(),
+                sample_count: Object.keys(phaseMs).length,
+                watch_options: 'startup_metrics_v1',
+                kind: 'startup_metrics',
+                startup_count: startupCount,
+                first_paint_ms: firstPaintMs,
+                first_contentful_paint_ms: fcpMs,
+              },
+              // 既存 debug-trace.js samples schema 互換 (= rules validate 通過)
+              // lat/lng は startup_metrics では意味なし dummy 値・phase+t_ms が実データ
+              samples: PHASES.map(function (name) {
+                const t = phaseMs[name];
+                return {
+                  t: t != null ? Math.round(baseline + t) : 0,
+                  lat: 0,
+                  lng: 0,
+                  acc: 0,
+                  spd: 0,
+                  hdg: 0,
+                  alt: 0,
+                  phase: name,
+                  t_ms: t != null ? t : null,
+                };
+              }),
+              writeKey: 'DAIKOME_DEBUG_2026',
+            };
+            const url =
+              'https://daikou-app-c821a-default-rtdb.asia-southeast1.firebasedatabase.app/debug_traces.json';
+            const json = JSON.stringify(body);
+            let sentOk = false;
+            try {
+              if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+                const blob = new Blob([json], { type: 'application/json' });
+                sentOk = navigator.sendBeacon(url, blob);
+              }
+            } catch (_) {
+              /* ignore */
+            }
+            if (!sentOk) {
+              try {
+                fetch(url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: json,
+                  keepalive: true,
+                }).catch(function () {
+                  /* graceful skip */
+                });
+              } catch (_) {
+                /* ignore */
+              }
+            }
+          } catch (_) {
+            /* 集計失敗 → 業務影響なし・graceful skip */
+          }
+        }
+        try {
+          setTimeout(_collectAndSend, 30000);
+        } catch (_) {
+          /* ignore */
+        }
+        try {
+          document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'hidden') _collectAndSend();
+          });
+        } catch (_) {
+          /* ignore */
+        }
+      })();
+
       // ★設計変更宣言 (2026-05-10): TDZ 撲滅のため全 let/const を script 先頭に集約
       //   旧: line 1906/2254/3843/4214 等に分散・script 中盤の throw で halt すると
       //       後続宣言が TDZ → startGPS 内 appState 参照, onBusinessStart 内 noSleep
@@ -5399,6 +5589,17 @@
               window._mmPipeline
                 .warmup()
                 .then(function () {
+                  // ★起動計測ログ Phase 0 (2026-05-25): MMDataPipeline warmup 完了 mark (= read-only)
+                  try {
+                    if (
+                      typeof performance !== 'undefined' &&
+                      typeof performance.mark === 'function'
+                    ) {
+                      performance.mark('mm-warmup-done');
+                    }
+                  } catch (_) {
+                    /* 業務影響ゼロ・graceful skip */
+                  }
                   // ★ warmup 完了で進捗を 100% に固定 + 完了文言
                   try {
                     const fill = document.getElementById('dlProgressFill');
@@ -6136,6 +6337,19 @@
           GPS.start(function (g) {
             try {
               _gpsCallbackCount++;
+              // ★起動計測ログ Phase 0 (2026-05-25): GPS first fix mark (= 初回 callback のみ・read-only)
+              if (_gpsCallbackCount === 1) {
+                try {
+                  if (
+                    typeof performance !== 'undefined' &&
+                    typeof performance.mark === 'function'
+                  ) {
+                    performance.mark('first-gps-fix');
+                  }
+                } catch (_) {
+                  /* 業務影響ゼロ・graceful skip */
+                }
+              }
               // ★設計変更宣言 (2026-05-13・大改修 C10): GPS 初回 fix 通知
               //   pipeline の Phase D (waitForGPS) を resolve
               // ★設計変更宣言 (2026-05-16・Step7・現在地県を渡して cache 自動補修):
@@ -6784,6 +6998,14 @@
       //   司さん仕様「業務開始から1日の総距離もほしい」に合致
       //   業務開始 = 1日の業務スタート = 全GPS情報を取り始める
       function onBusinessStart() {
+        // ★起動計測ログ Phase 0 (2026-05-25): 業務開始 button 押下 mark (= read-only)
+        try {
+          if (typeof performance !== 'undefined' && typeof performance.mark === 'function') {
+            performance.mark('first-business-start-click');
+          }
+        } catch (_) {
+          /* 業務影響ゼロ・graceful skip */
+        }
         // S1 (2026-05-10): 閲覧専用モードでは業務開始不可
         if (window._tabReadOnly) {
           showToast('別のタブで業務中です');
@@ -10903,6 +11125,14 @@
           if (extraItems[i]) extraItems[i].amount = parseInt(v, 10) || 0;
         };
       })();
+      // ★起動計測ログ Phase 0 (2026-05-25): inline script eval 完了 mark (= read-only)
+      try {
+        if (typeof performance !== 'undefined' && typeof performance.mark === 'function') {
+          performance.mark('inline-script-eval-end');
+        }
+      } catch (_) {
+        /* 業務影響ゼロ・graceful skip */
+      }
     </script>
 
     <!-- ★設計変更宣言 (2026-05-14・MA-1 SPA overlay 基盤・静的構造のみ・未起動):
