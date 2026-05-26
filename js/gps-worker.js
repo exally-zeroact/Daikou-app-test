@@ -517,6 +517,28 @@ function processPosition(data) {
     if (timeDiff > 0 && jump / timeDiff > CONFIG.jump_limit_m_per_s) return null;
   }
 
+  // ②-1 Doppler-Speed Sanity Gate (= Phase A-4・2026-05-26):
+  //   Doppler 速度 (= 衛星受信機 GPS chip 由来・gps.js L456 で speedKmh に変換) と
+  //   haversine 速度 (= 直線距離 / 経過時間) の整合性検証。
+  //   speedKmh <= 0 (= speed null fallback in gps.js L456) または dtSec >= 5 は skip。
+  //   |dopplerMs - haverMs| > 10 m/s (= 36 km/h 差) で異常 GPS 点と判定し reject。
+  //   絶対ルール準拠: distance_m 加算 5 経路 / calcFare / Worker B: 1byte 不変。
+  //   後退検出 (= Phase A-3) との整合: 後退中 Doppler は符号なし・絶対値で出力されるため
+  //   haversine と同等値・diff < 10 m/s で通過 (= 後退距離加算は維持される)。
+  if (lastPosition && speedKmh > 0) {
+    const dtSec = (now - lastPosition.timestamp) / 1000;
+    if (dtSec > 0 && dtSec < 5) {
+      const haverDist = calcDistance(lastPosition.lat, lastPosition.lng, lat, lng);
+      const haverMs = haverDist / dtSec;
+      const dopplerMs = speedKmh / 3.6;
+      const speedDiff = Math.abs(dopplerMs - haverMs);
+      if (speedDiff > 10) {
+        wlog('[GPS] Doppler-haversine 速度不整合 skip: diff=' + speedDiff.toFixed(1) + 'm/s');
+        return null;
+      }
+    }
+  }
+
   // ②-2 加速度異常判定（案Z）
   if (lastPosition && lastPosition.speedKmh != null && lastPosition.speedKmh > 1 && speedKmh > 1) {
     const dt = (now - lastPosition.timestamp) / 1000;
