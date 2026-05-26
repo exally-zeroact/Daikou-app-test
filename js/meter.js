@@ -144,6 +144,11 @@ const Meter = (() => {
   let _consecutiveSnapMiss = 0;
   let _haverAccumSinceLastCommit = 0; // 直近 commit からの haversine 累積 (retroactive 用)
   let _dispLogSig = null; // ★STEP2 診断: [DISP] ログの値変化 throttle 用 signature
+  // ★Phase D+E (2026-05-26・②burst 散らし・表示層のみ・distance_m/calcFare 不変):
+  const _DISP_NORMAL_STEP_M = 8; // D-1: target 増分がこれ超なら burst 扱い (前方予測抑止 + v 更新スキップ)
+  const _DISP_V_CLAMP_MPS = 36; // D-2: 予測 velocity 上限 (= 130km/h・旧 60 から縮小)
+  const _DISP_SLEW_BASE_MPS = 20; // E-1: catch-up slew の下限 (= 旧 rate 100 から縮小)
+  const _DISP_SLEW_FACTOR = 1.5; // E-2: slew = max(BASE, sustained v × FACTOR) で高速時の表示遅延を回避
   const OFFROAD_SNAP_MISS_THRESHOLD = 5;
   const OFFROAD_ABS_MAX_KMH = 160; // 物理上限
   // ★設計変更宣言 (2026-05-19・R1・代行開始直後 Off-Road 起動 grace period):
@@ -1500,7 +1505,10 @@ const Meter = (() => {
       state.gps_predictive_distance_m || 0,
       (state.distance_m || 0) + (state.tier2_pending_m || 0)
     );
-    // 予測 velocity 更新: 1 秒経過 or target 進捗時に・直近速度算出
+    // ★Phase D+E: 予測 velocity を「非 burst step のみ」で更新し sustained 速度化。
+    //   burst (= target が NORMAL_STEP_M 超の塊増分) では v をスパイクさせない →
+    //   前方予測の暴走 (旧 v=60 で 216km/h 先食い) を構造的に除去。
+    let _isBurst = false;
     if (state._prev_target_time === null) {
       state._prev_target_distance_m = target;
       state._prev_target_time = now;
@@ -1509,21 +1517,31 @@ const Meter = (() => {
       const tdt = (now - state._prev_target_time) / 1000;
       if (tdt >= 0.1) {
         const tdelta = Math.max(0, target - state._prev_target_distance_m);
-        // 物理上限 60 m/sec (= 216 km/h) で・mm commit 一括加算の・暴走防止
-        state._target_velocity_mps = Math.min(60, tdt > 0 ? tdelta / tdt : 0);
+        _isBurst = tdelta > _DISP_NORMAL_STEP_M; // D-1: 8m 超は burst
+        if (!_isBurst) {
+          // 通常 step のみ v 更新 (= sustained 速度・burst でスパイクさせない)・D-2: clamp 36
+          state._target_velocity_mps = Math.min(_DISP_V_CLAMP_MPS, tdt > 0 ? tdelta / tdt : 0);
+        }
         state._prev_target_distance_m = target;
         state._prev_target_time = now;
       }
     }
-    // 予測増分: 直近 target 更新から・最大 1 秒の・線形先取り
+    // D-1: burst 時は前方予測を抑止 (predicted=target)・通常時のみ sustained v で先取り
     const target_elapsed = Math.min(1.0, (now - (state._prev_target_time || now)) / 1000);
-    const predicted_target = target + state._target_velocity_mps * target_elapsed;
+    const predicted_target = _isBurst
+      ? target
+      : target + state._target_velocity_mps * target_elapsed;
     let display = state.display_distance_m || 0;
     if (state.last_display_update_time === null) {
       display = predicted_target;
     } else {
       const dt = Math.max(0, (now - state.last_display_update_time) / 1000);
-      const maxDelta = dt * 100; // rate=100 m/s
+      // E: slew = max(BASE, sustained v × FACTOR) で・高速で遅延せず burst を散らす
+      const slew = Math.max(
+        _DISP_SLEW_BASE_MPS,
+        (state._target_velocity_mps || 0) * _DISP_SLEW_FACTOR
+      );
+      const maxDelta = dt * slew;
       const diff = predicted_target - display;
       if (diff > 0 && diff <= maxDelta) {
         display = predicted_target;
@@ -1573,6 +1591,8 @@ const Meter = (() => {
     //   絶対ルール準拠: business_distance_m / business_tier2_pending_m: 1 byte 不変。
     const business_target =
       (state.business_distance_m || 0) + (state.business_tier2_pending_m || 0);
+    // ★Phase D+E: 業務 display も課金 display と同仕様 (= 非 burst のみ v 更新・burst 前方予測抑止・slew 連動)
+    let _isBurstB = false;
     if (state._prev_business_target_time === null) {
       state._prev_business_target_distance_m = business_target;
       state._prev_business_target_time = now;
@@ -1581,20 +1601,31 @@ const Meter = (() => {
       const btdt = (now - state._prev_business_target_time) / 1000;
       if (btdt >= 0.1) {
         const btdelta = Math.max(0, business_target - state._prev_business_target_distance_m);
-        state._business_target_velocity_mps = Math.min(60, btdt > 0 ? btdelta / btdt : 0);
+        _isBurstB = btdelta > _DISP_NORMAL_STEP_M; // D-1
+        if (!_isBurstB) {
+          state._business_target_velocity_mps = Math.min(
+            _DISP_V_CLAMP_MPS,
+            btdt > 0 ? btdelta / btdt : 0
+          ); // D-2
+        }
         state._prev_business_target_distance_m = business_target;
         state._prev_business_target_time = now;
       }
     }
     const btarget_elapsed = Math.min(1.0, (now - (state._prev_business_target_time || now)) / 1000);
-    const predicted_business_target =
-      business_target + state._business_target_velocity_mps * btarget_elapsed;
+    const predicted_business_target = _isBurstB
+      ? business_target
+      : business_target + state._business_target_velocity_mps * btarget_elapsed;
     let bdisplay = state.business_display_distance_m || 0;
     if (state.last_business_display_update_time === null) {
       bdisplay = predicted_business_target;
     } else {
       const bdt = Math.max(0, (now - state.last_business_display_update_time) / 1000);
-      const bmaxDelta = bdt * 100; // rate=100 m/s (= 課金 display と同)
+      const bslew = Math.max(
+        _DISP_SLEW_BASE_MPS,
+        (state._business_target_velocity_mps || 0) * _DISP_SLEW_FACTOR
+      ); // E
+      const bmaxDelta = bdt * bslew;
       const bdiff = predicted_business_target - bdisplay;
       if (bdiff > 0 && bdiff <= bmaxDelta) {
         bdisplay = predicted_business_target;
