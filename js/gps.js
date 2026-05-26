@@ -365,8 +365,6 @@ const GPS = (() => {
         if (e.data.type === 'result') {
           const d = e.data.data;
           if (d._debugCompass) dlog('[GPS]', d._debugCompass);
-          // ★診断 (2026-05-26): A-4 Doppler reject 累計を Eruda に表示 (②根因切り分け・計測専用)
-          if (d.a4RejectCount) dlog('[GPS] A-4 reject 累計: ' + d.a4RejectCount);
           // コンパス値がWorkerに届いているか定期確認（10回に1回）
           if (d.compassHeading != null && Math.random() < 0.1) {
             dlog('[GPS] compass届いてる:', d.compassHeading.toFixed(0) + '°');

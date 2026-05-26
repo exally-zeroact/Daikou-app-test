@@ -48,17 +48,6 @@ let trafficJamSince = null;
 let isTrafficJam = false;
 let kalman = null;
 
-// ★診断 (2026-05-26): A-4 Doppler-Speed Sanity Gate の reject 回数累計。
-//   成功 result に乗せて main へ運び、Eruda (iPhone 画面内コンソール) で②の根因切り分け。
-//   計測専用・距離/課金には一切関与しない。
-let _a4RejectCount = 0;
-
-// ★A/B 診断 (2026-05-26): A-4 Doppler-Speed Sanity Gate のトグル。
-//   false = ゲート無効化し、症状②(バババッ)が消えるか実機 A/B で判定するため test main へ push。
-//   消える→A-4が②主因→B1(緩和/warmup)へ。消えない→A-4以外(別ゲート)。判定後 true 復帰 or B1 置換。
-//   ★ A3 は含めない (= 交絡回避)・距離/課金/カウンタは 1byte 不変。
-const _A4_DOPPLER_GATE_ENABLED = false;
-
 // T5 (2026-05-09): Adaptive Kalman Q (道路種別連動)
 //   map-matcher.js で commit された snap の typeCode を main 経由で受信し、
 //   typeCode に応じて Q を動的化する。
@@ -587,8 +576,7 @@ function processPosition(data) {
       const haverMs = haverDist / dtSec;
       const dopplerMs = speedKmh / 3.6;
       const speedDiff = Math.abs(dopplerMs - haverMs);
-      if (_A4_DOPPLER_GATE_ENABLED && speedDiff > 10) {
-        _a4RejectCount++; // ★診断: A-4 reject を計上 (Eruda 累計表示用・計測専用)
+      if (speedDiff > 10) {
         wlog('[GPS] Doppler-haversine 速度不整合 skip: diff=' + speedDiff.toFixed(1) + 'm/s');
         return null;
       }
@@ -780,7 +768,6 @@ function processPosition(data) {
     timestamp: now,
     compassHeading: compassHeading != null ? compassHeading : null,
     _debugCompass: compassHeading != null && CONFIG._compassDebug ? CONFIG._compassDebug : null,
-    a4RejectCount: _a4RejectCount, // ★診断: A-4 reject 累計 (Eruda 表示用・計測専用)
     accelData: accelData || null,
     accelSampleCount: accelSamples ? accelSamples.length : 0,
     gyroData: gyroData || null,
