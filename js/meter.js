@@ -143,6 +143,7 @@ const Meter = (() => {
   let _offRoadActive = false;
   let _consecutiveSnapMiss = 0;
   let _haverAccumSinceLastCommit = 0; // 直近 commit からの haversine 累積 (retroactive 用)
+  let _dispLogSig = null; // ★STEP2 診断: [DISP] ログの値変化 throttle 用 signature
   const OFFROAD_SNAP_MISS_THRESHOLD = 5;
   const OFFROAD_ABS_MAX_KMH = 160; // 物理上限
   // ★設計変更宣言 (2026-05-19・R1・代行開始直後 Off-Road 起動 grace period):
@@ -1536,6 +1537,34 @@ const Meter = (() => {
     // 内部 state 更新 (= 次回計算の基準)
     state.display_distance_m = display;
     state.last_display_update_time = now;
+
+    // ★STEP2 診断 (2026-05-26): ②(固まって一気に増える)の発生源特定用。
+    //   dm/t2/gp/tgt/disp/v を「丸め値が変化した時のみ」出力 (= Eruda スパム回避・throttle)。
+    //   read-only ログ・distance_m / 表示値 / 課金には一切影響しない。判定後に撤去 (STEP3)。
+    if (typeof dlog === 'function') {
+      const _dm = state.distance_m || 0;
+      const _t2 = state.tier2_pending_m || 0;
+      const _gp = state.gps_predictive_distance_m || 0;
+      const _sig =
+        Math.round(_dm) + '|' + Math.round(_t2) + '|' + Math.round(_gp) + '|' + Math.round(target);
+      if (_sig !== _dispLogSig) {
+        _dispLogSig = _sig;
+        dlog(
+          '[DISP] dm=' +
+            _dm.toFixed(1) +
+            ' t2=' +
+            _t2.toFixed(1) +
+            ' gp=' +
+            _gp.toFixed(1) +
+            ' tgt=' +
+            target.toFixed(1) +
+            ' disp=' +
+            display.toFixed(1) +
+            ' v=' +
+            (state._target_velocity_mps || 0).toFixed(2)
+        );
+      }
+    }
 
     // ★設計変更宣言 (2026-05-24・業務 display 滑らか化・別回路):
     //   business_display_distance_m を・課金 display と・同仕様で計算。

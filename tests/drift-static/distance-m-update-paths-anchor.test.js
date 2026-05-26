@@ -57,8 +57,10 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-24 business preview 別回路 (= business_tier2_pending_m): state 追加 + 別 if ブロック 2 件で shift。
     // 旧: [506, 622, 1099, 1120, 1517]
     // 2026-05-24 表示層 予測補間 (= business_display_distance_m + _target_velocity_mps state 追加) で shift。
-    // 新: [519, 635, 1132, 1153, 1625]
-    const expectedLines = [519, 635, 1132, 1153, 1625];
+    // 旧: [519, 635, 1132, 1153, 1625]
+    // 2026-05-26 STEP2 診断 ([DISP] ログ + _dispLogSig closure var 追加) で shift。distance_m 本体 1byte 不変・行番号のみ更新。
+    // 新: [520, 636, 1133, 1154, 1651]
+    const expectedLines = [520, 636, 1133, 1154, 1651];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -111,7 +113,8 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // L373 は _isBusinessZuptMicroMotion 内 (ZUPT helper・道路 snap 構成屋内対策)
     // L413 は _calculateOffRoadIncrement 内 (sanitizer)
     // L1093 は gps_predictive_distance_m 連続点累積 (= 表示用・trip 単位・連続点累積は絶対ルール許可)
-    const expectedLines = [323, 373, 413, 1093];
+    // 2026-05-26 STEP2 診断 (_dispLogSig closure var 追加) で +1 shift。GPS.calcDistance 本体 1byte 不変・行番号のみ更新。
+    const expectedLines = [324, 374, 414, 1094];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 4; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
