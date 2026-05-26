@@ -21,9 +21,10 @@
     "test:property": "vitest run tests/property",
     "test:stryker": "stryker run",
     "test:replay": "node tests/replay-mm.js",
+    "test:mm-priority": "node tests/meter-mm-priority.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "check:logic": "npm run test && npm run test:replay",
+    "check:logic": "npm run test && npm run test:replay && npm run test:mm-priority",
     "check:all": "npm run check && npm run check:logic"
   },
   "lint-staged": {
