@@ -104,6 +104,17 @@ let _prevAccuracy = null;
 //   起動条件: 直前 frame の isStationary 判定 (3 点 AND: GPS+C-1+C-2)
 //   停車終了で自動的に通常 Q に復帰 (Off-Road Mode 中の慣性誤差累積も抑える効果)
 const ZUPT_Q = 0.01;
+// ★設計変更宣言 Phase A-5 (2026-05-26・案 N: R-only Sage-Husa Adaptive R):
+//   観測残差 (innovation) を直近 N=10 step 蓄積し RMS を取って R̂ を推定。
+//   effectiveAccuracy = max(報告 accuracy, R̂) で chip の accuracy 過小報告 (= multipath で
+//   誤って小値を吐くケース) を補正。R̂ は SAGE_HUSA_R_MAX_M で上限 clamp し過剰 filter を防止。
+//   buffer N<5 は既存 accuracy をそのまま使用 (fallback)。
+//   絶対ルール準拠:
+//     ・Q 3 系統 (= ZUPT / コンパス融合 / T5 typeCode 連動): 1byte 不変
+//     ・calcFare / distance_m 加算 5 経路 / running gate / Worker B: 1byte 不変
+const SAGE_HUSA_BUFFER_N = 10;
+const SAGE_HUSA_MIN_SAMPLES = 5;
+const SAGE_HUSA_R_MAX_M = 35; // R̂ 上限 (= getDynamicAccuracyLimit 最大値と同期)
 class KalmanGPS {
   constructor() {
     this._lat = null;
@@ -111,6 +122,8 @@ class KalmanGPS {
     this._accuracy = 0;
     this._timestamp = null;
     this._zuptActive = false; // Phase 1.ZUPT: 停車中フラグ
+    this._innovBuffer = []; // Phase A-5: 観測残差距離 (m) 直近 N=10 step
+    this._adaptiveR = null; // Phase A-5: 推定 R̂ (m)・buffer N>=5 で更新
   }
   reset() {
     this._lat = null;
@@ -118,6 +131,8 @@ class KalmanGPS {
     this._accuracy = 0;
     this._timestamp = null;
     this._zuptActive = false;
+    this._innovBuffer = []; // Phase A-5: buffer もリセット
+    this._adaptiveR = null;
   }
   // Phase 1.ZUPT: 停車検出に応じて ZUPT モードを切替
   setZuptActive(active) {
@@ -150,10 +165,39 @@ class KalmanGPS {
     } else {
       Q = _getDynamicBaseQ();
     }
+    // Phase A-5 (案 N): R adaptive 補正
+    //   buffer N>=5 で R̂ 有・effectiveAccuracy = max(報告 accuracy, R̂)。
+    //   buffer N<5 は fallback で報告 accuracy をそのまま使用。
+    let effectiveAccuracy = accuracy;
+    if (this._adaptiveR != null && this._innovBuffer.length >= SAGE_HUSA_MIN_SAMPLES) {
+      effectiveAccuracy = Math.max(accuracy, this._adaptiveR);
+    }
     const decayed = Math.sqrt(this._accuracy * this._accuracy + Q * Q * dt * dt);
-    const K = (decayed * decayed) / (decayed * decayed + accuracy * accuracy);
-    this._lat = this._lat + K * (lat - this._lat);
-    this._lng = this._lng + K * (lng - this._lng);
+    const K = (decayed * decayed) / (decayed * decayed + effectiveAccuracy * effectiveAccuracy);
+    // Phase A-5: innovation 距離 (m) 計算・buffer 蓄積・R̂ 推定
+    //   観測残差 = (lat - this._lat) ・(lng - this._lng) を meter 換算
+    //   buffer push + N>10 で shift・N>=5 で RMS から R̂ 更新
+    //   R̂ は SAGE_HUSA_R_MAX_M で上限 clamp (= 過剰 filter 防止)
+    const innovLat = lat - this._lat;
+    const innovLng = lng - this._lng;
+    const meterPerDegLat = 111000;
+    const meterPerDegLng = 111000 * Math.cos((this._lat * Math.PI) / 180);
+    const innovDistM = Math.sqrt(
+      innovLat * meterPerDegLat * (innovLat * meterPerDegLat) +
+        innovLng * meterPerDegLng * (innovLng * meterPerDegLng)
+    );
+    this._innovBuffer.push(innovDistM);
+    if (this._innovBuffer.length > SAGE_HUSA_BUFFER_N) this._innovBuffer.shift();
+    if (this._innovBuffer.length >= SAGE_HUSA_MIN_SAMPLES) {
+      let sumSq = 0;
+      for (let i = 0; i < this._innovBuffer.length; i++) {
+        sumSq += this._innovBuffer[i] * this._innovBuffer[i];
+      }
+      const rms = Math.sqrt(sumSq / this._innovBuffer.length);
+      this._adaptiveR = Math.min(rms, SAGE_HUSA_R_MAX_M);
+    }
+    this._lat = this._lat + K * innovLat;
+    this._lng = this._lng + K * innovLng;
     this._accuracy = Math.sqrt((1 - K) * decayed * decayed);
     this._timestamp = timestamp;
     if (!isFinite(this._lat) || !isFinite(this._lng)) {
