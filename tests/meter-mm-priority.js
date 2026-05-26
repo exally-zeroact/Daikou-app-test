@@ -285,7 +285,9 @@ console.log('\n[case6] ROAD_FACTOR が削除され Meter 内に未参照');
 //     本テストは fakeWorker で mmResult を直接 dispatch する方式に変更。
 //     RegionLoader モックは不要 (main 側で snap を計算しない設計に変わった)。
 //     state.last_speed_kmh で停車判定 (case 内で gpsAt 経由で 36 km/h を保証)。
-console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commit リセット');
+console.log(
+  '\n[case7] Tier2 Worker B 経由: tentativeDistanceM snapshot SET + commit 無音化 (Phase A+B)'
+);
 {
   Meter.reset();
   const w = makeFakeWorker();
@@ -295,18 +297,16 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
   // 停車判定回避: state.last_speed_kmh を 36 km/h に設定するため GPS step を 1 回投入
   Meter.update(gpsAt(0));
 
-  // mmResult を 3 回 dispatch (tentativeIncrementM=90 ずつ・mmIncrementM=0 = preview)
-  for (let i = 0; i < 3; i++) {
-    w._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeIncrementM: 90,
-      snapped: 1,
-      committed: false,
-    });
-  }
+  // ★Phase A+B: tentativeDistanceM = 「commit点→現射影」snapshot を SET (= 旧 accumulate 撤廃)
+  w._dispatch({
+    type: 'mmResult',
+    mmIncrementM: 0,
+    tentativeDistanceM: 270,
+    snapped: 1,
+    committed: false,
+  });
   let s = Meter.getState();
-  assertNear(s.tier2_pending_m, 270, 0.01, 'tier2_pending_m に 3 step × 90m = 270m が蓄積');
+  assertNear(s.tier2_pending_m, 270, 0.01, 'tier2_pending_m = snapshot 270m に SET');
   assertNear(s.distance_m, 0, 0.01, 'state.distance_m は commit 待ちで未加算 (= 0)');
   assertNear(
     s.distance_m + s.tier2_pending_m,
@@ -315,13 +315,12 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
     '表示式 (distance_m + tier2_pending_m) = 270m で即時反映'
   );
 
-  // ★設計変更宣言 (2026-05-16・commit で 0 リセット → 差分減算に変更):
-  //   通常 commit を dispatch (mmIncrementM=200・tier2_pending_m -= 200 with 0 下限)
-  //   270 - 200 = 70 が残り、表示式 (distance_m + tier2_pending_m) = 270 で表示後退しない
+  // ★Phase A+B (commit 無音化): commit (mmIncrementM=200) + post-commit snapshot=70
+  //   → dm=200・tier2=70・和=270 で連続 (= 二重計上なし・表示後退なし)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 200,
-    tentativeIncrementM: 0,
+    tentativeDistanceM: 70,
     snapped: 1,
     committed: true,
     snap: {
@@ -333,29 +332,24 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
   });
   s = Meter.getState();
   assertNear(s.distance_m, 200, 0.01, 'commit 後 state.distance_m に MM 200m が加算');
-  assertNear(
-    s.tier2_pending_m,
-    70,
-    0.01,
-    'commit で tier2_pending_m が 270-200=70m に差分減算 (表示後退防止)'
-  );
+  assertNear(s.tier2_pending_m, 70, 0.01, 'commit 後 tier2 = post-commit snapshot 70m に SET');
   assertNear(
     s.distance_m + s.tier2_pending_m,
     270,
     0.01,
-    '表示式 (distance_m + tier2_pending_m) = 270m で commit 前と同値 (= 単調増加維持)'
+    '表示式 (distance_m + tier2_pending_m) = 270m で commit 前と同値 (= 単調増加維持・無音 commit)'
   );
 
-  // 次の tentativeIncrement → 90m を tier2 に積む (70 + 90 = 160m)
+  // 次 step: snapshot が 160m に伸長 → tier2=160・dm+t2=360
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
-    tentativeIncrementM: 90,
+    tentativeDistanceM: 160,
     snapped: 1,
     committed: false,
   });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 160, 0.01, '次 step で tier2_pending_m が 70→160m');
+  assertNear(s.tier2_pending_m, 160, 0.01, '次 step で tier2_pending_m が snapshot 160m に SET');
   assertNear(
     s.distance_m + s.tier2_pending_m,
     360,
@@ -363,11 +357,11 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
     '表示式 (distance_m + tier2_pending_m) = 360m (単調増加・270→360)'
   );
 
-  // ★追加テスト: mmIncrementM > tier2_pending_m のときも下限 0 で clamp される
+  // ★大 commit (mmIncrementM=500) + post-commit snapshot=0 → dm=700・tier2=0
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 500,
-    tentativeIncrementM: 0,
+    tentativeDistanceM: 0,
     snapped: 1,
     committed: true,
     snap: {
@@ -379,18 +373,15 @@ console.log('\n[case7] Tier2 Worker B 経由: tentativeIncrementM 累積 + commi
   });
   s = Meter.getState();
   assertNear(s.distance_m, 700, 0.01, 'distance_m が 500m 加算 (200+500=700)');
-  assertNear(
-    s.tier2_pending_m,
-    0,
-    0.01,
-    'tier2_pending_m=160 から 500 減算 → 下限 0 clamp'
-  );
+  assertNear(s.tier2_pending_m, 0, 0.01, 'commit 後 tier2 = post-commit snapshot 0m に SET');
 
   Meter.stop();
 }
 
 // ─── case8 (2026-05-16): Tier 2 absolute rule 準拠 + 停車判定 ───
-console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road で加算ゼロ');
+console.log(
+  '\n[case8] Tier2 Worker B 経由: tentativeDistanceM SET / 停車中 snapshot 据え置きで不変 (Phase A+B)'
+);
 {
   Meter.reset();
   const w = makeFakeWorker();
@@ -400,41 +391,36 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
   // 走行中状態をセット (36 km/h)
   Meter.update(gpsAt(0));
 
-  // (a) tentativeIncrementM = 0 → 加算なし
+  // (a) tentativeDistanceM = 0 → tier2=0 (SET)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
-    tentativeIncrementM: 0,
+    tentativeDistanceM: 0,
     snapped: 0,
     committed: false,
   });
   let s = Meter.getState();
-  assertNear(s.tier2_pending_m, 0, 0.01, 'tentativeIncrementM=0 なら tier2 加算なし');
+  assertNear(s.tier2_pending_m, 0, 0.01, 'tentativeDistanceM=0 なら tier2=0 (SET)');
 
-  // (b) tentativeIncrementM > 0 + state.last_speed_kmh = 36 (走行中・新閾値 0.5 以上) → 90m 加算
+  // (b) 走行中 tentativeDistanceM=90 → tier2=90 (SET)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
-    tentativeIncrementM: 90,
+    tentativeDistanceM: 90,
     snapped: 1,
     committed: false,
   });
   s = Meter.getState();
-  assertNear(s.tier2_pending_m, 90, 0.01, '走行中 (36 km/h・> 0.5) なら tier2_pending_m=90 加算');
+  assertNear(s.tier2_pending_m, 90, 0.01, '走行中 tentativeDistanceM=90 → tier2=90 (SET)');
 
-  // (c) ★設計変更宣言 (2026-05-16・Step4): Worker B 側で msg.isStationary=true 時に
-  //     tentativeIncrementM=0 を返す設計に移行したため、main 側のスキップは撤去済。
-  //     テストでは fakeWorker が「Worker B が 0 化した結果」を直接 dispatch する。
-  //     停車中の Worker B 出力 = mmIncrementM=0 + tentativeIncrementM=0 を確認。
-  // ★設計変更宣言 (2026-05-16・補助 speedKmh 閾値撤去): _isStationary() は
-  //     state.last_isStationary === true のみ判定するため、テストで isStationary: true を明示。
+  // (c) ★Phase A+B: 停車中は Worker B が snapshot を据え置き (= bestEmit 不動で伸びない) →
+  //     同一 snapshot=90 を SET → tier2 不変 90。isStationary 判定本体は不変 (= 司さん専決)。
   const slowGps = Object.assign({}, gpsAt(1), { speedKmh: 0.3, isStationary: true });
   Meter.update(slowGps);
-  // Worker B 側で 0 化されたあとの結果を dispatch (= 停車中シナリオ)
   w._dispatch({
     type: 'mmResult',
     mmIncrementM: 0,
-    tentativeIncrementM: 0,
+    tentativeDistanceM: 90,
     snapped: 1,
     committed: false,
   });
@@ -443,7 +429,7 @@ console.log('\n[case8] Tier2 Worker B 経由: tentative=0 / 停車中 / off-road
     s.tier2_pending_m,
     90,
     0.01,
-    '停車中シナリオ (Worker B 出力 0) で tier2_pending_m 不変 (前回 90m のまま)'
+    '停車中シナリオ (snapshot 据え置き 90) で tier2_pending_m 不変 (90m のまま)'
   );
 
   Meter.stop();
