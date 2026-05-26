@@ -65,7 +65,9 @@ const GPS = (() => {
     // 登録直後に現在状態を通知
     try {
       fn(getStatus());
-    } catch (e) {}
+    } catch (e) {
+      /* noop - intentionally empty */
+    }
   }
 
   // 手動再試行（UIの[再試行]ボタンから呼ぶ）
@@ -78,7 +80,9 @@ const GPS = (() => {
     if (!navigator.geolocation) return false;
     try {
       navigator.geolocation.clearWatch(watchId);
-    } catch (e) {}
+    } catch (e) {
+      /* noop - intentionally empty */
+    }
     try {
       watchId = navigator.geolocation.watchPosition(onPosition, onError, _WATCH_OPTIONS);
       if (typeof dlog === 'function')
@@ -361,6 +365,8 @@ const GPS = (() => {
         if (e.data.type === 'result') {
           const d = e.data.data;
           if (d._debugCompass) dlog('[GPS]', d._debugCompass);
+          // ★診断 (2026-05-26): A-4 Doppler reject 累計を Eruda に表示 (②根因切り分け・計測専用)
+          if (d.a4RejectCount) dlog('[GPS] A-4 reject 累計: ' + d.a4RejectCount);
           // コンパス値がWorkerに届いているか定期確認（10回に1回）
           if (d.compassHeading != null && Math.random() < 0.1) {
             dlog('[GPS] compass届いてる:', d.compassHeading.toFixed(0) + '°');
@@ -790,4 +796,5 @@ const GPS = (() => {
 //   既存 `const GPS = (() => {...})()` IIFE は無変更。末尾に Node 環境用 module.exports を追加。
 //   browser context: module 未定義のため no-op (旧挙動と等価)。
 //   Node test context: require('./gps.js') で GPS API オブジェクトを取得可能。
+// eslint-disable-next-line no-undef -- Node test 用 module.exports shim (browser では module 未定義で no-op)
 if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') module.exports = GPS;
