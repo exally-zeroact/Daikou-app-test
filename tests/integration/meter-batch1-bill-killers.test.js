@@ -114,7 +114,10 @@ function setupMeter() {
 // kill する mutant: ArithmeticOperator (- → +)・MethodExpression (max → min)・
 //   ConditionalExpression / LogicalOperator (|| 0 系列)
 
-describe('Phase 8 Batch 1: L460 tier2_pending_m commit 差分減算 (= 表示単調増加保証)', () => {
+// ★設計変更宣言 (Phase A+B・R-A1・2026-05-26): tier2_pending_m を「commit点→現射影の
+//   snapshot 弧長」を SET する方式に変更。旧 (tier2 += tentativeIncrementM 累積 + commit 差分減算)
+//   から再表現。保持する不変条件: dm+t2 連続 (commit 無音) / 表示単調非減少。
+describe('Phase 8 Batch 1: tier2_pending_m snapshot SET (= dm+t2 連続・表示単調増加保証)', () => {
   let Meter, fakeWorker;
   beforeEach(() => {
     ({ Meter, fakeWorker } = setupMeter());
@@ -124,45 +127,61 @@ describe('Phase 8 Batch 1: L460 tier2_pending_m commit 差分減算 (= 表示単
     delete globalThis.GPS;
   });
 
-  it('pending=100 + commit mmIncrement=30 → pending=70 (= 差分減算)', () => {
-    // 先に tentativeIncrementM で pending を 100 まで積む (= L483 経路)
+  it('tentativeDistanceM=100 → tier2_pending_m=100 (= SET)', () => {
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 100,
+      tentativeDistanceM: 100,
       snapped: true,
       committed: false,
     });
     expect(Meter.getState().tier2_pending_m).toBe(100);
-    // commit (= mmIncrement>0 + committed:true) で L460 差分減算
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 30,
-      snapped: true,
-      committed: true,
-    });
-    expect(Meter.getState().tier2_pending_m).toBe(70);
   });
 
-  it('pending=50 + commit mmIncrement=100 → pending=0 (= Math.max 下限 clamp)', () => {
+  it('★commit 時 dm+t2 連続: SET100 → commit(mm=30, snapshot=70) → dm=30 t2=70 sum=100', () => {
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 100,
+      snapped: true,
+      committed: false,
+    });
+    const before = Meter.getState();
+    expect(before.distance_m + before.tier2_pending_m).toBe(100);
+    // commit: mmIncrementM=30 (= dm へ確定) + post-commit snapshot=70 (= tier2 へ SET)
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 30,
+      tentativeDistanceM: 70,
+      snapped: true,
+      committed: true,
+    });
+    const after = Meter.getState();
+    expect(after.distance_m).toBe(30);
+    expect(after.tier2_pending_m).toBe(70);
+    expect(after.distance_m + after.tier2_pending_m).toBe(100); // ★連続 (= +30 の二重計上が起きない)
+  });
+
+  it('snapshot SET は累積でない: SET50 → SET30 → tier2=30 (= 80 でない)', () => {
+    fakeWorker._dispatch({
+      type: 'mmResult',
+      mmIncrementM: 0,
+      tentativeDistanceM: 50,
       snapped: true,
       committed: false,
     });
     expect(Meter.getState().tier2_pending_m).toBe(50);
     fakeWorker._dispatch({
       type: 'mmResult',
-      mmIncrementM: 100,
+      mmIncrementM: 0,
+      tentativeDistanceM: 30,
       snapped: true,
-      committed: true,
+      committed: false,
     });
-    expect(Meter.getState().tier2_pending_m).toBe(0);
+    expect(Meter.getState().tier2_pending_m).toBe(30); // ★SET (= 累積なら 80)
   });
 
-  it('pending=0 + commit mmIncrement=50 → pending=0 (= 0 下限維持・既に 0)', () => {
+  it('pending=0 + commit mmIncrement=50 (tentativeDistanceM 無) → pending=0', () => {
     expect(Meter.getState().tier2_pending_m).toBe(0);
     fakeWorker._dispatch({
       type: 'mmResult',
@@ -173,28 +192,28 @@ describe('Phase 8 Batch 1: L460 tier2_pending_m commit 差分減算 (= 表示単
     expect(Meter.getState().tier2_pending_m).toBe(0);
   });
 
-  it('複数 commit 連続で表示値 (distance + tier2_pending) 単調増加', () => {
-    // pending=200 まで積む
+  it('複数 commit 連続で表示値 (distance + tier2_pending) 単調非減少 + 連続', () => {
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 200,
+      tentativeDistanceM: 200,
       snapped: true,
       committed: false,
     });
     const driveDistBefore =
       (Meter.getState().distance_m || 0) + (Meter.getState().tier2_pending_m || 0);
     expect(driveDistBefore).toBe(200);
-    // commit 60 → distance_m=60・tier2=140 → driveDist=200 (= 不変・表示停止)
+    // commit 60 + post-commit snapshot 140 → distance_m=60・tier2=140 → driveDist=200 (= 連続)
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 60,
+      tentativeDistanceM: 140,
       snapped: true,
       committed: true,
     });
     const driveDistAfter =
       (Meter.getState().distance_m || 0) + (Meter.getState().tier2_pending_m || 0);
-    expect(driveDistAfter).toBe(200); // 60 + 140 = 200 (= 不変)
+    expect(driveDistAfter).toBe(200); // 60 + 140 = 200 (= 連続)
     expect(driveDistAfter).toBeGreaterThanOrEqual(driveDistBefore); // 単調非減少
   });
 });
@@ -379,7 +398,7 @@ describe('Phase 8 Batch 1: L1305/L1317/L1321 display_distance_m 計算 (= 表示
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
       committed: false,
     });
@@ -400,20 +419,20 @@ describe('Phase 8 Batch 1: L1305/L1317/L1321 display_distance_m 計算 (= 表示
 
   it('L1305 target は (distance_m + tier2_pending_m) で正方向に動く (= ArithmeticOperator + → -)', () => {
     Meter.setDistance(100);
-    // 1 回目: tier2=50 → target=150
+    // 1 回目: tier2=50 (SET) → target=150
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
       committed: false,
     });
     const s1 = Meter.getState();
-    // 2 回目: tier2=100 (= +50)・短い経過 → target=200 だが maxDelta clamp で漸増
+    // 2 回目: tier2=100 (SET・snapshot 伸長)・短い経過 → target=200 だが maxDelta clamp で漸増
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 100,
       snapped: true,
       committed: false,
     });

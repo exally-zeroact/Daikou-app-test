@@ -312,54 +312,58 @@ describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と�
     expect(Meter.getState().business_tier2_pending_m).toBe(0);
   });
 
-  it('★ tentativeIncrementM 受信時・business_active=true で・business_tier2_pending_m += 加算', () => {
+  it('★ tentativeDistanceM 受信時・business_active=true で・business_tier2_pending_m を SET', () => {
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
     });
     expect(Meter.getState().business_tier2_pending_m).toBe(50);
   });
 
-  it('★ business_active=false なら・tentativeIncrementM 受信でも・business_tier2_pending_m 加算しない', () => {
+  it('★ business_active=false なら・tentativeDistanceM 受信でも・business_tier2_pending_m を SET しない', () => {
     Meter.setBusinessActive(false);
     Meter.start();
     Meter._setDrainMmUntil(0);
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
     });
     expect(Meter.getState().business_tier2_pending_m).toBe(0);
   });
 
-  it('★ mm commit (mmIncrementM>0) で・business_tier2_pending_m 確定減算 (= 単調増加保証)', () => {
+  it('★ commit 時 business_distance_m + business_tier2 連続 (= snapshot SET・dm+t2 と同仕様)', () => {
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
-    // preview 100m 累積
+    // snapshot 100m SET
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 100,
+      tentativeDistanceM: 100,
       snapped: true,
     });
     expect(Meter.getState().business_tier2_pending_m).toBe(100);
-    // commit 60m 受信 → preview -60 = 40
+    // commit 60m + post-commit snapshot 40 → business_dist=60・business_tier2=40 (和=100 連続)
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 60,
+      tentativeDistanceM: 40,
       snapped: true,
       committed: true,
     });
     expect(Meter.getState().business_tier2_pending_m).toBe(40);
-    // business_distance_m も・mm commit で +60
     expect(Meter.getState().business_distance_m).toBe(60);
+    // 和が連続 (= 100 のまま・二重計上なし)
+    expect(Meter.getState().business_distance_m + Meter.getState().business_tier2_pending_m).toBe(
+      100
+    );
   });
 
   it('★ mm commit > preview なら・business_tier2_pending_m = 0 (= Math.max 0 下限)', () => {
@@ -385,11 +389,11 @@ describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と�
     Meter.setBusinessActive(true); // business gate ON
     Meter.start(); // running gate ON
     Meter._setDrainMmUntil(0);
-    // tentativeIncrementM 受信 → 両方加算 (= ただし別 if ブロック)
+    // tentativeDistanceM 受信 → 両 tier2 を同 snapshot で SET (= ただし別 if ブロック・別変数)
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
     });
     const s = Meter.getState();
@@ -405,7 +409,7 @@ describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と�
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
     });
     const s = Meter.getState();
@@ -420,7 +424,7 @@ describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と�
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
     });
     const s = Meter.getState();
@@ -435,7 +439,7 @@ describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と�
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 30,
+      tentativeDistanceM: 30,
       snapped: true,
     });
     expect(Meter.getState().business_tier2_pending_m).toBe(30);
@@ -450,7 +454,7 @@ describe('business preview 別回路 (= 2026-05-24・課金 tier2_pending_m と�
 // ─── ★ 完全非共有 verify: source code 静的 verify (= 課金変数 read/write ゼロ) ─
 
 describe('課金 / business 完全非共有 verify (= source 静的)', () => {
-  it('★ 課金 tier2_pending_m の・実コード書込は・既存 2 経路のみ (= 確定減算 + tentative 累積)', () => {
+  it('★ 課金 tier2_pending_m の・実コード書込は・1 経路のみ (= Phase A+B・snapshot SET)', () => {
     const fs = require('fs');
     const meterSrc = fs.readFileSync(
       require('path').join(__dirname, '..', '..', 'js', 'meter.js'),
@@ -465,9 +469,9 @@ describe('課金 / business 完全非共有 verify (= source 静的)', () => {
         codeWrites.push({ lineNo: i + 1, content: lines[i].trim() });
       }
     }
-    if (codeWrites.length !== 2) {
+    if (codeWrites.length !== 1) {
       throw new Error(
-        '課金 tier2_pending_m 書込違反: 期待 2 件 (確定減算 + tentative 累積)・実検出 ' +
+        '課金 tier2_pending_m 書込違反: 期待 1 件 (Phase A+B・snapshot SET)・実検出 ' +
           codeWrites.length +
           ' 件: ' +
           JSON.stringify(codeWrites)

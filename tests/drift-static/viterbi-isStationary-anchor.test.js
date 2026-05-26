@@ -26,8 +26,9 @@ describe('drift-static: map-matcher.js L3007 isStationary 強制 0 化 block 位
   it('B-static1: map-matcher.js L3007 周辺に強制 0 化 block 存在 (drift 検出)', () => {
     const source = loadSource();
     const lines = source.split('\n');
-    // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張 (= 2990-3025)
-    const window = lines.slice(2990, 3025).join('\n');
+    // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張
+    // 2026-05-26 Phase A+B (map-matcher tentativeDistanceM +28行) で block が L3035 へ移動・window 同期
+    const window = lines.slice(3020, 3060).join('\n');
     if (!/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(window)) {
       throw new Error(
         'map-matcher.js L3007 周辺 (±10) に if (msg.isStationary === true) 未検出 (drift detected)'
@@ -46,7 +47,7 @@ describe('drift-static: map-matcher.js L3007 isStationary 強制 0 化 block 位
     const lines = source.split('\n');
     let forceZeroLineNo = -1;
     let postMessageLineNo = -1;
-    for (let i = 2980; i < 3050 && i < lines.length; i++) {
+    for (let i = 3010; i < 3070 && i < lines.length; i++) {
       if (/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(lines[i])) {
         forceZeroLineNo = i + 1;
       }

@@ -682,6 +682,11 @@ const ROUTE_CACHE_SIZE = 100;
 
 // MM-3: 確定済み（commit 済み）snap・main 側の prev に相当
 let lastCommittedSnap = null;
+// ★Phase B (R-A2・2026-05-26・表示スコープ): tentativeDistanceM の表示用平滑値 (hysteresis)。
+//   候補 flip 由来の上方 spike を物理上限/step で抑制 (減少は自由=自己補正)。
+//   ★commit 候補 (bestEmit/mmIncrementM) 選定には一切不干渉★。
+let _displayTentativeM = 0;
+const TENTATIVE_MAX_STEP_M = 60; // Phase B: tentative の 1 step 上方変化上限 (= 候補 flip spike 抑制)
 // MM-1/2 互換用 prevSnap（Viterbi 不在時の fallback 経路で使用）
 let prevSnap = null;
 
@@ -1221,6 +1226,7 @@ function _scoreCandidates(
     //       Viterbi 比較は log 値で行う・c.emission は表示/diagnostic 用に exp で復元
     //   各 score が 0 に近い場合は -Infinity 回避のため LOG_FLOOR で clamp
     const LOG_FLOOR = -50; // exp(-50) ≈ 1.9e-22 で Float64 安全圏
+    // eslint-disable-next-line no-inner-declarations -- 既存 inner helper (lint-only・機能不変)
     function _safeLog(x) {
       return x <= 0 ? LOG_FLOOR : Math.max(LOG_FLOOR, Math.log(x));
     }
@@ -1453,6 +1459,7 @@ BinaryHeap.prototype.pop = function () {
     items[0] = last;
     let i = 0;
     const len = items.length;
+    // eslint-disable-next-line no-constant-condition -- 既存 heap sift loop (lint-only・機能不変)
     while (true) {
       const left = 2 * i + 1;
       const right = 2 * i + 2;
@@ -1896,7 +1903,9 @@ function _savePheromoneAll() {
         for (const [pref, arr] of _pheromoneByPref) {
           store.put({ pref: pref, data: arr.buffer });
         }
-      } catch (e) {}
+      } catch (e) {
+        /* noop - intentionally empty */
+      }
     })
     .catch(function () {});
 }
@@ -1950,7 +1959,9 @@ function _saveGridBiasIncremental() {
         for (const [key, arr] of _gridBias) {
           store.put({ k: key, d: arr.buffer });
         }
-      } catch (e) {}
+      } catch (e) {
+        /* noop - intentionally empty */
+      }
     })
     .catch(function () {});
 }
@@ -1997,10 +2008,14 @@ const PERSIST_INTERVAL_MS = 5 * 60 * 1000;
 setInterval(function () {
   try {
     _savePheromoneAll();
-  } catch (_) {}
+  } catch (_) {
+    /* noop - intentionally empty */
+  }
   try {
     _saveGridBiasIncremental();
-  } catch (_) {}
+  } catch (_) {
+    /* noop - intentionally empty */
+  }
 }, PERSIST_INTERVAL_MS);
 
 // ─── MM-6: OSRM 教師信号 helpers ────────────────────────────────
@@ -2306,7 +2321,9 @@ function _dbg() {
   for (let i = 0; i < arguments.length; i++) args.push(arguments[i]);
   try {
     console.log.apply(console, args);
-  } catch (_) {}
+  } catch (_) {
+    /* noop - intentionally empty */
+  }
 }
 
 // ★設計変更宣言 (2026-05-13・大改修 C5): 全国共通 coarse data (粗粒度 POI/地形)
@@ -2810,6 +2827,9 @@ self.onmessage = function (e) {
     // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ): preview 用 単 step 道路距離
     //   通常 commit (mmIncrementM > 0) とは独立。main で tier2_pending_m に加算される。
     let tentativeIncrementM = 0;
+    // ★Phase A (R-A2・2026-05-26): 最終 commit 点→現 bestEmit の snapshot 道路距離 (= 連続射影弧長)。
+    //   main で tier2_pending_m に SET → dm+t2 を連続化し commit を無音化。post-commit で算出 (二重計上回避)。
+    let tentativeDistanceM = 0;
     let snapped = 0,
       skipped = 0;
     let outSnap = null;
@@ -2984,6 +3004,26 @@ self.onmessage = function (e) {
           _updateCurvatureFromCommit(newCommitted);
         }
 
+        // ★Phase A (R-A2): tentative を「本 step commit 後の lastCommittedSnap → 現 bestEmit」の
+        //   snapshot 道路距離に。★commit 後に算出★することで commit 区間の二重計上を回避
+        //   (= main で dm += mmIncrementM と tier2 = snapshot が同 message でも和が連続)。
+        //   絶対ルール: mmIncrementM (= 課金 commit) は上の ④ で確定済・本ブロックは触れない。
+        if (lastCommittedSnap && bestEmit) {
+          try {
+            const _sd = _routeDistance(lastCommittedSnap, bestEmit);
+            if (_sd && typeof _sd.distanceM === 'number' && _sd.distanceM >= 0) {
+              // Phase B (表示スコープ hysteresis): 上方変化のみ上限 clamp・減少は自由 (自己補正)
+              _displayTentativeM =
+                _sd.distanceM > _displayTentativeM + TENTATIVE_MAX_STEP_M
+                  ? _displayTentativeM + TENTATIVE_MAX_STEP_M
+                  : _sd.distanceM;
+              tentativeDistanceM = _displayTentativeM;
+            }
+          } catch (_) {
+            /* noop - preview 不要・課金に影響しない */
+          }
+        }
+
         // MM-2 互換 prevSnap も更新（Viterbi 不在時 fallback 経路用に維持）
         prevSnap = Object.assign({}, bestEmit, { timestamp: msg.timestamp });
       }
@@ -3031,6 +3071,7 @@ self.onmessage = function (e) {
       //   commit (mmIncrementM) を待たない preview 用の単 step 道路距離。
       //   main 側で state.tier2_pending_m に加算し、commit で 0 リセットされる。
       tentativeIncrementM: tentativeIncrementM,
+      tentativeDistanceM: tentativeDistanceM, // ★Phase A: commit点→現射影 snapshot 弧長 (main で tier2 SET)
       snap: outSnap,
       confidence: pickedEmission > 0 ? Math.min(1.0, pickedEmission) : 1.0,
       windowSize: viterbi.size(),

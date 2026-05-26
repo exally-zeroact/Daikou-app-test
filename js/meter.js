@@ -545,7 +545,8 @@ const Meter = (() => {
         //     → 表示値は単調増加 (絶対に下がらない)
         //   distance_m への加算は完全に不変 (= 絶対ルール「distance_m 変えない」準拠)
         //   _tier2Segments は引き続き未使用 (旧経路で使われていたが現在は空のまま維持)
-        state.tier2_pending_m = Math.max(0, (state.tier2_pending_m || 0) - (m.mmIncrementM || 0));
+        // ★Phase A (R-A1・2026-05-26): tier2 は snapshot SET 方式へ移行・commit 差分減算は不要
+        //   (= dm += mmIncrementM と tier2 = tentativeDistanceM(post-commit snapshot) で和が連続)。
         _tier2Segments = [];
       }
     }
@@ -555,17 +556,7 @@ const Meter = (() => {
     //   ・本ブロックは・mmIncrementM > 0 commit 時のみ・state.business_active gate で・business 減算
     //   ・単調増加保証: Math.max(0, ...) で・負値防止 (= 課金と同仕組み・別計算)
     //   ・課金変数 (= state.tier2_pending_m) を・read/write しない (= 完全非共有)
-    if (
-      m.type === 'mmResult' &&
-      typeof m.mmIncrementM === 'number' &&
-      m.mmIncrementM > 0 &&
-      state.business_active
-    ) {
-      state.business_tier2_pending_m = Math.max(
-        0,
-        (state.business_tier2_pending_m || 0) - m.mmIncrementM
-      );
-    }
+    // ★Phase A (R-A1): business tier2 も snapshot SET 方式へ移行・commit 差分減算は不要 (= 下記 SET で連続化)。
     // ★設計変更宣言 (2026-05-16・Tier 2 リードインジケータ・Worker B 経由 preview):
     //   mmIncrementM === 0 でも tentativeIncrementM > 0 を毎 GPS step 受信する設計。
     //   commit を待たず state.tier2_pending_m に加算し、表示式
@@ -577,15 +568,17 @@ const Meter = (() => {
     //   main 側の _isStationary 判定は冗長になり撤去。停車中は m.tentativeIncrementM=0 となり
     //   state.tier2_pending_m += 0 = 値不変。
     //   Tier 1 と同じく Worker B 出力を信頼。
+    // ★Phase A (R-A1): tentativeDistanceM (= commit点→現射影 snapshot 弧長) を tier2 に SET。
+    //   dm + tier2 = 連続射影弧長・commit は無音 (dm +X / 次 snapshot -X)。gate は従来同 (running/!offroad/drain)。
     if (
       m.type === 'mmResult' &&
-      typeof m.tentativeIncrementM === 'number' &&
-      m.tentativeIncrementM > 0 &&
+      typeof m.tentativeDistanceM === 'number' &&
+      m.tentativeDistanceM >= 0 &&
       state.running &&
       !_offRoadActive &&
       Date.now() >= _drainMmUntil
     ) {
-      state.tier2_pending_m = (state.tier2_pending_m || 0) + m.tentativeIncrementM;
+      state.tier2_pending_m = m.tentativeDistanceM;
     }
     // ★設計変更宣言 (2026-05-24・business preview 別回路・tentativeIncrementM 受信時の・★ 業務専用 ★ 累積):
     //   ★絶対原則: 課金 tier2_pending_m とは・完全に別 if ブロック・別行・別変数 ★
@@ -595,16 +588,16 @@ const Meter = (() => {
     //   ・Off-Road active 中は・累積 skip (= Worker B 確定不可・preview 不能)
     //   ・drain 中も・累積 skip (= 代行開始直後 0.17km 等の・残骸防止・課金 preview と同様)
     //   ・課金変数 (= state.tier2_pending_m) を・read/write しない (= 完全非共有)
+    // ★Phase A (R-A1): business tier2 も tentativeDistanceM を SET (= business_active gate・空車中も連続化)。
     if (
       m.type === 'mmResult' &&
-      typeof m.tentativeIncrementM === 'number' &&
-      m.tentativeIncrementM > 0 &&
+      typeof m.tentativeDistanceM === 'number' &&
+      m.tentativeDistanceM >= 0 &&
       state.business_active &&
       !_offRoadActive &&
       Date.now() >= _drainMmUntil
     ) {
-      state.business_tier2_pending_m =
-        (state.business_tier2_pending_m || 0) + m.tentativeIncrementM;
+      state.business_tier2_pending_m = m.tentativeDistanceM;
     }
     // Phase 1.C (2026-05-10): snap miss 連続検出 → Off-Road Mode 起動
     if (m.snapped) {

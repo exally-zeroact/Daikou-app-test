@@ -211,13 +211,13 @@ describe('offroad-mode-activation (meter.js Phase 1.C L95/L442/L462/L833/L334)',
   it('★ Phase 3: Off-Road 起動時の tier2_pending_m 一括 0 化は撤廃済 (= 自然減算で対応)', () => {
     // 2026-05-18 Phase 3 仕様変更:
     //   旧: Off-Road 起動時に tier2_pending_m = 0 一括リセット (= 表示急減原因)
-    //   新: 一括リセット撤廃・通常 commit 時の差分減算 (= 自然減算) で対応
+    //   新(Phase A+B): 一括リセット撤廃・tier2 は snapshot SET (= commit で自然追従)
     //   表示は display_distance_m (= Reconciliation 同期値) で滑らか追従
     for (let i = 0; i <= 5; i++) Meter.update(gpsAt(i));
     fakeWorker._dispatch({
       type: 'mmResult',
       mmIncrementM: 0,
-      tentativeIncrementM: 50,
+      tentativeDistanceM: 50,
       snapped: true,
     });
     expect(Meter.getState().tier2_pending_m).toBe(50);
