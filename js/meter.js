@@ -143,7 +143,6 @@ const Meter = (() => {
   let _offRoadActive = false;
   let _consecutiveSnapMiss = 0;
   let _haverAccumSinceLastCommit = 0; // 直近 commit からの haversine 累積 (retroactive 用)
-  let _dispLogSig = null; // ★STEP2 診断: [DISP] ログの値変化 throttle 用 signature
   // ★Phase D+E (2026-05-26・②burst 散らし・表示層のみ・distance_m/calcFare 不変):
   const _DISP_NORMAL_STEP_M = 8; // D-1: target 増分がこれ超なら burst 扱い (前方予測抑止 + v 更新スキップ)
   const _DISP_V_CLAMP_MPS = 36; // D-2: 予測 velocity 上限 (= 130km/h・旧 60 から縮小)
@@ -1493,11 +1492,11 @@ const Meter = (() => {
     //     ・表示専用 layer・display_distance_m / business_display_distance_m を・滑らかに表示
     //     ・予測は・後退禁止・実値下回り禁止 (= 単調増加 + max(display, target))
     const now = Date.now();
-    const target = Math.max(
-      state.distance_m || 0,
-      state.gps_predictive_distance_m || 0,
-      (state.distance_m || 0) + (state.tier2_pending_m || 0)
-    );
+    // ★1モデル化 (2026-05-27): 複数推定の同時計算 (max-of-3) を廃止し単一 target に。
+    //   target = 課金確定(distance_m) + 道路ベース preview リード(tier2_pending_m)。
+    //   gps_predictive を target から排除 (= 空車中も伸びる未ゲート第3推定＝動きすぎの一因を除去)。
+    //   tier2_pending_m >= 0 なので target >= distance_m が常に成立。
+    const target = (state.distance_m || 0) + (state.tier2_pending_m || 0);
     // ★Phase D+E: 予測 velocity を「非 burst step のみ」で更新し sustained 速度化。
     //   burst (= target が NORMAL_STEP_M 超の塊増分) では v をスパイクさせない →
     //   前方予測の暴走 (旧 v=60 で 216km/h 先食い) を構造的に除去。
@@ -1525,8 +1524,9 @@ const Meter = (() => {
       ? target
       : target + state._target_velocity_mps * target_elapsed;
     let display = state.display_distance_m || 0;
+    const dmNow = state.distance_m || 0;
     if (state.last_display_update_time === null) {
-      display = predicted_target;
+      display = Math.max(predicted_target, dmNow);
     } else {
       const dt = Math.max(0, (now - state.last_display_update_time) / 1000);
       // E: slew = max(BASE, sustained v × FACTOR) で・高速で遅延せず burst を散らす
@@ -1535,47 +1535,21 @@ const Meter = (() => {
         (state._target_velocity_mps || 0) * _DISP_SLEW_FACTOR
       );
       const maxDelta = dt * slew;
+      // 予測 target へ上限レートで追従 (単調増加・後退禁止)
       const diff = predicted_target - display;
-      if (diff > 0 && diff <= maxDelta) {
-        display = predicted_target;
-      } else if (diff > 0) {
-        display += maxDelta;
+      if (diff > 0) {
+        display += Math.min(diff, maxDelta);
       }
-      // diff <= 0: display 維持 (= 単調増加・後退禁止)
+      // ★1モデル化 (2026-05-27): 瞬間 floor (Math.max) を廃止。
+      //   課金距離(distance_m)を下回る分は・瞬間 jump せず同レート(maxDelta)で catch-up。
+      //   → distance_m が塊で進んでも段差ゼロで滑らかに追従 (バババッの構造的除去)。
+      if (display < dmNow) {
+        display += Math.min(dmNow - display, maxDelta);
+      }
     }
-    // 課金距離 (= state.distance_m) を下回らない max 保証
-    display = Math.max(display, state.distance_m || 0);
     // 内部 state 更新 (= 次回計算の基準)
     state.display_distance_m = display;
     state.last_display_update_time = now;
-
-    // ★STEP2 診断 (2026-05-26): ②(固まって一気に増える)の発生源特定用。
-    //   dm/t2/gp/tgt/disp/v を「丸め値が変化した時のみ」出力 (= Eruda スパム回避・throttle)。
-    //   read-only ログ・distance_m / 表示値 / 課金には一切影響しない。判定後に撤去 (STEP3)。
-    if (typeof dlog === 'function') {
-      const _dm = state.distance_m || 0;
-      const _t2 = state.tier2_pending_m || 0;
-      const _gp = state.gps_predictive_distance_m || 0;
-      const _sig =
-        Math.round(_dm) + '|' + Math.round(_t2) + '|' + Math.round(_gp) + '|' + Math.round(target);
-      if (_sig !== _dispLogSig) {
-        _dispLogSig = _sig;
-        dlog(
-          '[DISP] dm=' +
-            _dm.toFixed(1) +
-            ' t2=' +
-            _t2.toFixed(1) +
-            ' gp=' +
-            _gp.toFixed(1) +
-            ' tgt=' +
-            target.toFixed(1) +
-            ' disp=' +
-            display.toFixed(1) +
-            ' v=' +
-            (state._target_velocity_mps || 0).toFixed(2)
-        );
-      }
-    }
 
     // ★設計変更宣言 (2026-05-24・業務 display 滑らか化・別回路):
     //   business_display_distance_m を・課金 display と・同仕様で計算。
@@ -1610,8 +1584,9 @@ const Meter = (() => {
       ? business_target
       : business_target + state._business_target_velocity_mps * btarget_elapsed;
     let bdisplay = state.business_display_distance_m || 0;
+    const bdmNow = state.business_distance_m || 0;
     if (state.last_business_display_update_time === null) {
-      bdisplay = predicted_business_target;
+      bdisplay = Math.max(predicted_business_target, bdmNow);
     } else {
       const bdt = Math.max(0, (now - state.last_business_display_update_time) / 1000);
       const bslew = Math.max(
@@ -1619,16 +1594,17 @@ const Meter = (() => {
         (state._business_target_velocity_mps || 0) * _DISP_SLEW_FACTOR
       ); // E
       const bmaxDelta = bdt * bslew;
+      // 予測 target へ上限レートで追従 (単調増加・後退禁止)
       const bdiff = predicted_business_target - bdisplay;
-      if (bdiff > 0 && bdiff <= bmaxDelta) {
-        bdisplay = predicted_business_target;
-      } else if (bdiff > 0) {
-        bdisplay += bmaxDelta;
+      if (bdiff > 0) {
+        bdisplay += Math.min(bdiff, bmaxDelta);
       }
-      // bdiff <= 0: 後退禁止
+      // ★1モデル化 (2026-05-27): 瞬間 floor を廃止。総走行確定(business_distance_m)を
+      //   下回る分は同レートで catch-up (= trip と同じ構造・別ルート)。
+      if (bdisplay < bdmNow) {
+        bdisplay += Math.min(bdmNow - bdisplay, bmaxDelta);
+      }
     }
-    // 実値下回り防止
-    bdisplay = Math.max(bdisplay, business_target);
     state.business_display_distance_m = bdisplay;
     state.last_business_display_update_time = now;
 
@@ -1674,6 +1650,9 @@ const Meter = (() => {
     const v = Number.isFinite(distanceM) && distanceM >= 0 ? distanceM : 0;
     state.distance_m = v;
     state.fare_yen = calcFare(v);
+    // ★1モデル化 (2026-05-27): 復元/外部代入は表示を即時同期 (= ライブの滑らか catch-up とは別扱い)。
+    //   タスクキル復元時に display が 0 から数百秒かけて追従するのを防ぐ。
+    state.display_distance_m = v;
   }
 
   // ★設計変更宣言 (2026-05-14): business_distance_m の外部設定 API。
@@ -1681,7 +1660,10 @@ const Meter = (() => {
   //   永続化値 (state.total_distance_m) を Meter 側に逆流させるために使う。
   //   通常の業務中は呼ばない (Meter 内部で累積する)。
   function setBusinessDistance(m) {
-    state.business_distance_m = typeof m === 'number' && m >= 0 ? m : 0;
+    const bv = typeof m === 'number' && m >= 0 ? m : 0;
+    state.business_distance_m = bv;
+    // ★1モデル化 (2026-05-27): 復元時は業務 display も即時同期 (trip と同じ構造・別ルート)。
+    state.business_display_distance_m = bv;
   }
 
   // ★設計変更宣言 (2026-05-18・Phase 2・business_active gate):

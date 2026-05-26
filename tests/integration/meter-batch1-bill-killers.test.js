@@ -448,7 +448,8 @@ describe('Phase 8 Batch 1: L1305/L1317/L1321 display_distance_m 計算 (= 表示
     // 大きく distance_m を増やす (= 急増)
     Meter.setDistance(10000);
     const s2 = Meter.getState();
-    // display は L1321 の Math.max で・最低でも 10000 (= distance_m) になる
+    // ★1モデル化 (2026-05-27): setDistance は復元/外部代入経路 → display を即時同期 (= distance_m と一致)。
+    //   (ライブの distance_m 増分は瞬間 floor 廃止＋上限 catch-up で滑らか追従＝別挙動)
     expect(s2.display_distance_m).toBeGreaterThanOrEqual(10000);
     expect(s2.display_distance_m).toBeGreaterThan(s1.display_distance_m);
   });

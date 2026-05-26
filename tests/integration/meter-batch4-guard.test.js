@@ -12,19 +12,19 @@
 //   L490 mmResult skip gate (= snap miss 連続検出条件)                     (~6 mutants)
 //   L1161 calcFare vehicles 倍率 gate                                       (~5 mutants)
 //   L1211 calcFare rounding ガード                                          (~5 mutants)
-//   L1314 display maxDelta clamp ── docs only (L1321 Math.max で隠蔽・既出)
+//   表示 maxDelta clamp ── docs only (2026-05-27 表示1モデル化で再構成・下記)
 //
 // ★絶対ルール準拠:
 //   prod (js/*) 1 byte も触らない (= test 追加のみ)。distance_m 加算 5 経路・calcFare 本体・
 //   commit 機構 完全不変。追加 test は public API + 既存 fakeWorker dispatch で・既存挙動を
 //   verify するだけ (= 仕様変更ゼロ)。
 //
-// L1314 docs (= 観測不能・無理に kill しない):
-//   `if (Math.abs(diff) <= maxDelta)` → display = target / else → diff 方向に maxDelta clamp。
-//   但し直後 L1321 `display = Math.max(display, state.distance_m || 0)` で・**display は
-//   常に distance_m 以上に強制補正**される (= 課金距離下回らない設計・defense-in-depth)。
-//   結果: L1314 の clamp 方向の差異は・L1321 で吸収され観測不能。Batch 1 既出 L1317 と同様。
-//   → 課金 kill 率の真の分母から除外 (= docs 明記のみ)。
+// 表示 clamp docs (= 2026-05-27 表示1モデル化で構造変更):
+//   旧: if(diff<=maxDelta) display=target / else maxDelta clamp + 直後 瞬間 floor
+//       display=Math.max(display, distance_m) で常に距離以上に強制補正(観測不能の主因)。
+//   新: 瞬間 floor を撤廃 → display += Math.min(diff, maxDelta)・distance_m 下回り時のみ同レート catch-up。
+//   影響: floor 撤去で clamp 方向 mutant の観測性が変わる → Stryker の実 survivor は run 結果で確認。
+//   ※ display_distance_m は表示専用・distance_m / calcFare は 1byte 不変 (課金 kill 率に影響なし)。
 
 'use strict';
 
