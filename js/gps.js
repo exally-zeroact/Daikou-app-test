@@ -325,6 +325,10 @@ const GPS = (() => {
   // フォールバック用状態変数（Worker非対応時）
   let lastPosition = null;
   let lowSpeedStart = null;
+  // ★A3 (2026-05-26): main スレッドの raw 連続点 (= worker/fallback の accept/reject に
+  //   依存しない) を保持し、coords.speed が null/欠落の時に haversine 速度を代用するための前点。
+  let _rawPrevPos = null; // { lat, lng, t }
+  const _HAVER_SPEED_MAX_KMH = 180; // A3: 代用速度の物理上限クランプ (spike で accuracy 上限を緩めすぎない)
   let isStationary = false;
   let trafficJamSince = null;
   let isTrafficJam = false;
@@ -393,6 +397,7 @@ const GPS = (() => {
     startCompass(); // コンパス起動（許可不要）
     startMotion(); // 加速度センサー起動（案A・2026/04/29）
     if (!worker) initWorker();
+    _rawPrevPos = null; // A3: 業務開始時に代用速度の前点をリセット (worker/非worker 共通)
     if (!useWorker) {
       kalman = new KalmanGPS();
       lastPosition = null;
@@ -437,6 +442,7 @@ const GPS = (() => {
     // ジャイロバッファクリア（B段階・2026/04/29）
     gyroBuffer = [];
     gyroData = null;
+    _rawPrevPos = null; // A3: 停止/リセット時に代用速度の前点をリセット (worker/非worker 共通)
     if (useWorker && worker) {
       worker.postMessage({ type: 'reset', data: {} });
     } else {
@@ -457,7 +463,28 @@ const GPS = (() => {
     // G3 (2026-05-09): 最新位置を地磁気偏差ルックアップ用に記録
     _lastKnownLat = lat;
     _lastKnownLng = lng;
-    const speedKmh = speed != null && speed >= 0 ? speed * 3.6 : 0;
+    // ★A3 (2026-05-26): coords.speed が null/欠落の時 (= iOS Safari 全機で常時・弱GPS Android でも) は、
+    //   直前 raw GPS 点からの haversine 速度を代用する。
+    //   目的: 低速時 accuracy 上限 10m デッドロック (= 弱GPS端末/条件で speed=0→上限10m固定→
+    //         全点 reject→速度上がらず→永久10m) を断ち切る + 速度連動 accuracy 上限の適正化。
+    //   方針:
+    //     ・raw 連続点ベース (= Kalman/snap を経由しない main スレッドの前点) で算出するため
+    //       worker/fallback の accept/reject に依存せず常時更新される (= deadlock を解く核心)。
+    //     ・距離計算には一切使わない (= 表示/課金距離は従来経路のまま・絶対ルール準拠)。
+    //       本値は accuracy 上限選択 / 停車判定 / Doppler 整合などゲート用の速度推定にのみ供給。
+    //     ・物理上限でクランプ (= GPS spike で accuracy 上限を緩めすぎないため)。
+    //     ・dt が範囲外 (<=0 or >=10秒) は代用せず 0 (= バックグラウンド復帰等の stale 前点を除外)。
+    let speedKmh = speed != null && speed >= 0 ? speed * 3.6 : 0;
+    if ((speed == null || speed < 0) && _rawPrevPos) {
+      const _dtSpeed = (now - _rawPrevPos.t) / 1000;
+      if (_dtSpeed > 0 && _dtSpeed < 10) {
+        const _dSpeed = calcDistance(_rawPrevPos.lat, _rawPrevPos.lng, lat, lng);
+        const _kmh = (_dSpeed / _dtSpeed) * 3.6;
+        if (isFinite(_kmh) && _kmh > 0) speedKmh = Math.min(_kmh, _HAVER_SPEED_MAX_KMH);
+      }
+    }
+    // raw 前点を毎回更新 (= reject の有無に依存しない・次フレームの代用速度の基準)
+    _rawPrevPos = { lat, lng, t: now };
     // 加速度サンプル取り出し（案A・2026/04/29）
     const accelSamples = accelBuffer.slice();
     accelBuffer = [];
