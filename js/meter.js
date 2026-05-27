@@ -264,6 +264,11 @@ const Meter = (() => {
   // GPS消失補完の閾値
   const GAP_THRESHOLD_SEC = 5; // 5秒以上の空白＝GPS消失
   const GAP_MAX_SEC = 600; // 最大10分（それ以上は異常）
+  // ★Phase2-a (2026-05-27): Worker B が道路 routing で埋める gap の上限秒。
+  //   mmWorker 有 + dtSec <= GAP_ROUTE_MAX_SEC の gap は Worker B が commit 経路で routing する想定 →
+  //   meter.js は速度×時間 fill しない (= 二重計上回避)。mmWorker 無 or >GAP_ROUTE_MAX_SEC のみ fill。
+  //   ★map-matcher.js の同名定数と必ず一致させること★ (= 同期境界・現在 60s)。
+  const GAP_ROUTE_MAX_SEC = 60;
   // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): NEAR_INFRA_RADIUS_M / MM_MAX_SNAP_DIST_M /
   //   MM_MAX_SEGMENT_DIST_M / MM_GAP_RESET_SEC は inline snap / tunnel-bridge polyline 経路でのみ
   //   使用していたため削除。Worker B 側は map-matcher.js 内で独自の定数を持つ。
@@ -1112,7 +1117,16 @@ const Meter = (() => {
       //     を保持 → gap fill が「停車していない前提」で速度×時間で誤加算 (最大数十m)
       //   新: !gpsResult.isStationary を条件に追加。停車判定中は gap fill skip。
       //   絶対ルール準拠: 既存 += 経路自体は変更なし・gate 強化のみ。
-      if (dtSec >= GAP_THRESHOLD_SEC && !gpsResult.isStationary) {
+      // ★Phase2-a (2026-05-27): MM 活動中(mmWorker 有)の 5-60s gap は Worker B が道路 routing で
+      //   埋める (commit 経路 = mmIncrementM)。二重計上回避のため・meter.js 速度×時間 fill は
+      //   「mmWorker 無 (= 純 GPS mode) or dtSec > GAP_ROUTE_MAX_SEC (= 大 gap・Worker B も routing 不可)」のみ。
+      //   MM 有 + 5-60s gap で Worker B が routing を棄却した場合は過少 (安全側・過大課金回避)・Off-Road が捕捉。
+      //   distance_m 加算経路 (L1130) 自体は不変・gate 条件のみ追加。
+      //   ★判定は distanceSource==='mm' (= MM が直近 commit 中 = 機能している) で行う。
+      //   mmWorker 在っても road データ未 load 等で非機能なら distanceSource!=='mm' → 従来どおり速度×時間 fill。
+      const _mmHandlesGap =
+        !!mmWorker && state.distanceSource === 'mm' && dtSec <= GAP_ROUTE_MAX_SEC;
+      if (dtSec >= GAP_THRESHOLD_SEC && !gpsResult.isStationary && !_mmHandlesGap) {
         // gap fill: 速度×時間 (タイヤ回転由来の概算・GPS 直線弦ではない)
         const filled = calculateGapFill(dtSec, state.last_speed_kmh);
         if (filled !== null) {

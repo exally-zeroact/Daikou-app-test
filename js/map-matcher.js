@@ -35,6 +35,12 @@ importScripts('osrm-client.js'); // MM-6: OSRM /match クライアント
 const MM_MAX_SNAP_DIST_M = 50; // snap 単独の上限（fallback）
 const MM_MAX_SEGMENT_DIST_M = 1000; // T9 (2026-05-09): 単純 skip ではなく「明らかな jump」判定の閾値として使用
 const MM_GAP_RESET_SEC = 5;
+// ★Phase2-a (2026-05-27): gap 道路 routing 上限。MM_GAP_RESET_SEC < dtSec <= GAP_ROUTE_MAX_SEC の
+//   gap は道路 routing で埋める (OSRM 流)。>GAP_ROUTE_MAX_SEC は split/skip → meter.js 速度×時間 fallback。
+//   ★meter.js の同名定数と必ず一致させること★ (= 二重計上回避の同期境界)。
+const GAP_ROUTE_MAX_SEC = 60;
+// gap routing の誤 snap 過大ガード: 道路距離 / 直線距離 がこれ超は遠回り誤 snap として棄却 (過大課金防止)。
+const GAP_MAX_DETOUR_RATIO = 3.0;
 
 // T4 (2026-05-09): turn:restriction 違反 transition のペナルティ
 //   _violatesOneway と同じ ×0.05 (事実上除外だが完全 0 にはしない)
@@ -2954,11 +2960,43 @@ self.onmessage = function (e) {
             const prevObsT = lastCommittedSnap.observationTimestamp;
             const currObsT = newCommitted.observationTimestamp;
             const dtSec = prevObsT != null && currObsT != null ? (currObsT - prevObsT) / 1000 : 0;
-            if (dtSec > MM_GAP_RESET_SEC) {
-              reason = 'gap reset between commits';
+            if (dtSec > GAP_ROUTE_MAX_SEC) {
+              // ★Phase2-a (2026-05-27): >GAP_ROUTE_MAX_SEC の大 gap は道路 routing 不可 (OSRM 流 split)。
+              //   meter.js が速度×時間で fallback (= mmWorker 有 + dtSec>GAP_ROUTE_MAX_SEC で fill)。
+              reason = 'gap reset between commits (>' + GAP_ROUTE_MAX_SEC + 's)';
             } else {
               const r = _routeDistance(lastCommittedSnap, newCommitted);
-              if (r && typeof r.distanceM === 'number' && r.distanceM >= 0) {
+              // ★Phase2-a (2026-05-27): MM_GAP_RESET_SEC<dtSec<=GAP_ROUTE_MAX_SEC の gap は道路 routing で埋める。
+              //   誤 snap 過大課金を防ぐ guard (OSRM の transition/confidence 相当):
+              //     ① 同一道路 polyline 経路 (_via==='polyline') = 高信頼のみ採用 (別道路 tile 経路は見送り)
+              //     ② 直線距離比 route/great-circle <= GAP_MAX_DETOUR_RATIO (遠回り誤 snap を棄却)
+              //   guard 不通過 → skipped=1 (mmIncrementM=0)。meter.js も fill しない (dtSec<=60s+mmWorker) =
+              //   過少 (安全側・過大課金回避)・persistent miss は Off-Road が捕捉。distance_m 加算経路は不変。
+              if (
+                dtSec > MM_GAP_RESET_SEC &&
+                r &&
+                typeof r.distanceM === 'number' &&
+                r.distanceM >= 0
+              ) {
+                const _gcGap = _haversine(
+                  lastCommittedSnap.snapLat,
+                  lastCommittedSnap.snapLng,
+                  newCommitted.snapLat,
+                  newCommitted.snapLng
+                );
+                const _viaOk = r._via === 'polyline';
+                const _detourOk = _gcGap > 0 && r.distanceM / _gcGap <= GAP_MAX_DETOUR_RATIO;
+                if (!_viaOk || !_detourOk) {
+                  skipped = 1;
+                  reason =
+                    'gap not routable (via=' +
+                    r._via +
+                    ' ratio=' +
+                    (_gcGap > 0 ? (r.distanceM / _gcGap).toFixed(2) : 'NA') +
+                    ') → meter.js は fill せず (過少安全側)';
+                }
+              }
+              if (!skipped && r && typeof r.distanceM === 'number' && r.distanceM >= 0) {
                 // T9 (2026-05-09): 旧 MM_MAX_SEGMENT_DIST_M=1000 の単純 skip を廃止
                 //   ・ 短時間に 1km 超過は通常 ありえないが、120km/h 高速道路なら 30 秒で 1km
                 //     普通車でも実 13.3m/s × dtSec 程度は妥当
