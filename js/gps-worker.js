@@ -13,6 +13,32 @@ let debug = false;
 function wlog() {
   if (debug) console.log.apply(console, arguments);
 }
+// ★STEP0 診断 (2026-05-28): GPS層の値を main 経由で Eruda に出す (read-only・throttle)。
+//   worker の console.log(wlog) は Eruda に届かないため postMessage で main に送り dlog させる。
+//   speedKmh源/isStationary/accuracy/accLimit/reject理由 を・丸め signature 変化時のみ送信。
+//   ★accept/reject/距離ロジックには一切影響しない (純診断・判定後に撤去)★。
+let _gpsDbgSig = '';
+function _postGpsDbg(o) {
+  try {
+    const sig =
+      (o.rej || 'ok') +
+      '|' +
+      Math.round(o.spd || 0) +
+      '|' +
+      Math.round(o.acc || 0) +
+      '|' +
+      (o.lim || 0) +
+      '|' +
+      (o.stat ? 1 : 0) +
+      '|' +
+      (o.src || '');
+    if (sig === _gpsDbgSig) return;
+    _gpsDbgSig = sig;
+    self.postMessage({ type: 'gpsDbg', data: o });
+  } catch (_) {
+    /* noop - 診断のみ */
+  }
+}
 
 // ─── CONFIG（メインと同じ値・初期化メッセージで上書き可能） ───
 let CONFIG = {
@@ -548,17 +574,38 @@ function processPosition(data) {
     accelSamples,
     gyroData,
     gyroSamples,
+    speedSrc, // ★STEP0 診断: gps.js が付与 (= 'dop'=Doppler / 'hav'=A3 haversine代用)
   } = data;
 
   // ① 動的accuracy閾値
   const accLimit = getDynamicAccuracyLimit(speedKmh, now);
-  if (accuracy > accLimit) return null;
+  if (accuracy > accLimit) {
+    _postGpsDbg({
+      rej: 'accuracy',
+      spd: speedKmh,
+      src: speedSrc,
+      acc: accuracy,
+      lim: accLimit,
+      stat: isStationary,
+    });
+    return null;
+  }
 
   // ② ジャンプ判定
   if (lastPosition) {
     const jump = calcDistance(lastPosition.lat, lastPosition.lng, lat, lng);
     const timeDiff = (now - lastPosition.timestamp) / 1000;
-    if (timeDiff > 0 && jump / timeDiff > CONFIG.jump_limit_m_per_s) return null;
+    if (timeDiff > 0 && jump / timeDiff > CONFIG.jump_limit_m_per_s) {
+      _postGpsDbg({
+        rej: 'jump',
+        spd: speedKmh,
+        src: speedSrc,
+        acc: accuracy,
+        lim: accLimit,
+        stat: isStationary,
+      });
+      return null;
+    }
   }
 
   // ②-1 Doppler-Speed Sanity Gate (= Phase A-4・2026-05-26):
@@ -578,6 +625,14 @@ function processPosition(data) {
       const speedDiff = Math.abs(dopplerMs - haverMs);
       if (speedDiff > 10) {
         wlog('[GPS] Doppler-haversine 速度不整合 skip: diff=' + speedDiff.toFixed(1) + 'm/s');
+        _postGpsDbg({
+          rej: 'doppler',
+          spd: speedKmh,
+          src: speedSrc,
+          acc: accuracy,
+          lim: accLimit,
+          stat: isStationary,
+        });
         return null;
       }
     }
@@ -591,6 +646,14 @@ function processPosition(data) {
       const acceleration = dvMs / dt;
       if (Math.abs(acceleration) > CONFIG.max_acceleration_ms2) {
         wlog('[GPS] 加速度異常: ' + acceleration.toFixed(1) + 'm/s²・スキップ');
+        _postGpsDbg({
+          rej: 'accel',
+          spd: speedKmh,
+          src: speedSrc,
+          acc: accuracy,
+          lim: accLimit,
+          stat: isStationary,
+        });
         return null;
       }
     }
@@ -627,6 +690,14 @@ function processPosition(data) {
             '°・スキップ' +
             (compassHeading != null ? '（コンパス）' : '（GPS）')
         );
+        _postGpsDbg({
+          rej: 'heading',
+          spd: speedKmh,
+          src: speedSrc,
+          acc: accuracy,
+          lim: accLimit,
+          stat: isStationary,
+        });
         return null;
       }
       if (isReverse) {
@@ -756,6 +827,15 @@ function processPosition(data) {
   };
 
   _prevAccuracy = accuracy;
+  // ★STEP0 診断: accept 時の最終値 (speedKmh源/isStationary/accuracy/accLimit) を出力
+  _postGpsDbg({
+    rej: null,
+    spd: clampedSpeedKmh,
+    src: speedSrc,
+    acc: accuracy,
+    lim: accLimit,
+    stat: isStationary,
+  });
   // 2026-05-09 (P4/P5): cellularLayerHint / accelLayerHint 廃止
   //   layer (v6 attribute) + tunnels-/bridges-{pref}.js データで完全代替
   return {

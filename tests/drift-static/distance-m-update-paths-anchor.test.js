@@ -64,9 +64,11 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 旧: [525, 641, 1138, 1159, 1682]
     // 2026-05-27 表示1モデル化 + [DISP] 診断ログ/_dispLogSig 撤去で shift。
     // 旧: [524, 633, 1130, 1151, 1651]
-    // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数 + gap fill gate コメント追加) で shift。distance_m 本体 1byte 不変・行番号のみ。
-    // 新: [529, 638, 1141, 1162, 1662]
-    const expectedLines = [529, 638, 1141, 1162, 1662];
+    // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数 + gap fill gate コメント追加) で shift。
+    // 旧: [529, 638, 1141, 1162, 1662]
+    // 2026-05-28 STEP0 診断 (_mmDbg helper + 4加算地点の診断call追加) で shift。distance_m 本体 1byte 不変・行番号のみ。
+    // 新: [551, 661, 1168, 1190, 1691]
+    const expectedLines = [551, 661, 1168, 1190, 1691];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -122,8 +124,9 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-26 STEP2 診断 (_dispLogSig closure var 追加) で +1 shift。GPS.calcDistance 本体 1byte 不変・行番号のみ更新。
     // 2026-05-26 Phase D+E (const 4 追加) で +5 shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
     // 2026-05-27 表示1モデル化 + [DISP]/_dispLogSig 撤去で shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
-    // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数追加) で +5 shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
-    const expectedLines = [333, 383, 423, 1096];
+    // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数追加) で +5 shift。
+    // 2026-05-28 STEP0 診断 (_mmDbg helper 追加) で shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
+    const expectedLines = [355, 405, 445, 1120];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 4; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);

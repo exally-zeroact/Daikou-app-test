@@ -269,6 +269,28 @@ const Meter = (() => {
   //   meter.js は速度×時間 fill しない (= 二重計上回避)。mmWorker 無 or >GAP_ROUTE_MAX_SEC のみ fill。
   //   ★map-matcher.js の同名定数と必ず一致させること★ (= 同期境界・現在 60s)。
   const GAP_ROUTE_MAX_SEC = 60;
+  // ★STEP0 診断 (2026-05-28): distance_m 加算の源/量/dm/tier2 を Eruda に出す (read-only・throttle)。
+  //   ★distance_m / calcFare / running gate には一切影響しない (純診断・判定後に撤去)★。
+  let _mmDbgSig = null;
+  function _mmDbg(src, addM) {
+    if (typeof dlog !== 'function') return;
+    const _dm = Math.round(state.distance_m || 0);
+    const _t2 = Math.round(state.tier2_pending_m || 0);
+    const _sig = src + '|' + _dm + '|' + _t2;
+    if (_sig === _mmDbgSig) return;
+    _mmDbgSig = _sig;
+    dlog(
+      '[MM-DBG] src=' +
+        src +
+        ' add=' +
+        (addM || 0).toFixed(1) +
+        'm dm=' +
+        (state.distance_m || 0).toFixed(1) +
+        'm tier2=' +
+        _t2 +
+        'm'
+    );
+  }
   // ★設計変更宣言 (2026-05-17・RegionLoader 撤去): NEAR_INFRA_RADIUS_M / MM_MAX_SNAP_DIST_M /
   //   MM_MAX_SEGMENT_DIST_M / MM_GAP_RESET_SEC は inline snap / tunnel-bridge polyline 経路でのみ
   //   使用していたため削除。Worker B 側は map-matcher.js 内で独自の定数を持つ。
@@ -529,6 +551,7 @@ const Meter = (() => {
           state.distance_m += m.mmIncrementM;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = 'mm';
+          _mmDbg('commit', m.mmIncrementM); // ★STEP0 診断
         }
         if (state.business_active) {
           state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
@@ -639,6 +662,7 @@ const Meter = (() => {
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'offroad';
             state.offroad_distance_m = (state.offroad_distance_m || 0) + _haverAccumSinceLastCommit;
+            _mmDbg('retro', _haverAccumSinceLastCommit); // ★STEP0 診断
           }
           if (state.business_active) {
             state.business_distance_m =
@@ -1145,6 +1169,7 @@ const Meter = (() => {
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'gap';
             _recordGapFill(filled);
+            _mmDbg('gap', filled); // ★STEP0 診断
           }
           if (state.business_active) {
             state.business_distance_m = (state.business_distance_m || 0) + filled;
@@ -1166,6 +1191,7 @@ const Meter = (() => {
             state.fare_yen = calcFare(state.distance_m);
             state.distanceSource = 'offroad';
             state.offroad_distance_m = (state.offroad_distance_m || 0) + inc;
+            _mmDbg('offroad', inc); // ★STEP0 診断
           }
           // ★設計変更宣言 (2026-05-24・司さん採用指示・道路 snap 構成・本経路に・★屋内対策 ZUPT★):
           //   distance_m と同じ Off-Road incremental を・business_distance_m にも適用。

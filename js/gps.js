@@ -366,6 +366,40 @@ const GPS = (() => {
         },
       });
       worker.onmessage = function (e) {
+        // ★STEP0 診断 (2026-05-28): worker から GPS層の値を受けて Eruda に出す (read-only・worker側で throttle 済)
+        if (e.data.type === 'gpsDbg') {
+          const o = e.data.data || {};
+          if (typeof dlog === 'function') {
+            if (o.rej) {
+              dlog(
+                '[GPS-REJ] reason=' +
+                  o.rej +
+                  ' spd=' +
+                  (o.spd || 0).toFixed(1) +
+                  ' src=' +
+                  (o.src || '?') +
+                  ' acc=' +
+                  (o.acc || 0).toFixed(1) +
+                  ' lim=' +
+                  (o.lim || 0)
+              );
+            } else {
+              dlog(
+                '[GPS-DBG] spd=' +
+                  (o.spd || 0).toFixed(1) +
+                  ' src=' +
+                  (o.src || '?') +
+                  ' stat=' +
+                  (o.stat ? 'T' : 'F') +
+                  ' acc=' +
+                  (o.acc || 0).toFixed(1) +
+                  ' lim=' +
+                  (o.lim || 0)
+              );
+            }
+          }
+          return;
+        }
         if (e.data.type === 'result') {
           const d = e.data.data;
           if (d._debugCompass) dlog('[GPS]', d._debugCompass);
@@ -485,6 +519,8 @@ const GPS = (() => {
     }
     // raw 前点を毎回更新 (= reject の有無に依存しない・次フレームの代用速度の基準)
     _rawPrevPos = { lat, lng, t: now };
+    // ★STEP0 診断: speedKmh の源 (Doppler or A3 haversine代用) を worker に伝える (read-only)
+    const _speedSrc = speed != null && speed >= 0 ? 'dop' : 'hav';
     // 加速度サンプル取り出し（案A・2026/04/29）
     const accelSamples = accelBuffer.slice();
     accelBuffer = [];
@@ -507,6 +543,7 @@ const GPS = (() => {
           accelSamples,
           gyroData,
           gyroSamples,
+          speedSrc: _speedSrc, // ★STEP0 診断
         },
       });
     } else {
