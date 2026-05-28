@@ -46,7 +46,8 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // 2026-05-28 PM mirror アーキ完成 (= mm/retro 経路に ZUPT 並記コメント追加) で L1095 へ移動・window 同期。
     // 2026-05-28 PM (例外条項適用) gap fill sanity check 追加で L1133 へ移動・window 同期。
     // 2026-05-28 PM Phase 3 (α-β filter + helper ~70 行追加) で L1202 へ移動・window 同期。
-    const window = lines.slice(1190, 1220).join('\n');
+    // 2026-05-28 PM 再構築 (= Google MM 式統一・α-β filter 削除) で L1141 へ戻る・window 同期。
+    const window = lines.slice(1130, 1160).join('\n');
     if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
       throw new Error(
         'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'

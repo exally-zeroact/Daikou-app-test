@@ -74,9 +74,11 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-28 PM (例外条項適用) gap fill に position sanity check 追加 + calculateGapFill 呼出箇所の引数拡張で shift。
     // 旧: [551, 675, 1242, 1269, 1770]
     // 2026-05-28 PM Phase 3 (α-β filter + state field + helper 関数 ~70 行追加) で +66 shift。
-    // distance_m 本体 1byte 不変・5 経路の += 自体は変えていない・α-β filter helper 追加で行 shift。
-    // 新: [617, 741, 1304, 1340, 1809]
-    const expectedLines = [617, 741, 1304, 1340, 1809];
+    // 旧: [617, 741, 1304, 1340, 1809]
+    // 2026-05-28 PM 再構築 (Google MM 式統一・α-β filter / 多層 catch-up 全削除) で -66 shift。
+    // distance_m 本体 1byte 不変・5 経路の += 自体は変えていない・display 計算簡素化で行 shift。
+    // 新: [556, 680, 1243, 1279, 1690]
+    const expectedLines = [556, 680, 1243, 1279, 1690];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -140,7 +142,9 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 件数 4 → 5 件・対象は「速度過大を haversine で clamp する sanity」 で・絶対ルール「GPS 直線課金禁止」 に違反しない (= 速度×時間を直線で抑制する方向のみ)。
     // 2026-05-28 PM Phase 3 (α-β filter + state field + helper 関数 ~70 行追加) で +66 shift。
     // 件数 5 件不変・GPS.calcDistance 本体 1byte 不変・α-β filter は内部で GPS.calcDistance 不使用。
-    const expectedLines = [421, 471, 511, 1161, 1256];
+    // 2026-05-28 PM 再構築 (= Google MM 式統一・α-β filter helper 削除) で -61 shift。
+    // 件数 5 件不変・GPS.calcDistance 本体 1byte 不変。
+    const expectedLines = [360, 410, 450, 1100, 1195];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 5; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
