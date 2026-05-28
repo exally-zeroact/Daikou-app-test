@@ -692,6 +692,15 @@ let lastCommittedSnap = null;
 //   候補 flip 由来の上方 spike を物理上限/step で抑制 (減少は自由=自己補正)。
 //   ★commit 候補 (bestEmit/mmIncrementM) 選定には一切不干渉★。
 let _displayTentativeM = 0;
+// ★設計変更宣言 (2026-05-29・real-trace 解析・creep 真因解消):
+//   司さん iPhone13 trace (Firebase RTDB 取得・990 sample・5.35km・16.5min・停車中 298 sample)
+//   で観測した停車中 creep の真因 = isStationary=true でも tentativeDistanceM (= snapshot 弧長)
+//   が更新され続け・main の business_tier2_pending_m SET (= meter.js L646) 経由で display +44.8m。
+//   freeze: isStationary=true 期間中は・前回 isStationary=false 時の値で固定して出力する。
+//   走行再開時 (= isStationary=false 復帰) には通常 snapshot 計算に戻り、停車中累積した drift を
+//   一気に表示しないため・「飛ぶ」事象 (= display jump) も同時解消。
+//   絶対ルール準拠: distance_m / business_distance_m 加算経路は 1 byte 不変。
+let _frozenTentativeDistanceM = null;
 const TENTATIVE_MAX_STEP_M = 60; // Phase B: tentative の 1 step 上方変化上限 (= 候補 flip spike 抑制)
 // MM-1/2 互換用 prevSnap（Viterbi 不在時の fallback 経路で使用）
 let prevSnap = null;
@@ -3128,9 +3137,21 @@ self.onmessage = function (e) {
     //     ・Worker B 出力値の制御で結果として停車中加算ゼロを実現
     //   Viterbi window / pheromone / grid bias 学習は通常通り進める (= 停車後の再走行時に
     //   学習履歴が連続する利点を維持)。出力値だけ 0 にする。
+    // ★設計変更宣言 (2026-05-29・real-trace 解析・tentativeDistanceM freeze 追加):
+    //   旧: isStationary=true 中・mmIncrementM=0 / tentativeIncrementM=0 化のみで・
+    //       tentativeDistanceM (= snapshot 弧長) は更新継続 → main 側 business_tier2_pending_m
+    //       SET 経由で display creep + 走行再開時 display jump (= 「飛ぶ」) を発生させていた。
+    //   新: isStationary=true 中・tentativeDistanceM も freeze 値 (= 前回 isStationary=false 時の
+    //       値) で出力する。isStationary=false 期間中は・freeze 値を最新値で更新し続ける。
+    //   絶対ルール準拠: distance_m / business_distance_m 加算経路は 1 byte 不変。
     if (msg.isStationary === true) {
       mmIncrementM = 0;
       tentativeIncrementM = 0;
+      if (_frozenTentativeDistanceM !== null) {
+        tentativeDistanceM = _frozenTentativeDistanceM;
+      }
+    } else {
+      _frozenTentativeDistanceM = tentativeDistanceM;
     }
 
     const t1 =
@@ -3156,6 +3177,7 @@ self.onmessage = function (e) {
       //   main 側で state.tier2_pending_m に加算し、commit で 0 リセットされる。
       tentativeIncrementM: tentativeIncrementM,
       tentativeDistanceM: tentativeDistanceM, // ★Phase A: commit点→現射影 snapshot 弧長 (main で tier2 SET)
+      isStationary: msg.isStationary === true, // ★2026-05-29 real-trace: main 側 SET ガード用・freeze と二重保険
       snap: outSnap,
       confidence: pickedEmission > 0 ? Math.min(1.0, pickedEmission) : 1.0,
       windowSize: viterbi.size(),

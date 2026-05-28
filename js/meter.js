@@ -622,7 +622,8 @@ const Meter = (() => {
       m.tentativeDistanceM >= 0 &&
       state.running &&
       !_offRoadActive &&
-      Date.now() >= _drainMmUntil
+      Date.now() >= _drainMmUntil &&
+      !m.isStationary // ★2026-05-29 real-trace: 停車中 SET skip (= Worker B freeze と二重保険)
     ) {
       state.tier2_pending_m = m.tentativeDistanceM;
     }
@@ -641,7 +642,8 @@ const Meter = (() => {
       m.tentativeDistanceM >= 0 &&
       state.business_active &&
       !_offRoadActive &&
-      Date.now() >= _drainMmUntil
+      Date.now() >= _drainMmUntil &&
+      !m.isStationary // ★2026-05-29 real-trace: 停車中 SET skip (= business display creep 真因解消)
     ) {
       state.business_tier2_pending_m = m.tentativeDistanceM;
     }

@@ -3549,6 +3549,206 @@
         window._daikomeTabId = TAB_ID;
       })();
 
+      // ━━ DataReadyGate (2026-05-26): 初回データ DL 完了まで業務開始系ボタン disabled ━━
+      //   司さん指摘 (2026-05-26 実機): dlOverlay は X4 方式 E で Phase A 完了で hide されるが
+      //   background load (= 47 県 roads + 282 件 aux) は 33 秒継続する。
+      //   その間に「センサーを許可」「業務開始」「代行開始」 が押せると
+      //   不完全データで業務開始 → 住所取得失敗 / MM 失敗 リスク。
+      //
+      //   対応:
+      //     ・起動時 marker (= localStorage daikome_warmup_v1) 確認・あれば即 active (= 2 回目以降)
+      //     ・なし (= 初回) → 全 5 ボタン disabled + 進捗 hint 表示
+      //     ・window._mmPipeline._bgLoadDone を 1 秒 polling
+      //     ・完了で 全 5 ボタン active + 「準備完了」 3 秒表示 → fade out
+      //
+      //   絶対ルール準拠:
+      //     ・mm-data-pipeline.js / sw.js: 1byte 不変 (= 既存 _bgLoadDone field 参照のみ)
+      //     ・calcFare / distance_m / running gate / Worker B: 1byte 不変
+      //     ・お節介バナー禁止: 機能要件 (= 必須表示) で抵触なし
+      //     ・JS コメント内バッククォート: 禁止遵守 (= シングルクォートのみ)
+      //
+      //   既存 TabGuard (= L3478) と同じ disabled パターン (= disabled 属性 + opacity 0.4 + pointer-events none)
+      //   既存 dlOverlay と同じく timeout なし (= オフライン哲学: 初回 DL は通信前提・既存 enqueueRetry で救済)
+      (function setupDataReadyGate() {
+        const STORAGE_KEY = 'daikome_warmup_v1';
+        const POLL_INTERVAL_MS = 1000;
+        const TOTAL_FILES = 47 + 282; // 47 県 roads + 282 件 aux (= mm-data-pipeline.js 仕様)
+        let _gateActive = false;
+        let _pollTimer = null;
+
+        function _applyDisabled(el, disabled) {
+          if (!el) return;
+          if (disabled) {
+            el.disabled = true;
+            el.style.opacity = '0.4';
+            el.style.pointerEvents = 'none';
+          } else {
+            el.disabled = false;
+            el.style.opacity = '';
+            el.style.pointerEvents = '';
+          }
+        }
+
+        function _setButtonGate(disabled) {
+          // 個別 id: btnSensorPermission / btnResumeFromStart / btnMain (= landscape 代行開始)
+          const ids = ['btnSensorPermission', 'btnResumeFromStart', 'btnMain'];
+          // class: .btn-business-start (= 業務開始) / .btn-main-idle-portrait (= portrait 代行開始)
+          const sels = ['.btn-business-start', '.btn-main-idle-portrait'];
+          ids.forEach(function (id) {
+            _applyDisabled(document.getElementById(id), disabled);
+          });
+          sels.forEach(function (sel) {
+            const list = document.querySelectorAll(sel);
+            for (let i = 0; i < list.length; i++) _applyDisabled(list[i], disabled);
+          });
+        }
+
+        function _setHint(text, kind) {
+          const el = document.getElementById('dataReadyHint');
+          if (!el) return;
+          if (!text) {
+            el.style.display = 'none';
+            return;
+          }
+          el.textContent = text;
+          el.style.display = 'block';
+          // kind: 'progress' (青) / 'complete' (緑)
+          if (kind === 'complete') {
+            el.style.color = '#34c759';
+            el.style.background = 'rgba(52, 199, 89, 0.1)';
+          } else {
+            el.style.color = '#007aff';
+            el.style.background = 'rgba(0, 122, 255, 0.08)';
+          }
+        }
+
+        function _calcProgress() {
+          try {
+            if (!window._mmPipeline || !window._mmPipeline.stats) return null;
+            const s = window._mmPipeline.stats;
+            const done = (s.roadsOk || 0) + (s.auxOk || 0);
+            const pct = Math.min(100, Math.round((done / TOTAL_FILES) * 100));
+            return { done: done, total: TOTAL_FILES, pct: pct };
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function _checkBgLoadDone() {
+          try {
+            return !!(window._mmPipeline && window._mmPipeline._bgLoadDone === true);
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function _markerOk() {
+          try {
+            const m = localStorage.getItem(STORAGE_KEY);
+            if (!m) return false;
+            const p = JSON.parse(m);
+            const expected = (window.DataRegistry && window.DataRegistry.VERSION) || '0';
+            return !!(p && p.version === expected);
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function _isStandalone() {
+          try {
+            return (
+              window.navigator.standalone === true ||
+              (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+            );
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function _updateProgress() {
+          const p = _calcProgress();
+          if (p) {
+            _setHint(
+              '📥 初回データ準備中 ' + p.pct + '% (' + p.done + '/' + p.total + ')',
+              'progress'
+            );
+          } else {
+            _setHint('📥 初回データ準備中...', 'progress');
+          }
+        }
+
+        function _releaseGate() {
+          if (!_gateActive) return;
+          _gateActive = false;
+          if (_pollTimer) {
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+          }
+          _setButtonGate(false);
+          _setHint('✅ 準備完了', 'complete');
+          setTimeout(function () {
+            _setHint(null);
+          }, 3000);
+          if (typeof dlog === 'function')
+            dlog('[DataReadyGate] 全データ準備完了・ボタン active 化');
+        }
+
+        function _engageGate() {
+          if (_gateActive) return;
+          _gateActive = true;
+          _setButtonGate(true);
+          _updateProgress();
+          if (typeof dlog === 'function') dlog('[DataReadyGate] 初回 DL 中・ボタン disabled');
+          _pollTimer = setInterval(function () {
+            if (_checkBgLoadDone()) {
+              _releaseGate();
+            } else {
+              _updateProgress();
+            }
+          }, POLL_INTERVAL_MS);
+        }
+
+        function _init() {
+          // 非 PWA (= ブラウザ閲覧) は・dlOverlay と同じく gate skip (= 業務しない前提)
+          if (!_isStandalone()) {
+            if (typeof dlog === 'function') dlog('[DataReadyGate] 非 standalone・gate skip');
+            return;
+          }
+          // 2 回目以降 (= marker あり) は・gate skip (= 起動最速化 方式 E ec61fff4 と整合)
+          if (_markerOk()) {
+            if (typeof dlog === 'function')
+              dlog('[DataReadyGate] marker あり・gate skip (2 回目以降)');
+            return;
+          }
+          // 既に bg load 完了している場合 (= race 救済) も skip
+          if (_checkBgLoadDone()) {
+            if (typeof dlog === 'function') dlog('[DataReadyGate] 既に bg 完了・gate skip');
+            return;
+          }
+          // 初回 DL 中: gate engage
+          _engageGate();
+        }
+
+        // _mmPipeline は・index.html L5496 で・window._mmPipeline = new MMDataPipeline(...) で初期化
+        // _init は・DOM 構築済 + _mmPipeline 初期化済 の・両方を待つ必要あり
+        function _scheduleInit() {
+          let _tries = 0;
+          const _waitTimer = setInterval(function () {
+            _tries++;
+            if (window._mmPipeline || _tries > 30) {
+              clearInterval(_waitTimer);
+              _init();
+            }
+          }, 500);
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', _scheduleInit);
+        } else {
+          _scheduleInit();
+        }
+      })();
+
       // ━━ S2 業務開始忘れ警告: 2026-05-23 Phase 1 で・お節介ルール適用・完全削除 ━━
       //   旧仕様 (2026-05-10): GPS 5km/h+ 10 秒継続 + 業務外 で・「業務開始していますか?」問いかけ表示
       //   削除理由: 「お節介バナー全面禁止」恒久ルール (= 2026-05-23 制定) 該当
@@ -4145,6 +4345,30 @@
       >
         <!-- 日時（全画面共通） -->
         <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
+        <!-- ★設計変更宣言 (2026-05-26・初回データ DL ガード):
+             dlOverlay は X4 方式 E で Phase A 完了時に hide されるが・
+             background load (= 47 県 roads + 282 件 aux) は 33 秒継続する。
+             その間に・「センサーを許可」 → 「業務開始」 → 「代行開始」 が押せると
+             不完全データで業務開始リスク (= 司さん 2026-05-26 実機指摘)。
+             対応: window._mmPipeline._bgLoadDone を polling し・完了まで全 5 ボタン disabled。
+             マーカー (= localStorage daikome_warmup_v1) あり = 2 回目以降は即 active。
+             お節介バナー禁止ルール 抵触なし (= 機能要件・必須表示)。 -->
+        <div
+          id="dataReadyHint"
+          style="
+            display: none;
+            text-align: center;
+            font-size: 13px;
+            color: #007aff;
+            font-weight: 600;
+            padding: 10px 18px;
+            margin: 0 24px;
+            background: rgba(0, 122, 255, 0.08);
+            border-radius: 10px;
+            line-height: 1.5;
+            max-width: 320px;
+          "
+        ></div>
         <!-- ★設計変更宣言 (2026-05-10): センサー許可明示ボタン -->
         <!-- iOS PWA 未許可時のみ表示・押下で DeviceMotionEvent.requestPermission() を user gesture 経由で発火 -->
         <button
@@ -4734,6 +4958,11 @@
     <!-- ★page-lifecycle.js：Phase A-1（2026-05-20追加）iOS PWA freeze/kill 時の distance_m 永続化補完 -->
 
     <script src="js/debug-trace.js"></script>
+    <!-- ★debug-log-uploader.js: Eruda console を Firebase RTDB 自動 push (2026-05-29 追加・解析側 Claude 並行参照用)
+         feature flag・既定 ON (テストビルド) / OFF (本番)・?debuglog=on/off で切替・debug-trace.js と device_id 共有 -->
+    <script src="js/debug-log-uploader.js"></script>
+    <!-- ★設計変更宣言 (2026-05-24・端末ライセンス台数ロック): 既存 DAIKOME_DEVICE_ID 流用・debug-trace.js 後に load -->
+    <script src="js/license.js"></script>
 
     <!-- ★debug-trace.js：較正用 GPS trace 収集 (2026-05-21・noise model 較正タスク用)
          feature flag OFF default・URL ?trace=on で activate・他端末ではサイレント
@@ -7010,6 +7239,30 @@
         if (window._tabReadOnly) {
           showToast('別のタブで業務中です');
           return;
+        }
+        // ★設計変更宣言 (2026-05-24・端末ライセンス台数 gate):
+        //   js/license.js の・LicenseGate で・cache 期限内 / grace 中なら・allowed
+        //   未登録 / expired 時は・showLicenseGate で・ゲート画面表示・業務開始 block
+        //   絶対ルール準拠: distance_m / 課金距離ロジックには・触れない
+        try {
+          if (
+            typeof window.License !== 'undefined' &&
+            typeof window.License.checkBeforeBusinessStart === 'function'
+          ) {
+            const _lic = window.License.checkBeforeBusinessStart();
+            if (!_lic.allowed) {
+              if (typeof window.showLicenseGate === 'function') {
+                window.showLicenseGate(_lic);
+              } else {
+                showToast(_lic.message || 'ライセンス認証エラー');
+              }
+              if (typeof dlog === 'function')
+                dlog('[Business] start blocked: license ' + _lic.state);
+              return;
+            }
+          }
+        } catch (_) {
+          // License module 未 load 等の・致命傷ではない・graceful skip (= 既存挙動維持)
         }
         // ★設計変更宣言 (2026-05-12): 全 OS で PWA standalone 必須化
         //   理由: 非 PWA (iOS Safari ブラウザ・Android Chrome ブラウザ) では
@@ -9602,6 +9855,46 @@
           if (typeof dlog === 'function') dlog('[SPA] hideAllOverlays');
         };
 
+        // ★設計変更宣言 (2026-05-24・端末ライセンス未登録ゲート画面 開閉):
+        //   spa-overlay 機構を流用 (= 既存 history/help/settings と同方式)・但し _OVERLAYS には登録しない
+        //   (= nav 連動なし・独立 overlay)。
+        //   showLicenseGate(info): info.message + device_id を表示・overlay show
+        //   hideLicenseGate(): overlay hide
+        window.showLicenseGate = function (info) {
+          const el = document.getElementById('overlayLicenseGate');
+          if (!el) return;
+          const msgEl = document.getElementById('licenseGateMessage');
+          if (msgEl && info && info.message) msgEl.textContent = info.message;
+          const idEl = document.getElementById('licenseGateDeviceId');
+          if (
+            idEl &&
+            typeof window.License !== 'undefined' &&
+            typeof window.License.getDeviceId === 'function'
+          ) {
+            idEl.textContent = window.License.getDeviceId();
+          }
+          el.classList.add('show');
+          el.setAttribute('aria-hidden', 'false');
+        };
+
+        window.hideLicenseGate = function () {
+          const el = document.getElementById('overlayLicenseGate');
+          if (!el) return;
+          el.classList.remove('show');
+          el.setAttribute('aria-hidden', 'true');
+        };
+
+        // 起動時・License 初期化 (= 非 block・promise・cache 更新のみ)
+        //   ・WiFi 接続あれば・RTDB 問い合わせ・cache 更新
+        //   ・オフライン・network 失敗時は・既存 cache 利用 (= 業務開始時に gate 判定)
+        if (typeof window.License !== 'undefined' && typeof window.License.init === 'function') {
+          try {
+            window.License.init();
+          } catch (_) {
+            /* graceful skip */
+          }
+        }
+
         // ★設計変更宣言 (2026-05-15・Phase E・ESC ハンドラ追加):
         //   ESC キー押下で現在 .spa-overlay.show 状態のオーバーレイを閉じる。
         //   従来は appbar-back ボタン (overlay 内左上 ＜) か bottom-nav 業務タブのみで close 可能だった。
@@ -11222,6 +11515,104 @@
      目的: MPA タブ遷移 (location.href) で起きていた watchPosition / MM Worker B /
           sensor listener / WakeLock 全停止 = 走行距離取りこぼし を完全解消する。
      業務 workflow (index.html JS) を常駐させたまま履歴/設定/使い方を viewing する。 -->
+    <!-- ★設計変更宣言 (2026-05-24・端末ライセンス未登録ゲート画面):
+         license.js の・checkBeforeBusinessStart が・allowed=false 時に表示。
+         お節介バナーではなく機能ゲート (= 業務開始 block・device_id 表示 + 司さん登録案内)。
+         spa-overlay 機構を流用 (= 既存 history/help/settings と同 z-index 80・全面 overlay)。
+         閉じる button あり (= 司さんが・device_id をメモして・閉じて・Firebase Console 登録後・再起動) -->
+    <div id="overlayLicenseGate" class="spa-overlay" aria-hidden="true" style="z-index: 200">
+      <div
+        style="
+          padding: 32px 24px;
+          max-width: 480px;
+          margin: 0 auto;
+          font-family: 'Noto Sans JP', sans-serif;
+        "
+      >
+        <h2 style="font-size: 20px; font-weight: 800; color: #1d4ed8; margin: 0 0 16px">
+          🔒 端末ライセンス
+        </h2>
+        <div
+          id="licenseGateMessage"
+          style="
+            font-size: 14px;
+            color: #1c1c1e;
+            line-height: 1.6;
+            margin: 0 0 24px;
+            padding: 12px 16px;
+            background: #f0f7ff;
+            border-radius: 8px;
+            border: 1px solid #b8d9ff;
+          "
+        >
+          この端末は未登録です
+        </div>
+        <div style="font-size: 13px; font-weight: 700; color: #8e8e93; margin: 0 0 6px">
+          端末 ID (= 司さんに伝えて登録してもらう)
+        </div>
+        <div
+          id="licenseGateDeviceId"
+          style="
+            font-family: monospace;
+            font-size: 14px;
+            padding: 10px 12px;
+            background: #fff;
+            border: 1px solid #c6c6c8;
+            border-radius: 6px;
+            word-break: break-all;
+            user-select: all;
+            -webkit-user-select: all;
+            margin: 0 0 16px;
+          "
+        >
+          (loading...)
+        </div>
+        <button
+          type="button"
+          onclick="
+            window.License &&
+              window.License.refresh().then(function () {
+                window.hideLicenseGate && window.hideLicenseGate();
+              })
+          "
+          style="
+            display: block;
+            width: 100%;
+            padding: 14px;
+            background: #007aff;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            margin: 0 0 12px;
+            font-family: 'Noto Sans JP', sans-serif;
+          "
+        >
+          再認証する (WiFi 接続後)
+        </button>
+        <button
+          type="button"
+          onclick="window.hideLicenseGate && window.hideLicenseGate()"
+          style="
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background: none;
+            color: #8e8e93;
+            border: 1px solid #c6c6c8;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: 'Noto Sans JP', sans-serif;
+          "
+        >
+          閉じる
+        </button>
+      </div>
+    </div>
     <div id="overlayHistory" class="spa-overlay" aria-hidden="true">
       <!-- ★設計変更宣言 (2026-05-14・MA-5 history.html の本体を #overlayHistory に移植):
        元 history.html (204 行) の appbar + wrap を移植。
