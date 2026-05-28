@@ -132,7 +132,20 @@
     } catch (_) {
       text = '[stringify-failed]';
     }
-    buffer.push({ t: Date.now() - startedAt, lvl: level, m: text });
+    // ★Firebase rules schema 互換 (= 2026-05-29 PM rev5・401 拒否 fix):
+    //   既存 startup_metrics と同 schema (= lat/lng/acc/spd/hdg/alt 必須・dummy 0 で pass)
+    //   lvl/m は phase と同じ追加 field・rules validate を素直に通す。
+    buffer.push({
+      t: Date.now() - startedAt,
+      lat: 0,
+      lng: 0,
+      acc: 0,
+      spd: 0,
+      hdg: 0,
+      alt: 0,
+      lvl: level,
+      m: text,
+    });
     if (buffer.length >= FLUSH_THRESHOLD) {
       _maybeFlush('threshold');
     }
