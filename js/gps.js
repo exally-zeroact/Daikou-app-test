@@ -329,6 +329,14 @@ const GPS = (() => {
   //   依存しない) を保持し、coords.speed が null/欠落の時に haversine 速度を代用するための前点。
   let _rawPrevPos = null; // { lat, lng, t }
   const _HAVER_SPEED_MAX_KMH = 180; // A3: 代用速度の物理上限クランプ (spike で accuracy 上限を緩めすぎない)
+  // ★Fix③ (2026-05-28): 高レート端末(Android ~5Hz)の worker 送信を最小間隔で間引く。
+  //   目的: 5Hz の sub-second 区間を多数 sum する drift over-count(暴走)を net 変位ベースに抑制。
+  //   ・1Hz 端末(iOS)は間隔 >= 本値 で素通り(無影響)。
+  //   ・間引き時は accelBuffer を drain せず累積 / _rawPrevPos も据え置き(A3 は送信点間で計測)。
+  //   ・安全側=過少(過大課金NG): 直線は net≈sum で不変・曲線は弦で過少・drift は相殺で過大が減る。
+  //   ★仮説ベース(走行ログ未取得・本ログは静止のみ)・[MMDBG] 走行ログで検証/調整する暫定対策★
+  const GPS_MIN_SEND_INTERVAL_MS = 700;
+  let _lastWorkerSendT = null;
   let isStationary = false;
   let trafficJamSince = null;
   let isTrafficJam = false;
@@ -372,7 +380,7 @@ const GPS = (() => {
           if (typeof dlog === 'function') {
             if (o.rej) {
               dlog(
-                '[GPS-REJ] reason=' +
+                '[GPSREJ] reason=' +
                   o.rej +
                   ' spd=' +
                   (o.spd || 0).toFixed(1) +
@@ -385,7 +393,7 @@ const GPS = (() => {
               );
             } else {
               dlog(
-                '[GPS-DBG] spd=' +
+                '[GPSDBG] spd=' +
                   (o.spd || 0).toFixed(1) +
                   ' src=' +
                   (o.src || '?') +
@@ -432,6 +440,7 @@ const GPS = (() => {
     startMotion(); // 加速度センサー起動（案A・2026/04/29）
     if (!worker) initWorker();
     _rawPrevPos = null; // A3: 業務開始時に代用速度の前点をリセット (worker/非worker 共通)
+    _lastWorkerSendT = null; // ★Fix③: 開始時リセット (最初の点を確実に送信)
     if (!useWorker) {
       kalman = new KalmanGPS();
       lastPosition = null;
@@ -477,6 +486,7 @@ const GPS = (() => {
     gyroBuffer = [];
     gyroData = null;
     _rawPrevPos = null; // A3: 停止/リセット時に代用速度の前点をリセット (worker/非worker 共通)
+    _lastWorkerSendT = null; // ★Fix③: 停止/リセット時リセット
     if (useWorker && worker) {
       worker.postMessage({ type: 'reset', data: {} });
     } else {
@@ -497,6 +507,15 @@ const GPS = (() => {
     // G3 (2026-05-09): 最新位置を地磁気偏差ルックアップ用に記録
     _lastKnownLat = lat;
     _lastKnownLng = lng;
+    // ★Fix③ (2026-05-28): 高レート端末は最小間隔未満の点を間引く (worker 経路のみ)。
+    //   早期 return で accelBuffer は drain されず累積・_rawPrevPos も据え置き(A3 は送信点間計測)。
+    if (
+      useWorker &&
+      _lastWorkerSendT != null &&
+      now - _lastWorkerSendT < GPS_MIN_SEND_INTERVAL_MS
+    ) {
+      return;
+    }
     // ★A3 (2026-05-26): coords.speed が null/欠落の時 (= iOS Safari 全機で常時・弱GPS Android でも) は、
     //   直前 raw GPS 点からの haversine 速度を代用する。
     //   目的: 低速時 accuracy 上限 10m デッドロック (= 弱GPS端末/条件で speed=0→上限10m固定→
@@ -528,6 +547,7 @@ const GPS = (() => {
     const gyroSamples = gyroBuffer.slice();
     gyroBuffer = [];
     if (useWorker) {
+      _lastWorkerSendT = now; // ★Fix③: 送信時刻を記録 (次点の間引き判定用)
       worker.postMessage({
         type: 'position',
         data: {

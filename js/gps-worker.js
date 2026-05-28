@@ -64,11 +64,22 @@ let CONFIG = {
   accel_motion_threshold: 0.5, // m/s²・|平均|a|-9.8| の閾値・実機調整
   accel_motion_window_ms: 5000, // 直近5秒のサンプルで計算
   accel_motion_min_samples: 5, // この件数未満なら判定不能（null返す）
+  // ★Fix① (2026-05-28・★設計変更宣言★): 静止判定を加速度variance主体に作り直す。
+  //   GPS速度(A3合成/Dopplerノイズ)を静止判定の主信号にしない。
+  //   この速度以上は「確実に移動」(driftでは到達しない速度) として静止解除し、
+  //   定速走行で加速度varidanceが低くても under-count しないための backstop。
+  //   観測値: A3 静止 drift 速度 ≈ 3.1km/h → これを上回り・かつ実走行を拾う 10km/h。
+  stationary_moving_speed_kmh: 10,
+  // ★Fix② (2026-05-28): accuracy cap deadlock 手当て。移動時(直前frame非静止)のみ
+  //   この値まで accuracy 上限を緩和し屋内/低速 deadlock(全reject→凍結)を回避。
+  //   静止時は緩和せず(=base のまま厳格) drift を計上しない。観測: SE 屋内 acc 12-17m。
+  accuracy_moving_max_m: 20,
 };
 
 // ─── 状態変数（Worker内で保持） ───
 let lastPosition = null;
 let lowSpeedStart = null;
+let _posStillStart = null; // ★Fix① (2026-05-28): 速度非依存の位置半径静止判定 anchor (accel不能時fallback)
 let isStationary = false;
 let trafficJamSince = null;
 let isTrafficJam = false;
@@ -465,6 +476,10 @@ function _inertialGapCorrection(prevPos, accelSamples, currLat, currLng, dt) {
   return { driftDist: driftDist };
 }
 
+// ★Fix① (2026-05-28): 旧 speed ベース静止判定。GPS速度(A3/Doppler)が主信号のため creep を招き、
+//   主経路からは外した(= checkPositionStationary + accel 主体に置換)。但し関数自体は
+//   単体テスト契約 + 実機検証中の即時 rollback 余地として保持する(= 意図的に未使用)。
+// eslint-disable-next-line no-unused-vars
 function checkStationary(speedKmh, lat, lng, now) {
   if (isStationary && speedKmh >= CONFIG.resume_speed_kmh) {
     lowSpeedStart = null;
@@ -483,6 +498,25 @@ function checkStationary(speedKmh, lat, lng, now) {
   }
   lowSpeedStart = null;
   return false;
+}
+
+// ★Fix① (2026-05-28): 速度に依存しない位置半径のみの静止判定。
+//   A3合成速度/Dopplerノイズに左右されず・accel 判定不能(iOS権限拒否等)時の fallback。
+//   半径超で move = anchor 再設定し非静止 / 半径内 stationary_sec 継続で静止。
+function checkPositionStationary(lat, lng, now) {
+  if (!_posStillStart) {
+    _posStillStart = { time: now, lat, lng };
+    return isStationary;
+  }
+  const elapsedSec = (now - _posStillStart.time) / 1000;
+  const movedM = calcDistance(_posStillStart.lat, _posStillStart.lng, lat, lng);
+  const radius = isTrafficJam ? CONFIG.stationary_radius_jam_m : CONFIG.stationary_radius_m;
+  if (movedM >= radius) {
+    _posStillStart = { time: now, lat, lng }; // 半径超 = 移動 → anchor 再設定し非静止
+    return false;
+  }
+  if (elapsedSec >= CONFIG.stationary_sec) return true; // radius 内で継続 = 静止
+  return isStationary;
 }
 
 // ─── Vincenty公式（WGS84楕円体） ───
@@ -578,7 +612,13 @@ function processPosition(data) {
   } = data;
 
   // ① 動的accuracy閾値
-  const accLimit = getDynamicAccuracyLimit(speedKmh, now);
+  // ★Fix② (2026-05-28): 静止時(直前frame)は base のまま厳格(drift計上しない)・
+  //   移動時は base を下限に accuracy_moving_max_m まで緩和(屋内/低速で全reject→凍結→jump を回避)。
+  //   isStationary は直前frame の値(本frame判定は後段) = Fix① で信頼できる。安全側=過少。
+  const _accLimitBase = getDynamicAccuracyLimit(speedKmh, now);
+  const accLimit = isStationary
+    ? _accLimitBase
+    : Math.max(_accLimitBase, CONFIG.accuracy_moving_max_m);
   if (accuracy > accLimit) {
     _postGpsDbg({
       rej: 'accuracy',
@@ -742,29 +782,39 @@ function processPosition(data) {
   const filtered = kalman.update(lat, lng, accuracy, now, CONFIG._kalman_Q_override);
   CONFIG._kalman_Q_override = null; // 使い捨て
 
-  // ⑤ 静止判定（C-1+C-2：加速度variance + 動き判定強化・2026/04/30）
-  // 既存GPS判定 AND C-1（分散小） AND NOT C-2（|a|-9.8 大） で「確実に静止」
-  // 加速度なし時は GPS判定のみ（後方互換）
-  const gpsStationary = checkStationary(speedKmh, filtered.lat, filtered.lng, now);
+  // ⑤ 静止判定（★Fix① 2026-05-28・★設計変更宣言★：加速度variance主体に作り直し）
+  //   旧: finalStationary = gpsStationary && c1Stationary && !c2Moving (3点AND)。
+  //       gpsStationary = checkStationary(speedKmh,...) が GPS速度<3 を必須としたため、
+  //       A3合成速度/Dopplerノイズの偽速度(観測 3.1km/h)で gpsStationary=false に落ち、
+  //       accel が「静止」と言っても 3点AND が非静止 → 空車中 drift を計上(creep)。
+  //   新: GPS速度(A3/Doppler)を静止判定の主信号にしない。
+  //       (a) 高速(>=stationary_moving_speed_kmh)は確実に移動 → 静止解除(定速走行 under-count防止)
+  //       (b) 低速域は accel(物理的な動き)を主信号: C-1静止 かつ C-2動きなし → 静止
+  //       (c) accel 判定不能(iOS権限拒否等)は位置半径のみ(checkPositionStationary)に fallback
+  //           (= A3速度ではなく位置で判定)
+  //   安全側=過少(過大課金NG): accel が「静止」と言えば停止扱い(drift を計上しない)。
   const accelVariance = calcAccelVariance(accelSamples, now);
   const accelDeviation = calcAccelMagnitudeDeviation(accelSamples, now);
+  // 位置半径のみの静止判定 (速度非依存・accel不能時 fallback / 診断比較用・毎frame維持)
+  const posStationary = checkPositionStationary(filtered.lat, filtered.lng, now);
 
   let finalStationary;
-  if (accelVariance === null && accelDeviation === null) {
-    // 加速度判定不能（センサーなし／サンプル不足）→ GPS判定のみ（後方互換）
-    finalStationary = gpsStationary;
+  if (speedKmh >= CONFIG.stationary_moving_speed_kmh) {
+    // (a) 確実に移動 (drift では到達しない速度) → 計上
+    finalStationary = false;
+  } else if (accelVariance === null && accelDeviation === null) {
+    // (c) 加速度判定不能 → 位置半径のみ (A3/Doppler 速度に依存しない fallback)
+    finalStationary = posStationary;
   } else {
-    // C-1：分散による静止判定（小さいほど静止）
+    // (b) accel 主体: C-1（分散小=静止）かつ NOT C-2（合算ベクトル大=動き）→ 物理的に静止
     const c1Stationary = accelVariance === null || accelVariance < CONFIG.accel_variance_threshold;
-    // C-2：合算ベクトルによる動き判定（大きいほど動き）
     const c2Moving = accelDeviation !== null && accelDeviation > CONFIG.accel_motion_threshold;
 
-    // チューニング用ログ：3つの判定が一致しない時のみ出力
-    const allAgree = gpsStationary === c1Stationary && gpsStationary === !c2Moving;
-    if (!allAgree) {
+    // チューニング用ログ：accel 主体判定と位置半径判定が食い違う時のみ出力
+    if ((c1Stationary && !c2Moving) !== posStationary) {
       wlog(
-        '[C-1+C-2] 判定不一致 GPS=' +
-          gpsStationary +
+        '[C-1+C-2] 判定不一致 pos=' +
+          posStationary +
           ' C1=' +
           c1Stationary +
           ' C2_moving=' +
@@ -779,9 +829,8 @@ function processPosition(data) {
       );
     }
 
-    // 3点AND：GPS静止 AND C-1静止 AND C-2動きなし → 確実に静止
-    // 1つでも動きを示す → 距離計測続行（保守的・代行業務向き）
-    finalStationary = gpsStationary && c1Stationary && !c2Moving;
+    // ★accel が物理的静止を示せば停止扱い (GPS速度は参照しない = A3/Doppler 偽速度を無視)
+    finalStationary = c1Stationary && !c2Moving;
   }
   isStationary = finalStationary;
   // Phase 1.ZUPT (2026-05-10): 次 frame の Kalman 用に判定を carry
@@ -869,6 +918,7 @@ self.onmessage = function (e) {
     kalman = new KalmanGPS();
     lastPosition = null;
     lowSpeedStart = null;
+    _posStillStart = null; // ★Fix① (2026-05-28): 位置半径 anchor リセット
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;
@@ -883,6 +933,7 @@ self.onmessage = function (e) {
     if (kalman) kalman.reset();
     lastPosition = null;
     lowSpeedStart = null;
+    _posStillStart = null; // ★Fix① (2026-05-28): 位置半径 anchor リセット
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;

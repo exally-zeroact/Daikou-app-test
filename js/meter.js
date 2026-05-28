@@ -280,7 +280,7 @@ const Meter = (() => {
     if (_sig === _mmDbgSig) return;
     _mmDbgSig = _sig;
     dlog(
-      '[MM-DBG] src=' +
+      '[MMDBG] src=' +
         src +
         ' add=' +
         (addM || 0).toFixed(1) +
