@@ -1042,7 +1042,6 @@ const Meter = (() => {
   //       tunnel/bridge polyline 距離を加味して naiveDistance との max を採用していた。
   //   新: RegionLoader が永続的に undefined のためこれらの経路は dead code 化。
   //       速度×時間 (naiveDistance) のみで補完する設計に整理。
-  //       prevLat/prevLng/currLat/currLng/compassHeading の引数は不要になったため signature 縮小。
   //   絶対ルール準拠: lastSpeedKmh<=0 で null 返却 (= GPS 直線距離流入遮断) は維持。
   function calculateGapFill(gapSec, lastSpeedKmh) {
     if (gapSec > GAP_MAX_SEC) return null;
@@ -1067,6 +1066,48 @@ const Meter = (() => {
       dlog(
         `[Meter] GPS消失補完: ${gapSec.toFixed(1)}秒 → ${Math.round(naiveDistance)}m (速度×時間)`
       );
+    }
+    return naiveDistance;
+  }
+
+  // ★設計変更宣言 (2026-05-28 PM・業務距離 sanity helper・歩行中偽速度 creep 真因対処):
+  //   司さん実機 (iPhone13/Android・20:51・歩行中で 4G/外屋外) で・spd=42-46km/h が continuous
+  //   accept・business が 1 分で 450m creep する事象を解決する。
+  //   ZUPT (= 30 秒 net 変位 < 10m AND 現 haver < 5m) は屋内静止用で・歩行中 (= net 変位 > 10m)
+  //   には skip しない仕様のため・position sanity check (= 業界標準・米国タクシー特許 US6686834
+  //   constant pulse 検出と整合) を追加。
+  //   絶対ルール準拠:
+  //     ・distance_m / calcFare / running gate / business_active gate は 1byte 不変
+  //     ・本 helper は ★business_distance_m 加算経路のみに適用★ (= mm/retro/gap の business 側)
+  //     ・既存 calculateGapFill は不変 (= distance_m への加算経路に影響しない)
+  //     ・haver < 5m → 0 (= 物理的に動いていない・速度偽認定)
+  //     ・naive > haver × 3 → haver clamp (= 速度過大時は直線距離で抑制)
+  //     ・どちらでもなければ既存 naiveDistance を維持 (= 既存動作不変)
+  function _businessGapSanity(naiveDistance, prevLat, prevLng, currLat, currLng) {
+    if (
+      typeof prevLat !== 'number' ||
+      typeof prevLng !== 'number' ||
+      typeof currLat !== 'number' ||
+      typeof currLng !== 'number'
+    ) {
+      return naiveDistance;
+    }
+    const haver = GPS.calcDistance(prevLat, prevLng, currLat, currLng);
+    if (haver < 5) {
+      if (typeof dlog === 'function') {
+        dlog(
+          `[Meter] business sanity: haver=${haver.toFixed(1)}m < 5m → 速度偽認定 → 0 (naive ${Math.round(naiveDistance)}m skip)`
+        );
+      }
+      return 0;
+    }
+    if (naiveDistance > haver * 3) {
+      if (typeof dlog === 'function') {
+        dlog(
+          `[Meter] business sanity: naive=${Math.round(naiveDistance)}m > haver×3 (${Math.round(haver * 3)}m) → haver=${Math.round(haver)}m に clamp`
+        );
+      }
+      return haver;
     }
     return naiveDistance;
   }
@@ -1203,10 +1244,19 @@ const Meter = (() => {
           // ★設計変更宣言 (2026-05-28・mirror アーキ完成・gap 経路 ZUPT 並記追補):
           //   司さん実機 Eruda log で観測した creep の主因。
           //   [Meter] GPS消失補完: X秒 → Y m (速度×時間) ログ直後に business +Y m が発火していた。
-          //   距離計算は既存ロジック維持・business 加算のみ ZUPT 並記。
+          //   ★business 加算前に position sanity check も適用 (= 歩行中偽速度 continuous accept 対処)★
           //   distance_m / running gate / business_active gate は 1byte 不変。
-          if (state.business_active && !_isBusinessZuptMicroMotion(gpsResult, filled)) {
-            state.business_distance_m = (state.business_distance_m || 0) + filled;
+          if (state.business_active) {
+            const businessFilled = _businessGapSanity(
+              filled,
+              state.last_gps && state.last_gps.lat,
+              state.last_gps && state.last_gps.lng,
+              gpsResult.lat,
+              gpsResult.lng
+            );
+            if (!_isBusinessZuptMicroMotion(gpsResult, businessFilled)) {
+              state.business_distance_m = (state.business_distance_m || 0) + businessFilled;
+            }
           }
           _haverAccumSinceLastCommit = 0; // gap fill で確定したのでバッファ reset
         }

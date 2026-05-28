@@ -70,8 +70,11 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 旧: [551, 661, 1168, 1190, 1691]
     // 2026-05-28 PM mirror アーキ完成 (= mm/retro/gap 経路に _isBusinessZuptMicroMotion 並記コメント追加) で shift。
     // distance_m 本体 1byte 不変・5 経路の += 自体は変えていない・コメント追加で行のみ shift。
-    // 新: [551, 675, 1197, 1224, 1725]
-    const expectedLines = [551, 675, 1197, 1224, 1725];
+    // 旧: [551, 675, 1197, 1224, 1725]
+    // 2026-05-28 PM (例外条項適用) gap fill に position sanity check 追加 + calculateGapFill 呼出箇所の引数拡張で shift。
+    // distance_m 本体 1byte 不変・5 経路の += 自体は変えていない・関数内 sanity check と呼出側引数追加で行 shift。
+    // 新: [551, 675, 1242, 1269, 1770]
+    const expectedLines = [551, 675, 1242, 1269, 1770];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -95,7 +98,7 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     }
   });
 
-  it('C3: dangerous_sources (GPS.calcDistance) は 4 箇所・うち 2 箇所 sanitizer 内 + 1 箇所 ZUPT helper + 1 箇所 gps_predictive (= 連続点許可済)', () => {
+  it('C3: dangerous_sources (GPS.calcDistance) は 5 箇所・うち 2 箇所 sanitizer 内 + 1 箇所 ZUPT helper + 1 箇所 gap fill sanity + 1 箇所 gps_predictive (= 連続点許可済)', () => {
     // ★設計変更宣言 (2026-05-19・業務単位を haversine 連続点累積に移行):
     //   業界標準 (= Strava / Garmin / 米国タクシー特許) と整合・iOS speedKmh ノイズ免疫。
     //   ★絶対ルール「連続点 polyline 累積 = 許可」(meter.js L106-108) と完全整合。
@@ -112,28 +115,30 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
         calls.push({ lineNo: i + 1, content: lines[i].trim() });
       }
     }
-    if (calls.length !== 4) {
+    if (calls.length !== 5) {
       throw new Error(
-        'GPS.calcDistance 呼出件数違反: 期待 4 件 (L323 sanitizer / L373 ZUPT helper / L413 sanitizer / L1093 gps_predictive) 実検出 ' +
+        'GPS.calcDistance 呼出件数違反: 期待 5 件 (L355 sanitizer / L405 ZUPT helper / L445 sanitizer / L1086 gap fill sanity / L1187 gps_predictive) 実検出 ' +
           calls.length +
           ' 件・' +
           JSON.stringify(calls)
       );
     }
-    // L323 は _trackHaversineBetweenGps 内 (sanitizer)
-    // L373 は _isBusinessZuptMicroMotion 内 (ZUPT helper・道路 snap 構成屋内対策)
-    // L413 は _calculateOffRoadIncrement 内 (sanitizer)
-    // L1093 は gps_predictive_distance_m 連続点累積 (= 表示用・trip 単位・連続点累積は絶対ルール許可)
+    // L355 は _trackHaversineBetweenGps 内 (sanitizer)
+    // L405 は _isBusinessZuptMicroMotion 内 (ZUPT helper・道路 snap 構成屋内対策)
+    // L445 は _calculateOffRoadIncrement 内 (sanitizer)
+    // L1086 は calculateGapFill 内 (★gap fill sanity check・2026-05-28 PM・歩行中偽速度 creep 対処)
+    // L1187 は gps_predictive_distance_m 連続点累積 (= 表示用・trip 単位・連続点累積は絶対ルール許可)
     // 2026-05-26 STEP2 診断 (_dispLogSig closure var 追加) で +1 shift。GPS.calcDistance 本体 1byte 不変・行番号のみ更新。
     // 2026-05-26 Phase D+E (const 4 追加) で +5 shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
     // 2026-05-27 表示1モデル化 + [DISP]/_dispLogSig 撤去で shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
     // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数追加) で +5 shift。
     // 2026-05-28 STEP0 診断 (_mmDbg helper 追加) で shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
     // 2026-05-28 PM mirror アーキ完成 (= mm/retro/gap 経路 ZUPT 並記コメント追加) で +29 shift。
-    // GPS.calcDistance 本体 1byte 不変・行番号のみ更新。
-    const expectedLines = [355, 405, 445, 1149];
+    // 2026-05-28 PM (例外条項適用) gap fill sanity check (= L1086 GPS.calcDistance 1 件新規追加) + 呼出側引数拡張で shift。
+    // 件数 4 → 5 件・対象は「速度過大を haversine で clamp する sanity」 で・絶対ルール「GPS 直線課金禁止」 に違反しない (= 速度×時間を直線で抑制する方向のみ)。
+    const expectedLines = [355, 405, 445, 1086, 1187];
     const LINE_TOLERANCE = 10;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
       if (diff > LINE_TOLERANCE) {
         throw new Error(

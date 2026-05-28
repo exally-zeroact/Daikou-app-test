@@ -408,12 +408,19 @@ describe('Phase 8 Batch 8: calculateGapFill via update() (= L836-861)', () => {
   let Meter;
   function gps(t, opts) {
     opts = opts || {};
+    // ★2026-05-28 PM (例外条項) gap fill sanity check (= L1059 calculateGapFill) 通過用:
+    //   speed × time から lat 移動量を計算し・既存固定 lat=33.84 を時間進行で北方向に動かす。
+    //   緯度 1度 ≈ 111132m。speed=50km/h × t秒 = (50/3.6)*t m 北方向。
+    //   既存テストの数値検証 (= speed×時間) は不変・haver=speed×時間で sanity check 通過する。
+    const _speedKmh = opts.speedKmh != null ? opts.speedKmh : 50;
+    const _moveM = (_speedKmh / 3.6) * t;
+    const _dLat = _moveM / 111132;
     return {
-      lat: opts.lat != null ? opts.lat : 33.84,
+      lat: opts.lat != null ? opts.lat : 33.84 + _dLat,
       lng: opts.lng != null ? opts.lng : 132.7656,
       altitude: 0,
       accuracy: opts.accuracy != null ? opts.accuracy : 5,
-      speedKmh: opts.speedKmh != null ? opts.speedKmh : 50,
+      speedKmh: _speedKmh,
       isStationary: false,
       timestamp: 1714100000000 + t * 1000,
     };
