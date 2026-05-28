@@ -69,17 +69,19 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // 2026-05-26 Phase A+B (map-matcher tentativeDistanceM +28行) で block が L3035 へ移動・window 同期
     // 2026-05-27 Phase2-a (gap routing guard + 定数追加) で block が L3085 へ移動・window 同期
     // 2026-05-29 partial commit 早期化で block が L3121 へ移動・window 同期
-    const window = lines.slice(3115, 3165).join('\n');
-    if (!/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(window)) {
+    // 2026-05-29 PM real-trace 残存 creep 解析 (= freeze 条件拡張): block が L3159 / pattern も
+    //   if (_effectivelyStationary) へ更新・window slice 同期。
+    const window = lines.slice(3140, 3190).join('\n');
+    if (!/if\s*\(\s*_effectivelyStationary\s*\)/.test(window)) {
       throw new Error(
-        'map-matcher.js L3007 周辺 (±10) に if (msg.isStationary === true) pattern 未検出 (drift detected)'
+        'map-matcher.js L3147 周辺 (±10) に if (_effectivelyStationary) pattern 未検出 (drift detected)'
       );
     }
     if (!/mmIncrementM\s*=\s*0/.test(window)) {
-      throw new Error('map-matcher.js L3007 周辺 (±10) に mmIncrementM = 0 代入 未検出');
+      throw new Error('map-matcher.js L3147 周辺 (±10) に mmIncrementM = 0 代入 未検出');
     }
     if (!/tentativeIncrementM\s*=\s*0/.test(window)) {
-      throw new Error('map-matcher.js L3007 周辺 (±10) に tentativeIncrementM = 0 代入 未検出');
+      throw new Error('map-matcher.js L3147 周辺 (±10) に tentativeIncrementM = 0 代入 未検出');
     }
   });
 });

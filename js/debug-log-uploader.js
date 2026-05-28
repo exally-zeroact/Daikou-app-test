@@ -42,8 +42,12 @@
   const DEVICE_LABEL_KEY = 'DAIKOME_DEVICE_LABEL'; // debug-trace.js と共有
   const WRITE_KEY = 'DAIKOME_DEBUG_2026'; // Firebase rules validation 共有 key
   const DB_URL = 'https://daikou-app-c821a-default-rtdb.asia-southeast1.firebasedatabase.app';
-  const FLUSH_INTERVAL_MS = 5000; // 5 秒間隔 flush
-  const FLUSH_THRESHOLD = 100; // 100 件溜まったら flush
+  // ★設計変更宣言 (2026-05-29 PM・real-trace 38ed5e46 後 解析・thread/network 圧迫軽減):
+  //   旧: 5 秒間隔 / 100 件 flush → main thread + network を喰い・GPS / Worker B / 描画 遅延
+  //       司さん「中の更新や通信速度が遅くなってる」 仮説 (= 完全的中)
+  //   新: 30 秒間隔 / 500 件 flush で・PATCH 頻度を 1/6 に削減 (= 6 倍軽量)
+  const FLUSH_INTERVAL_MS = 30000; // 30 秒間隔 flush (= 旧 5 秒の 1/6)
+  const FLUSH_THRESHOLD = 500; // 500 件溜まったら flush (= 旧 100 の 5 倍 batch)
   const MAX_BUFFER = 5000; // overflow guard
 
   // ─── Feature flag handling (= ?debuglog=on/off で切替) ────
@@ -60,17 +64,14 @@
   }
 
   // ─── enabled 判定 ───
+  // ★設計変更宣言 (2026-05-29 PM・既定 OFF 化・解析タスク時のみ明示 ON):
+  //   旧: テストビルドで既定 ON → console hook + fetch POST が常時動き・thread/network 圧迫
+  //   新: 本番・テストビルド共に既定 OFF・?debuglog=on 明示でのみ ON。
+  //   解析タスク時のみ・司さんが URL に ?debuglog=on を付加して取得 → 普段は完全に動かない。
   let _enabled = false;
   try {
     const stored = localStorage.getItem(FLAG_KEY);
-    if (stored === '1') {
-      _enabled = true;
-    } else if (stored === '0') {
-      _enabled = false;
-    } else {
-      const _isProd = typeof DEBUG !== 'undefined' && DEBUG && DEBUG.isProduction === true;
-      _enabled = !_isProd;
-    }
+    _enabled = stored === '1';
   } catch (_) {
     _enabled = false;
   }

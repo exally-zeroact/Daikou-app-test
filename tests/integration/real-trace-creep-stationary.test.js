@@ -25,6 +25,12 @@ const path = require('path');
 const { createMapMatcherWorker, loadPrefRoadsData } = require('../replay-mm-worker/worker-sim');
 
 const FIXTURE_PATH = path.join(__dirname, '..', 'fixtures', 'real-trace-iphone13-親-16min.json');
+const FIXTURE_PATH_V2 = path.join(
+  __dirname,
+  '..',
+  'fixtures',
+  'real-trace-iphone13-親-7min-after-38ed5e46.json'
+);
 
 function _haversine(lat1, lng1, lat2, lng2) {
   if (lat1 === lat2 && lng1 === lng2) return 0;
@@ -146,5 +152,80 @@ describe('real-trace iPhone13 親機 (990 sample・16.5min・5.35km) → 停車�
     // freeze なしの場合・GPS drift で 10m+ 累積していた (= 真因)
     expect(maxStatRunLen).toBeGreaterThan(10); // 停車区間が観測できていることを確認
     expect(maxDeltaWhileStat).toBeLessThan(1.0);
+  }, 60000);
+
+  // ★設計変更宣言 (2026-05-29 PM・real-trace 38ed5e46 後 残存 creep 検証):
+  //   38ed5e46 push 後の trace で・spd<1km/h sample 134 件で haversine 21.7m drift 残存。
+  //   原因: isStationary=true (= 5sec/3m radius) 判定外の・spd<2 で 3m radius 超える drift。
+  //   freeze 条件拡張 (= isStationary OR speedKmh<2) で・低速 drift も freeze 対象に。
+  //   本 test は新 trace fixture で freeze 拡張効果を検証する。
+  it('38ed5e46 後 trace: spd<2km/h 低速区間も freeze (= effectively stationary 拡張)', async () => {
+    const data = JSON.parse(fs.readFileSync(FIXTURE_PATH_V2, 'utf8'));
+    const samples = data.samples.slice(0, 250); // 7 分 fixture の代表区間
+    const worker = createMapMatcherWorker();
+    const events = [];
+    worker.on((e) => events.push(e.data));
+
+    const roadsData = loadPrefRoadsData('ehime');
+    worker.sendMessage({ type: 'loadRoads', pref: 'ehime', roadsData });
+
+    const results = [];
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      const speedKmh = (s.spd || 0) * 3.6;
+      const isStat = _computeIsStationary(samples, i);
+      const before = events.length;
+      worker.sendMessage({
+        type: 'gps',
+        lat: s.lat,
+        lng: s.lng,
+        accuracy: s.acc,
+        speedKmh,
+        heading: s.hdg,
+        timestamp: s.t,
+        isStationary: isStat,
+        pref: 'ehime',
+      });
+      for (let j = before; j < events.length; j++) {
+        const e = events[j];
+        if (e && e.type === 'mmResult') {
+          results.push({
+            idx: i,
+            speedKmh,
+            isStat,
+            effStat: e.isStationary, // ★Worker B echo (= effectively stationary)
+            tentativeDistanceM: e.tentativeDistanceM,
+          });
+        }
+      }
+    }
+
+    expect(results.length).toBeGreaterThan(50);
+
+    // ★assert 1: spd<2km/h sample で mmResult.isStationary が true (= echo 拡張)★
+    const lowSpeedResults = results.filter((r) => r.speedKmh < 2);
+    expect(lowSpeedResults.length).toBeGreaterThan(5);
+    const echoCorrect = lowSpeedResults.filter((r) => r.effStat === true).length;
+    expect(echoCorrect).toBe(lowSpeedResults.length); // 全 low-speed で echo=true
+
+    // ★assert 2: effectively stationary 連続区間で tentativeDistanceM が freeze★
+    let anchor = null;
+    let maxDeltaWhileEff = 0;
+    let effRunLen = 0;
+    let maxEffRunLen = 0;
+    for (const r of results) {
+      if (r.effStat === true) {
+        if (anchor === null) anchor = r.tentativeDistanceM;
+        const delta = r.tentativeDistanceM - anchor;
+        if (delta > maxDeltaWhileEff) maxDeltaWhileEff = delta;
+        effRunLen++;
+        if (effRunLen > maxEffRunLen) maxEffRunLen = effRunLen;
+      } else {
+        anchor = null;
+        effRunLen = 0;
+      }
+    }
+    expect(maxEffRunLen).toBeGreaterThan(5);
+    expect(maxDeltaWhileEff).toBeLessThan(1.0);
   }, 60000);
 });

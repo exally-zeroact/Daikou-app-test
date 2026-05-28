@@ -3144,7 +3144,19 @@ self.onmessage = function (e) {
     //   新: isStationary=true 中・tentativeDistanceM も freeze 値 (= 前回 isStationary=false 時の
     //       値) で出力する。isStationary=false 期間中は・freeze 値を最新値で更新し続ける。
     //   絶対ルール準拠: distance_m / business_distance_m 加算経路は 1 byte 不変。
-    if (msg.isStationary === true) {
+    // ★設計変更宣言 (2026-05-29 PM・real-trace 38ed5e46 後 残存 creep 解析・freeze 条件拡張):
+    //   旧: msg.isStationary === true のみで freeze
+    //   問題: 司さん iPhone13・spd=0.5km/h で 3m radius 超える drift → isStationary=false →
+    //         freeze 抜ける → main SET 流入 → 残存 creep 21.7m / 7 分間
+    //   新: effectively stationary 判定で freeze 拡張
+    //       = msg.isStationary === true OR (msg.speedKmh != null && msg.speedKmh < 2)
+    //   2 km/h 未満は・物理的に「実質停止」(= 業界標準・矢崎/二葉/GO・歩行慣性的にも停止扱い)・
+    //   走行 skip risk なし。msg.speedKmh が null (= iOS Safari 速度欠落) は freeze せず通常。
+    //   mmResult.isStationary を effectively stationary で echo back し・main 側 SET ガードと同期。
+    //   絶対ルール準拠: distance_m / business_distance_m 加算経路は 1 byte 不変。
+    const _lowSpeed = msg.speedKmh != null && msg.speedKmh < 2;
+    const _effectivelyStationary = msg.isStationary === true || _lowSpeed;
+    if (_effectivelyStationary) {
       mmIncrementM = 0;
       tentativeIncrementM = 0;
       if (_frozenTentativeDistanceM !== null) {
@@ -3177,7 +3189,7 @@ self.onmessage = function (e) {
       //   main 側で state.tier2_pending_m に加算し、commit で 0 リセットされる。
       tentativeIncrementM: tentativeIncrementM,
       tentativeDistanceM: tentativeDistanceM, // ★Phase A: commit点→現射影 snapshot 弧長 (main で tier2 SET)
-      isStationary: msg.isStationary === true, // ★2026-05-29 real-trace: main 側 SET ガード用・freeze と二重保険
+      isStationary: _effectivelyStationary, // ★2026-05-29 PM real-trace 残存 creep: effectively stationary (= isStationary OR speedKmh<2) を echo・main SET ガード同期
       snap: outSnap,
       confidence: pickedEmission > 0 ? Math.min(1.0, pickedEmission) : 1.0,
       windowSize: viterbi.size(),
