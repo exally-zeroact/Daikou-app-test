@@ -74,12 +74,22 @@ let CONFIG = {
   //   この値まで accuracy 上限を緩和し屋内/低速 deadlock(全reject→凍結)を回避。
   //   静止時は緩和せず(=base のまま厳格) drift を計上しない。観測: SE 屋内 acc 12-17m。
   accuracy_moving_max_m: 20,
+  // ★Fix① v2 (2026-05-28・★設計変更宣言★・dwell time 業界標準準拠):
+  //   速度 spike (1 step) で静止判定が defeat されないよう・連続 N step で
+  //   speedKmh >= stationary_moving_speed_kmh を観測した時のみ高速ガード発火。
+  //   = ArduPilot EKF_GLITCH_RAD「persistent then accept」 + Vehicle Stationary
+  //     Detection 論文 (PMC4170787) dwell time 3 秒 (MM併用相当) と整合。
+  //   = Linux CI で偽速度 spike 11.68km/h (1 step) が 10km/h backstop を defeat し
+  //     creep 33m を出した事象 (run 26553931113 で観測) を遮断。
+  //   3 step = 1Hz 端末で 3 秒・5Hz 端末で 0.6 秒。実走行(持続)は通過・spike は遮断。
+  high_speed_dwell_steps: 3,
 };
 
 // ─── 状態変数（Worker内で保持） ───
 let lastPosition = null;
 let lowSpeedStart = null;
 let _posStillStart = null; // ★Fix① (2026-05-28): 速度非依存の位置半径静止判定 anchor (accel不能時fallback)
+let _highSpeedConsecCount = 0; // ★Fix① v2 (2026-05-28): 高速ガード dwell time カウンタ (連続 N step で fire)
 let isStationary = false;
 let trafficJamSince = null;
 let isTrafficJam = false;
@@ -798,9 +808,24 @@ function processPosition(data) {
   // 位置半径のみの静止判定 (速度非依存・accel不能時 fallback / 診断比較用・毎frame維持)
   const posStationary = checkPositionStationary(filtered.lat, filtered.lng, now);
 
-  let finalStationary;
+  // ★Fix① v2 (2026-05-28・dwell time 業界標準準拠):
+  //   speedKmh >= stationary_moving_speed_kmh を ★連続 high_speed_dwell_steps step★ 観測した時のみ
+  //   高速ガード発火。1 step の偽速度 spike (= A3 drift 由来) は dwell 未達で accel 判定に落とし
+  //   creep を遮断。Linux CI run 26553931113 で spd=11.68km/h 1 step spike が backstop を defeat した
+  //   事象 → 本 dwell time で遮断。ArduPilot EKF_GLITCH_RAD「persistent then accept」と整合。
+  let highSpeedFire = false;
   if (speedKmh >= CONFIG.stationary_moving_speed_kmh) {
-    // (a) 確実に移動 (drift では到達しない速度) → 計上
+    _highSpeedConsecCount++;
+    if (_highSpeedConsecCount >= CONFIG.high_speed_dwell_steps) {
+      highSpeedFire = true;
+    }
+  } else {
+    _highSpeedConsecCount = 0;
+  }
+
+  let finalStationary;
+  if (highSpeedFire) {
+    // (a) ★連続 N step★ で高速 → 確実に移動 (drift spike では達しない) → 計上
     finalStationary = false;
   } else if (accelVariance === null && accelDeviation === null) {
     // (c) 加速度判定不能 → 位置半径のみ (A3/Doppler 速度に依存しない fallback)
@@ -919,6 +944,7 @@ self.onmessage = function (e) {
     lastPosition = null;
     lowSpeedStart = null;
     _posStillStart = null; // ★Fix① (2026-05-28): 位置半径 anchor リセット
+    _highSpeedConsecCount = 0; // ★Fix① v2 (2026-05-28): 高速ガード dwell time カウンタリセット
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;
@@ -934,6 +960,7 @@ self.onmessage = function (e) {
     lastPosition = null;
     lowSpeedStart = null;
     _posStillStart = null; // ★Fix① (2026-05-28): 位置半径 anchor リセット
+    _highSpeedConsecCount = 0; // ★Fix① v2 (2026-05-28): 高速ガード dwell time カウンタリセット
     isStationary = false;
     trafficJamSince = null;
     isTrafficJam = false;

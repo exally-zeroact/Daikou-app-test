@@ -278,12 +278,13 @@ describe('Fix② accuracy cap watchdog (実 gps-worker.js 経由・★新構造)
     }
   });
 
-  // ★②-3 (2026-05-28・★CI 環境差調査中★・it.skip):
-  //   ローカル (Windows + Node 24) では deterministic biz=0 だが・
-  //   CI (Ubuntu Linux + Node 24) では biz=33.23m が出る現象を確認 (run 26553139049)。
-  //   ローカル再現不可 (Docker/WSL なし) のため・★CI ログから per-step を採取する diagnostic★ を
-  //   下記 it で実行・本 ②-3 は skip して CI 緑回復。真因特定後に復活させる。
-  it.skip('②-3 屋内 12-17m + 静止 + accel平坦 → biz=0 (= 静止時は drift 計上しない)', () => {
+  // ★②-3 (2026-05-28・★Fix① v2 dwell time で復活):
+  //   旧 Fix① で Linux CI で偽速度 spike 11.68km/h (1 step) が 10km/h backstop を defeat し
+  //   biz=33.23m creep が発生 (run 26553931113 で diagnostic 確認)。
+  //   Fix① v2 (dwell time=3 step) で・1 step spike では highSpeedFire しない → accel branch
+  //   → c1&&!c2=true → finalStationary=true 維持 → biz=0 を期待。
+  //   diagnostic 版は CI ログで Linux 環境の挙動を比較確認するため保持。
+  it('②-3 屋内 12-17m + 静止 + accel平坦 → biz=0 (= 静止時は drift 計上しない)', () => {
     const cfg = Object.assign(defaultConfigIndoor(), {
       seed: 31,
       position_noise_stddev_m: 1.0,
