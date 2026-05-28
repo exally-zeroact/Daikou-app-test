@@ -37,7 +37,7 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     }
     if (matchedLines.length !== 5) {
       throw new Error(
-        '述語 C 違反: distance_m 書込経路 5 経路 (L496/L576/L1043/L1064/L1461) を逸脱。検出: ' +
+        '述語 C 違反: distance_m 書込経路 5 経路 (L551/L661/L1168/L1190/L1691・2026-05-28 verified) を逸脱。検出: ' +
           JSON.stringify(matchedLines, null, 2)
       );
     }
