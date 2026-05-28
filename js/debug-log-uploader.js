@@ -64,14 +64,24 @@
   }
 
   // ─── enabled 判定 ───
-  // ★設計変更宣言 (2026-05-29 PM・既定 OFF 化・解析タスク時のみ明示 ON):
-  //   旧: テストビルドで既定 ON → console hook + fetch POST が常時動き・thread/network 圧迫
-  //   新: 本番・テストビルド共に既定 OFF・?debuglog=on 明示でのみ ON。
-  //   解析タスク時のみ・司さんが URL に ?debuglog=on を付加して取得 → 普段は完全に動かない。
+  // ★設計変更宣言 (2026-05-29 PM rev2・既定 OFF 撤回・自動 ON 復帰):
+  //   司さん「URL 付け加えるのめんどくさい」 指示で・rev1 の既定 OFF 化を撤回。
+  //   UX 優先: テストビルド (= !DEBUG.isProduction) では・既定 ON で自動 push
+  //            本番 (= DEBUG.isProduction === true) では・既定 OFF (= privacy/同意・既存仕様)
+  //   ?debuglog=off で・明示 OFF 可能 (= localStorage '0' 永続)。
+  //   thread/network 圧迫は・flush 30sec / batch 500 軽量化で副作用なし (= 1/6 削減で常時 ON でも軽い)。
+  //   debug-trace.js の既定 ON 方針 (2026-05-23) と同じ pattern。
   let _enabled = false;
   try {
     const stored = localStorage.getItem(FLAG_KEY);
-    _enabled = stored === '1';
+    if (stored === '1') {
+      _enabled = true;
+    } else if (stored === '0') {
+      _enabled = false;
+    } else {
+      const _isProd = typeof DEBUG !== 'undefined' && DEBUG && DEBUG.isProduction === true;
+      _enabled = !_isProd;
+    }
   } catch (_) {
     _enabled = false;
   }
