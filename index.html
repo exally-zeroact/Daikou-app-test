@@ -10096,6 +10096,37 @@
           });
         }
 
+        // ★設計変更宣言 (2026-05-29 PM rev3・アプリ バージョン表示):
+        //   司さん指示「CACHE_NAME どこ？」 で・設定画面に SW CACHE_NAME を表示。
+        //   sw.js の message handler ({ type: 'GET_CACHE_NAME' }) に MessageChannel で問合せ。
+        //   SW 未登録 (= 開発環境 / 初回 install 直後) は「(SW 未登録)」 表示で fallback。
+        function _loadAppVersion() {
+          const el = document.getElementById('_st_appVersionLine');
+          if (!el) return;
+          if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
+            el.textContent = '(SW 未登録)';
+            return;
+          }
+          let received = false;
+          try {
+            const ch = new MessageChannel();
+            ch.port1.onmessage = function (ev) {
+              received = true;
+              if (ev && ev.data && ev.data.type === 'CACHE_NAME' && ev.data.value) {
+                el.textContent = ev.data.value;
+              } else {
+                el.textContent = '(取得失敗)';
+              }
+            };
+            navigator.serviceWorker.controller.postMessage({ type: 'GET_CACHE_NAME' }, [ch.port2]);
+            setTimeout(function () {
+              if (!received) el.textContent = '(応答なし)';
+            }, 2000);
+          } catch (_) {
+            el.textContent = '(取得失敗)';
+          }
+        }
+
         async function _loadDlStatus() {
           const updateEl = document.getElementById('_st_dataLastUpdateLine');
           const statusEl = document.getElementById('_st_dataDlStatusLine');
@@ -10315,6 +10346,7 @@
           // ★設計変更宣言 (2026-05-14): resetTime restore 撤去 (時刻ベース廃止)
           _refreshTrainingToggleUI();
           _loadDlStatus();
+          _loadAppVersion();
         }
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', _init);
@@ -11663,6 +11695,16 @@
               料金設定（追加料金・基本・段階・割増・自動・車種・待機・区間・確認）
             </div>
             <div style="color: #8e8e93; font-size: 13px">›</div>
+          </div>
+        </div>
+
+        <!-- ★設計変更宣言 (2026-05-29 PM rev3・アプリ バージョン表示): 司さん指示「CACHE_NAME どこ？」で追加 -->
+        <div class="section">
+          <div class="row" style="justify-content: space-between">
+            <div class="row-label" style="color: #8e8e93">アプリ バージョン</div>
+            <div id="_st_appVersionLine" style="color: #1c1c1e; font-size: 14px; font-weight: 600">
+              確認中...
+            </div>
           </div>
         </div>
 
