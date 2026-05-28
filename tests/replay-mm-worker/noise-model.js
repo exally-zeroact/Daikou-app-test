@@ -249,8 +249,16 @@ function generateGpsTrace(trueTrace, config) {
         : 0;
       speedSrc = 'hav';
     } else if (speedMode === 'dop') {
-      // Doppler: coords.speed あり = 真速度 + 小 noise (>=0 clamp)
-      speedKmh = Math.max(0, trueSpeed + gaussian(speedPrng, 0, config.speed_noise_kmh || 0.5));
+      // Doppler: coords.speed あり = 真速度 + bias + 小 noise (>=0 clamp)
+      // ★設計変更宣言 (2026-05-28・Android 屋内 Doppler 偽速度継続出力 再現):
+      //   屋内 GPS multipath で・真実 0km/h なのに Doppler が 0.6-0.8km/h を継続出力する
+      //   現象を再現するため・speed_bias_kmh を加算 (= 司さん実機 Eruda log 観測値)。
+      //   これにより Fix① の static 判定が moving に振れた瞬間に 5 経路で creep する現象を再現可能。
+      const speedBias = config.speed_bias_kmh || 0;
+      speedKmh = Math.max(
+        0,
+        trueSpeed + speedBias + gaussian(speedPrng, 0, config.speed_noise_kmh || 0.5)
+      );
       speedSrc = 'dop';
     } else {
       speedKmh = trueSpeed;

@@ -43,7 +43,8 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // 2026-05-24 更新 (business preview 別回路・state 追加 + 別 if ブロック): L950 → L1006 (+56) 移動。
     // 2026-05-24 更新 (表示層 予測補間・state 追加 + 別ブロック): L1006 → L1039 (+33) 移動。
     // 2026-05-28 STEP0 診断 (_mmDbg helper + 診断call追加) で L1066 へ移動・window 同期。
-    const window = lines.slice(1050, 1080).join('\n');
+    // 2026-05-28 PM mirror アーキ完成 (= mm/retro 経路に ZUPT 並記コメント追加) で L1095 へ移動・window 同期。
+    const window = lines.slice(1085, 1115).join('\n');
     if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
       throw new Error(
         'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'

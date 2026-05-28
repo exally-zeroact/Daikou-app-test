@@ -553,8 +553,22 @@ const Meter = (() => {
           state.distanceSource = 'mm';
           _mmDbg('commit', m.mmIncrementM); // ★STEP0 診断
         }
+        // ★設計変更宣言 (2026-05-28・mirror アーキ完成・mm 経路 ZUPT 並記漏れ追補):
+        //   司さん実機 (iPhone13/Android) で・屋内 Doppler 偽速度 0.6km/h + Fix① stat=F 瞬間で
+        //   business_distance_m が creep する真因 = 4 経路中 mm/retro/gap で ZUPT 並記漏れ
+        //   (= offroad L1204 にのみ既存) を解消。Worker B 側 isStationary 漏れ時の保険として並記。
+        //   distance_m / running gate / business_active gate は 1byte 不変。
         if (state.business_active) {
-          state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+          const _gpsForZupt = state.last_gps
+            ? {
+                timestamp: state.last_timestamp,
+                lat: state.last_gps.lat,
+                lng: state.last_gps.lng,
+              }
+            : null;
+          if (!_gpsForZupt || !_isBusinessZuptMicroMotion(_gpsForZupt, m.mmIncrementM)) {
+            state.business_distance_m = (state.business_distance_m || 0) + m.mmIncrementM;
+          }
         }
         lastMmUsefulAt = Date.now();
         // 参照値も並行更新 (旧設計互換・stats 表示用)
@@ -664,9 +678,24 @@ const Meter = (() => {
             state.offroad_distance_m = (state.offroad_distance_m || 0) + _haverAccumSinceLastCommit;
             _mmDbg('retro', _haverAccumSinceLastCommit); // ★STEP0 診断
           }
+          // ★設計変更宣言 (2026-05-28・mirror アーキ完成・retro 経路 ZUPT 並記追補):
+          //   屋内 drift 累積で・business_distance_m が creep する真因解消。
+          //   distance_m / running gate は 1byte 不変・business 加算のみ ZUPT 並記。
           if (state.business_active) {
-            state.business_distance_m =
-              (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
+            const _gpsForZupt = state.last_gps
+              ? {
+                  timestamp: state.last_timestamp,
+                  lat: state.last_gps.lat,
+                  lng: state.last_gps.lng,
+                }
+              : null;
+            if (
+              !_gpsForZupt ||
+              !_isBusinessZuptMicroMotion(_gpsForZupt, _haverAccumSinceLastCommit)
+            ) {
+              state.business_distance_m =
+                (state.business_distance_m || 0) + _haverAccumSinceLastCommit;
+            }
           }
           if (typeof dlog === 'function') {
             dlog(
@@ -1171,7 +1200,12 @@ const Meter = (() => {
             _recordGapFill(filled);
             _mmDbg('gap', filled); // ★STEP0 診断
           }
-          if (state.business_active) {
+          // ★設計変更宣言 (2026-05-28・mirror アーキ完成・gap 経路 ZUPT 並記追補):
+          //   司さん実機 Eruda log で観測した creep の主因。
+          //   [Meter] GPS消失補完: X秒 → Y m (速度×時間) ログ直後に business +Y m が発火していた。
+          //   距離計算は既存ロジック維持・business 加算のみ ZUPT 並記。
+          //   distance_m / running gate / business_active gate は 1byte 不変。
+          if (state.business_active && !_isBusinessZuptMicroMotion(gpsResult, filled)) {
             state.business_distance_m = (state.business_distance_m || 0) + filled;
           }
           _haverAccumSinceLastCommit = 0; // gap fill で確定したのでバッファ reset

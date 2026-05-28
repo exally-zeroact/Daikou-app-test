@@ -177,6 +177,31 @@ describe('Fix① 静止判定 watchdog (実 gps-worker.js 経由・★新構造)
         biz_max_m: 1,
       },
     },
+    {
+      // ★設計変更宣言 (2026-05-28・実機 Android iPhone13 屋内 Doppler creep 真因再現):
+      //   司さん iPhone13/Android 実機で・屋内静止中に・Doppler 偽速度 0.6-0.8km/h が継続出力 +
+      //   accel ノイズで Fix① 静止判定が時々 moving に振れる + GPS dropout で・[Meter] GPS消失補完
+      //   (mm/retro/gap 経路) が発火 → business_distance_m が 70m/7 分で creep する現象を再現。
+      //   この fixture は・ZUPT 並記 (= 4 経路に _isBusinessZuptMicroMotion 並記) ★前は FAIL★・
+      //   並記後は緑 (= mirror アーキ完成) で・修正の効果を assertion で担保する。
+      name: '①-7 Android Doppler 屋内偽速度 0.6km/h 継続 + accel ノイズ → business creep ≤ 1m (★ZUPT 全 4 経路並記 検証)',
+      gen: {
+        seed: 23,
+        position_noise_stddev_m: 1.0,
+        accuracy_mean_m: 8,
+        accuracy_stddev_m: 2,
+        outlier_rate: 0,
+        speed_mode: 'dop',
+        speed_bias_kmh: 0.6, // ★屋内 Doppler 偽速度 mean=0.6km/h 継続出力 (= 司さん実機 Eruda log 観測値)
+        speed_noise_kmh: 0.2,
+        interval_ms: 1000,
+        accel_mode: 'moving', // ★屋内 accel ノイズで・Fix① 判定が時々 moving に振れる (= 実機現象)
+      },
+      opts: { businessActive: true, running: false },
+      expect: {
+        biz_max_m: 1, // ★ZUPT 並記 前は FAIL・並記後は緑 (= mirror アーキ完成)
+      },
+    },
   ];
 
   for (const s of SCENARIOS_FIX1) {

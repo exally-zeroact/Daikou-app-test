@@ -67,8 +67,11 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数 + gap fill gate コメント追加) で shift。
     // 旧: [529, 638, 1141, 1162, 1662]
     // 2026-05-28 STEP0 診断 (_mmDbg helper + 4加算地点の診断call追加) で shift。distance_m 本体 1byte 不変・行番号のみ。
-    // 新: [551, 661, 1168, 1190, 1691]
-    const expectedLines = [551, 661, 1168, 1190, 1691];
+    // 旧: [551, 661, 1168, 1190, 1691]
+    // 2026-05-28 PM mirror アーキ完成 (= mm/retro/gap 経路に _isBusinessZuptMicroMotion 並記コメント追加) で shift。
+    // distance_m 本体 1byte 不変・5 経路の += 自体は変えていない・コメント追加で行のみ shift。
+    // 新: [551, 675, 1197, 1224, 1725]
+    const expectedLines = [551, 675, 1197, 1224, 1725];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -126,7 +129,9 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 2026-05-27 表示1モデル化 + [DISP]/_dispLogSig 撤去で shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
     // 2026-05-27 Phase2-a (GAP_ROUTE_MAX_SEC 定数追加) で +5 shift。
     // 2026-05-28 STEP0 診断 (_mmDbg helper 追加) で shift。GPS.calcDistance 本体 1byte 不変・行番号のみ。
-    const expectedLines = [355, 405, 445, 1120];
+    // 2026-05-28 PM mirror アーキ完成 (= mm/retro/gap 経路 ZUPT 並記コメント追加) で +29 shift。
+    // GPS.calcDistance 本体 1byte 不変・行番号のみ更新。
+    const expectedLines = [355, 405, 445, 1149];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 4; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);
