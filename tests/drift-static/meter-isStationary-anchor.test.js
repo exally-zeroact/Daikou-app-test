@@ -68,7 +68,8 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張
     // 2026-05-26 Phase A+B (map-matcher tentativeDistanceM +28行) で block が L3035 へ移動・window 同期
     // 2026-05-27 Phase2-a (gap routing guard + 定数追加) で block が L3085 へ移動・window 同期
-    const window = lines.slice(3065, 3115).join('\n');
+    // 2026-05-29 partial commit 早期化で block が L3121 へ移動・window 同期
+    const window = lines.slice(3115, 3165).join('\n');
     if (!/if\s*\(\s*msg\.isStationary\s*===\s*true\s*\)/.test(window)) {
       throw new Error(
         'map-matcher.js L3007 周辺 (±10) に if (msg.isStationary === true) pattern 未検出 (drift detected)'

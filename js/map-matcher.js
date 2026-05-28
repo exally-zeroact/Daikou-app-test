@@ -2851,6 +2851,26 @@ self.onmessage = function (e) {
       if (candCount === 0) {
         // 候補ゼロ = snap miss（窓状態は維持・skip カウントなし）
         reason = 'no candidates';
+        // ★設計変更宣言 (2026-05-29・partial commit 早期化・display 動き出す遅い 真因対処):
+        //   候補ゼロ (= accuracy 悪化 / 道路から遠い) でも・raw GPS 連続点 haversine で
+        //   preview 用 tentativeIncrementM を出力。main 側で tier2_pending_m に SET され
+        //   display = distance_m + tier2_pending_m で・display target が進む。
+        //   絶対ルール準拠:
+        //     ・課金 distance_m には影響しない (= preview のみ・GPS 直線課金禁止維持)
+        //     ・連続点 polyline 累積 = memory「連続点 haversine 累積 = 許可」 と整合
+        //     ・accuracy > 50m は加算しない (= 既存 _trackHaversineBetweenGps と同基準)
+        //     ・物理上限 200m/step (= 既存と同基準)
+        if (msg.accuracy != null && msg.accuracy <= 50 && _recentGpsBuf.length >= 2) {
+          const _prevGps = _recentGpsBuf[_recentGpsBuf.length - 2];
+          const _currGps = _recentGpsBuf[_recentGpsBuf.length - 1];
+          const _dtRaw = (_currGps.t - _prevGps.t) / 1000;
+          if (_dtRaw > 0 && _dtRaw <= 30) {
+            const _rawHaver = _haversine(_prevGps.lat, _prevGps.lng, _currGps.lat, _currGps.lng);
+            if (_rawHaver > 0 && _rawHaver <= 200) {
+              tentativeIncrementM = _rawHaver;
+            }
+          }
+        }
       } else {
         // ② emission scoring（直前 commit 済 snap の type bucket / layer を prev として渡す）
         const prevBucket =
@@ -2921,6 +2941,32 @@ self.onmessage = function (e) {
               }
             } catch (_) {
               // calcRoadDistance 失敗は無視 (= preview 不要・課金には影響しない)
+            }
+          }
+        }
+        // ★設計変更宣言 (2026-05-29・partial commit 早期化・初回 GPS / prevSnap=null 対応):
+        //   bestEmit はあるが prevSnap=null (= 初回 GPS / softReset 直後) で
+        //   tentativeIncrementM=0 のまま display が動かない問題への対処。
+        //   raw GPS 連続点 haversine で early tentative 出力。
+        //   絶対ルール準拠: preview のみ・課金 distance_m 不変・連続点累積許可。
+        if (
+          tentativeIncrementM === 0 &&
+          msg.accuracy != null &&
+          msg.accuracy <= 50 &&
+          _recentGpsBuf.length >= 2
+        ) {
+          const _prevGps2 = _recentGpsBuf[_recentGpsBuf.length - 2];
+          const _currGps2 = _recentGpsBuf[_recentGpsBuf.length - 1];
+          const _dtRaw2 = (_currGps2.t - _prevGps2.t) / 1000;
+          if (_dtRaw2 > 0 && _dtRaw2 <= 30) {
+            const _rawHaver2 = _haversine(
+              _prevGps2.lat,
+              _prevGps2.lng,
+              _currGps2.lat,
+              _currGps2.lng
+            );
+            if (_rawHaver2 > 0 && _rawHaver2 <= 200) {
+              tentativeIncrementM = _rawHaver2;
             }
           }
         }
