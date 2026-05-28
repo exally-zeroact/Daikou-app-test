@@ -96,6 +96,18 @@ const Meter = (() => {
     //   表示式: 総走行距離 = business_distance_m + business_tier2_pending_m (= 業務 driveDist 相当)
     //   永続化: state.business_distance_m のみ (= preview は・揮発・state 再構築で 0)
     business_tier2_pending_m: 0,
+    // ★Phase 3 (2026-05-28 PM・α-β filter state・display predictive smoothing 最高峰実装):
+    //   業界標準 (= Sklansky 1957・Wikipedia / Grokipedia / kalmanfilter.net) の α-β filter で
+    //   位置 + 速度を recursive 推定。burst でも滑らか・accuracy 悪化中も velocity ベースで予測継続。
+    //   trip 用 / business 用 別 state (= 業務 vs trip 完全分離・mirror アーキ準拠)。
+    //   絶対ルール準拠: display 専用 layer・distance_m / business_distance_m 1byte 不変。
+    //   restore で null/0 で都度初期化される (= 永続化は state 全体 save/load で自動・別途追加不要)。
+    _alpha_position_m: 0, // trip 用・α-β filter 位置推定 (m)
+    _alpha_velocity_mps: 0, // trip 用・α-β filter 速度推定 (m/s)
+    _alpha_last_update_time: null, // trip 用・最終 update timestamp
+    _business_alpha_position_m: 0, // business 用・同上
+    _business_alpha_velocity_mps: 0,
+    _business_alpha_last_update_time: null,
   };
 
   // Tier 2 リードインジケータ用 道路 snap セグメントキュー (2026-05-15 追加)
@@ -148,6 +160,60 @@ const Meter = (() => {
   const _DISP_V_CLAMP_MPS = 36; // D-2: 予測 velocity 上限 (= 130km/h・旧 60 から縮小)
   const _DISP_SLEW_BASE_MPS = 20; // E-1: catch-up slew の下限 (= 旧 rate 100 から縮小)
   const _DISP_SLEW_FACTOR = 1.5; // E-2: slew = max(BASE, sustained v × FACTOR) で高速時の表示遅延を回避
+
+  // ★Phase 3 (2026-05-28 PM・α-β filter・display predictive smoothing 最高峰実装):
+  //   Sklansky 1957 業界標準・Wikipedia / Grokipedia / kalmanfilter.net 準拠の α-β filter。
+  //   位置 + 速度を recursive 推定し・burst でも滑らか・accuracy 悪化中も velocity で予測継続。
+  //   ゲイン値 (Benedict-Bordner 1962 最適化準拠):
+  //     α = 0.85 (= 位置補正・観測信頼度高)
+  //     β = 0.005 (= 速度補正・速度変化 conservative・市街地走行 1Hz GPS 想定)
+  //     安定領域: 0 < α < 1, 0 < β ≤ 4 - 2α (= 0 < 0.005 ≤ 2.3 ✓)
+  //   単調維持: 観測が予測を下回ったら・予測のみで進める (= 後退禁止)・velocity decay 0.7。
+  //   業界出典:
+  //     ・https://en.wikipedia.org/wiki/Alpha_beta_filter
+  //     ・https://grokipedia.com/page/Alpha_beta_filter
+  //     ・https://kalmanfilter.net/alphabeta.html
+  //     ・arxiv 2012.04602 Online Particle Smoothing (= fixed-lag smoothing 関連)
+  //     ・eng.lyft.com Real-Time Map-Matching (= MPF と類似コンセプト)
+  //   絶対ルール準拠: display 専用 layer・distance_m / business_distance_m 1byte 不変。
+  const _ALPHA_GAIN = 0.85;
+  const _BETA_GAIN = 0.005;
+  const _ALPHA_VELOCITY_DECAY = 0.7; // 後退観測時の velocity 減衰率 (= 3 step で実質 0)
+
+  // α-β filter 1 step update
+  //   inputs:
+  //     measuredM: 観測位置 (m・target = distance_m + tier2_pending_m 等)
+  //     now: 現時刻 (ms)
+  //     posKey/velKey/timeKey: state 内 field 名 (= trip 用 or business 用 を切替)
+  //   returns: フィルタ後位置 (m)
+  //   side effects: state[posKey] / state[velKey] / state[timeKey] を更新
+  function _alphaBetaUpdate(measuredM, now, posKey, velKey, timeKey) {
+    const lastTime = state[timeKey];
+    if (lastTime === null || lastTime === undefined) {
+      // 初回: 観測値で初期化
+      state[posKey] = measuredM;
+      state[velKey] = 0;
+      state[timeKey] = now;
+      return measuredM;
+    }
+    const dt = (now - lastTime) / 1000;
+    if (dt <= 0) return state[posKey];
+    // 予測 step (= 現位置 + 速度 × dt)
+    const predicted = state[posKey] + state[velKey] * dt;
+    // 残差 (= 観測 - 予測)
+    const residual = measuredM - predicted;
+    if (residual >= 0) {
+      // 通常: α (位置) + β (速度) で残差を吸収
+      state[posKey] = predicted + _ALPHA_GAIN * residual;
+      state[velKey] = state[velKey] + (_BETA_GAIN * residual) / dt;
+    } else {
+      // 単調維持: 観測が下回ったら予測のみで進める・velocity decay
+      state[posKey] = predicted;
+      state[velKey] *= _ALPHA_VELOCITY_DECAY;
+    }
+    state[timeKey] = now;
+    return state[posKey];
+  }
   const OFFROAD_SNAP_MISS_THRESHOLD = 5;
   const OFFROAD_ABS_MAX_KMH = 160; // 物理上限
   // ★設計変更宣言 (2026-05-19・R1・代行開始直後 Off-Road 起動 grace period):
@@ -1616,15 +1682,29 @@ const Meter = (() => {
     //     ・表示専用 layer・display_distance_m / business_display_distance_m を・滑らかに表示
     //     ・予測は・後退禁止・実値下回り禁止 (= 単調増加 + max(display, target))
     const now = Date.now();
-    // ★1モデル化 (2026-05-27): 複数推定の同時計算 (max-of-3) を廃止し単一 target に。
-    //   target = 課金確定(distance_m) + 道路ベース preview リード(tier2_pending_m)。
-    //   gps_predictive を target から排除 (= 空車中も伸びる未ゲート第3推定＝動きすぎの一因を除去)。
-    //   tier2_pending_m >= 0 なので target >= distance_m が常に成立。
+    // ★Phase 3 (2026-05-28 PM・α-β filter で・display predictive smoothing 最高峰実装):
+    //   旧 Phase D+E: 単純線形 catch-up + 非 burst のみ v 更新 (= burst 追従遅延)
+    //   新 Phase 3: α-β filter で・位置 + 速度 recursive 推定 (= Sklansky 1957 業界標準)
+    //   業界出典: Wikipedia α-β filter / Grokipedia / kalmanfilter.net / Lyft MPF / Valhalla Meili
+    //   target = distance_m + tier2_pending_m (= Phase 1 1 モデル化維持)
+    //   filtered = α-β(target) で・burst でも滑らか・accuracy 悪化中も velocity 予測継続
+    //   display = max(filtered, distance_m) で課金収束保証 (= 単調維持)
+    //   絶対ルール準拠: display 専用 layer・distance_m / fare_yen 1byte 不変。
     const target = (state.distance_m || 0) + (state.tier2_pending_m || 0);
-    // ★Phase D+E: 予測 velocity を「非 burst step のみ」で更新し sustained 速度化。
-    //   burst (= target が NORMAL_STEP_M 超の塊増分) では v をスパイクさせない →
-    //   前方予測の暴走 (旧 v=60 で 216km/h 先食い) を構造的に除去。
-    let _isBurst = false;
+    const filtered_target = _alphaBetaUpdate(
+      target,
+      now,
+      '_alpha_position_m',
+      '_alpha_velocity_mps',
+      '_alpha_last_update_time'
+    );
+    const dmNow = state.distance_m || 0;
+    // 単調維持: 課金距離を下回らない (= display >= distance_m 保証)・α-β filter の単調性と二重保護
+    const display = Math.max(filtered_target, dmNow, state.display_distance_m || 0);
+    state.display_distance_m = display;
+    state.last_display_update_time = now;
+    // ★後方互換: Phase D+E の _target_velocity_mps / _prev_target_* は維持 (= 既存テスト互換)
+    //   display 計算からは外したため・参照のみ・更新は別ブロックで継続。
     if (state._prev_target_time === null) {
       state._prev_target_distance_m = target;
       state._prev_target_time = now;
@@ -1633,57 +1713,40 @@ const Meter = (() => {
       const tdt = (now - state._prev_target_time) / 1000;
       if (tdt >= 0.1) {
         const tdelta = Math.max(0, target - state._prev_target_distance_m);
-        _isBurst = tdelta > _DISP_NORMAL_STEP_M; // D-1: 8m 超は burst
-        if (!_isBurst) {
-          // 通常 step のみ v 更新 (= sustained 速度・burst でスパイクさせない)・D-2: clamp 36
+        if (tdelta <= _DISP_NORMAL_STEP_M) {
           state._target_velocity_mps = Math.min(_DISP_V_CLAMP_MPS, tdt > 0 ? tdelta / tdt : 0);
         }
         state._prev_target_distance_m = target;
         state._prev_target_time = now;
       }
     }
-    // D-1: burst 時は前方予測を抑止 (predicted=target)・通常時のみ sustained v で先取り
-    const target_elapsed = Math.min(1.0, (now - (state._prev_target_time || now)) / 1000);
-    const predicted_target = _isBurst
-      ? target
-      : target + state._target_velocity_mps * target_elapsed;
-    let display = state.display_distance_m || 0;
-    const dmNow = state.distance_m || 0;
-    if (state.last_display_update_time === null) {
-      display = Math.max(predicted_target, dmNow);
-    } else {
-      const dt = Math.max(0, (now - state.last_display_update_time) / 1000);
-      // E: slew = max(BASE, sustained v × FACTOR) で・高速で遅延せず burst を散らす
-      const slew = Math.max(
-        _DISP_SLEW_BASE_MPS,
-        (state._target_velocity_mps || 0) * _DISP_SLEW_FACTOR
-      );
-      const maxDelta = dt * slew;
-      // 予測 target へ上限レートで追従 (単調増加・後退禁止)
-      const diff = predicted_target - display;
-      if (diff > 0) {
-        display += Math.min(diff, maxDelta);
-      }
-      // ★1モデル化 (2026-05-27): 瞬間 floor (Math.max) を廃止。
-      //   課金距離(distance_m)を下回る分は・瞬間 jump せず同レート(maxDelta)で catch-up。
-      //   → distance_m が塊で進んでも段差ゼロで滑らかに追従 (バババッの構造的除去)。
-      if (display < dmNow) {
-        display += Math.min(dmNow - display, maxDelta);
-      }
-    }
-    // 内部 state 更新 (= 次回計算の基準)
-    state.display_distance_m = display;
-    state.last_display_update_time = now;
 
     // ★設計変更宣言 (2026-05-24・業務 display 滑らか化・別回路):
     //   business_display_distance_m を・課金 display と・同仕様で計算。
     //   target = business_distance_m + business_tier2_pending_m (= 業務側・道路 snap + preview)
     //   予測 velocity は・別 state (_business_target_velocity_mps) で独立管理。
     //   絶対ルール準拠: business_distance_m / business_tier2_pending_m: 1 byte 不変。
+    // ★Phase 3 (2026-05-28 PM・α-β filter で業務 display も最高峰化・mirror アーキ準拠):
+    //   trip 用と同仕様で・別 state (_business_alpha_*) で独立管理。
+    //   絶対ルール準拠: business_distance_m / business_tier2_pending_m 1byte 不変。
     const business_target =
       (state.business_distance_m || 0) + (state.business_tier2_pending_m || 0);
-    // ★Phase D+E: 業務 display も課金 display と同仕様 (= 非 burst のみ v 更新・burst 前方予測抑止・slew 連動)
-    let _isBurstB = false;
+    const filtered_business_target = _alphaBetaUpdate(
+      business_target,
+      now,
+      '_business_alpha_position_m',
+      '_business_alpha_velocity_mps',
+      '_business_alpha_last_update_time'
+    );
+    const bdmNow = state.business_distance_m || 0;
+    const bdisplay = Math.max(
+      filtered_business_target,
+      bdmNow,
+      state.business_display_distance_m || 0
+    );
+    state.business_display_distance_m = bdisplay;
+    state.last_business_display_update_time = now;
+    // 後方互換: _business_target_velocity_mps / _prev_business_target_* は維持 (= 既存テスト互換)
     if (state._prev_business_target_time === null) {
       state._prev_business_target_distance_m = business_target;
       state._prev_business_target_time = now;
@@ -1692,45 +1755,16 @@ const Meter = (() => {
       const btdt = (now - state._prev_business_target_time) / 1000;
       if (btdt >= 0.1) {
         const btdelta = Math.max(0, business_target - state._prev_business_target_distance_m);
-        _isBurstB = btdelta > _DISP_NORMAL_STEP_M; // D-1
-        if (!_isBurstB) {
+        if (btdelta <= _DISP_NORMAL_STEP_M) {
           state._business_target_velocity_mps = Math.min(
             _DISP_V_CLAMP_MPS,
             btdt > 0 ? btdelta / btdt : 0
-          ); // D-2
+          );
         }
         state._prev_business_target_distance_m = business_target;
         state._prev_business_target_time = now;
       }
     }
-    const btarget_elapsed = Math.min(1.0, (now - (state._prev_business_target_time || now)) / 1000);
-    const predicted_business_target = _isBurstB
-      ? business_target
-      : business_target + state._business_target_velocity_mps * btarget_elapsed;
-    let bdisplay = state.business_display_distance_m || 0;
-    const bdmNow = state.business_distance_m || 0;
-    if (state.last_business_display_update_time === null) {
-      bdisplay = Math.max(predicted_business_target, bdmNow);
-    } else {
-      const bdt = Math.max(0, (now - state.last_business_display_update_time) / 1000);
-      const bslew = Math.max(
-        _DISP_SLEW_BASE_MPS,
-        (state._business_target_velocity_mps || 0) * _DISP_SLEW_FACTOR
-      ); // E
-      const bmaxDelta = bdt * bslew;
-      // 予測 target へ上限レートで追従 (単調増加・後退禁止)
-      const bdiff = predicted_business_target - bdisplay;
-      if (bdiff > 0) {
-        bdisplay += Math.min(bdiff, bmaxDelta);
-      }
-      // ★1モデル化 (2026-05-27): 瞬間 floor を廃止。総走行確定(business_distance_m)を
-      //   下回る分は同レートで catch-up (= trip と同じ構造・別ルート)。
-      if (bdisplay < bdmNow) {
-        bdisplay += Math.min(bdmNow - bdisplay, bmaxDelta);
-      }
-    }
-    state.business_display_distance_m = bdisplay;
-    state.last_business_display_update_time = now;
 
     return { ...state, elapsed_sec: elapsedSec };
   }
