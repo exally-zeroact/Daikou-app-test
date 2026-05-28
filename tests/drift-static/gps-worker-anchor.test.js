@@ -30,8 +30,8 @@ describe('drift-static: gps-worker.js 3-AND gate / 加速度 null 救済 line an
     // 2026-05-26 更新 (Phase A-3 後退検出 追加): L627 → L647 (+20) 移動・window 同期。
     // 2026-05-26 更新 (Phase A-4 Doppler-Speed Sanity Gate 追加): L647 → L669 (+22) 移動・window 同期。
     // 2026-05-26 更新 (Phase A-5 R-only Sage-Husa 追加): L669 → L713 (+44) 移動・window 同期。
-    // 2026-05-28 STEP0 診断 (_postGpsDbg helper + reject診断 追加) で L756 へ移動・window 同期。
-    const window = lines.slice(745, 768).join('\n');
+    // 2026-05-28 STEP0 診断 (_postGpsDbg helper + reject診断 追加・prettier整形込) で L784 へ移動・window 同期。
+    const window = lines.slice(772, 797).join('\n');
     if (!/finalStationary\s*=\s*gpsStationary\s*&&\s*c1Stationary\s*&&\s*!c2Moving/.test(window)) {
       throw new Error(
         'gps-worker.js L627 周辺 (±10) に 3-AND 判定 pattern 未検出 (drift detected)'
@@ -45,8 +45,8 @@ describe('drift-static: gps-worker.js 3-AND gate / 加速度 null 救済 line an
     // 2026-05-26 更新 (Phase A-3 後退検出 追加): L596 → L616 (+20) 移動・window 同期。
     // 2026-05-26 更新 (Phase A-4 Doppler-Speed Sanity Gate 追加): L616 → L638 (+22) 移動・window 同期。
     // 2026-05-26 更新 (Phase A-5 R-only Sage-Husa 追加): L638 → L682 (+44) 移動・window 同期。
-    // 2026-05-28 STEP0 診断 (_postGpsDbg helper + reject診断 追加) で L725 へ移動・window 同期。
-    const window = lines.slice(714, 737).join('\n');
+    // 2026-05-28 STEP0 診断 (_postGpsDbg helper + reject診断 追加・prettier整形込) で L753 へ移動・window 同期。
+    const window = lines.slice(741, 766).join('\n');
     // accelVariance === null && accelDeviation === null で gpsStationary 単独採用
     if (!/accelVariance\s*===\s*null\s*&&\s*accelDeviation\s*===\s*null/.test(window)) {
       throw new Error(
