@@ -34,6 +34,19 @@ distance_m = running=true 中の「道路 snap 累積(mmIncrementM)」。GPS 直
 
 ### A-6. Viterbi scoring 式 / Kalman フィルタ(アルゴリズム中核は再利用・式は不変)
 
+### A-7. ★データ層(司さん指摘・絶対保つ・壊すと距離/住所/防災/配信が全部死ぬ)★
+- **道路データ** roads-{pref}.js(47県・v7 形式: 24bit attr bitmap + varint + base64 + 全通過グリッド)
+  → これが 9,436m を出す source。形式変更不可。
+- **roads-decoder.js**: RoadDecoder API(decodeRoadAt / buildOffsetTable / getRoadsNear /
+  snapToNearestRoad / snapAllWithin / calcRoadDistance / isRestrictedTransition)。v4-v7 マルチ対応。
+  → snap 段はこの decoder を通す。消費側は形式変更時も無変更(roads-decoder が吸収)が原則。
+- **データ読込**: region-loader / data-loader(IndexedDB cache)・window.ROADS_{PREF} グローバル代入。
+- **sw.js precache 規約**: 全国共通バンドルは PRECACHE / 県別(poi/hazard/roads)は SWR。**触らない**。
+- **その他データ**: poi-{pref} / hazard-{type}-{pref}(5種×47県)/ addresses-fine/coarse(getNearestAddress 用)/
+  bridges / tunnels / road-attrs / DEM由来 incline。形式・出典(OSM ODbL / KSJ / 地理院)維持。
+- **★距離計算は道路データの道なり(road polyline)に沿う・GPS直線距離での課金は禁止★**(A-5 と一体)。
+- 不可侵ファイル: **mm-data-pipeline.js / sw.js**(memory 既出の触らないファイル)。
+
 ---
 
 ## B. 白紙にする(=今の mess・配線監査13件 + 重複層)
