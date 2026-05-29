@@ -34,7 +34,10 @@ describe('drift-static: map-matcher.js L3007 isStationary 強制 0 化 block 位
     //   旧: if (msg.isStationary === true) で freeze
     //   新: const _effectivelyStationary = msg.isStationary === true || _lowSpeed; if (_effectivelyStationary)
     //   anchor regex / pattern を新 block 構造に合わせ更新・window slice 同期 (= L3159 へ移動)。
-    const window = lines.slice(3140, 3190).join('\n');
+    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合・importScripts + tracker manager ~58 行
+    //   を上流に additive 追加): block が L3251 へ移動・window slice を (3240,3300) へ同期。
+    //   freeze block (= mmIncrementM=0 / tentativeIncrementM=0 / _effectivelyStationary 宣言) は prod 1byte 不変。
+    const window = lines.slice(3240, 3300).join('\n');
     if (!/if\s*\(\s*_effectivelyStationary\s*\)/.test(window)) {
       throw new Error(
         'map-matcher.js L3147 周辺 (±10) に if (_effectivelyStationary) 未検出 (drift detected)'
@@ -61,7 +64,8 @@ describe('drift-static: map-matcher.js L3007 isStationary 強制 0 化 block 位
     let forceZeroLineNo = -1;
     let postMessageLineNo = -1;
     // 2026-05-29 PM: anchor pattern を if (_effectivelyStationary) へ更新・range も同期で拡張
-    for (let i = 3140; i < 3200 && i < lines.length; i++) {
+    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合): block が L3251 へ移動・range を 3240..3310 へ同期。
+    for (let i = 3240; i < 3310 && i < lines.length; i++) {
       if (/if\s*\(\s*_effectivelyStationary\s*\)/.test(lines[i])) {
         forceZeroLineNo = i + 1;
       }
