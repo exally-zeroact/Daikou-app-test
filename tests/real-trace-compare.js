@@ -25,7 +25,19 @@ const DB = 'https://daikou-app-c821a-default-rtdb.asia-southeast1.firebasedataba
 const OUT_DIR = path.join(__dirname, '..', 'data', 'test-results');
 const OUT_FILE = path.join(OUT_DIR, 'real-trace-latest.json');
 
-const GOOGLE_KEY = process.env.GOOGLE_DIRECTIONS_API_KEY || '';
+const GOOGLE_KEY_RAW = process.env.GOOGLE_DIRECTIONS_API_KEY || '';
+const GOOGLE_KEY = GOOGLE_KEY_RAW.trim(); // 貼付時の改行/空白混入を除去
+// キーの形だけ安全診断 (中身は出さない: 長さ・AIza始まりか・前後空白の有無のみ)
+if (GOOGLE_KEY_RAW) {
+  console.log(
+    '[real-compare] key diag: len=' +
+      GOOGLE_KEY.length +
+      ' startsAIza=' +
+      GOOGLE_KEY.startsWith('AIza') +
+      ' hadWhitespace=' +
+      (GOOGLE_KEY_RAW !== GOOGLE_KEY)
+  );
+}
 const OSRM_ENDPOINT = (process.env.OSRM_ENDPOINT || '').replace(/\/+$/, '');
 const OSRM_PROFILE = process.env.OSRM_PROFILE || 'driving';
 const FORCED_KEY = process.env.REAL_TRACE_KEY || '';
