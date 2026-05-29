@@ -133,6 +133,11 @@ const Meter = (() => {
   //   distance_m / business_distance_m いずれにも加算しない。
   let _drainMmUntil = 0;
   const MM_DRAIN_AFTER_START_MS = 500;
+
+  // ★gap補完 (Worker B 不在時のみ・GNSS空白の速度補完) 定数★
+  const GAP_FILL_THRESHOLD_SEC = 5; // dt がこれ以上で gap 補完発火 (= GPS 空白)
+  const GAP_FILL_MAX_SEC = 120; // これ以上の dt は app background 等とみなし補完しない
+  const GAP_FILL_MAX_KMH = 160; // 速度の物理上限 clamp (異常 speed での過大補完防止)
   // 旧 Off-Road grace period の escape hatch 用 (= テスト互換・新距離では未使用だが API 維持)。
   let _offRoadGraceUntil = 0;
   const OFFROAD_GRACE_AFTER_START_MS = 5000;
@@ -491,6 +496,35 @@ const Meter = (() => {
       const dtSec2 = (gpsResult.timestamp - state.last_timestamp) / 1000;
       if (dtSec2 > 0 && dtSec2 < 60 && (gpsResult.speedKmh || 0) < 3) {
         state.wait_sec += dtSec2;
+      }
+    }
+
+    // ★gap補完 (GNSS空白・国交省認定メーター方式の「速度補完」) ★:
+    //   Worker B(pipeline engine)が居れば gap 区間は engine が道なり routing で計上するため不要。
+    //   ★Worker B 不在時のみ★ (= worker 起動前/importScripts失敗/E2E等) speed×時間 で距離を補完し
+    //   トンネル/worker欠落時の課金欠損を防ぐ。GPS直線でなく速度×時間 (= 認定メーター準拠)。
+    //   dt は GAP_FILL_THRESHOLD_SEC〜GAP_FILL_MAX_SEC・速度は物理上限 GAP_FILL_MAX_KMH に clamp。
+    //   engine 経路 (pipelineDeltaM) とは Worker B 有無で排他のため二重計上しない。
+    if (
+      state.running &&
+      state.last_timestamp &&
+      !(mmWorker && _workerLoadedPrefs.size > 0) &&
+      (gpsResult.speedKmh || 0) > 0
+    ) {
+      const gapSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
+      if (gapSec >= GAP_FILL_THRESHOLD_SEC && gapSec < GAP_FILL_MAX_SEC) {
+        const spdKmh = Math.min(gpsResult.speedKmh, GAP_FILL_MAX_KMH);
+        const gapM = (spdKmh / 3.6) * gapSec;
+        if (gapM > 0) {
+          state.distance_m += gapM;
+          state.fare_yen = calcFare(state.distance_m);
+          state.distanceSource = 'gap';
+          state.gap_fill_count = (state.gap_fill_count || 0) + 1;
+          state.gap_fill_total_m = (state.gap_fill_total_m || 0) + gapM;
+          if (state.business_active) {
+            state.business_distance_m = (state.business_distance_m || 0) + gapM;
+          }
+        }
       }
     }
 

@@ -73,20 +73,22 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     //       よって本 test は「距離加算は += delta 経路のみ・GPS.calcDistance 呼出ゼロ」を検証する。
     const source = loadMeterSource();
     const lines = source.split('\n');
-    // distance_m += は delta 経路 1 件のみ (= setDistance の = v は別カウント)。
+    // distance_m += は 2 経路: delta (= pipeline 主経路) + gapM (= Worker B 不在時の gap補完・
+    //   速度×時間=認定メーター方式)。いずれも GPS 直線(haversine)課金ではない。
+    //   (setDistance の = v は別カウント)。
     const addPaths = lines.filter((l) => /^\s*state\.distance_m\s*\+=\s*/.test(l));
-    if (addPaths.length !== 1) {
+    if (addPaths.length !== 2) {
       throw new Error(
-        '白紙書き直し違反: state.distance_m += は 1 経路 (= pipeline delta) のはず。実検出 ' +
+        '白紙書き直し違反: state.distance_m += は 2 経路 (= pipeline delta + gap補完 gapM) のはず。実検出 ' +
           addPaths.length +
           ' 件・' +
           JSON.stringify(addPaths.map((l) => l.trim()))
       );
     }
-    if (!/\+=\s*delta/.test(addPaths[0])) {
+    if (!/\+=\s*delta/.test(addPaths[0]) || !/\+=\s*gapM/.test(addPaths[1])) {
       throw new Error(
-        '白紙書き直し違反: distance_m 加算は += delta (= pipelineDeltaM) のはず。実検出: ' +
-          addPaths[0].trim()
+        '白紙書き直し違反: distance_m 加算は #1 += delta (pipelineDeltaM) / #2 += gapM (gap補完) のはず。実検出: ' +
+          JSON.stringify(addPaths.map((l) => l.trim()))
       );
     }
     // meter.js 内 GPS.calcDistance は 0 件 (= GPS 直線課金経路の混入なし)。

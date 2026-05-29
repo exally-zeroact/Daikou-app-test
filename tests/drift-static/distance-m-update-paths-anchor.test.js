@@ -25,7 +25,7 @@ function loadMeterSource() {
 }
 
 describe('drift-static: meter.js 距離駆動は pipeline delta 単一経路 (白紙書き直し・clean-rebuild-pipeline)', () => {
-  it('C1: state.distance_m への代入/加算は meter.js 内で 2 経路のみ (= += delta / = v)', () => {
+  it('C1: state.distance_m への代入/加算は meter.js 内で 3 経路のみ (= += delta / += gapM / = v)', () => {
     const source = loadMeterSource();
     const lines = source.split('\n');
     const matchedLines = [];
@@ -35,10 +35,15 @@ describe('drift-static: meter.js 距離駆動は pipeline delta 単一経路 (�
         matchedLines.push({ lineNo: i + 1, content: lines[i].trim() });
       }
     }
-    if (matchedLines.length !== 2) {
+    // ★白紙書き直し後 distance_m 書込経路は 3 経路:
+    //   #1 += delta  : pipeline-distance エンジンの道なり区間増分 (= 主経路・Worker B 有)
+    //   #2 += gapM   : gap補完 (= Worker B 不在時のみ・GNSS空白の速度×時間・認定メーター方式)
+    //   #3 = v       : setDistance 復元代入
+    //   いずれも GPS 直線 (haversine) 課金ではない (C3 で GPS.calcDistance 0 を別途保証)。
+    if (matchedLines.length !== 3) {
       throw new Error(
-        '述語 C 違反: 白紙書き直し後 distance_m 書込経路は 2 経路 ' +
-          '(= _onMmWorkerMessage の += delta + setDistance の = v) のはず。検出: ' +
+        '述語 C 違反: 白紙書き直し後 distance_m 書込経路は 3 経路 ' +
+          '(= += delta + += gapM + = v) のはず。検出: ' +
           JSON.stringify(matchedLines, null, 2)
       );
     }
@@ -49,11 +54,18 @@ describe('drift-static: meter.js 距離駆動は pipeline delta 単一経路 (�
           matchedLines[0].content
       );
     }
-    // 経路 #2 は setDistance の復元代入
-    if (!/=\s*v\b/.test(matchedLines[1].content)) {
+    // 経路 #2 は gap補完 (= Worker B 不在時・速度×時間)
+    if (!/\+=\s*gapM/.test(matchedLines[1].content)) {
       throw new Error(
-        '述語 C 違反: 経路 #2 は state.distance_m = v (= setDistance 復元) のはず。実検出: ' +
+        '述語 C 違反: 経路 #2 は state.distance_m += gapM (= gap補完・速度×時間) のはず。実検出: ' +
           matchedLines[1].content
+      );
+    }
+    // 経路 #3 は setDistance の復元代入
+    if (!/=\s*v\b/.test(matchedLines[2].content)) {
+      throw new Error(
+        '述語 C 違反: 経路 #3 は state.distance_m = v (= setDistance 復元) のはず。実検出: ' +
+          matchedLines[2].content
       );
     }
   });
