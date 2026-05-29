@@ -47,7 +47,12 @@ const DEFAULTS = {
   routingMaxRatio: 4.0, // routing距離/直線距離 がこれ超なら直線 fallback (過大ガード)
   routingMaxNodes: 4000, // Dijkstra 展開ノード上限 (暴走ガード)
   routingSearchGrids: 3, // routing 用に getRoadsNear する周辺グリッド半径
-  nodeQuantize: 1e5, // 道路頂点を node 化する際の量子化 (= precision 既定値)
+  // ★交差点接続率★ 道路頂点を node 化する際の量子化。
+  //   precision=1e5 だと 1 単位 = lat≈1.11m / lng≈0.92m → round(lat*1e5) は no-op で
+  //   完全一致頂点しか交差点接続できず別道路 route 失効 (= 直線 fb 増・距離欠損)。
+  //   33333 だと bucket = lat≈3.3m / lng≈2.8m。OSM 交差点の頂点は通常同一座標だが、
+  //   分割道路 (車線分離・端点ズレ) を ~3m 許容でクラスタ化し接続率を上げる。
+  nodeQuantize: 33333,
   perSegmentMaxM: 2000, // 1 区間でこの距離超は異常として直線 fallback
   routingMaxStraightM: 600, // 直線距離がこれ超の別道路区間は routing せず直線 (遠距離=gap)
 
@@ -107,6 +112,154 @@ function isStationaryByDisplacement(prev, cur, disp, cfg) {
   return disp < thr;
 }
 
+// 緯度経度差をメートル換算する係数 (decoder._searchSnap と同一式・平面近似)
+function metersPerDegree(refLat) {
+  const toRad = Math.PI / 180;
+  return {
+    lat: 111132.954 - 559.822 * Math.cos(2 * refLat * toRad) + 1.175 * Math.cos(4 * refLat * toRad),
+    lng: 111319.488 * Math.cos(refLat * toRad),
+  };
+}
+
+// ─── SnapCache (★性能★ snap候補キャッシュ + grid展開snap) ─────────────────
+// 監査官 major #1「routing ~5ms/点」の真因は計測の結果 snapToNearestRoad だった
+//   (snap-only で seg1 の ~96% 時間)。decoder.snapToNearestRoad は radiusGrids=5→9 の
+//   フォールバックで毎回 121〜361 グリッドの全道路を decode + 全 segment 投影する。
+//   seg1 1582 点は実測 7 グリッドセルにしか入らず、cell 単位 decode は完全に冗長。
+//
+// 本クラスは decoder を一切改変せず、以下で同一 snap 結果を再現しつつ高速化する:
+//   (1) cell 単位 decode キャッシュ … grid セル "gy_gx" → decode 済み road 配列を 1 回だけ。
+//   (2) 展開リング探索 … 中心セルから外側へ 1 リングずつ走査し、maxDistM 以内の snap を
+//       見つけたら「+1 リング(境界の取りこぼし防止)」で停止。decoder の固定 r=5→9 全走査と
+//       異なり、近傍で当たれば数セルで確定。roads は通過全グリッドに登録されているため
+//       (実データで radiusGrids=1 が default と完全一致を確認済) リング展開で同一結果。
+//   投影式・t クランプ・距離判定は decoder._searchSnap と byte 等価 (実 trace で
+//   1582/1582 一致を確認済)。distance_m 意味論は不変。
+//
+// fallbackMaxRing: maxDistM 以内が見つからない真の miss 時の探索上限。
+//   decoder は r=9 まで広げるので既定 9。
+function SnapCache(decoder, opts) {
+  this.decoder = decoder;
+  this.precision = decoder.precision || 1e5;
+  this.gridSize = decoder.gridSize || 1000;
+  this.maxDistM = opts && opts.snapMaxDistM != null ? opts.snapMaxDistM : DEFAULTS.snapMaxDistM;
+  this.fallbackMaxRing = opts && opts.snapFallbackMaxRing != null ? opts.snapFallbackMaxRing : 9; // decoder の 2 段目フォールバック (radiusGrids=9) 相当
+  this._cellCache = new Map(); // "gy_gx" -> [road(+_idx), ...] | null (空セル)
+}
+
+// grid セルの road 配列を decode (キャッシュ)。空セルは null をキャッシュし再 decode しない。
+SnapCache.prototype._roadsInCell = function (gy, gx) {
+  const k = gy + '_' + gx;
+  const c = this._cellCache.get(k);
+  if (c !== undefined) return c;
+  const ids = this.decoder.grid[k];
+  let arr = null;
+  if (ids && ids.length) {
+    arr = [];
+    for (let i = 0; i < ids.length; i++) {
+      const r = this.decoder.decodeRoadAt(ids[i]);
+      if (r) {
+        r._idx = ids[i];
+        arr.push(r);
+      }
+    }
+  }
+  this._cellCache.set(k, arr);
+  return arr;
+};
+
+// (lat,lng) を最寄り道路に snap。戻り値は decoder.snapToNearestRoad と同一形 or null。
+SnapCache.prototype.snap = function (lat, lng) {
+  const prec = this.precision;
+  const gs = this.gridSize;
+  const maxDistM = this.maxDistM;
+  const mpd = metersPerDegree(lat);
+  const mpdLat = mpd.lat;
+  const mpdLng = mpd.lng;
+  const li = Math.round(lat * prec);
+  const gi = Math.round(lng * prec);
+  const gy = Math.floor(li / gs);
+  const gx = Math.floor(gi / gs);
+  const maxSq = maxDistM * maxDistM;
+
+  let bestSq = Infinity;
+  let bRI = -1,
+    bSeg = -1,
+    bT = 0,
+    bLat = 0,
+    bLng = 0,
+    bType = -1;
+  const seen = {};
+  let hitRing = -1;
+
+  for (let ring = 0; ring <= this.fallbackMaxRing; ring++) {
+    for (let dy = -ring; dy <= ring; dy++) {
+      const onYEdge = dy === -ring || dy === ring;
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (!onYEdge && dx !== -ring && dx !== ring) continue; // 周縁リングのみ
+        const roads = this._roadsInCell(gy + dy, gx + dx);
+        if (!roads) continue;
+        for (let ri = 0; ri < roads.length; ri++) {
+          const road = roads[ri];
+          if (seen[road._idx]) continue;
+          seen[road._idx] = 1;
+          const pts = road.points;
+          for (let j = 0; j < pts.length - 1; j++) {
+            const aLat = pts[j][0] / prec;
+            const aLng = pts[j][1] / prec;
+            const bLatp = pts[j + 1][0] / prec;
+            const bLngp = pts[j + 1][1] / prec;
+            const ax = (aLng - lng) * mpdLng;
+            const ay = (aLat - lat) * mpdLat;
+            const bx = (bLngp - lng) * mpdLng;
+            const by = (bLatp - lat) * mpdLat;
+            const abx = bx - ax;
+            const aby = by - ay;
+            const ab2 = abx * abx + aby * aby;
+            let t;
+            if (ab2 < 1e-9) t = 0;
+            else {
+              t = (-ax * abx + -ay * aby) / ab2;
+              if (t < 0) t = 0;
+              else if (t > 1) t = 1;
+            }
+            const sx = ax + t * abx;
+            const sy = ay + t * aby;
+            const dsq = sx * sx + sy * sy;
+            if (dsq < bestSq) {
+              bestSq = dsq;
+              bRI = road._idx;
+              bSeg = j;
+              bT = t;
+              bLat = aLat + t * (bLatp - aLat);
+              bLng = aLng + t * (bLngp - aLng);
+              bType = road.typeCode;
+            }
+          }
+        }
+      }
+    }
+    // maxDist 以内に当たったら +1 リングで境界取りこぼし防止して停止
+    if (bRI >= 0 && bestSq <= maxSq && hitRing < 0) hitRing = ring;
+    if (hitRing >= 0 && ring >= hitRing + 1) break;
+  }
+
+  if (bRI < 0 || bestSq > maxSq) return null;
+  return {
+    roadIndex: bRI,
+    segmentIndex: bSeg,
+    t: bT,
+    snapLat: bLat,
+    snapLng: bLng,
+    distanceM: Math.sqrt(bestSq),
+    typeCode: bType,
+  };
+};
+
+SnapCache.prototype.reset = function () {
+  this._cellCache = new Map();
+};
+
 // ─── RoadGraphRouter ─────────────────────────────────────────
 // RoadDecoder が持つ道路ポリライン群から「道路網グラフ」をオンデマンド構築し、
 // 2 snap 点間の道なり距離を簡易 Dijkstra で求める。
@@ -126,6 +279,14 @@ function RoadGraphRouter(decoder, opts) {
   this.precision = decoder.precision || 1e5;
   this.searchGrids = this.opts.routingSearchGrids || DEFAULTS.routingSearchGrids;
   this.maxNodes = this.opts.routingMaxNodes || DEFAULTS.routingMaxNodes;
+  this.gridSize = decoder.gridSize || 1000;
+
+  // ★性能★ localグラフのキャッシュ。
+  //   別道路 routing は連続区間 (同じ街区) で何度も同じ周辺道路を decode + graph 構築する。
+  //   build 範囲を「覆うグリッドセル集合の署名」で正規化しキャッシュ → 連続区間で再利用。
+  //   署名 = sorted("gy_gx" 文字列) を結合したキー。
+  this._graphCache = new Map(); // sig -> { adj, nodeLatLng, index }
+  this._graphCacheCap = this.opts.graphCacheCap || 64; // LRU 風上限 (メモリガード)
 }
 
 // 道路頂点 (整数 lat*precision, lng*precision) → node キー
@@ -138,9 +299,54 @@ RoadGraphRouter.prototype._nodeKey = function (rawLatInt, rawLngInt) {
   return ql + '_' + qg;
 };
 
-// 2 snap 点周辺の道路を集めて隣接グラフを構築。
-// 戻り値: { adj: Map(nodeKey -> [{to, w, lat, lng}]), nodeLatLng: Map(nodeKey->[lat,lng]) }
+// (lat,lng) が属する decoder グリッドセルキー "gy_gx"
+RoadGraphRouter.prototype._cellKey = function (lat, lng) {
+  const latInt = Math.round(lat * this.precision);
+  const lngInt = Math.round(lng * this.precision);
+  const gy = Math.floor(latInt / this.gridSize);
+  const gx = Math.floor(lngInt / this.gridSize);
+  return gy + '_' + gx;
+};
+
+// snapA/snapB を覆う「searchGrids 半径の周辺グリッドセル集合」の正規化署名。
+//   両端 + 中点の 3 アンカーそれぞれの ±searchGrids セルを union。
+//   連続する別道路区間は同じ街区 = 同じセル集合 → 同一署名でキャッシュ命中。
+RoadGraphRouter.prototype._coverSignature = function (snapA, snapB) {
+  const r = this.searchGrids;
+  const anchors = [
+    [snapA.snapLat, snapA.snapLng],
+    [snapB.snapLat, snapB.snapLng],
+    [(snapA.snapLat + snapB.snapLat) / 2, (snapA.snapLng + snapB.snapLng) / 2],
+  ];
+  const cells = {};
+  for (let a = 0; a < anchors.length; a++) {
+    const latInt = Math.round(anchors[a][0] * this.precision);
+    const lngInt = Math.round(anchors[a][1] * this.precision);
+    const gy = Math.floor(latInt / this.gridSize);
+    const gx = Math.floor(lngInt / this.gridSize);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        cells[gy + dy + '_' + (gx + dx)] = 1;
+      }
+    }
+  }
+  const keys = Object.keys(cells);
+  keys.sort();
+  return keys.join('|');
+};
+
+// 署名で指定された周辺道路から隣接グラフを構築 (+ 最寄り node 用 grid 空間索引)。
+// 戻り値: { adj, nodeLatLng, index } ※ index は _nearestNode 用 grid bucket
 RoadGraphRouter.prototype._buildLocalGraph = function (snapA, snapB) {
+  const sig = this._coverSignature(snapA, snapB);
+  const cached = this._graphCache.get(sig);
+  if (cached) {
+    // LRU 風: 参照されたら末尾へ (Map は挿入順保持)
+    this._graphCache.delete(sig);
+    this._graphCache.set(sig, cached);
+    return cached;
+  }
+
   const dec = this.decoder;
   const precision = this.precision;
   const midLat = (snapA.snapLat + snapB.snapLat) / 2;
@@ -196,7 +402,37 @@ RoadGraphRouter.prototype._buildLocalGraph = function (snapA, snapB) {
     }
   }
 
-  return { adj: adj, nodeLatLng: nodeLatLng };
+  // ★性能★ _nearestNode 用 grid 空間索引を構築 (線形走査の排除)。
+  //   node を nodeQuantize と同じ粗さの bucket でハッシュ → 近傍 bucket のみ走査。
+  const index = this._buildNodeIndex(nodeLatLng);
+
+  const graph = { adj: adj, nodeLatLng: nodeLatLng, index: index };
+  // キャッシュ格納 (LRU 風 eviction)
+  this._graphCache.set(sig, graph);
+  if (this._graphCache.size > this._graphCacheCap) {
+    const oldest = this._graphCache.keys().next().value;
+    this._graphCache.delete(oldest);
+  }
+  return graph;
+};
+
+// nodeLatLng から grid 空間索引を構築。bucket = floor(coord * quantize)。
+// 戻り値: { buckets: Map("by_bx" -> [key,...]), q: quantize }
+RoadGraphRouter.prototype._buildNodeIndex = function (nodeLatLng) {
+  const q = this.quantize;
+  const buckets = new Map();
+  nodeLatLng.forEach(function (ll, key) {
+    const by = Math.floor(ll[0] * q);
+    const bx = Math.floor(ll[1] * q);
+    const bk = by + '_' + bx;
+    let arr = buckets.get(bk);
+    if (!arr) {
+      arr = [];
+      buckets.set(bk, arr);
+    }
+    arr.push(key);
+  });
+  return { buckets: buckets, q: q };
 };
 
 // グラフ上で start node → goal node の最短 (道なり) 距離を Dijkstra で算出。
@@ -257,14 +493,65 @@ RoadGraphRouter.prototype.routeDistance = function (snapA, snapB) {
   return core + tailA + tailB;
 };
 
-// graph 内で (lat,lng) に最も近い node キー
+// graph 内で (lat,lng) に最も近い node キー。
+// ★性能★ grid 空間索引で中心 bucket から外側へリング展開し、最初にヒットした
+//   リング + 安全のため 1 リング外側まで走査して最近接を確定 (線形全走査を排除)。
 RoadGraphRouter.prototype._nearestNode = function (graph, lat, lng) {
+  const index = graph.index;
+  if (!index || index.buckets.size === 0) {
+    // 索引が無い場合の保険 (線形 fallback)
+    return this._nearestNodeLinear(graph, lat, lng);
+  }
+  const q = index.q;
+  const buckets = index.buckets;
+  const cy = Math.floor(lat * q);
+  const cx = Math.floor(lng * q);
+  const nodeLatLng = graph.nodeLatLng;
+
+  let best = null;
+  let bestD = Infinity;
+  let foundRing = -1;
+  // bucket 1 個 ≈ 1/q 度。グラフ規模は小さいので妥当な上限まで展開。
+  const MAX_RING = 64;
+
+  for (let ring = 0; ring <= MAX_RING; ring++) {
+    // この ring の周縁 bucket だけ走査 (内側は既走査)
+    let scannedAny = false;
+    for (let dy = -ring; dy <= ring; dy++) {
+      const onYEdge = dy === -ring || dy === ring;
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (!onYEdge && dx !== -ring && dx !== ring) continue; // 周縁のみ
+        const arr = buckets.get(cy + dy + '_' + (cx + dx));
+        if (!arr) continue;
+        scannedAny = true;
+        for (let i = 0; i < arr.length; i++) {
+          const ll = nodeLatLng.get(arr[i]);
+          const ex = ll[0] - lat;
+          const ey = ll[1] - lng;
+          const d = ex * ex + ey * ey;
+          if (d < bestD) {
+            bestD = d;
+            best = arr[i];
+          }
+        }
+      }
+    }
+    // ヒットした最初のリングを記録し、1 リング外まで見て確定 (bucket 境界の取りこぼし防止)
+    if (best && foundRing < 0) foundRing = ring;
+    if (foundRing >= 0 && ring >= foundRing + 1) break;
+    void scannedAny;
+  }
+  return best;
+};
+
+// 索引なし時の線形 fallback (保険・通常経路では使わない)
+RoadGraphRouter.prototype._nearestNodeLinear = function (graph, lat, lng) {
   let best = null;
   let bestD = Infinity;
   graph.nodeLatLng.forEach(function (ll, key) {
     const dx = ll[0] - lat;
     const dy = ll[1] - lng;
-    const d = dx * dx + dy * dy; // 近似 (近距離比較のみ)
+    const d = dx * dx + dy * dy;
     if (d < bestD) {
       bestD = d;
       best = key;
@@ -340,12 +627,16 @@ function computeDistance(samples, decoder, opts) {
   const enableRouting = opts.enableRouting !== false;
 
   const router = enableRouting ? new RoadGraphRouter(decoder, cfg) : null;
+  // ★性能★ snap候補キャッシュ (opts.useSnapCache=false で decoder 直叩きに戻せる)。
+  const snapper = opts.useSnapCache === false ? null : new SnapCache(decoder, cfg);
 
-  // 入力整形: lat/lng 数値のみ・t 昇順
+  // 入力整形: lat/lng 有限数値のみ・t 昇順
+  // ★NaN/Infinity 防御★: typeof==='number' は NaN/Infinity を通すため Number.isFinite で弾く。
+  //   NaN 座標が straightFallbackM 等を汚染し breakdown を {…:null} 化するのを防止。
   const pts = [];
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i];
-    if (!s || typeof s.lat !== 'number' || typeof s.lng !== 'number') continue;
+    if (!s || !Number.isFinite(s.lat) || !Number.isFinite(s.lng)) continue;
     pts.push(s);
   }
   pts.sort(function (a, b) {
@@ -370,7 +661,9 @@ function computeDistance(samples, decoder, opts) {
 
   for (let p = 0; p < pts.length; p++) {
     const cur = pts[p];
-    const snap = decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
+    const snap = snapper
+      ? snapper.snap(cur.lat, cur.lng)
+      : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
     if (snap) stats.snapHit++;
     else stats.snapMiss++;
 
@@ -484,11 +777,155 @@ function stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, 
   return straight;
 }
 
+// ─── createDistanceTracker (★インクリメンタル API・live meter 用★) ──────────
+// computeDistance は sample 列バッチだが、live meter は GPS を 1 点ずつ受ける。
+// stateful な tracker を返し、ingest(sample) ごとに当該区間の道なり加算を確定する。
+//
+//   const tk = createDistanceTracker(decoder, opts);
+//   tk.ingest({lat,lng,t,acc,spd}) -> { deltaM, totalM, reason }
+//   tk.totalM()  -> 現在の累積 distance_m
+//   tk.reset()   -> 状態クリア (業務開始/再計測)
+//
+// ★バッチ一致保証★: 同一 trace を「同じ順序」で 1 点ずつ ingest した totalM() は
+//   computeDistance(...).distance_m と一致する。理由:
+//     - 区間距離は computeDistance と同一の stepDistance / 静止判定を呼ぶ。
+//     - router を共有し localグラフキャッシュも効く。
+//   注意: computeDistance は内部で t 昇順 sort する。tracker は live streaming のため
+//   全体 sort できない (未来点が未到着)。代わりに ★out-of-order ガード★ で
+//   cur.t < prev.t の遅延到着/順序逆転フレームを破棄し (reason:'out_of_order')、
+//   computeDistance(sort 済) と同一の単調増加列だけを処理する。これにより
+//   遅延到着フレームによる距離水増しを防ぐ。回帰テストは sort 済み列で一致を確認する。
+//
+// reason 値: 'first' | 'stationary' | 'sameRoad' | 'routed' | 'straight' | 'doppler'
+//   | 'skip' (無効点) | 'out_of_order' (t 逆転で破棄)
+//   (区間の分類。課金境界差込時のデバッグ/監査用。calcFare は一切呼ばない。)
+function createDistanceTracker(decoder, opts) {
+  opts = opts || {};
+  const cfg = {};
+  for (const k in DEFAULTS) cfg[k] = opts[k] != null ? opts[k] : DEFAULTS[k];
+  const speedProvider =
+    typeof opts.speedProvider === 'function' ? opts.speedProvider : gpsSpeedProvider;
+  const enableRouting = opts.enableRouting !== false;
+  // ★reset で完全初期化するため let (= 状態漏れ根絶のため新インスタンス再生成可能に)
+  let router = enableRouting ? new RoadGraphRouter(decoder, cfg) : null;
+  let snapper = opts.useSnapCache === false ? null : new SnapCache(decoder, cfg);
+
+  let total = 0;
+  let prev = null;
+  let prevSnap = null;
+  // breakdown/stats を区間分類のため保持 (stepDistance が要求する構造)
+  let bd, stats;
+  function freshAccum() {
+    bd = { sameRoadM: 0, routedM: 0, straightFallbackM: 0, dopplerM: 0, stationarySkipped: 0 };
+    stats = {
+      points: 0,
+      snapHit: 0,
+      snapMiss: 0,
+      sameRoadSegs: 0,
+      routedSegs: 0,
+      straightSegs: 0,
+      dopplerSegs: 0,
+      routingFallbacks: 0,
+    };
+  }
+  freshAccum();
+
+  function classifyReason(beforeStats) {
+    if (stats.sameRoadSegs > beforeStats.sameRoadSegs) return 'sameRoad';
+    if (stats.routedSegs > beforeStats.routedSegs) return 'routed';
+    if (stats.dopplerSegs > beforeStats.dopplerSegs) return 'doppler';
+    if (stats.straightSegs > beforeStats.straightSegs) return 'straight';
+    return 'straight';
+  }
+
+  return {
+    ingest: function (sample) {
+      if (!sample || !Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) {
+        // 無効点 (null/NaN/Infinity) は computeDistance の入力整形と同様に黙殺 (距離影響なし)
+        return { deltaM: 0, totalM: total, reason: 'skip' };
+      }
+      const cur = sample;
+      // ★out-of-order ガード★: computeDistance は t 昇順 sort 済みで処理するが live tracker は
+      //   全体 sort できない。遅延到着/順序逆転フレーム (cur.t < prev.t) を破棄し、batch と
+      //   同一の単調増加列だけを処理する (距離水増し防止)。t 欠落点は順序判定をスキップ。
+      if (prev && Number.isFinite(cur.t) && Number.isFinite(prev.t) && cur.t < prev.t) {
+        return { deltaM: 0, totalM: total, reason: 'out_of_order' };
+      }
+      stats.points++;
+      const snap = snapper
+        ? snapper.snap(cur.lat, cur.lng)
+        : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
+      if (snap) stats.snapHit++;
+      else stats.snapMiss++;
+
+      if (!prev) {
+        prev = cur;
+        prevSnap = snap;
+        return { deltaM: 0, totalM: total, reason: 'first' };
+      }
+
+      // 静止判定 (ZUPT) — computeDistance と同一ロジック
+      const spd = speedProvider(cur, prev);
+      const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+      let stationary = false;
+      if (spd >= 0) {
+        if (spd < cfg.stationarySpdMps) stationary = true;
+      } else {
+        if (isStationaryByDisplacement(prev, cur, disp, cfg)) stationary = true;
+      }
+      if (stationary) {
+        bd.stationarySkipped++;
+        prev = cur;
+        prevSnap = snap;
+        return { deltaM: 0, totalM: total, reason: 'stationary' };
+      }
+
+      const beforeStats = {
+        sameRoadSegs: stats.sameRoadSegs,
+        routedSegs: stats.routedSegs,
+        straightSegs: stats.straightSegs,
+        dopplerSegs: stats.dopplerSegs,
+      };
+      const added = stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, stats);
+      const delta = added > 0 ? added : 0;
+      total += delta;
+      const reason = classifyReason(beforeStats);
+
+      prev = cur;
+      prevSnap = snap;
+      return { deltaM: delta, totalM: total, reason: reason };
+    },
+    totalM: function () {
+      return total;
+    },
+    reset: function () {
+      total = 0;
+      prev = null;
+      prevSnap = null;
+      freshAccum();
+      // ★router/snapper を新インスタンスで完全再生成 (= キャッシュ等の内部状態漏れを根絶)。
+      //   旧実装はキャッシュ Map のみ差し替えていたが reset 後再 ingest で 10m 級の残留が出たため、
+      //   インスタンスごと作り直して trip 単位の完全初期化を保証する。
+      router = enableRouting ? new RoadGraphRouter(decoder, cfg) : null;
+      snapper = opts.useSnapCache === false ? null : new SnapCache(decoder, cfg);
+    },
+    // 監査/デバッグ用 (課金には使わない)
+    _breakdown: function () {
+      return bd;
+    },
+    _stats: function () {
+      return stats;
+    },
+  };
+}
+
 // ─── exports (Node tests = module.exports / browser = グローバル公開) ───
 (function (root) {
   const api = {
     computeDistance: computeDistance,
+    createDistanceTracker: createDistanceTracker,
     RoadGraphRouter: RoadGraphRouter,
+    SnapCache: SnapCache,
     gpsSpeedProvider: gpsSpeedProvider,
     haversineM: haversineM,
     DEFAULTS: DEFAULTS,
