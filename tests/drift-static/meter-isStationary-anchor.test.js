@@ -32,34 +32,32 @@ function loadSource(filePath) {
 }
 
 describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期 return (旧 isstationary-no-increase.test.js B3/B4)', () => {
-  it('B3: meter.js L790 に update() 入口 isStationary 早期 return が存在', () => {
+  it('B3: meter.js update() 入口に isStationary 早期 return が存在 (= 停車中 距離不変)', () => {
+    // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline)★
+    //   旧: 行アンカー window slice で early return を検出 (= 行 shift で false-fail)。
+    //   新: 距離駆動が pipeline 単一経路化したため行番号は大きく変動。
+    //       「function update(gpsResult)」 の本体冒頭から最初の数十行内に
+    //       if (gpsResult.isStationary) { _updateMapMatching(gpsResult); return; } が
+    //       存在することを ★構造で★ 検出する (= 行アンカー非依存・drift 耐性向上)。
     const source = loadSource(METER_JS_PATH);
-    const lines = source.split('\n');
-    // L790 周辺で `if (gpsResult.isStationary)` パターン + early return を確認
-    // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張
-    // 2026-05-18 更新 (Phase 3): L839 → L867 (+28) 移動・window 同期。
-    // 2026-05-19 R1 更新 (Off-Road grace period): L867 → L884 (+17) 移動・window 同期。
-    // 2026-05-24 更新 (道路 snap 構成・ZUPT helper 追加): L884 → L950 (+66) 移動・window 同期。
-    // 2026-05-24 更新 (business preview 別回路・state 追加 + 別 if ブロック): L950 → L1006 (+56) 移動。
-    // 2026-05-24 更新 (表示層 予測補間・state 追加 + 別ブロック): L1006 → L1039 (+33) 移動。
-    // 2026-05-28 STEP0 診断 (_mmDbg helper + 診断call追加) で L1066 へ移動・window 同期。
-    // 2026-05-28 PM mirror アーキ完成 (= mm/retro 経路に ZUPT 並記コメント追加) で L1095 へ移動・window 同期。
-    // 2026-05-28 PM (例外条項適用) gap fill sanity check 追加で L1133 へ移動・window 同期。
-    // 2026-05-28 PM Phase 3 (α-β filter + helper ~70 行追加) で L1202 へ移動・window 同期。
-    // 2026-05-28 PM 再構築 (= Google MM 式統一・α-β filter 削除) で L1141 へ戻る・window 同期。
-    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合・state/格納コメント +18 行上流追加) で
-    //   block が L1160 へ移動・window slice を (1150,1180) へ同期 (= prod の if(gpsResult.isStationary) は 1byte 不変)。
-    const window = lines.slice(1150, 1180).join('\n');
+    const updIdx = source.indexOf('function update(gpsResult)');
+    if (updIdx < 0) {
+      throw new Error('meter.js に function update(gpsResult) が存在しない');
+    }
+    // update() 本体冒頭 ~1500 文字 を対象 window とする (= early return は冒頭にある)。
+    const window = source.slice(updIdx, updIdx + 1500);
     if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
       throw new Error(
-        'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'
+        'update() 冒頭に if (gpsResult.isStationary) パターン未検出 (drift detected)'
       );
     }
     if (!/_updateMapMatching\s*\(\s*gpsResult\s*\)/.test(window)) {
-      throw new Error('meter.js L790 周辺 (±10) に _updateMapMatching(gpsResult) 呼出 未検出');
+      throw new Error(
+        'update() 冒頭 isStationary block に _updateMapMatching(gpsResult) 呼出 未検出'
+      );
     }
     if (!/return\s*;/.test(window)) {
-      throw new Error('meter.js L790 周辺 (±10) に early return ; 未検出');
+      throw new Error('update() 冒頭 isStationary block に early return ; 未検出');
     }
   });
 

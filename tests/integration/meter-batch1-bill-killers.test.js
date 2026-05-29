@@ -1,30 +1,15 @@
 // tests/integration/meter-batch1-bill-killers.test.js
 //
-// ★設計変更宣言 Phase 8 Batch 1 (2026-05-21・BILL 高密度 mutant kill・司さん採択):
-//   Stryker Pass A で survived の [BILL] 分類 mutant のうち・1 line に複数 mutant 集中する
-//   高 ROI cluster を kill するための boundary / behavior test 集約。
-//
-// 対象 line + mutant 件数 (= 計 56 mutant 中 大半 kill 想定):
-//   L460  tier2_pending_m = Math.max(0, (tier2 || 0) - (mmIncrement || 0))     (8 mutants)
-//   L932  if (_haver > 0 && _haver <= _maxDist)  (gps_predictive 物理上限)     (6 mutants)
-//   L1002 if (dtSec2 > 0 && dtSec2 < 60 && (speedKmh || 0) < 3)  (wait_sec 境界) (18 mutants)
-//   L1305 (distance_m || 0) + (tier2_pending_m || 0)            (display target) (7 mutants)
-//   L1317 display += diff > 0 ? maxDelta : -maxDelta            (display clamp)  (5 mutants)
-//   L1321 display = Math.max(display, distance_m || 0)          (display 下限)   (4 mutants)
-//
-// L1374 equivalent mutation (= 等価・kill 不可・docs のみ):
-//   setBusinessDistance(m) の `m >= 0` → `m > 0` 改変は・L1364 と同パターン:
-//     入力 m=0: 旧 true → state.business_distance_m=0 / 新 false → 0 (fallback) → **同値 0**
-//     入力 m=正値: 両者 true → m そのまま → **同値**
-//     入力 m=負値/NaN/Infinity: 両者 false → 0 → **同値**
-//   → 全入力で state.business_distance_m 同一・観測不能・kill 不可
-//   → 課金 kill 率の真の分母から除外 (= L1364 と同列の構造的等価 mutation)
+// ★白紙書き直し (2026-05-30・clean-rebuild-pipeline・新挙動へ更新)★
+//   旧 Phase 8 Batch 1 は tier2_pending_m snapshot SET / gps_predictive 物理上限 /
+//   wait_sec 境界 / display 計算の mutant kill test だった。
+//   新メーターでは tier2 preview 回路 / gps_predictive 連続点累積は ★廃止★。
+//   存続する不変条件のみ残す:
+//     - L: wait_sec 累積 boundary (dtSec2>0 && <60 && speedKmh<3)  ← 保持
+//     - display_distance_m は distance_m を下回らない / 単調非減少     ← 保持 (= 表示予測補間)
 //
 // ★絶対ルール準拠:
-//   prod (js/meter.js) は 1 byte も触らない (= test 追加のみ)。
-//   distance_m += 5 経路・calcFare・commit 機構は完全不変。
-//   tier2_pending_m / wait_sec / gps_predictive_distance_m / display_distance_m は
-//   表示 layer 又は集計 layer・課金根拠 (= distance_m / fare_yen) には一切影響しない。
+//   distance_m は pipeline delta 単一経路で駆動・wait_sec / display は集計/表示 layer。
 
 'use strict';
 
@@ -56,7 +41,6 @@ const DEFAULT_FARE_CONFIG = {
 function mockGPS() {
   globalThis.GPS = {
     calcDistance: (lat1, lng1, lat2, lng2) => {
-      // 同パターンのハバーサイン (= 既存 offroad-mode-activation.test.js と同等)
       const R = 6371000;
       const toRad = (d) => (d * Math.PI) / 180;
       const dLat = toRad(lat2 - lat1);
@@ -103,194 +87,9 @@ function setupMeter() {
   return { Meter, fakeWorker };
 }
 
-// ─── L460: tier2_pending_m commit 差分減算 (8 mutants) ──────────────────────
-//
-// 対象式: state.tier2_pending_m = Math.max(0, (state.tier2_pending_m || 0) - (m.mmIncrementM || 0));
-//   pending 累積 > mmIncrementM: 差分減算で残値 > 0
-//   pending 累積 < mmIncrementM: Math.max(0, ...) で 0 下限 clamp
-//   tier2_pending_m undefined / null: || 0 fallback で 0 として扱う
-//   m.mmIncrementM undefined / null: 同上
-//
-// kill する mutant: ArithmeticOperator (- → +)・MethodExpression (max → min)・
-//   ConditionalExpression / LogicalOperator (|| 0 系列)
-
-// ★設計変更宣言 (Phase A+B・R-A1・2026-05-26): tier2_pending_m を「commit点→現射影の
-//   snapshot 弧長」を SET する方式に変更。旧 (tier2 += tentativeIncrementM 累積 + commit 差分減算)
-//   から再表現。保持する不変条件: dm+t2 連続 (commit 無音) / 表示単調非減少。
-describe('Phase 8 Batch 1: tier2_pending_m snapshot SET (= dm+t2 連続・表示単調増加保証)', () => {
-  let Meter, fakeWorker;
-  beforeEach(() => {
-    ({ Meter, fakeWorker } = setupMeter());
-  });
-  afterEach(() => {
-    if (Meter) Meter.reset();
-    delete globalThis.GPS;
-  });
-
-  it('tentativeDistanceM=100 → tier2_pending_m=100 (= SET)', () => {
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 100,
-      snapped: true,
-      committed: false,
-    });
-    expect(Meter.getState().tier2_pending_m).toBe(100);
-  });
-
-  it('★commit 時 dm+t2 連続: SET100 → commit(mm=30, snapshot=70) → dm=30 t2=70 sum=100', () => {
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 100,
-      snapped: true,
-      committed: false,
-    });
-    const before = Meter.getState();
-    expect(before.distance_m + before.tier2_pending_m).toBe(100);
-    // commit: mmIncrementM=30 (= dm へ確定) + post-commit snapshot=70 (= tier2 へ SET)
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 30,
-      tentativeDistanceM: 70,
-      snapped: true,
-      committed: true,
-    });
-    const after = Meter.getState();
-    expect(after.distance_m).toBe(30);
-    expect(after.tier2_pending_m).toBe(70);
-    expect(after.distance_m + after.tier2_pending_m).toBe(100); // ★連続 (= +30 の二重計上が起きない)
-  });
-
-  it('snapshot SET は累積でない: SET50 → SET30 → tier2=30 (= 80 でない)', () => {
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 50,
-      snapped: true,
-      committed: false,
-    });
-    expect(Meter.getState().tier2_pending_m).toBe(50);
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 30,
-      snapped: true,
-      committed: false,
-    });
-    expect(Meter.getState().tier2_pending_m).toBe(30); // ★SET (= 累積なら 80)
-  });
-
-  it('pending=0 + commit mmIncrement=50 (tentativeDistanceM 無) → pending=0', () => {
-    expect(Meter.getState().tier2_pending_m).toBe(0);
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 50,
-      snapped: true,
-      committed: true,
-    });
-    expect(Meter.getState().tier2_pending_m).toBe(0);
-  });
-
-  it('複数 commit 連続で表示値 (distance + tier2_pending) 単調非減少 + 連続', () => {
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 200,
-      snapped: true,
-      committed: false,
-    });
-    const driveDistBefore =
-      (Meter.getState().distance_m || 0) + (Meter.getState().tier2_pending_m || 0);
-    expect(driveDistBefore).toBe(200);
-    // commit 60 + post-commit snapshot 140 → distance_m=60・tier2=140 → driveDist=200 (= 連続)
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 60,
-      tentativeDistanceM: 140,
-      snapped: true,
-      committed: true,
-    });
-    const driveDistAfter =
-      (Meter.getState().distance_m || 0) + (Meter.getState().tier2_pending_m || 0);
-    expect(driveDistAfter).toBe(200); // 60 + 140 = 200 (= 連続)
-    expect(driveDistAfter).toBeGreaterThanOrEqual(driveDistBefore); // 単調非減少
-  });
-});
-
-// ─── L932: gps_predictive 物理上限 160 km/h gate (6 mutants) ──────────────
-//
-// 対象式: if (_haver > 0 && _haver <= _maxDist)
-//   _maxDist = (160 / 3.6) * dtSec
-//   _haver=0 → skip / _haver>_maxDist → skip (GPS jump 防御) / 0<_haver<=_maxDist → 加算
-//
-// kill する mutant: ConditionalExpression / LogicalOperator / EqualityOperator boundary
-
-describe('Phase 8 Batch 1: L932 _haver 物理上限 160 km/h gate (= GPS jump 防御)', () => {
-  let Meter;
-  // 1 sec interval・25m 北 (= 90 km/h・上限内)
-  const baseTs = 1714100000000;
-  function gps(stepIdx, opts) {
-    opts = opts || {};
-    return {
-      lat: 33.84 + (opts.dLat != null ? opts.dLat : 0.000225 * stepIdx),
-      lng: 132.7656,
-      altitude: 0,
-      accuracy: 5,
-      speedKmh: opts.speedKmh != null ? opts.speedKmh : 50,
-      isStationary: false,
-      timestamp: baseTs + stepIdx * 1000,
-    };
-  }
-  beforeEach(() => {
-    ({ Meter } = setupMeter());
-  });
-  afterEach(() => {
-    if (Meter) Meter.reset();
-    delete globalThis.GPS;
-  });
-
-  it('_haver=0 (= 同座標) → gps_predictive 加算なし', () => {
-    Meter.update(gps(0)); // last_gps 確立
-    const before = Meter.getState().gps_predictive_distance_m || 0;
-    // 同座標で再 update → haver=0 → L932 `_haver > 0` で skip
-    Meter.update({ ...gps(0), timestamp: baseTs + 1000 });
-    expect(Meter.getState().gps_predictive_distance_m || 0).toBe(before);
-  });
-
-  it('_haver 通常範囲 (= ~25m / 1 秒) → gps_predictive 加算される', () => {
-    Meter.update(gps(0));
-    const before = Meter.getState().gps_predictive_distance_m || 0;
-    Meter.update(gps(1)); // 25m 北 → _haver ≈ 25・_maxDist ≈ 44 (= 160km/h × 1s)
-    const after = Meter.getState().gps_predictive_distance_m || 0;
-    expect(after).toBeGreaterThan(before);
-    expect(after - before).toBeGreaterThan(20);
-    expect(after - before).toBeLessThan(30);
-  });
-
-  it('_haver 物理上限超 (= 200m / 1 秒・720km/h) → gps_predictive 加算なし (= GPS jump 防御)', () => {
-    Meter.update(gps(0));
-    const before = Meter.getState().gps_predictive_distance_m || 0;
-    // 200m 北 ≈ 720 km/h・160 km/h 上限超過
-    Meter.update({ ...gps(0, { dLat: 0.0018 }), timestamp: baseTs + 1000 });
-    expect(Meter.getState().gps_predictive_distance_m || 0).toBe(before);
-  });
-});
-
-// ─── L1002: wait_sec 累積 boundary (18 mutants・最大密度) ────────────────
-//
-// 対象式: if (dtSec2 > 0 && dtSec2 < 60 && (gpsResult.speedKmh || 0) < 3) {
-//          state.wait_sec += dtSec2;
-//        }
-// 境界:
-//   dtSec2 > 0    (= 0 / 負値で除外)
-//   dtSec2 < 60   (= 60 ちょうどで除外)
-//   speedKmh < 3  (= 3 ちょうどで除外)
-//   speedKmh = null → ||0 → 0 < 3 真 → 加算経路
-//
-// kill する mutant: 各 boundary を真偽両方経由する境界 test 集
-
-describe('Phase 8 Batch 1: L1002 wait_sec 累積 boundary (= 待機料金集計)', () => {
+// ─── wait_sec 累積 boundary (= 待機料金集計・存続) ────────────────
+//   if (dtSec2 > 0 && dtSec2 < 60 && (gpsResult.speedKmh || 0) < 3) state.wait_sec += dtSec2;
+describe('Batch 1: wait_sec 累積 boundary (= 待機料金集計)', () => {
   let Meter;
   const baseTs = 1714100000000;
   function gpsLike(opts) {
@@ -305,7 +104,6 @@ describe('Phase 8 Batch 1: L1002 wait_sec 累積 boundary (= 待機料金集計)
     };
   }
   function setLast(Meter, ts, speedKmh) {
-    // 初期 GPS で state.last_timestamp 確立
     Meter.update(gpsLike({ ts, speedKmh: speedKmh != null ? speedKmh : 2 }));
   }
   beforeEach(() => {
@@ -326,14 +124,14 @@ describe('Phase 8 Batch 1: L1002 wait_sec 累積 boundary (= 待機料金集計)
   it('dtSec2=0 (= 同 timestamp) → wait_sec 不変 (= > 0 境界)', () => {
     setLast(Meter, baseTs);
     const before = Meter.getState().wait_sec || 0;
-    Meter.update(gpsLike({ ts: baseTs, speedKmh: 2 })); // 同 ts
+    Meter.update(gpsLike({ ts: baseTs, speedKmh: 2 }));
     expect(Meter.getState().wait_sec).toBe(before);
   });
 
   it('dtSec2=60 (= 60 ちょうど) → wait_sec 不変 (= < 60 境界)', () => {
     setLast(Meter, baseTs);
     const before = Meter.getState().wait_sec || 0;
-    Meter.update(gpsLike({ ts: baseTs + 60000, speedKmh: 2 })); // 60 秒後ちょうど
+    Meter.update(gpsLike({ ts: baseTs + 60000, speedKmh: 2 }));
     expect(Meter.getState().wait_sec).toBe(before);
   });
 
@@ -374,16 +172,8 @@ describe('Phase 8 Batch 1: L1002 wait_sec 累積 boundary (= 待機料金集計)
   });
 });
 
-// ─── L1305 / L1317 / L1321: display_distance_m 計算 (16 mutants) ─────────
-//
-// 対象式:
-//   target = max(distance_m, gps_predictive, distance_m + tier2_pending)  ← L1305
-//   if |diff| > maxDelta: display += diff > 0 ? maxDelta : -maxDelta       ← L1317
-//   display = max(display, distance_m)                                     ← L1321
-//
-// 規約: display_distance_m は・課金距離 (= distance_m) を下回らない / 単調増加 / 急減なし
-
-describe('Phase 8 Batch 1: L1305/L1317/L1321 display_distance_m 計算 (= 表示値)', () => {
+// ─── display_distance_m: distance_m 下限保証 + 単調非減少 (= 表示予測補間・存続) ──
+describe('Batch 1: display_distance_m (= 表示予測補間・下限/単調)', () => {
   let Meter, fakeWorker;
   beforeEach(() => {
     ({ Meter, fakeWorker } = setupMeter());
@@ -393,63 +183,29 @@ describe('Phase 8 Batch 1: L1305/L1317/L1321 display_distance_m 計算 (= 表示
     delete globalThis.GPS;
   });
 
-  it('L1305 target は (distance_m + tier2_pending_m) を含む (= max source 3)', () => {
-    Meter.setDistance(100);
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 50,
-      snapped: true,
-      committed: false,
-    });
-    // 1 回目 getState (= last_display_update_time=null → target を即時採用)
-    const s1 = Meter.getState();
-    expect(s1.tier2_pending_m).toBe(50);
-    // target = max(100, gps_predictive=0, 100+50=150) = 150
-    expect(s1.display_distance_m).toBeGreaterThanOrEqual(150);
-  });
-
-  it('L1321 display は distance_m を下回らない (= 課金距離下限保証)', () => {
-    // 大きな distance_m を setDistance で設定
+  it('display は distance_m を下回らない (= 課金距離下限保証)', () => {
     Meter.setDistance(500);
     const s = Meter.getState();
-    // display_distance_m は・最低でも distance_m 以上
     expect(s.display_distance_m).toBeGreaterThanOrEqual(500);
   });
 
-  it('L1305 target は (distance_m + tier2_pending_m) で正方向に動く (= ArithmeticOperator + → -)', () => {
-    Meter.setDistance(100);
-    // 1 回目: tier2=50 (SET) → target=150
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 50,
-      snapped: true,
-      committed: false,
-    });
+  it('pipeline delta で distance_m が増えると display も単調非減少 + 下限保証', () => {
+    fakeWorker._dispatch({ type: 'mmResult', pipelineDeltaM: 100, snapped: true, committed: true });
     const s1 = Meter.getState();
-    // 2 回目: tier2=100 (SET・snapshot 伸長)・短い経過 → target=200 だが maxDelta clamp で漸増
-    fakeWorker._dispatch({
-      type: 'mmResult',
-      mmIncrementM: 0,
-      tentativeDistanceM: 100,
-      snapped: true,
-      committed: false,
-    });
+    expect(s1.distance_m).toBe(100);
+    expect(s1.display_distance_m).toBeGreaterThanOrEqual(100);
+    fakeWorker._dispatch({ type: 'mmResult', pipelineDeltaM: 50, snapped: true, committed: true });
     const s2 = Meter.getState();
-    // tier2_pending_m が増えたら・display_distance_m は (前回 ≤ now) で単調非減少
-    expect(s2.tier2_pending_m).toBe(100);
+    expect(s2.distance_m).toBe(150);
+    expect(s2.display_distance_m).toBeGreaterThanOrEqual(150);
     expect(s2.display_distance_m).toBeGreaterThanOrEqual(s1.display_distance_m);
   });
 
-  it('L1317 maxDelta clamp 方向: distance_m 急増で display は前回より大きくなる (= diff > 0 path)', () => {
+  it('setDistance 急増で display は即時同期 (= 復元経路・distance_m 一致)', () => {
     Meter.setDistance(100);
     const s1 = Meter.getState();
-    // 大きく distance_m を増やす (= 急増)
     Meter.setDistance(10000);
     const s2 = Meter.getState();
-    // ★1モデル化 (2026-05-27): setDistance は復元/外部代入経路 → display を即時同期 (= distance_m と一致)。
-    //   (ライブの distance_m 増分は瞬間 floor 廃止＋上限 catch-up で滑らか追従＝別挙動)
     expect(s2.display_distance_m).toBeGreaterThanOrEqual(10000);
     expect(s2.display_distance_m).toBeGreaterThan(s1.display_distance_m);
   });
