@@ -77,8 +77,13 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 旧: [617, 741, 1304, 1340, 1809]
     // 2026-05-28 PM 再構築 (Google MM 式統一・α-β filter / 多層 catch-up 全削除) で -66 shift。
     // distance_m 本体 1byte 不変・5 経路の += 自体は変えていない・display 計算簡素化で行 shift。
-    // 新: [556, 680, 1243, 1279, 1690]
-    const expectedLines = [556, 680, 1243, 1279, 1690];
+    // 旧: [556, 680, 1243, 1279, 1690]
+    // 2026-05-30 白紙書き直し 第四弾 (= 新距離エンジン pipeline-distance 並列統合) で +17〜19 shift。
+    //   meter.js への追加は (a) state.pipeline_distance_m 新フィールド + コメント (state 初期化部・+9 行)、
+    //   (b) _onMmWorkerMessage 冒頭の state.pipeline_distance_m = m.pipelineTotalM 格納 + コメント (+9 行) のみ。
+    //   distance_m 加算 5 経路は 1byte 不変・追加は SET のみ (= 課金根拠不可侵)・行番号のみ shift。
+    // 新: [573, 699, 1262, 1298, 1709]
+    const expectedLines = [573, 699, 1262, 1298, 1709];
     // Stryker sandbox は project files をコピーする際に line offset を作る可能性あり。
     // 完全一致ではなく ±10 line 許容で drift 検出する (= 大幅 drift は捕捉・微小 offset は許容)。
     const LINE_TOLERANCE = 10;
@@ -144,7 +149,11 @@ describe('drift-static: meter.js distance_m += 5 経路 / GPS.calcDistance 3 経
     // 件数 5 件不変・GPS.calcDistance 本体 1byte 不変・α-β filter は内部で GPS.calcDistance 不使用。
     // 2026-05-28 PM 再構築 (= Google MM 式統一・α-β filter helper 削除) で -61 shift。
     // 件数 5 件不変・GPS.calcDistance 本体 1byte 不変。
-    const expectedLines = [360, 410, 450, 1100, 1195];
+    // 旧: [360, 410, 450, 1100, 1195]
+    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合) で +10〜19 shift。
+    //   GPS.calcDistance 呼出 5 件は 1byte 不変・件数も不変・上流の state/格納コメント追加で行のみ shift。
+    // 新: [370, 420, 460, 1119, 1214]
+    const expectedLines = [370, 420, 460, 1119, 1214];
     const LINE_TOLERANCE = 10;
     for (let i = 0; i < 5; i++) {
       const diff = Math.abs(calls[i].lineNo - expectedLines[i]);

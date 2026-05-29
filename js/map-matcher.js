@@ -30,6 +30,20 @@
 
 importScripts('roads-decoder.js');
 importScripts('osrm-client.js'); // MM-6: OSRM /match クライアント
+// ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列統合):
+//   js/pipeline-distance.js を Worker B に読み込み、createDistanceTracker を
+//   ★既存 Viterbi mmIncrementM 経路とは完全並列・additive★ で動かす。
+//   新距離は mmResult.pipelineTotalM として main に送るだけ (= 課金 distance_m に影響ゼロ)。
+//   既存の mmIncrementM / tentativeIncrementM / tentativeDistanceM は 1 byte 不変。
+//   self.PipelineDistance.createDistanceTracker(decoder, opts) を使用 (browser global 公開済)。
+//   ★課金安全: importScripts 失敗 (404/fetch error) で worker 全死 → MM/課金距離 全滅を防ぐため
+//     try/catch で包む。失敗時は self.PipelineDistance 未定義のまま → 並列 tracker は no-op (L157 guard)。
+//     既存 Viterbi mmIncrementM 経路は影響ゼロで生存。
+try {
+  importScripts('pipeline-distance.js');
+} catch (_pdErr) {
+  // pipeline-distance.js のロード失敗は並列計測の無効化のみ (課金経路に一切伝播させない)
+}
 
 // 既存定数（MM-1 と同一・挙動互換のため不変）
 const MM_MAX_SNAP_DIST_M = 50; // snap 単独の上限（fallback）
@@ -137,6 +151,54 @@ function _maybeAdjustViterbiN() {
 // 県別 RoadDecoder
 const decoders = new Map();
 const loadedPrefs = new Set();
+
+// ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列トラッカ):
+//   pipeline-distance.js の createDistanceTracker を県別に lazy 生成し、GPS 受信毎に
+//   ingest して新距離を累積する。★既存 Viterbi / mmIncrementM 経路とは完全並列・additive★。
+//   - 県別トラッカ: tracker が decoder を構築時に束縛する (RoadGraphRouter/SnapCache)。
+//     県跨ぎ trip は各県トラッカが自県分を加算し、合計 (= _pipelineTotalM) を main に送る。
+//   - reset (業務リセット) で全トラッカ reset + 合計 0 化。
+//   - pipeline-distance 未ロード / decoder 未ロード時は no-op (= 既存挙動完全不変)。
+const _pipelineTrackers = new Map(); // pref → tracker
+function _getPipelineTracker(pref) {
+  if (typeof self.PipelineDistance === 'undefined' || !self.PipelineDistance.createDistanceTracker)
+    return null;
+  if (!pref) return null;
+  const dec = decoders.get(pref);
+  if (!dec) return null;
+  let tk = _pipelineTrackers.get(pref);
+  if (!tk) {
+    try {
+      tk = self.PipelineDistance.createDistanceTracker(dec, {});
+      _pipelineTrackers.set(pref, tk);
+    } catch (_) {
+      return null; // 生成失敗は no-op (= 既存距離パスに影響させない)
+    }
+  }
+  return tk;
+}
+function _pipelineTotalM() {
+  let total = 0;
+  for (const tk of _pipelineTrackers.values()) {
+    try {
+      total += tk.totalM() || 0;
+    } catch (_) {
+      /* noop */
+    }
+  }
+  return total;
+}
+function _resetPipelineTrackers() {
+  for (const tk of _pipelineTrackers.values()) {
+    try {
+      tk.reset();
+    } catch (_) {
+      /* noop */
+    }
+  }
+  // インスタンスごと破棄して trip 単位の完全初期化を保証 (reset() も内部再生成するが二重保険)。
+  _pipelineTrackers.clear();
+}
 
 // D3 (2026-05-09): 緊急輸送道路指定 道路の Set (pref → Set<roadIdx>)
 //   road-attrs-{pref}.js の emergencyRouteB64 を main 側で decode → forward
@@ -2760,6 +2822,8 @@ self.onmessage = function (e) {
       });
     }
     viterbi.reset();
+    // ★白紙書き直し 第四弾 (2026-05-30): 業務リセットで新距離エンジンも完全初期化 (= trip 単位)。
+    _resetPipelineTrackers();
     lastCommittedSnap = null;
     prevSnap = null;
     _gpsBuffer.length = 0;
@@ -3160,6 +3224,35 @@ self.onmessage = function (e) {
     //   走行 skip risk なし。msg.speedKmh が null (= iOS Safari 速度欠落) は freeze せず通常。
     //   mmResult.isStationary を effectively stationary で echo back し・main 側 SET ガードと同期。
     //   絶対ルール準拠: distance_m / business_distance_m 加算経路は 1 byte 不変。
+    // ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列 ingest):
+    //   ★既存の mmIncrementM / tentativeIncrementM / tentativeDistanceM 算出は上で完了済・1 byte 不変★。
+    //   ここで新エンジン (pipeline-distance) に同じ GPS 点を ingest し、新距離を別計上する。
+    //   ★この block は下の isStationary freeze / postMessage の構造には一切干渉しない (= 並列)★。
+    //   prefecture は bestEmit (= outSnap) の県を優先・無ければ loaded 県を探索 fallback。
+    //   ingest 失敗 / 未ロードは no-op。例外は握りつぶし既存距離パスに一切影響させない。
+    let _pipelineTotalM_now = 0;
+    try {
+      let _pipePref = outSnap && outSnap.prefecture ? outSnap.prefecture : null;
+      if (!_pipePref && loadedPrefs.size > 0) {
+        // outSnap が無い (snap miss) 時は最寄り道路を持つ県を解決 (= 加算ではなく県特定のみ)。
+        const _fb = _snapAcrossPrefs(msg.lat, msg.lng);
+        _pipePref = _fb && _fb.prefecture ? _fb.prefecture : loadedPrefs.values().next().value;
+      }
+      const _tk = _getPipelineTracker(_pipePref);
+      if (_tk) {
+        _tk.ingest({
+          lat: msg.lat,
+          lng: msg.lng,
+          t: msg.timestamp,
+          acc: msg.accuracy,
+          spd: typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1, // km/h → m/s (無ければ -1)
+        });
+      }
+      _pipelineTotalM_now = _pipelineTotalM();
+    } catch (_) {
+      _pipelineTotalM_now = _pipelineTotalM();
+    }
+
     const _lowSpeed = msg.speedKmh != null && msg.speedKmh < 2;
     const _effectivelyStationary = msg.isStationary === true || _lowSpeed;
     if (_effectivelyStationary) {
@@ -3207,6 +3300,9 @@ self.onmessage = function (e) {
       candidatesCount: candCount,
       pickedEmission: pickedEmission,
       _reason: reason,
+      // ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン累積 (= 並列・比較表示用)。
+      //   課金 distance_m / mmIncrementM とは完全独立・main では state.pipeline_distance_m に格納のみ。
+      pipelineTotalM: _pipelineTotalM_now,
     });
   }
 };

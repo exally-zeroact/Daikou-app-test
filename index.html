@@ -4491,6 +4491,16 @@
             <div class="meter-value">
               <span id="driveDist">0.00</span><span class="meter-unit">km</span>
             </div>
+            <!-- ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン (pipeline-distance) の
+                 並列計測値を・既存メーターの隣に小さく比較表示する (= 実機検証用・additive)。
+                 課金 distance_m / display_distance_m とは完全独立・参照値のみ。 -->
+            <div
+              class="meter-sub"
+              id="pipelineDistSub"
+              style="font-size: 0.72em; opacity: 0.6; margin-top: 2px"
+            >
+              新計測 <span id="pipelineDist">0.00</span> km
+            </div>
           </div>
           <!-- ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・waypointCard):
                押下で現在地住所を Business.onWaypoint 経由で trip.waypoints に追加する。
@@ -6852,6 +6862,12 @@
           const displayDistM = s.display_distance_m || s.distance_m || 0;
           document.getElementById('driveDist').textContent = (displayDistM / 1000).toFixed(2);
           document.getElementById('driveFare').textContent = total.toLocaleString();
+          // ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン並列計測値を比較表示 (= 参照値)。
+          //   s.pipeline_distance_m は Worker B の pipeline-distance.js 累積・課金とは独立。
+          try {
+            const _pipeEl = document.getElementById('pipelineDist');
+            if (_pipeEl) _pipeEl.textContent = ((s.pipeline_distance_m || 0) / 1000).toFixed(2);
+          } catch (_) {}
           // ★設計変更宣言 (2026-05-15・住所取得 retry UI 自動追従):
           //   addresses-fine-jp.js 24.6MB の defer load 完了前に押された経由地点は
           //   Business 側の _scheduleAddressRetry が 1〜5 秒後に解決する。本タイマで

@@ -96,6 +96,11 @@ const Meter = (() => {
     //   表示式: 総走行距離 = business_distance_m + business_tier2_pending_m (= 業務 driveDist 相当)
     //   永続化: state.business_distance_m のみ (= preview は・揮発・state 再構築で 0)
     business_tier2_pending_m: 0,
+    // ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列計測値):
+    //   Worker B (map-matcher) 内で pipeline-distance.js が ★並列・additive★ に計算した
+    //   新距離の累積。mmResult.pipelineTotalM を SET するだけ (= 課金 distance_m に影響ゼロ)。
+    //   実機で既存メーターと比較表示するための参照値・課金 / calcFare には一切使わない。
+    pipeline_distance_m: 0,
   };
 
   // Tier 2 リードインジケータ用 道路 snap セグメントキュー (2026-05-15 追加)
@@ -480,6 +485,13 @@ const Meter = (() => {
       return;
     }
     if (m.type !== 'mmResult') return;
+    // ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列計測値の格納):
+    //   ★既存の距離 / 課金ロジックには一切触れない・SET するだけ★。
+    //   Worker B が pipeline-distance.js で並列計算した累積を参照値として保持し、getState で露出。
+    //   distance_m / business_distance_m / tier2 系には read/write しない (= 完全非共有)。
+    if (typeof m.pipelineTotalM === 'number' && m.pipelineTotalM >= 0) {
+      state.pipeline_distance_m = m.pipelineTotalM;
+    }
     if (typeof m.mmIncrementM === 'number' && m.mmIncrementM > 0) {
       if (_offRoadActive) {
         // Phase 1.C: Off-Road でカバー済 → 二重課金防止のため Worker B mmIncrement を無視

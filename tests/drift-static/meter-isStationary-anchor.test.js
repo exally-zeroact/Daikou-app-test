@@ -47,7 +47,9 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // 2026-05-28 PM (例外条項適用) gap fill sanity check 追加で L1133 へ移動・window 同期。
     // 2026-05-28 PM Phase 3 (α-β filter + helper ~70 行追加) で L1202 へ移動・window 同期。
     // 2026-05-28 PM 再構築 (= Google MM 式統一・α-β filter 削除) で L1141 へ戻る・window 同期。
-    const window = lines.slice(1130, 1160).join('\n');
+    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合・state/格納コメント +18 行上流追加) で
+    //   block が L1160 へ移動・window slice を (1150,1180) へ同期 (= prod の if(gpsResult.isStationary) は 1byte 不変)。
+    const window = lines.slice(1150, 1180).join('\n');
     if (!/if\s*\(\s*gpsResult\.isStationary\s*\)/.test(window)) {
       throw new Error(
         'meter.js L790 周辺 (±10) に if (gpsResult.isStationary) パターン未検出 (drift detected)'
@@ -71,7 +73,10 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     // 2026-05-29 partial commit 早期化で block が L3121 へ移動・window 同期
     // 2026-05-29 PM real-trace 残存 creep 解析 (= freeze 条件拡張): block が L3159 / pattern も
     //   if (_effectivelyStationary) へ更新・window slice 同期。
-    const window = lines.slice(3140, 3190).join('\n');
+    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合): importScripts + tracker manager
+    //   (~58 行) を上流に additive 追加で block が L3251 へ移動・window slice を (3240,3300) へ同期。
+    //   freeze block (= mmIncrementM=0 / tentativeIncrementM=0) は prod 1byte 不変・並列 ingest は freeze 上流。
+    const window = lines.slice(3240, 3300).join('\n');
     if (!/if\s*\(\s*_effectivelyStationary\s*\)/.test(window)) {
       throw new Error(
         'map-matcher.js L3147 周辺 (±10) に if (_effectivelyStationary) pattern 未検出 (drift detected)'
