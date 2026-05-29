@@ -36,7 +36,14 @@ importScripts('osrm-client.js'); // MM-6: OSRM /match クライアント
 //   新距離は mmResult.pipelineTotalM として main に送るだけ (= 課金 distance_m に影響ゼロ)。
 //   既存の mmIncrementM / tentativeIncrementM / tentativeDistanceM は 1 byte 不変。
 //   self.PipelineDistance.createDistanceTracker(decoder, opts) を使用 (browser global 公開済)。
-importScripts('pipeline-distance.js');
+//   ★課金安全: importScripts 失敗 (404/fetch error) で worker 全死 → MM/課金距離 全滅を防ぐため
+//     try/catch で包む。失敗時は self.PipelineDistance 未定義のまま → 並列 tracker は no-op (L157 guard)。
+//     既存 Viterbi mmIncrementM 経路は影響ゼロで生存。
+try {
+  importScripts('pipeline-distance.js');
+} catch (_pdErr) {
+  // pipeline-distance.js のロード失敗は並列計測の無効化のみ (課金経路に一切伝播させない)
+}
 
 // 既存定数（MM-1 と同一・挙動互換のため不変）
 const MM_MAX_SNAP_DIST_M = 50; // snap 単独の上限（fallback）
