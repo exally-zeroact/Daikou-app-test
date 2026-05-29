@@ -117,14 +117,18 @@
     if (samples.length >= MAX_SAMPLES) return; // 上限到達後は破棄
     const c = p.coords;
     if (startedAt == null) startedAt = p.timestamp;
+    // ★計器 (2026-05-29): Firebase RTDB は null を field ごと削除するため、
+    //   coords.speed/heading が null の瞬間 (iOS で頻発) は spd/hdg が trace から消え、
+    //   「速度 null」 と 「記録漏れ」 が区別不能になる。null→-1 sentinel で永続化し、
+    //   Doppler ゲート (gps-worker.js) のオフライン再現を可能にする。診断専用・課金非関与。
     samples.push({
       t: p.timestamp,
       lat: c.latitude,
       lng: c.longitude,
       acc: c.accuracy,
-      spd: c.speed,
-      hdg: c.heading,
-      alt: c.altitude,
+      spd: c.speed == null ? -1 : c.speed,
+      hdg: c.heading == null ? -1 : c.heading,
+      alt: c.altitude == null ? -9999 : c.altitude,
     });
     const countEl = document.getElementById('traceSampleCount');
     if (countEl) countEl.textContent = String(samples.length);

@@ -284,11 +284,16 @@ const Meter = (() => {
     const _sig = src + '|' + _dm + '|' + _t2;
     if (_sig === _mmDbgSig) return;
     _mmDbgSig = _sig;
+    // ★計器 (2026-05-29): snap弧長(add) と 生haversine(raw=_haverAccumSinceLastCommit) を並記。
+    //   snap短縮 (raw>add) と gap非加算を経路別に定量するため。診断専用・課金非関与。
+    const _raw = typeof _haverAccumSinceLastCommit === 'number' ? _haverAccumSinceLastCommit : 0;
     dlog(
       '[MMDBG] src=' +
         src +
         ' add=' +
         (addM || 0).toFixed(1) +
+        'm raw=' +
+        _raw.toFixed(1) +
         'm dm=' +
         (state.distance_m || 0).toFixed(1) +
         'm tier2=' +

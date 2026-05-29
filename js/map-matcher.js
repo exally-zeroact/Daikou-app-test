@@ -3043,12 +3043,18 @@ self.onmessage = function (e) {
                 const _detourOk = _gcGap > 0 && r.distanceM / _gcGap <= GAP_MAX_DETOUR_RATIO;
                 if (!_viaOk || !_detourOk) {
                   skipped = 1;
+                  // ★計器 (2026-05-29): skip 区間長 (gap=直線, route=routing結果) を併記。
+                  //   「skip 回数 × 平均区間長」 で gap非加算の過少量を定量するため。診断専用。
                   reason =
                     'gap not routable (via=' +
                     r._via +
                     ' ratio=' +
                     (_gcGap > 0 ? (r.distanceM / _gcGap).toFixed(2) : 'NA') +
-                    ') → meter.js は fill せず (過少安全側)';
+                    ' gap=' +
+                    (_gcGap || 0).toFixed(0) +
+                    'm route=' +
+                    (typeof r.distanceM === 'number' ? r.distanceM.toFixed(0) : 'NA') +
+                    'm) → meter.js は fill せず (過少安全側)';
                 }
               }
               if (!skipped && r && typeof r.distanceM === 'number' && r.distanceM >= 0) {
