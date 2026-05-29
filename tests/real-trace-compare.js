@@ -188,7 +188,11 @@ async function googleDirections(trip) {
   try {
     const resp = await getJson(url);
     if (!resp || resp.status !== 'OK' || !resp.routes || !resp.routes[0]) {
-      return { status: 'no_route', google_status: resp ? resp.status : null };
+      return {
+        status: 'no_route',
+        google_status: resp ? resp.status : null,
+        google_error: resp ? resp.error_message || null : null,
+      };
     }
     let d = 0;
     for (const leg of resp.routes[0].legs || []) d += (leg.distance && leg.distance.value) || 0;
@@ -229,6 +233,8 @@ async function main() {
     osrmMatch(trip),
     googleDirections(trip),
   ]);
+  console.log('[real-compare] google_detail:', JSON.stringify(google));
+  console.log('[real-compare] osrm_detail:', JSON.stringify(osrm));
 
   const rawM = +rawDistanceM.toFixed(1);
   const daikomeM = daikomeKm != null ? Math.round(daikomeKm * 1000) : null;
