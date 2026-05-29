@@ -2854,16 +2854,10 @@ self.onmessage = function (e) {
     return;
   }
 
-  // Phase 1.C (2026-05-10): Off-Road Mode の境界制御
-  //   meter.js の Off-Road 起動 / 終了で送信される
-  //   起動時: Off-Road 中に Worker B が古い lastCommittedSnap を起点に
-  //           大きな mmIncrement を出すのを防ぐため null 化
-  //   終了時: Off-Road でカバー済の commit を「再起点化」するため null 化
-  //   Viterbi 窓は維持 (snap 候補蓄積を継続)・pheromone/grid bias も維持
-  if (msg.type === 'resetCommittedSnap') {
-    lastCommittedSnap = null;
-    return;
-  }
+  // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline): 旧 Off-Road Mode の境界制御
+  //   message 'resetCommittedSnap' は廃止。新メーターは Off-Road 経路を持たず
+  //   (= 距離は pipeline-distance エンジンが gap/off-road を内部処理する) 送信されない。
+  //   handler を削除し dead handler 化を防ぐ (= clean 統合)。
 
   // B6 (2026-05-09): 停車検出時の hint
   //   main 側で停車検知したら _gpsBuffer をクリアして
@@ -3231,6 +3225,12 @@ self.onmessage = function (e) {
     //   prefecture は bestEmit (= outSnap) の県を優先・無ければ loaded 県を探索 fallback。
     //   ingest 失敗 / 未ロードは no-op。例外は握りつぶし既存距離パスに一切影響させない。
     let _pipelineTotalM_now = 0;
+    // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline・距離駆動エンジン化):
+    //   新 meter.js は state.distance_m を ★pipeline-distance の delta★ で駆動する。
+    //   worker は ingest() の戻り deltaM を mmResult.pipelineDeltaM として返し、main(meter) は
+    //   running gate 内で state.distance_m += pipelineDeltaM を実行する (= 単一経路・道路 snap 道なり)。
+    //   pipelineTotalM は参照値として併存 (= 後方互換・debug 表示)。
+    let _pipelineDeltaM_now = 0;
     try {
       let _pipePref = outSnap && outSnap.prefecture ? outSnap.prefecture : null;
       if (!_pipePref && loadedPrefs.size > 0) {
@@ -3240,17 +3240,21 @@ self.onmessage = function (e) {
       }
       const _tk = _getPipelineTracker(_pipePref);
       if (_tk) {
-        _tk.ingest({
+        const _ing = _tk.ingest({
           lat: msg.lat,
           lng: msg.lng,
           t: msg.timestamp,
           acc: msg.accuracy,
           spd: typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1, // km/h → m/s (無ければ -1)
         });
+        if (_ing && typeof _ing.deltaM === 'number' && _ing.deltaM > 0) {
+          _pipelineDeltaM_now = _ing.deltaM;
+        }
       }
       _pipelineTotalM_now = _pipelineTotalM();
     } catch (_) {
       _pipelineTotalM_now = _pipelineTotalM();
+      _pipelineDeltaM_now = 0;
     }
 
     const _lowSpeed = msg.speedKmh != null && msg.speedKmh < 2;
@@ -3258,6 +3262,8 @@ self.onmessage = function (e) {
     if (_effectivelyStationary) {
       mmIncrementM = 0;
       tentativeIncrementM = 0;
+      // ★白紙書き直し (2026-05-30): effectively stationary 時は新 meter 距離駆動 delta も 0 (= creep 防止二重保険)。
+      _pipelineDeltaM_now = 0;
       if (_frozenTentativeDistanceM !== null) {
         tentativeDistanceM = _frozenTentativeDistanceM;
       }
@@ -3300,9 +3306,13 @@ self.onmessage = function (e) {
       candidatesCount: candCount,
       pickedEmission: pickedEmission,
       _reason: reason,
-      // ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン累積 (= 並列・比較表示用)。
-      //   課金 distance_m / mmIncrementM とは完全独立・main では state.pipeline_distance_m に格納のみ。
+      // ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン累積 (= 参照・比較表示用)。
       pipelineTotalM: _pipelineTotalM_now,
+      // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline): 新 meter の距離駆動 delta。
+      //   新 meter.js は running gate 内で state.distance_m += pipelineDeltaM を実行する。
+      //   isStationary (= effectively stationary) freeze 時は ingest 側 ZUPT が deltaM=0 を返すため
+      //   別途 0 化不要だが・freeze と整合させるため下の effectivelyStationary block で 0 に念押しする。
+      pipelineDeltaM: _pipelineDeltaM_now,
     });
   }
 };

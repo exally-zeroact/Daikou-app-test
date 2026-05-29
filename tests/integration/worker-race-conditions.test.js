@@ -85,14 +85,14 @@ describe('Worker A/B race conditions (㉔)', () => {
         timestamp: baseTs + i * 200,
       });
     }
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 100, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 100, snapped: true, committed: true });
     expect(Meter.getState().distance_m).toBe(100);
   });
 
   it('R2: 同期同タイミングで複数 mmResult dispatch → 累積加算', () => {
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 50, snapped: true, committed: true });
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 30, snapped: true, committed: true });
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 20, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 50, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 30, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 20, snapped: true, committed: true });
     expect(Meter.getState().distance_m).toBe(100);
   });
 
@@ -100,22 +100,22 @@ describe('Worker A/B race conditions (㉔)', () => {
     Meter.reset();
     Meter.start(); // _drainMmUntil = Date.now() + 500
     // drain 中
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 200, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 200, snapped: true, committed: true });
     expect(Meter.getState().distance_m).toBe(0);
   });
 
   it('R4: businessEnd 中の mmResult arrival → discard (= running=false)', () => {
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 100, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 100, snapped: true, committed: true });
     expect(Meter.getState().distance_m).toBe(100);
     Meter.businessEnd(); // state.running = false
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 100, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 100, snapped: true, committed: true });
     // running=false で加算なし
     expect(Meter.getState().distance_m).toBe(100);
   });
 
   it('R5: 不正 type の message は無視 (= type !== mmResult)', () => {
-    fw._dispatch({ type: 'wrongType', mmIncrementM: 500, snapped: true });
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 100, snapped: true, committed: true });
+    fw._dispatch({ type: 'wrongType', pipelineDeltaM: 500, snapped: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 100, snapped: true, committed: true });
     expect(Meter.getState().distance_m).toBe(100);
   });
 
@@ -126,7 +126,7 @@ describe('Worker A/B race conditions (㉔)', () => {
   });
 
   it('R7: mmResult arrival → GPS update → mmResult arrival の交互順序', () => {
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 50, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 50, snapped: true, committed: true });
     Meter.update({
       lat: 33.84,
       lng: 132.7656,
@@ -135,7 +135,7 @@ describe('Worker A/B race conditions (㉔)', () => {
       isStationary: false,
       timestamp: 1714100000000,
     });
-    fw._dispatch({ type: 'mmResult', mmIncrementM: 30, snapped: true, committed: true });
+    fw._dispatch({ type: 'mmResult', pipelineDeltaM: 30, snapped: true, committed: true });
     expect(Meter.getState().distance_m).toBe(80);
   });
 });
