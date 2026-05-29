@@ -170,11 +170,15 @@ async function osrmMatch(trip) {
   }
 }
 
-// ── Google Directions (実走経路を waypoint で渡す・最大 25 点) ──
+// ── Google Routes API computeRoutes (実走経路を intermediates で渡す・最大 25 点) ──
+//   旧 Directions API は legacy で新規プロジェクト無効のため Routes API (新) を使用。
+//   要: Google Cloud で「Routes API」有効化 + キー制限に Routes API を含める。
+function llObj(p) {
+  return { location: { latLng: { latitude: p.lat, longitude: p.lng } } };
+}
 async function googleDirections(trip) {
   if (!GOOGLE_KEY) return { status: 'skipped', note: 'GOOGLE_DIRECTIONS_API_KEY 未設定' };
-  // origin + destination + 中間 waypoint 最大 23 = 計 25 点に間引く
-  const MAX_WP = 23;
+  const MAX_WP = 23; // origin + destination + 中間 23 = 計 25 点
   const origin = trip[0];
   const dest = trip[trip.length - 1];
   const inner = trip.slice(1, -1);
@@ -183,33 +187,37 @@ async function googleDirections(trip) {
     const step = Math.max(1, Math.floor(inner.length / MAX_WP));
     for (let i = 0; i < inner.length && wps.length < MAX_WP; i += step) wps.push(inner[i]);
   }
-  const wpStr = wps.map((p) => p.lat.toFixed(6) + ',' + p.lng.toFixed(6)).join('|');
-  const url =
-    'https://maps.googleapis.com/maps/api/directions/json' +
-    '?origin=' +
-    origin.lat.toFixed(6) +
-    ',' +
-    origin.lng.toFixed(6) +
-    '&destination=' +
-    dest.lat.toFixed(6) +
-    ',' +
-    dest.lng.toFixed(6) +
-    (wpStr ? '&waypoints=' + encodeURIComponent(wpStr) : '') +
-    '&mode=driving&key=' +
-    encodeURIComponent(GOOGLE_KEY);
+  const body = {
+    origin: llObj(origin),
+    destination: llObj(dest),
+    intermediates: wps.map(llObj),
+    travelMode: 'DRIVE',
+  };
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const resp = await getJson(url);
-    if (!resp || resp.status !== 'OK' || !resp.routes || !resp.routes[0]) {
+    const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      signal: ctl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_KEY,
+        'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+      },
+      body: JSON.stringify(body),
+    });
+    clearTimeout(t);
+    const resp = await res.json();
+    if (!res.ok || !resp.routes || !resp.routes[0] || resp.routes[0].distanceMeters == null) {
       return {
         status: 'no_route',
-        google_status: resp ? resp.status : null,
-        google_error: resp ? resp.error_message || null : null,
+        http: res.status,
+        google_error: resp && resp.error ? resp.error.message : null,
       };
     }
-    let d = 0;
-    for (const leg of resp.routes[0].legs || []) d += (leg.distance && leg.distance.value) || 0;
-    return { status: 'ok', distance_m: d, waypoints_sent: wps.length };
+    return { status: 'ok', distance_m: resp.routes[0].distanceMeters, waypoints_sent: wps.length };
   } catch (e) {
+    clearTimeout(t);
     return { status: 'error', error: e.message };
   }
 }
