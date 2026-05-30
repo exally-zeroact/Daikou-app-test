@@ -92,8 +92,11 @@ const Meter = (() => {
   //     ・確定 / 停車 / 業務終了 (= 支払タイミング) では display を target に latch し
   //       メーター=実距離=料金 を一致させる (= calcFare(display) ≤ calcFare(distance_m) 保証)。
   //   旧 predict 先取り (display = target + velocity×経過秒) は overshoot を生むため撤去。
-  const DISP_CATCHUP_TAU_S = 0.4; // catch-up 時定数 (= 0.4s・会議推奨0.3〜0.5s内・lag最小化。実機traceで再調整可)
+  const DISP_CATCHUP_TAU_S = 0.4; // (旧・指数catch-up 時定数。等速ペース化で未使用・互換のため残置)
   const DISP_LATCH_GAP_M = 0.01; // この残差未満なら target に着地 (= 収束扱い)
+  const DISP_RATE_EMA_ALPHA = 0.5; // 等速ペース rate の EMA 平滑係数 (= 直近瞬時レートの寄与・0<α≤1)
+  const DISP_RATE_MAX_MPS = 55; // 等速ペース rate の物理上限 (= 198km/h・cold-start/glitch の瞬時値 spike を EMA から除外)
+  void DISP_CATCHUP_TAU_S; // 等速ペース化で未使用 (= 形維持・lint 黙らせ)
 
   // ─── fareConfig (v2・後方互換維持) ───
   let fareConfig = {
@@ -327,13 +330,14 @@ const Meter = (() => {
       display_distance_m: 0,
       last_display_update_time: null,
       _prev_target_distance_m: 0,
-      _prev_target_time: null,
+      // ★等速ペース★: 開始時刻を seed (= 初回 delta で valid dtTarget を得て cold-start sit を解消)。
+      _prev_target_time: now,
       _target_velocity_mps: 0,
       // business display (per-trip 引き継ぎ)
       business_display_distance_m: prevBusinessDisplay,
       last_business_display_update_time: null,
       _prev_business_target_distance_m: prevBusinessDisplay,
-      _prev_business_target_time: null,
+      _prev_business_target_time: now,
       _business_target_velocity_mps: 0,
       wait_sec: 0,
       // 後方互換キー (= 廃止・0 維持)
@@ -796,28 +800,65 @@ const Meter = (() => {
   }
 
   // ─── 表示用 catch-up ヘルパ (= 距離値 1 byte 不変の表示専用 layer) ───
-  //   ★overshoot ゼロ契約★: 返り値 display は target を ★絶対に超えない★。
-  //   target = 実距離値 (distance_m)。display は前回値から target へ「下から」指数収束する。
-  //   ・display ≥ target なら即 target に着地 (= target が下がる事は無いが防御的に clamp)。
-  //   ・display < target なら gap を 1 - exp(-dt/τ) の割合だけ詰める (= 滑らか catch-up)。
-  //   ・単調非減少: target は単調増加・display は target を上限に増えるのみ。
-  //   prevTarget/prevTargetTime/velRef は呼出側の状態 bookkeeping 維持用 (= 形維持)。
-  function _smoothDisplay(target, prevDisplay, prevTarget, prevTargetTime, velRef, now) {
-    velRef.prevTarget = target;
-    velRef.prevTargetTime = now;
-    velRef.v = 0; // 先取り廃止のため velocity は未使用 (= 形維持のため 0 固定)
+  //   ★等速ペース catch-up★ (2026-05-30・「止まって動いて」脈動の根治):
+  //   target = 実距離値 (distance_m)。display は前回値から target へ「下から」★一定速度★で詰める。
+  //   ・rate = 直近の target 増分速度 (= target増分/target間dt) を EMA 平滑したもの (m/s)。
+  //     1Hz GPS なら rate ≈ 実走行速度。これで display を等速に進めるので「動いて→止まって」が消える。
+  //   ・毎フレーム: display += min(gap, rate*dt_frame)。dt_frame = 直前 display 更新からの経過秒。
+  //     min(gap,…) clamp で ★display は target を絶対に超えない (overshoot ゼロ)★。
+  //   ・gap ≤ 0 (= target に追いついた/停車で target 不進) は据え置き (= 不動・単調非減少・creep 0)。
+  //   ・true-stop (target 進まない) → 新規増分 0 → EMA で rate→0 → display 不動 (phantom 0)。
+  //   ・fps 非依存 (dt_frame ベース)。latch は呼出側 _latchDisplay で維持。
+  //   velRef: { v(=rate EMA m/s), prevTarget(=最後に観測した target), prevTargetTime(=その時刻) }。
+  //   lastDisplayTime: 直前にこの display を更新した時刻 (= per-frame dt の基準・null 可)。
+  function _smoothDisplay(target, prevDisplay, lastDisplayTime, velRef, now) {
     const tgt = target > 0 ? target : 0;
-    const display = prevDisplay > 0 ? prevDisplay : 0;
+    let display = prevDisplay > 0 ? prevDisplay : 0;
+
+    // ── rate (EMA) 更新: target が新しい値に増えた fix のたびに瞬時レートを取り込む ──
+    const prevTarget = typeof velRef.prevTarget === 'number' ? velRef.prevTarget : tgt;
+    const prevTargetTime = velRef.prevTargetTime;
+    if (tgt > prevTarget + 1e-9) {
+      // target が増えた = 新 fix 到着。瞬時レート = 増分 / 経過秒 (= 速度近似)。
+      const dtTarget = prevTargetTime !== null ? (now - prevTargetTime) / 1000 : 0;
+      if (dtTarget > 1e-3) {
+        let inst = (tgt - prevTarget) / dtTarget; // m/s
+        // 物理上限 clamp: cold-start (start 直後の極小 dt) や GPS glitch の spike を EMA から除外。
+        if (inst > DISP_RATE_MAX_MPS) inst = DISP_RATE_MAX_MPS;
+        const prevRate = typeof velRef.v === 'number' && velRef.v > 0 ? velRef.v : inst;
+        velRef.v = DISP_RATE_EMA_ALPHA * inst + (1 - DISP_RATE_EMA_ALPHA) * prevRate;
+      }
+      velRef.prevTarget = tgt;
+      velRef.prevTargetTime = now;
+    } else if (prevTargetTime === null) {
+      // 初観測 (= latch/setDistance 直後の時刻基準確立)。レートは据え置き、時刻だけ刻む。
+      velRef.prevTarget = tgt;
+      velRef.prevTargetTime = now;
+    }
+
     // 防御的 clamp: display が target を超える事は設計上起きないが万一あれば即 target に揃える。
-    if (display >= tgt) return tgt;
-    const dt = prevTargetTime !== null ? (now - prevTargetTime) / 1000 : 0;
-    if (!(dt > 0)) {
+    if (display >= tgt) {
+      if (display > tgt) display = tgt;
+      return display;
+    }
+
+    // ── 等速で gap を詰める ──
+    const dtFrame = lastDisplayTime !== null ? (now - lastDisplayTime) / 1000 : 0;
+    if (!(dtFrame > 0)) {
       // 時間未経過 (= 同一 tick 再読) は据え置き (= overshoot しない・単調維持)。
       return display;
     }
     const gap = tgt - display;
-    const ratio = 1 - Math.exp(-dt / DISP_CATCHUP_TAU_S);
-    let next = display + gap * ratio;
+    const rate = typeof velRef.v === 'number' && velRef.v > 0 ? velRef.v : 0;
+    let step = rate * dtFrame; // 等速ペース前進量
+    if (!(step > 0)) {
+      // rate 未確立 (= 最初の数 fix) で gap が残る場合のみ、収束保証のため
+      //   残差が極小なら着地。そうでなければ据え置き (= 次 fix で rate 確立後に等速で詰める)。
+      if (gap < DISP_LATCH_GAP_M) return tgt;
+      return display;
+    }
+    if (step > gap) step = gap; // ★overshoot ゼロ★: target を超えない
+    let next = display + step;
     // 残差が極小なら target に着地 (= 乖離放置せず収束させる)。
     if (tgt - next < DISP_LATCH_GAP_M) next = tgt;
     // ★絶対不変条件★: display ≤ target (overshoot ゼロ) かつ 単調非減少。
@@ -861,8 +902,7 @@ const Meter = (() => {
     const display = _smoothDisplay(
       target,
       state.display_distance_m,
-      state._prev_target_distance_m,
-      state._prev_target_time,
+      state.last_display_update_time,
       velRef,
       now
     );
@@ -882,8 +922,7 @@ const Meter = (() => {
     const bdisplay = _smoothDisplay(
       btarget,
       state.business_display_distance_m,
-      state._prev_business_target_distance_m,
-      state._prev_business_target_time,
+      state.last_business_display_update_time,
       bvelRef,
       now
     );
@@ -928,9 +967,9 @@ const Meter = (() => {
     //   display は getState の catch-up で「下から」追いつく (= 先取りしない)。
     //   復元 (= 確定済み実距離) で即一致させたい場合は呼出側で Meter.latchDisplay() を使う。
     if ((state.display_distance_m || 0) > v) state.display_distance_m = v;
-    state._prev_target_distance_m = v;
-    state._prev_target_time = null;
-    state._target_velocity_mps = 0;
+    // ★等速ペース化★: _prev_target_* / _target_velocity_mps は _smoothDisplay が所有する
+    //   (= fix 間の増分でレートを測るため setDistance では clobber しない)。overshoot は
+    //   getState 内 min(gap, rate*dt) clamp で保証。即一致が要る復元は latchDisplay() を使う。
   }
   function setBusinessDistance(m) {
     const bv = typeof m === 'number' && m >= 0 ? m : 0;
@@ -938,9 +977,7 @@ const Meter = (() => {
     // ★overshoot ゼロ★: business_display は business_distance_m(bv) を超えない (= min clamp)。
     //   target が上がっても display は getState の catch-up で「下から」追いつく。
     if ((state.business_display_distance_m || 0) > bv) state.business_display_distance_m = bv;
-    state._prev_business_target_distance_m = bv;
-    state._prev_business_target_time = null;
-    state._business_target_velocity_mps = 0;
+    // ★等速ペース化★: _prev_business_target_* / 速度は _smoothDisplay が所有 (= clobber しない)。
   }
   function setBusinessActive(active) {
     state.business_active = !!active;

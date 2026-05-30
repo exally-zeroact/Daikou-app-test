@@ -14,8 +14,13 @@
 //         ※ display は表示専用。display ≤ distance_m ゆえ calcFare(display) ≤ calcFare(distance_m)
 //           で過大請求は不能。distance_m は不可侵 (= verify-new-meter-9677.js が 9,675.91m を別途 gate)。
 //     (3) display_distance_m は trip 終了 (最終 getState) で distance_m に収束する
-//         (= 乖離放置なし・catch-up で target に着地)。
-//     (4) business_display_distance_m も同様に単調・先取り 10m 以内・収束
+//         (= 乖離放置なし・等速ペース catch-up で target に着地)。
+//     (4) business_display_distance_m も同様に単調・overshoot ゼロ・収束
+//
+//   ★等速ペース前提 (2026-05-30)★: display は target へ ★一定速度 (直近進行レート)★ で
+//     「下から」詰める (= 旧・指数減速や 10m 先取りグリッドではない)。1Hz GPS でも「動いて→
+//     止まって→動いて」の脈動を出さず連続的に動く。本テストは overshoot ゼロ・単調・収束を
+//     gate し、等速性そのものの脈動 invariant は tests/verify-display-even-pace.js が担当する。
 //
 //   ★絶対不可侵★ distance_m / calcFare / 課金経路は本テストで一切変更しない (= 読むだけ)。
 //
@@ -180,7 +185,7 @@ function main() {
     Meter.update(input);
 
     // UI ループ相当: 1 GPS 点ごとに複数回 getState (= rAF 60Hz / setInterval 100ms の高頻度読出)。
-    //   getState は now=Date.now() ベースで予測補間するため、複数回呼んでも単調・課金値以下。
+    //   getState は now=Date.now() ベースの等速ペース catch-up ゆえ、複数回呼んでも単調・課金値以下。
     for (let k = 0; k < UI_TICKS_PER_GPS; k++) {
       // UI tick ごとに次点までの実時間を配分して進める (= rAF/setInterval が実秒で回る再現)。
       _mockNow = p.t + Math.round((dtToNext * (k + 1)) / UI_TICKS_PER_GPS);
@@ -195,11 +200,11 @@ function main() {
       if (disp < prevDisplay - 1e-6) monoViolations++;
       prevDisplay = Math.max(prevDisplay, disp);
 
-      // (2) 課金値 distance_m に対する先取り量 (= overshoot)・10m 以内であるべき
+      // (2) 課金値 distance_m に対する overshoot 量 (= 先取りゼロ契約・0 であるべき)
       const over = disp - dist;
       if (over > maxOvershoot) maxOvershoot = over;
 
-      // (3) 走行中の display↔target 乖離量を記録 (= 10m グリッド追従の上限確認)
+      // (3) 走行中の display↔target 乖離量を記録 (= 等速 catch-up の下からの追従ラグ上限)
       const gap = dist - disp;
       if (gap > maxGapToTarget) maxGapToTarget = gap;
 

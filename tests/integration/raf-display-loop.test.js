@@ -80,7 +80,7 @@ describe('3. uiTimer stop 周辺・rAF stop 配線', () => {
 describe('4. textContent 比較・無駄 DOM 書込 防止 (= _renderMeterReadout 内)', () => {
   let readoutBlock;
   beforeAll(() => {
-    const m = html.match(/function _renderMeterReadout\(\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
+    const m = html.match(/function _renderMeterReadout\([^)]*\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
     readoutBlock = m ? m[0] : '';
   });
 
@@ -103,7 +103,7 @@ describe('4. textContent 比較・無駄 DOM 書込 防止 (= _renderMeterReadou
 describe('5. 読み出し共通関数・getState 予測補間 利用 (= display_distance_m 採用)', () => {
   let readoutBlock;
   beforeAll(() => {
-    const m = html.match(/function _renderMeterReadout\(\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
+    const m = html.match(/function _renderMeterReadout\([^)]*\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
     readoutBlock = m ? m[0] : '';
   });
 
@@ -114,7 +114,7 @@ describe('5. 読み出し共通関数・getState 予測補間 利用 (= display_
   it('rAF tick は _renderMeterReadout を呼ぶ (= 読み出し一本化)', () => {
     const m = html.match(/function _rafDisplayTick\(\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
     expect(m).not.toBeNull();
-    expect(m[0]).toMatch(/_renderMeterReadout\(\)/);
+    expect(m[0]).toMatch(/_renderMeterReadout\([^)]*\)/);
   });
 
   it('Meter.getState() 呼出', () => {
@@ -162,7 +162,7 @@ describe('7. 不可侵境界 verify (= 距離計算ロジック 1 byte 不変)',
   });
 
   it('読み出し関数内・state.distance_m / business_distance_m に・write しない', () => {
-    const m = html.match(/function _renderMeterReadout\(\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
+    const m = html.match(/function _renderMeterReadout\([^)]*\)\s*\{[\s\S]*?\n\s\s\s\s\s\s\}/);
     expect(m).not.toBeNull();
     const block = m[0];
     // read は・OK (= s.display_distance_m / s.distance_m)・write は・ない

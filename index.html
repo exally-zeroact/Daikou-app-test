@@ -6773,9 +6773,11 @@
       //  _renderMeterReadout(): driveDist / driveFare / totalDist を 1 回読み出す共通関数。
       //    textContent 前回値比較で無駄 DOM 書込を skip する。rAF (60Hz) と
       //    setInterval (100ms) の双方から呼ぶが、比較 skip で二重書込のコストはゼロ。
-      function _renderMeterReadout() {
+      // cachedState: 呼出側 (_rafDisplayTick) が同一 tick で既に取得済の getState 戻り値。
+      //   渡された場合は再取得しない (= getState の二重呼出 / 補間二重前進を防ぐ・値は完全同一)。
+      function _renderMeterReadout(cachedState) {
         if (typeof Meter === 'undefined' || typeof Meter.getState !== 'function') return;
-        const s = Meter.getState();
+        const s = cachedState || Meter.getState();
 
         // 表示距離 = catch-up display (= distance_m へ「下から」滑らかに追従・★実距離を超えない★)。
         // ★司さん確定方針 (2026-05-30)★: display ≤ distance_m (overshoot ゼロ)。停車/確定で
@@ -6835,6 +6837,20 @@
           //   getState 予測補間は now ベースのため frame skip しても次描画で時間差を吸収し連続表示。
           const nowMs = Date.now();
           const sinceMs = nowMs - _dispLastRenderMs;
+          // ★走行中 (running=true) は間引き無効 = full rAF 60Hz★ (2026-05-30・「止まって動いて」
+          //   脈動の根治): 等速ペース catch-up で display が 1 秒かけて滑らかに進むため、4Hz 間引き
+          //   は連続移動を階段化 (= 脈動増幅) する。走行中は毎 frame 描画して滑らかさを最優先する。
+          //   間引き (CPU/発熱低減) は ★停車中 / 省電力 (= running=false)★ の時だけ適用する。
+          //   ★距離値・getState・calcFare には一切触れない (= 表示読み出し頻度のみの変更)★。
+          // ★getState は本 tick で 1 回だけ取得★ (2026-05-30・MINOR 省電力修正): running 判定と
+          //   描画 (_renderMeterReadout) で同一戻り値を共有し二重呼出を排除 (render frame で従来 2 回
+          //   → 1 回)。getState 内補間は now ベースで 1 tick = 1 回前進ゆえ値・表示は完全不変
+          //   (= 検証済 bit/overshoot/脈動 結果に影響なし・純粋な無駄呼出削減)。
+          const st =
+            typeof Meter !== 'undefined' && typeof Meter.getState === 'function'
+              ? Meter.getState()
+              : null;
+          const isRunning = !!(st && st.running);
           // 直近 ★描画 frame★ の表示距離から proxy 速度 (km/h) を算出し、その変化で間引き判定。
           const dtH = sinceMs / 3600000;
           // _renderMeterReadout が更新する _lastDriveDistKm (= 文字列 km) を数値化して使う。
@@ -6844,15 +6860,17 @@
               ? Math.abs(curDistKmNum - _dispLastDistKmNum) / dtH
               : 0;
           const velChange = Math.abs(velKmh - _dispLastVelKmh);
-          // 速度変化が小さい かつ 直近描画から _DISP_THROTTLE_MS 未満なら本 frame は描画しない。
+          // 走行中以外で・速度変化が小さく・直近描画から _DISP_THROTTLE_MS 未満なら本 frame は間引く。
           if (
+            !isRunning &&
             _dispLastRenderMs > 0 &&
             velChange < _DISP_VEL_EPS_KMH &&
             sinceMs < _DISP_THROTTLE_MS
           ) {
-            // skip: getState を呼ばず CPU を消費しない。次 frame で再判定。
+            // skip: 本 frame は描画しない (= DOM 書込/calcFare を省く)。次 frame で再判定。
+            //   getState は running 判定で 1 回呼んだのみ (= 従来同等・補間 1 回前進)。
           } else {
-            _renderMeterReadout();
+            _renderMeterReadout(st);
             _dispLastVelKmh = velKmh;
             _dispLastDistKmNum = _lastDriveDistKm != null ? parseFloat(_lastDriveDistKm) || 0 : 0;
             _dispLastRenderMs = nowMs;
