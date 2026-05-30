@@ -508,12 +508,20 @@ const GPS = (() => {
     _lastKnownLat = lat;
     _lastKnownLng = lng;
     // ★Fix③ (2026-05-28): 高レート端末は最小間隔未満の点を間引く (worker 経路のみ)。
-    //   早期 return で accelBuffer は drain されず累積・_rawPrevPos も据え置き(A3 は送信点間計測)。
+    //   ★§1-A drain bug 修正 (2026-05-30)★: 早期 return 時に accelBuffer/gyroBuffer を
+    //   drain せず累積すると、間引き区間に蓄積した古い accel/gyro が次回送信に混入し
+    //   worker の accel variance (静止判定の主信号) を汚染する。
+    //   → 間引き時は buffer を破棄して持ち越しを断つ。直近値 (accelData/gyroData) は据え置く
+    //     (= 次回送信で直近 1 点は accelData として参照可・variance window には混ぜない)。
+    //   静止判定の閾値・挙動は不変 (= 汚染除去のみ・creep0 を壊さない安全側)。
+    //   _rawPrevPos は据え置き(A3 は送信点間で計測)・_lastWorkerSendT も据え置き。
     if (
       useWorker &&
       _lastWorkerSendT != null &&
       now - _lastWorkerSendT < GPS_MIN_SEND_INTERVAL_MS
     ) {
+      accelBuffer = [];
+      gyroBuffer = [];
       return;
     }
     // ★A3 (2026-05-26): coords.speed が null/欠落の時 (= iOS Safari 全機で常時・弱GPS Android でも) は、

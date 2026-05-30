@@ -137,8 +137,8 @@ function _getDynamicBaseQ() {
 //   理由: layer (v6 attribute) + tunnels-{pref}.js データで道路属性ベースに代替
 //   利点: iOS Safari/PWA でも同等動作・接続不安定時の偽陽性なし
 //   詳細: map-matcher.js の _computeLayerScore で prevLayer 連続性 boost に置換
-
-let _prevAccuracy = null;
+// 2026-05-30 (§4 死コード一掃): _prevAccuracy は write-only (= 参照 0・grep 実証済) で
+//   除去。accuracy は processPosition 内 local + lastPosition に保持され差分には未使用。
 
 // ─── Kalmanフィルター（案D・2026/04/27） ───
 // ★設計変更宣言 Phase 1.ZUPT (2026-05-10): Zero Velocity Update
@@ -337,69 +337,12 @@ function calcAccelVariance(accelSamples, now) {
   return variance;
 }
 
-// ─── MM-5 (2026-05-08): 加速度路面セマンティクス検出 ─────────
-// vibration_index = std(|a|) を 1Hz で算出し、橋進入時の急上下 G impulse を検出
-// accelLayerHint: 'bridge' | 'normal'
-//   - 'bridge': 直近 5 秒で max(|a|) - min(|a|) > 4 m/s² の impulse を観測
-//   - 'normal': デフォルト・上記閾値未満
-// トンネルは accel から検出困難なため normal のまま（cellular hint で補完）
-//
-// 戻り値: { hint, vibrationIndex, magRange, sampleCount } | null
-const ACCEL_LAYER_WINDOW_MS = 5000;
-const ACCEL_LAYER_MIN_SAMPLES = 8;
-const ACCEL_BRIDGE_RANGE_THRESHOLD = 4.0; // m/s² 急上下 G の検出閾値
-const ACCEL_BRIDGE_VARIANCE_THRESHOLD = 0.8; // 高 vibration の検出閾値
-
-function _calcAccelLayerHint(accelSamples, now) {
-  if (!accelSamples || !Array.isArray(accelSamples)) return null;
-  if (accelSamples.length < ACCEL_LAYER_MIN_SAMPLES) return null;
-
-  const recent = accelSamples.filter(
-    (s) => s && typeof s.t === 'number' && now - s.t < ACCEL_LAYER_WINDOW_MS
-  );
-  if (recent.length < ACCEL_LAYER_MIN_SAMPLES) return null;
-
-  // 各サンプルの |a| = √(x² + y² + z²) を算出
-  let maxMag = -Infinity,
-    minMag = Infinity,
-    sumMag = 0;
-  const mags = new Array(recent.length);
-  for (let i = 0; i < recent.length; i++) {
-    const s = recent[i];
-    const m = Math.sqrt(s.x * s.x + s.y * s.y + s.z * s.z);
-    mags[i] = m;
-    if (m > maxMag) maxMag = m;
-    if (m < minMag) minMag = m;
-    sumMag += m;
-  }
-  const mean = sumMag / recent.length;
-
-  // 標準偏差 (vibration_index)
-  let variance = 0;
-  for (let i = 0; i < mags.length; i++) {
-    const d = mags[i] - mean;
-    variance += d * d;
-  }
-  variance /= mags.length;
-  const vibrationIndex = Math.sqrt(variance);
-
-  // 急上下 G の range（最大 - 最小）
-  const magRange = maxMag - minMag;
-
-  let hint = 'normal';
-  // 橋進入: range が大きい（伸縮継ぎ目を踏んだ瞬間の vertical G impulse）
-  // または vibration_index が高い（橋面の不整・段差）
-  if (magRange > ACCEL_BRIDGE_RANGE_THRESHOLD || vibrationIndex > ACCEL_BRIDGE_VARIANCE_THRESHOLD) {
-    hint = 'bridge';
-  }
-
-  return {
-    hint: hint,
-    vibrationIndex: vibrationIndex,
-    magRange: magRange,
-    sampleCount: recent.length,
-  };
-}
+// 2026-05-09 (P4/P5 廃止) + 2026-05-30 (§4 死コード一掃):
+//   旧 MM-5 加速度路面セマンティクス検出 (_calcAccelLayerHint・accelLayerHint='bridge'/'normal'
+//   と ACCEL_LAYER_*/ACCEL_BRIDGE_* 定数) は除去。
+//   理由: layer (v6 attribute) + bridges-/tunnels-{pref}.js データで道路属性ベースに代替済で
+//         本関数は呼出 0 件 (= grep 実証済・dead)。橋/トンネル判定は map-matcher の
+//         _computeLayerScore (prevLayer 連続性 boost) が担う。
 
 // ─── C-2：加速度合算ベクトル動き判定（2026/04/30追加） ───
 // 直近のサンプルから |a|=√(x²+y²+z²) の平均を計算し、9.8（重力）からの偏差を返す
@@ -900,7 +843,6 @@ function processPosition(data) {
     altitude,
   };
 
-  _prevAccuracy = accuracy;
   // ★STEP0 診断: accept 時の最終値 (speedKmh源/isStationary/accuracy/accLimit) を出力
   _postGpsDbg({
     rej: null,
