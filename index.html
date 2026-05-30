@@ -4491,16 +4491,6 @@
             <div class="meter-value">
               <span id="driveDist">0.00</span><span class="meter-unit">km</span>
             </div>
-            <!-- ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン (pipeline-distance) の
-                 並列計測値を・既存メーターの隣に小さく比較表示する (= 実機検証用・additive)。
-                 課金 distance_m / display_distance_m とは完全独立・参照値のみ。 -->
-            <div
-              class="meter-sub"
-              id="pipelineDistSub"
-              style="font-size: 0.72em; opacity: 0.6; margin-top: 2px"
-            >
-              新計測 <span id="pipelineDist">0.00</span> km
-            </div>
           </div>
           <!-- ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・waypointCard):
                押下で現在地住所を Business.onWaypoint 経由で trip.waypoints に追加する。
@@ -6751,57 +6741,80 @@
         }
       }
 
-      // ─── rAF 描画ループ (= 2026-05-24・案 B・60Hz 滑らか化) ───
-      //   毎 frame: Meter.getState() → driveDist/driveFare/totalDist 更新 (= textContent 比較で・無駄 skip)
-      //   getState 内・予測補間は・now=Date.now() ベース・rAF 高頻度でも・滑らか連続加算
-      //   業務画面以外で・display 不変 → textContent 比較で・DOM 書込ゼロ・無駄なし
-      //   ★ 実距離値・課金経路・予測補間ロジック: 1 byte 不変 ★
+      // ═══════════════════════════════════════════════════════════════════
+      //  距離 / 料金メーター読み出し部 (白紙書き直し・2026-05-30・clean-rebuild-pipeline)
+      // ───────────────────────────────────────────────────────────────────
+      //  ★表示契約 (= getState() を唯一の信源とする)★
+      //    driveDist  = Meter.getState().display_distance_m  (滑らか 10m 先取り表示)
+      //    driveFare  = Meter.calcFare(display_distance_m) + surcharge + extras
+      //    totalDist  = Business.getReport().total_distance_m
+      //                 (= Meter.business_display_distance_m を信源とする業務滑らか総走行)
+      //  ★絶対不可侵★ display は表示専用。本読み出し部は distance_m (課金値) を一切
+      //    読み替えず・課金経路にも一切書き込まない (= read-only)。display_distance_m は
+      //    getState 内の予測補間で distance_m を最大 10m 滑らかに先取りする (= 採択済の
+      //    「10m 先取り」契約・project_daikome_display_interp.md)。最終課金額は
+      //    calcFare(distance_m) で確定し distance_m は不可侵。
+      //  ★並列統合フェーズの参照表示 (= 旧「新計測」span) は本白紙版に存在しない★
+      //
+      //  _renderMeterReadout(): driveDist / driveFare / totalDist を 1 回読み出す共通関数。
+      //    textContent 前回値比較で無駄 DOM 書込を skip する。rAF (60Hz) と
+      //    setInterval (100ms) の双方から呼ぶが、比較 skip で二重書込のコストはゼロ。
+      function _renderMeterReadout() {
+        if (typeof Meter === 'undefined' || typeof Meter.getState !== 'function') return;
+        const s = Meter.getState();
+
+        // 表示距離 = 滑らか display (= distance_m を最大 10m まで予測先取り・DISP_PREDICT_MAX_M)。
+        // ★display は distance_m を最大 10m 上回り得る (= 先取り表示)・課金値ではない★。
+        // 最終課金は calcFare(distance_m) で確定し distance_m は不可侵。
+        // ここでの fallback (|| s.distance_m) は getState が display を未算出の極初期のみ。
+        const displayDistM = s.display_distance_m || s.distance_m || 0;
+
+        // driveDist
+        const distKm = (displayDistM / 1000).toFixed(2);
+        if (distKm !== _lastDriveDistKm) {
+          const elDist = document.getElementById('driveDist');
+          if (elDist) elDist.textContent = distKm;
+          _lastDriveDistKm = distKm;
+        }
+
+        // driveFare = calcFare(display) + surcharge + extras (= 表示専用再計算・calcFare 不変)
+        let fare = Meter.calcFare(displayDistM);
+        if (typeof surchargeOn !== 'undefined' && surchargeOn) {
+          fare = Math.round(fare * surchargeRate);
+        }
+        const extraTotal =
+          typeof extras !== 'undefined' && Array.isArray(extras)
+            ? extras.reduce((a, b) => a + b.amount, 0)
+            : 0;
+        const fareStr = (fare + extraTotal).toLocaleString();
+        if (fareStr !== _lastDriveFareYen) {
+          const elFare = document.getElementById('driveFare');
+          if (elFare) elFare.textContent = fareStr;
+          _lastDriveFareYen = fareStr;
+        }
+
+        // totalDist = 業務総走行 (= business_display_distance_m 信源・getReport 経由)
+        if (typeof Business !== 'undefined' && typeof Business.getReport === 'function') {
+          try {
+            const r = Business.getReport();
+            const totalDistKm = ((r.total_distance_m || 0) / 1000).toFixed(2);
+            if (totalDistKm !== _lastTotalDistKm) {
+              const elTotal = document.getElementById('totalDist');
+              if (elTotal) elTotal.textContent = totalDistKm;
+              _lastTotalDistKm = totalDistKm;
+            }
+          } catch (_) {
+            /* Business.getReport 失敗・graceful skip */
+          }
+        }
+      }
+
+      // ─── rAF 描画ループ (= 60Hz 滑らか化・読み出しは _renderMeterReadout 一本化) ───
+      //   getState 内予測補間は now=Date.now() ベースで rAF 高頻度でも滑らか連続。
+      //   表示不変時は textContent 比較で DOM 書込ゼロ。★課金経路 1 byte 不変★
       function _rafDisplayTick() {
         try {
-          if (typeof Meter === 'undefined' || typeof Meter.getState !== 'function') {
-            // Meter 未 load 時・graceful skip・次 frame 再 schedule
-            _rafDisplayId = requestAnimationFrame(_rafDisplayTick);
-            return;
-          }
-          const s = Meter.getState();
-          // driveDist (= 課金 display)
-          const displayDistM = s.display_distance_m || s.distance_m || 0;
-          const distKm = (displayDistM / 1000).toFixed(2);
-          if (distKm !== _lastDriveDistKm) {
-            const elDist = document.getElementById('driveDist');
-            if (elDist) elDist.textContent = distKm;
-            _lastDriveDistKm = distKm;
-          }
-          // driveFare (= 料金・surchargeOn + extras 反映)
-          let fare = Meter.calcFare(displayDistM);
-          if (typeof surchargeOn !== 'undefined' && surchargeOn) {
-            fare = Math.round(fare * surchargeRate);
-          }
-          const extraTotal =
-            typeof extras !== 'undefined' && Array.isArray(extras)
-              ? extras.reduce((a, b) => a + b.amount, 0)
-              : 0;
-          const total = fare + extraTotal;
-          const fareStr = total.toLocaleString();
-          if (fareStr !== _lastDriveFareYen) {
-            const elFare = document.getElementById('driveFare');
-            if (elFare) elFare.textContent = fareStr;
-            _lastDriveFareYen = fareStr;
-          }
-          // totalDist (= 業務総走行・Business.getReport 経由・preview 込み)
-          if (typeof Business !== 'undefined' && typeof Business.getReport === 'function') {
-            try {
-              const r = Business.getReport();
-              const totalDistKm = ((r.total_distance_m || 0) / 1000).toFixed(2);
-              if (totalDistKm !== _lastTotalDistKm) {
-                const elTotal = document.getElementById('totalDist');
-                if (elTotal) elTotal.textContent = totalDistKm;
-                _lastTotalDistKm = totalDistKm;
-              }
-            } catch (_) {
-              /* Business.getReport 失敗・graceful skip */
-            }
-          }
+          _renderMeterReadout();
         } catch (_) {
           /* rAF tick エラー・graceful skip・次 frame 継続 */
         }
@@ -6840,38 +6853,11 @@
         startRafDisplay();
         uiTimer = setInterval(() => {
           const s = Meter.getState();
-          // ★設計変更宣言 (2026-05-16・Step1・driveFare ラグ解消):
-          //   旧: let fare = s.fare_yen (= calcFare(distance_m) のみ・Tier 1 commit ラグ込み)
-          //   新: let fare = Meter.calcFare(distance_m + tier2_pending_m) で表示用に再計算
-          //   効果: driveDist (= distance_m + tier2_pending_m) と driveFare が同期し
-          //         「1.5km 走行中なのに料金 ¥1,300 のまま」事象を解消。
-          //   絶対ルール準拠:
-          //     ・state.distance_m / state.fare_yen / calcFare ロジックは完全不変
-          //     ・表示用変数 fare を再計算するだけ・課金経路には触れない
-          //     ・tier2_pending_m は差分減算で単調増加保証・表示後退なし
-          //     ・calcFare は単調非減少関数 → 表示料金も単調増加
-          //   iOS/Android 共通 (platform 分岐なし・state.tier2_pending_m は両 OS で同等)。
-          // ★ Phase 3: display_distance_m を採用
-          let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
-          if (surchargeOn) fare = Math.round(fare * surchargeRate);
-          let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
-          let total = fare + extraTotal;
-
-          // ★設計変更宣言 (2026-05-15・Tier 2 リードインジケータ・走行距離表示ラグ解消):
-          //   表示は state.distance_m (Tier 1 commit-authoritative・課金距離) +
-          //   state.tier2_pending_m (Tier 2 inline 道路 snap 先行値・道路ジオメトリ距離) の和。
-          //   commit ラグ (Android 3s / iOS 10s) を Tier 2 並走で 0.2s/1.0s まで短縮する。
-          //   driveFare (= 課金額) は s.fare_yen のまま (= calcFare(state.distance_m) の結果)。
-          // ★ Phase 3: display_distance_m (= GPS predictive + Reconciliation 同期値) 採用
-          const displayDistM = s.display_distance_m || s.distance_m || 0;
-          document.getElementById('driveDist').textContent = (displayDistM / 1000).toFixed(2);
-          document.getElementById('driveFare').textContent = total.toLocaleString();
-          // ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン並列計測値を比較表示 (= 参照値)。
-          //   s.pipeline_distance_m は Worker B の pipeline-distance.js 累積・課金とは独立。
-          try {
-            const _pipeEl = document.getElementById('pipelineDist');
-            if (_pipeEl) _pipeEl.textContent = ((s.pipeline_distance_m || 0) / 1000).toFixed(2);
-          } catch (_) {}
+          // 距離 / 料金 / 業務総走行の読み出しは rAF と共通の _renderMeterReadout() に一本化
+          // (= driveDist=display_distance_m 滑らか・driveFare=calcFare(display)+surcharge+extras・
+          //    totalDist=Business.getReport().total_distance_m)。textContent 比較で二重書込なし。
+          // ★課金経路・calcFare・distance_m は 1 byte 不変・display は表示専用 (最大 10m 先取り)★
+          _renderMeterReadout();
           // ★設計変更宣言 (2026-05-15・住所取得 retry UI 自動追従):
           //   addresses-fine-jp.js 24.6MB の defer load 完了前に押された経由地点は
           //   Business 側の _scheduleAddressRetry が 1〜5 秒後に解決する。本タイマで

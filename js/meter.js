@@ -20,7 +20,7 @@
 //   3. getState が返す既存 state field キー (distance_m / fare_yen / business_distance_m /
 //      display_distance_m / business_display_distance_m / tier2_pending_m /
 //      business_tier2_pending_m / running / business_active / elapsed_sec / last_gps /
-//      wait_sec / distanceSource / mm_* / offroad_* / gap_fill_* / pipeline_distance_m 等)
+//      wait_sec / distanceSource / mm_* / offroad_* / gap_fill_* 等)
 //      = 既存キーは消さない (index.html / business.js が読む)。距離 5 経路廃止に伴い
 //      参照値となった field (mm_*/offroad_*/gap_fill_*) は 0 のまま温存 (= 後方互換キー)。
 //   4. 非距離ロジック (住所 getNearestAddress / surcharge / vehicle / fareConfig /
@@ -82,8 +82,6 @@ const Meter = (() => {
     offroad_count: 0, // 旧 Off-Road 起動回数 (= 廃止・常に 0)
     gap_fill_count: 0, // 旧 gap fill 回数 (= 廃止・常に 0)
     gap_fill_total_m: 0, // 旧 gap fill 距離 (= 廃止・常に 0)
-    // ─── 新距離エンジン参照値 (= Worker B pipeline 累積・比較表示用) ───
-    pipeline_distance_m: 0,
   };
 
   // ─── 表示予測補間の定数 (10m 滑らか・距離値 1 byte 不変の表示専用) ───
@@ -220,11 +218,6 @@ const Meter = (() => {
     }
     if (m.type !== 'mmResult') return;
 
-    // 新距離エンジン参照値 (= 並列累積・比較表示用・課金には使わない)
-    if (typeof m.pipelineTotalM === 'number' && m.pipelineTotalM >= 0) {
-      state.pipeline_distance_m = m.pipelineTotalM;
-    }
-
     // ★距離駆動: pipeline delta を距離に加算する単一経路★
     const delta =
       typeof m.pipelineDeltaM === 'number' && m.pipelineDeltaM > 0 ? m.pipelineDeltaM : 0;
@@ -346,7 +339,6 @@ const Meter = (() => {
       offroad_count: 0,
       gap_fill_count: 0,
       gap_fill_total_m: 0,
-      pipeline_distance_m: (state && state.pipeline_distance_m) || 0,
     };
     // fareConfig v2: 業務開始時 default ON の surcharge を初期 active に
     _activeSurchargeIds = new Set();
@@ -457,7 +449,6 @@ const Meter = (() => {
       offroad_count: 0,
       gap_fill_count: 0,
       gap_fill_total_m: 0,
-      pipeline_distance_m: (state && state.pipeline_distance_m) || 0,
     };
     lastMmUsefulAt = 0;
     // trip reset では softReset (= lastCommittedSnap / prevSnap のみクリア・窓は維持)。

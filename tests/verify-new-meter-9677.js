@@ -147,7 +147,6 @@ function main() {
 
   const s = Meter.getState();
   const distance_m = s.distance_m;
-  const pipeline_distance_m = s.pipeline_distance_m;
   const fare = Meter.calcFare(distance_m);
 
   const TARGET = 9676.69;
@@ -156,9 +155,6 @@ function main() {
 
   console.log('[verify] dispatched (non-stationary) = ' + nonStationary);
   console.log('[verify] Meter.state.distance_m       = ' + distance_m.toFixed(2) + ' m');
-  console.log(
-    '[verify] Meter.state.pipeline_distance_m = ' + pipeline_distance_m.toFixed(2) + ' m'
-  );
   console.log('[verify] target (pipeline batch)      = ' + TARGET + ' m');
   console.log('[verify] |diff| = ' + diff.toFixed(2) + ' m  (' + (ratio * 100).toFixed(3) + '%)');
   console.log('[verify] fare_yen (calcFare)          = ' + fare + ' 円');
