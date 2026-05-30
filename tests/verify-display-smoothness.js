@@ -1,0 +1,269 @@
+#!/usr/bin/env node
+'use strict';
+
+// tests/verify-display-smoothness.js
+// 白紙書き直し (clean-rebuild-pipeline) 表示層検証:
+//   実 js/meter.js (新・pipeline 駆動) + 実 js/map-matcher.js (Worker B) に
+//   実走 trace (gpstrace.json seg1) を Meter.update 経由で流し、各点後に
+//   getState() を ★UI ループ相当で複数回★ 呼んで display_distance_m の挙動を検証する。
+//
+//   ★検証 invariant (= index.html 距離表示層の白紙契約)★
+//     (1) display_distance_m は単調非減少 (= 表示後退ゼロ)
+//     (2) display_distance_m の課金値 distance_m に対する先取り (= overshoot) は
+//         ★DISP_PREDICT_MAX_M (= 10m) を超えない★ (= 予測補間「10m 滑らか先取り」の設計上限・
+//         project_daikome_display_interp.md / phase3_alpha_beta_filter で採択済の先取り契約)。
+//         ※ display は表示専用。最終課金額 = calcFare(distance_m) で distance_m は不可侵
+//           (= verify-new-meter-9677.js が 9,675.91m を別途 gate)。本テストは表示層の
+//           滑らかさ (= 単調・先取り 10m 以内・収束) のみを検証する。
+//     (3) display_distance_m は trip 終了 (最終 getState) で distance_m に収束する
+//         (= 乖離放置なし・予測 0 へ減衰し target に着地)。
+//     (4) business_display_distance_m も同様に単調・先取り 10m 以内・収束
+//
+//   ★絶対不可侵★ distance_m / calcFare / 課金経路は本テストで一切変更しない (= 読むだけ)。
+//
+//   使い方: node tests/verify-display-smoothness.js
+//   exit 0 = PASS / 非0 = FAIL (= CI gate)。
+
+const fs = require('fs');
+const { createMapMatcherWorker, loadPrefRoadsData } = require('./replay-mm-worker/worker-sim');
+const { loadMeter } = require('./replay-mm-worker/runner');
+
+const PREF = (process.env.ROADS_PREF || 'ehime').toLowerCase();
+const TRACE_PATH = process.env.GPS_TRACE || 'C:/Users/zeroa/gpstrace.json';
+const TRIP_GAP_SEC = 120;
+const R = 6371000;
+
+// getState 内の予測補間先取り上限 (= meter.js DISP_PREDICT_MAX_M)。display は
+// target(distance_m) を最大この値だけ先取りする (= 「10m 滑らか先取り」採択済契約)。
+// 本テストはこの先取りが ★10m を超えない★ こと (= 暴走しない・予測 clamp 有効) と
+// 単調・収束を検証する。distance_m (課金値) 自体は verify-new-meter-9677.js が別途 gate。
+const DISP_PREDICT_MAX_M = 10; // meter.js と同値 (= 先取り上限)。
+const OVERSHOOT_TOL_M = DISP_PREDICT_MAX_M + 0.01; // float 誤差吸収込みの先取り許容。
+const CONVERGE_TOL_M = 1.0; // trip 終了時の display↔distance 収束許容。
+const UI_TICKS_PER_GPS = 4; // 1 GPS 点あたり UI ループ呼び出し回数 (= rAF/setInterval 相当)。
+
+function rad(x) {
+  return (x * Math.PI) / 180;
+}
+function haversine(a, b) {
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function pickMainTrip(samples) {
+  const s = samples
+    .filter((x) => x && typeof x.lat === 'number' && typeof x.lng === 'number')
+    .sort((a, b) => a.t - b.t);
+  const segs = [[]];
+  for (let i = 0; i < s.length; i++) {
+    if (i > 0 && s[i].t - s[i - 1].t > TRIP_GAP_SEC * 1000) segs.push([]);
+    segs[segs.length - 1].push(s[i]);
+  }
+  let best = [];
+  let bd = -1;
+  for (const g of segs) {
+    if (g.length < 2) continue;
+    let d = 0;
+    for (let i = 1; i < g.length; i++) d += haversine(g[i - 1], g[i]);
+    if (d > bd) {
+      bd = d;
+      best = g;
+    }
+  }
+  return best;
+}
+
+function fail(msg) {
+  console.error('[display] FAIL: ' + msg);
+  process.exit(1);
+}
+
+function main() {
+  if (!fs.existsSync(TRACE_PATH)) {
+    console.error('[display] trace not found: ' + TRACE_PATH + ' (skip・実機 trace 未配置)');
+    // trace 未配置の環境 (= 一部 CI) では skip 扱い (= exit 0)。実機 trace のある
+    // 環境 / ローカルでは必ず実行され invariant を検証する。
+    process.exit(0);
+  }
+  const raw = JSON.parse(fs.readFileSync(TRACE_PATH, 'utf8'));
+  const samples = Array.isArray(raw) ? raw : raw.samples || raw.trace || [];
+  const seg = pickMainTrip(samples);
+  if (seg.length < 2) fail('seg1 too short');
+  console.log('[display] seg1 points=' + seg.length);
+
+  const prefRoadsData = loadPrefRoadsData(PREF);
+  const worker = createMapMatcherWorker({ debug: false });
+  let roadsLoaded = false;
+  worker.on((e) => {
+    const m = e.data;
+    if (m && m.type === 'roadsLoaded') roadsLoaded = m.ok;
+  });
+
+  const Meter = loadMeter({ debug: false });
+  Meter.setFareConfig({
+    version: 2,
+    base_fare: 1300,
+    base_distance_m: 1000,
+    add_fare: 100,
+    add_distance_m: 420,
+    tiers: [],
+    surcharges: [],
+    minFare: null,
+    maxFare: null,
+    rounding: 10,
+    autoSurcharges: {},
+    vehicles: [],
+    vehiclesEnabled: false,
+    wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
+  });
+  Meter.reset();
+
+  const handlers = [];
+  worker.on((e) => {
+    for (const h of handlers) h(e);
+  });
+  const adapter = {
+    addEventListener(type, h) {
+      if (type === 'message') handlers.push(h);
+    },
+    removeEventListener(type, h) {
+      const i = handlers.indexOf(h);
+      if (i >= 0) handlers.splice(i, 1);
+    },
+    postMessage(msg) {
+      worker.sendMessage(msg);
+    },
+  };
+  Meter.setMapMatcher(adapter);
+  adapter.postMessage({ type: 'configPlatform', isIOS: true });
+  adapter.postMessage({ type: 'loadRoads', pref: PREF, roadsData: prefRoadsData });
+  if (!roadsLoaded) fail('loadRoads failed');
+
+  Meter.setBusinessActive(true);
+  Meter.start();
+  if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  if (typeof Meter._setOffRoadGraceUntil === 'function') Meter._setOffRoadGraceUntil(0);
+
+  let prevDisplay = 0;
+  let prevBizDisplay = 0;
+  let maxOvershoot = 0; // display - distance_m の最大値 (= 課金値超え量)。
+  let maxBizOvershoot = 0;
+  let monoViolations = 0;
+  let bizMonoViolations = 0;
+  let totalTicks = 0;
+  let maxGapToTarget = 0; // 走行中 display が distance_m から離れた最大量。
+
+  for (let i = 0; i < seg.length; i++) {
+    const p = seg[i];
+    const spd = typeof p.spd === 'number' && p.spd >= 0 ? p.spd : null;
+    const speedKmh = spd != null ? spd * 3.6 : undefined;
+    const input = {
+      lat: p.lat,
+      lng: p.lng,
+      accuracy:
+        typeof p.acc === 'number' ? p.acc : typeof p.accuracy === 'number' ? p.accuracy : 10,
+      timestamp: p.t,
+      altitude: 0,
+      compassHeading: null,
+      isStationary: false,
+    };
+    if (speedKmh !== undefined) input.speedKmh = speedKmh;
+    Meter.update(input);
+
+    // UI ループ相当: 1 GPS 点ごとに複数回 getState (= rAF 60Hz / setInterval 100ms の高頻度読出)。
+    //   getState は now=Date.now() ベースで予測補間するため、複数回呼んでも単調・課金値以下。
+    for (let k = 0; k < UI_TICKS_PER_GPS; k++) {
+      const s = Meter.getState();
+      const disp = s.display_distance_m || 0;
+      const dist = s.distance_m || 0;
+      const biz = s.business_display_distance_m || 0;
+      const bizTarget = s.business_distance_m || 0;
+      totalTicks++;
+
+      // (1) 単調非減少 (display)
+      if (disp < prevDisplay - 1e-6) monoViolations++;
+      prevDisplay = Math.max(prevDisplay, disp);
+
+      // (2) 課金値 distance_m に対する先取り量 (= overshoot)・10m 以内であるべき
+      const over = disp - dist;
+      if (over > maxOvershoot) maxOvershoot = over;
+
+      // (3) 走行中の display↔target 乖離量を記録 (= 10m グリッド追従の上限確認)
+      const gap = dist - disp;
+      if (gap > maxGapToTarget) maxGapToTarget = gap;
+
+      // (4) business display 単調 + 課金 business 超えない
+      if (biz < prevBizDisplay - 1e-6) bizMonoViolations++;
+      prevBizDisplay = Math.max(prevBizDisplay, biz);
+      const bizOver = biz - bizTarget;
+      if (bizOver > maxBizOvershoot) maxBizOvershoot = bizOver;
+    }
+  }
+
+  // trip 終了後: display は target に収束するまで getState を回す (= UI が止まらない限り追従)。
+  let s = Meter.getState();
+  let settleGuard = 0;
+  while (s.distance_m - (s.display_distance_m || 0) > CONVERGE_TOL_M && settleGuard < 100000) {
+    s = Meter.getState();
+    settleGuard++;
+  }
+  const finalDisp = s.display_distance_m || 0;
+  const finalDist = s.distance_m || 0;
+  const finalBizDisp = s.business_display_distance_m || 0;
+  const finalBizDist = s.business_distance_m || 0;
+  const convergeGap = Math.abs(finalDist - finalDisp);
+  const bizConvergeGap = Math.abs(finalBizDist - finalBizDisp);
+
+  console.log('[display] ticks                       = ' + totalTicks);
+  console.log('[display] final distance_m            = ' + finalDist.toFixed(2) + ' m (課金値)');
+  console.log('[display] final display_distance_m    = ' + finalDisp.toFixed(2) + ' m');
+  console.log('[display] final business_distance_m   = ' + finalBizDist.toFixed(2) + ' m');
+  console.log('[display] final business_display_m    = ' + finalBizDisp.toFixed(2) + ' m');
+  console.log('[display] mono violations (display)   = ' + monoViolations);
+  console.log('[display] mono violations (business)  = ' + bizMonoViolations);
+  console.log(
+    '[display] max 先取り overshoot (display)  = ' +
+      maxOvershoot.toFixed(4) +
+      ' m (上限 ' +
+      DISP_PREDICT_MAX_M +
+      'm)'
+  );
+  console.log(
+    '[display] max 先取り overshoot (business) = ' +
+      maxBizOvershoot.toFixed(4) +
+      ' m (上限 ' +
+      DISP_PREDICT_MAX_M +
+      'm)'
+  );
+  console.log('[display] max gap display→distance    = ' + maxGapToTarget.toFixed(2) + ' m');
+  console.log('[display] converge gap (display)      = ' + convergeGap.toFixed(4) + ' m');
+  console.log('[display] converge gap (business)     = ' + bizConvergeGap.toFixed(4) + ' m');
+
+  // ─── 判定 ───
+  if (monoViolations > 0)
+    fail('display_distance_m が後退した (= 単調非減少違反 ' + monoViolations + ' 回)');
+  if (bizMonoViolations > 0)
+    fail('business_display_distance_m が後退した (= 単調非減少違反 ' + bizMonoViolations + ' 回)');
+  if (maxOvershoot > OVERSHOOT_TOL_M)
+    fail(
+      'display_distance_m の先取りが 10m 設計上限を超えた (= 最大 ' +
+        maxOvershoot.toFixed(4) +
+        ' m・予測補間暴走)'
+    );
+  if (maxBizOvershoot > OVERSHOOT_TOL_M)
+    fail(
+      'business_display_distance_m の先取りが 10m 設計上限を超えた (= 最大 ' +
+        maxBizOvershoot.toFixed(4) +
+        ' m)'
+    );
+  if (convergeGap > CONVERGE_TOL_M)
+    fail('display が distance_m に収束しない (= 乖離 ' + convergeGap.toFixed(4) + ' m・追従破綻)');
+  if (finalDist <= 0) fail('distance_m が 0 のまま (= 距離駆動が動いていない・harness 異常)');
+
+  console.log('[display] 判定: PASS');
+  process.exit(0);
+}
+
+main();

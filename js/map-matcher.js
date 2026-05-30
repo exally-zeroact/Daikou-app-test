@@ -30,10 +30,11 @@
 
 importScripts('roads-decoder.js');
 importScripts('osrm-client.js'); // MM-6: OSRM /match クライアント
-// ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列統合):
+// ★白紙書き直し (2026-05-30・新距離エンジン = 距離駆動の唯一源):
 //   js/pipeline-distance.js を Worker B に読み込み、createDistanceTracker を
-//   ★既存 Viterbi mmIncrementM 経路とは完全並列・additive★ で動かす。
-//   新距離は mmResult.pipelineTotalM として main に送るだけ (= 課金 distance_m に影響ゼロ)。
+//   GPS 受信毎に ingest して道路 snap 道なり増分を算出する。
+//   その増分を mmResult.pipelineDeltaM として main に送り、meter は running gate 内で
+//   state.distance_m += pipelineDeltaM を実行する (= 距離駆動の単一経路)。
 //   既存の mmIncrementM / tentativeIncrementM / tentativeDistanceM は 1 byte 不変。
 //   self.PipelineDistance.createDistanceTracker(decoder, opts) を使用 (browser global 公開済)。
 //   ★課金安全: importScripts 失敗 (404/fetch error) で worker 全死 → MM/課金距離 全滅を防ぐため
@@ -154,11 +155,12 @@ const loadedPrefs = new Set();
 
 // ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列トラッカ):
 //   pipeline-distance.js の createDistanceTracker を県別に lazy 生成し、GPS 受信毎に
-//   ingest して新距離を累積する。★既存 Viterbi / mmIncrementM 経路とは完全並列・additive★。
+//   ingest して道路 snap 道なり増分 (= ingest().deltaM) を算出する。これが新 meter の
+//   ★距離駆動 delta★ (= mmResult.pipelineDeltaM) の唯一の供給源。
 //   - 県別トラッカ: tracker が decoder を構築時に束縛する (RoadGraphRouter/SnapCache)。
-//     県跨ぎ trip は各県トラッカが自県分を加算し、合計 (= _pipelineTotalM) を main に送る。
-//   - reset (業務リセット) で全トラッカ reset + 合計 0 化。
-//   - pipeline-distance 未ロード / decoder 未ロード時は no-op (= 既存挙動完全不変)。
+//     県跨ぎ trip は各県トラッカが自県分を加算する。
+//   - reset (業務リセット) で全トラッカ reset。
+//   - pipeline-distance 未ロード / decoder 未ロード時は no-op (= deltaM=0・既存挙動完全不変)。
 const _pipelineTrackers = new Map(); // pref → tracker
 function _getPipelineTracker(pref) {
   if (typeof self.PipelineDistance === 'undefined' || !self.PipelineDistance.createDistanceTracker)
@@ -176,17 +178,6 @@ function _getPipelineTracker(pref) {
     }
   }
   return tk;
-}
-function _pipelineTotalM() {
-  let total = 0;
-  for (const tk of _pipelineTrackers.values()) {
-    try {
-      total += tk.totalM() || 0;
-    } catch (_) {
-      /* noop */
-    }
-  }
-  return total;
 }
 function _resetPipelineTrackers() {
   for (const tk of _pipelineTrackers.values()) {
@@ -3224,12 +3215,10 @@ self.onmessage = function (e) {
     //   ★この block は下の isStationary freeze / postMessage の構造には一切干渉しない (= 並列)★。
     //   prefecture は bestEmit (= outSnap) の県を優先・無ければ loaded 県を探索 fallback。
     //   ingest 失敗 / 未ロードは no-op。例外は握りつぶし既存距離パスに一切影響させない。
-    let _pipelineTotalM_now = 0;
     // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline・距離駆動エンジン化):
     //   新 meter.js は state.distance_m を ★pipeline-distance の delta★ で駆動する。
     //   worker は ingest() の戻り deltaM を mmResult.pipelineDeltaM として返し、main(meter) は
     //   running gate 内で state.distance_m += pipelineDeltaM を実行する (= 単一経路・道路 snap 道なり)。
-    //   pipelineTotalM は参照値として併存 (= 後方互換・debug 表示)。
     let _pipelineDeltaM_now = 0;
     try {
       let _pipePref = outSnap && outSnap.prefecture ? outSnap.prefecture : null;
@@ -3251,9 +3240,7 @@ self.onmessage = function (e) {
           _pipelineDeltaM_now = _ing.deltaM;
         }
       }
-      _pipelineTotalM_now = _pipelineTotalM();
     } catch (_) {
-      _pipelineTotalM_now = _pipelineTotalM();
       _pipelineDeltaM_now = 0;
     }
 
@@ -3306,8 +3293,6 @@ self.onmessage = function (e) {
       candidatesCount: candCount,
       pickedEmission: pickedEmission,
       _reason: reason,
-      // ★白紙書き直し 第四弾 (2026-05-30): 新距離エンジン累積 (= 参照・比較表示用)。
-      pipelineTotalM: _pipelineTotalM_now,
       // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline): 新 meter の距離駆動 delta。
       //   新 meter.js は running gate 内で state.distance_m += pipelineDeltaM を実行する。
       //   isStationary (= effectively stationary) freeze 時は ingest 側 ZUPT が deltaM=0 を返すため
