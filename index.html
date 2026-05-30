@@ -6895,6 +6895,14 @@
         startRafDisplay();
         uiTimer = setInterval(() => {
           const s = Meter.getState();
+          // ★クラッシュ修正 (2026-05-30・Sentry DAIKOME-4 "Can't find variable: total")★:
+          //   _renderMeterReadout 一本化時に fare/extraTotal/total の算出ブロックが消え、
+          //   下記 6947/6948/6953/6969/6981 の参照だけが残り走行中 ReferenceError。算出を復元。
+          //   ★課金経路不変: calcFare(display) は表示・FB送信・localStorage 用で従来同一式★。
+          let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
+          if (surchargeOn) fare = Math.round(fare * surchargeRate);
+          const extraTotal = extras.reduce((a, b) => a + b.amount, 0);
+          const total = fare + extraTotal;
           // 距離 / 料金 / 業務総走行の読み出しは rAF と共通の _renderMeterReadout() に一本化
           // (= driveDist=display_distance_m 滑らか・driveFare=calcFare(display)+surcharge+extras・
           //    totalDist=Business.getReport().total_distance_m)。textContent 比較で二重書込なし。
