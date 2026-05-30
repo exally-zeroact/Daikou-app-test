@@ -9,14 +9,12 @@
 //
 //   ★検証 invariant (= index.html 距離表示層の白紙契約)★
 //     (1) display_distance_m は単調非減少 (= 表示後退ゼロ)
-//     (2) display_distance_m の課金値 distance_m に対する先取り (= overshoot) は
-//         ★DISP_PREDICT_MAX_M (= 10m) を超えない★ (= 予測補間「10m 滑らか先取り」の設計上限・
-//         project_daikome_display_interp.md / phase3_alpha_beta_filter で採択済の先取り契約)。
-//         ※ display は表示専用。最終課金額 = calcFare(distance_m) で distance_m は不可侵
-//           (= verify-new-meter-9677.js が 9,675.91m を別途 gate)。本テストは表示層の
-//           滑らかさ (= 単調・先取り 10m 以内・収束) のみを検証する。
+//     (2) ★司さん確定方針 (2026-05-30)★: display_distance_m は課金値 distance_m を
+//         ★絶対に超えない (overshoot ゼロ・先取り廃止)★。catch-up で「下から」追従する。
+//         ※ display は表示専用。display ≤ distance_m ゆえ calcFare(display) ≤ calcFare(distance_m)
+//           で過大請求は不能。distance_m は不可侵 (= verify-new-meter-9677.js が 9,675.91m を別途 gate)。
 //     (3) display_distance_m は trip 終了 (最終 getState) で distance_m に収束する
-//         (= 乖離放置なし・予測 0 へ減衰し target に着地)。
+//         (= 乖離放置なし・catch-up で target に着地)。
 //     (4) business_display_distance_m も同様に単調・先取り 10m 以内・収束
 //
 //   ★絶対不可侵★ distance_m / calcFare / 課金経路は本テストで一切変更しない (= 読むだけ)。

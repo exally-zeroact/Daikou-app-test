@@ -8251,6 +8251,11 @@
           // Driving中に確定を押したら → 確定画面へ（カウントは継続）
           appState = 'fare';
           histSaved = false;
+          // ★支払タイミング latch (2026-05-30・司さん方針「支払時点 メーター=実距離=料金 厳密一致」)★:
+          //   確定画面の料金は calcFare(display) で算出する。catch-up 途中だと display<実距離
+          //   (= 過少方向・過大請求は出ないが厳密一致せず)。確定の瞬間に display=distance_m へ latch し
+          //   メーター=実距離=料金 を一致させる。distance_m/calcFare 式は不変 (display 層のみ)。
+          if (typeof Meter.latchDisplay === 'function') Meter.latchDisplay();
           const s = Meter.getState();
           // ★設計変更宣言 (2026-05-16・Step2・renderFare 計算式を startUiTimer と統一):
           //   旧: let fare = s.fare_yen (= state.fare_yen ・Tier 1 commit ベース)
