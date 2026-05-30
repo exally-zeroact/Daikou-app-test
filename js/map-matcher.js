@@ -237,6 +237,60 @@ function _resetPipelineTrackers() {
   _pipelineTrackers.clear();
 }
 
+// ★L1 配線ヘルパ (2026-05-31): 1 GPS 点の「確定道路読み取り」道なり弧長 delta を返す。★
+//   = state.distance_m を駆動する距離源 (= mmResult.pipelineDeltaM の供給元)。
+//   pipeline-distance.createDistanceTracker.ingest を呼ぶが、その stepDistance には
+//   ★L2 連結性ハード拘束★ が入っており、別道路への偽 flip (繋がってない道) は棄却され
+//   前道路へ投影し直した道なり弧長になる (= 余計な弦が距離に入らない)。
+//   = Viterbi/HMM の「繋がってない道へ遷移しない」拘束を距離計算へ接続したもの。
+//   prefecture は outSnap の県を優先・無ければ最寄り道路を持つ県を解決 (加算ではなく県特定のみ)。
+//   未ロード / ingest 失敗 / 静止は 0 (= no-op・既存挙動不変)。
+function _confirmedRoadDelta(msg, outSnap) {
+  try {
+    let pref = outSnap && outSnap.prefecture ? outSnap.prefecture : null;
+    if (!pref && loadedPrefs.size > 0) {
+      const fb = _snapAcrossPrefs(msg.lat, msg.lng);
+      pref = fb && fb.prefecture ? fb.prefecture : loadedPrefs.values().next().value;
+    }
+    const tk = _getPipelineTracker(pref);
+    if (!tk) return 0;
+    // ★L1 配線 (2026-05-31): 距離源を Viterbi 確定経路 (= outSnap = bestEmit) へ一本化する。
+    //   outSnap は emission scoring + Viterbi 窓 transition で選ばれた ★HMM の確定 snap★。
+    //   これを sample.snap として ingest に渡すと、pipeline は greedy 最近傍 SnapCache.snap を
+    //   ★呼ばず★ Viterbi 確定 snap で道なり弧長 (L2 連結性ハード拘束付き stepDistance) を算出する。
+    //   = 「Viterbi が繋がってない道へ遷移しない」拘束を距離計算へ直接接続 (= (c) greedy 残存ゼロ)。
+    //   outSnap 不足 (roadIndex/snapLat/snapLng 欠落) 時のみ ingest 内部で従来 snap に退避。
+    const _vitSnap =
+      outSnap &&
+      Number.isFinite(outSnap.roadIndex) &&
+      Number.isFinite(outSnap.snapLat) &&
+      Number.isFinite(outSnap.snapLng)
+        ? {
+            roadIndex: outSnap.roadIndex,
+            segmentIndex: outSnap.segmentIndex,
+            t: outSnap.t,
+            snapLat: outSnap.snapLat,
+            snapLng: outSnap.snapLng,
+            distanceM: outSnap.distanceM,
+            typeCode: outSnap.typeCode,
+          }
+        : null;
+    const res = tk.ingest({
+      lat: msg.lat,
+      lng: msg.lng,
+      t: msg.timestamp,
+      acc: msg.accuracy,
+      spd: typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1, // km/h → m/s (無ければ -1)
+      snap: _vitSnap, // ★Viterbi 確定 snap (= 距離源)。null なら ingest 内で従来 snap 退避。
+    });
+    // 確定道路読み取り (連結性拘束済) の道なり区間増分。正値のみ採用。
+    const confirmedDeltaM = res && typeof res.deltaM === 'number' ? res.deltaM : 0;
+    return confirmedDeltaM > 0 ? confirmedDeltaM : 0;
+  } catch (_) {
+    return 0; // 例外は既存距離パスに一切影響させない
+  }
+}
+
 // D3 (2026-05-09): 緊急輸送道路指定 道路の Set (pref → Set<roadIdx>)
 //   road-attrs-{pref}.js の emergencyRouteB64 を main 側で decode → forward
 //   scoring で c.roadIndex がこの set に含まれていれば ×1.05 boost
@@ -2669,6 +2723,34 @@ self.onmessage = function (e) {
     return;
   }
 
+  // ★L1 配線監査用 (2026-05-31・診断専用・距離計算に一切影響しない):
+  //   距離源 = Viterbi 確定 snap で駆動する pipeline tracker の breakdown / stats を返す。
+  //   gate-road-distance.js が「余計な弦 (straightFallbackM/straightSegs) = 0」「viterbiSnaps>0
+  //   (= greedy SnapCache を距離に使っていない)」を実コードの実値で検証するためのフック。
+  if (msg.type === 'getPipelineBreakdown') {
+    let bd = null;
+    let st = null;
+    let pref = msg.pref || null;
+    if (!pref) {
+      // 直近 ingest した tracker (= loaded 県の先頭) を採用
+      const it = _pipelineTrackers.keys().next();
+      if (!it.done) pref = it.value;
+    }
+    const tk = pref ? _pipelineTrackers.get(pref) : null;
+    if (tk && typeof tk._breakdown === 'function') {
+      bd = tk._breakdown();
+      st = tk._stats();
+    }
+    self.postMessage({
+      type: 'pipelineBreakdown',
+      pref: pref,
+      totalM: tk && typeof tk.totalM === 'function' ? tk.totalM() : null,
+      breakdown: bd,
+      stats: st,
+    });
+    return;
+  }
+
   // MM-6: OSRM 統計取得（debug 用）
   if (msg.type === 'getOsrmStats') {
     self.postMessage({
@@ -3263,33 +3345,21 @@ self.onmessage = function (e) {
     //   ★この block は下の isStationary freeze / postMessage の構造には一切干渉しない (= 並列)★。
     //   prefecture は bestEmit (= outSnap) の県を優先・無ければ loaded 県を探索 fallback。
     //   ingest 失敗 / 未ロードは no-op。例外は握りつぶし既存距離パスに一切影響させない。
-    // ★白紙書き直し (2026-05-30・clean-rebuild-pipeline・距離駆動エンジン化):
-    //   新 meter.js は state.distance_m を ★pipeline-distance の delta★ で駆動する。
-    //   worker は ingest() の戻り deltaM を mmResult.pipelineDeltaM として返し、main(meter) は
-    //   running gate 内で state.distance_m += pipelineDeltaM を実行する (= 単一経路・道路 snap 道なり)。
+    // ★L1 配線 (2026-05-31・clean-rebuild-pipeline・距離源を「確定道路読み取り」へ一本化):
+    //   司さん核心:「通った道の正確な距離を出せ」。過大の正体 = greedy snap の別道路 flip (余計な弦)。
+    //   新 meter.js は state.distance_m を ★確定道路読み取りの道なり弧長 delta★ で駆動する。
+    //   この delta は pipeline-distance の ★L2 連結性ハード拘束付き stepDistance★ が算出する:
+    //     - 同一道路       → calcRoadDistance の polyline 弧長 (= L3 道なり距離・既存・正確)。
+    //     - 別道路 (連結)  → 道路網 routing で道なり距離 (= 正当な交差点/分岐通過)。
+    //     - 別道路 (非連結 = 偽 flip) → ★棄却★ し前道路へ投影し直した道なり弧長 (= 余計な弦を距離に入れない)。
+    //   = Worker B の Viterbi/HMM が transition で行う「繋がってない道へ遷移しない」拘束を距離計算に接続。
+    //   worker は確定 delta を mmResult.pipelineDeltaM として返し、main(meter) は running gate 内で
+    //   state.distance_m += pipelineDeltaM を実行する (= 単一経路・道路 snap 道なり)。
+    //   ★(c) 配線完全性: 距離源は greedy per-point snap 生値ではなく・連結性拘束を通した確定道路読み取り★。
     let _pipelineDeltaM_now = 0;
-    try {
-      let _pipePref = outSnap && outSnap.prefecture ? outSnap.prefecture : null;
-      if (!_pipePref && loadedPrefs.size > 0) {
-        // outSnap が無い (snap miss) 時は最寄り道路を持つ県を解決 (= 加算ではなく県特定のみ)。
-        const _fb = _snapAcrossPrefs(msg.lat, msg.lng);
-        _pipePref = _fb && _fb.prefecture ? _fb.prefecture : loadedPrefs.values().next().value;
-      }
-      const _tk = _getPipelineTracker(_pipePref);
-      if (_tk) {
-        const _ing = _tk.ingest({
-          lat: msg.lat,
-          lng: msg.lng,
-          t: msg.timestamp,
-          acc: msg.accuracy,
-          spd: typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1, // km/h → m/s (無ければ -1)
-        });
-        if (_ing && typeof _ing.deltaM === 'number' && _ing.deltaM > 0) {
-          _pipelineDeltaM_now = _ing.deltaM;
-        }
-      }
-    } catch (_) {
-      _pipelineDeltaM_now = 0;
+    {
+      const _confirmed = _confirmedRoadDelta(msg, outSnap);
+      if (_confirmed > 0) _pipelineDeltaM_now = _confirmed;
     }
 
     const _lowSpeed = msg.speedKmh != null && msg.speedKmh < 2;

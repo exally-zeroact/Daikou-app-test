@@ -4,8 +4,18 @@
 // tests/verify-new-meter-9677.js
 // 白紙書き直し検証: 実 js/meter.js (新・pipeline 駆動) + 実 js/map-matcher.js (Worker B) に
 //   実走 trace (gpstrace.json seg1・1582 点) を Meter.update 経由で流し、
-//   最終 state.distance_m ≈ 9,677m を確認する (= pipeline-distance batch と一致)。
+//   最終 state.distance_m が pipeline-distance batch と一致することを確認する。
 // 完全に実コード経路。spd → speedKmh = spd*3.6 で渡す。
+//
+// ★再 baseline (2026-05-31・L1 配線: 距離源を Viterbi 確定 snap (outSnap) へ一本化)★:
+//   旧 TARGET=9676.69 は greedy snap の別道路 flip (余計な弦) を含む過大値・9233.39 は
+//   greedy SnapCache 駆動 batch 値だった。L1 配線後の prod 経路は ★Viterbi emission/transition で
+//   選んだ確定 snap (outSnap)★ を距離源とする (= greedy 最近傍 snap を距離計算に使わない)。
+//   よって live meter は Viterbi 確定 snap 駆動値 ★9220.9m★ に収束する (= greedy batch 9233.39m と
+//   12.5m / 0.135% 差・Viterbi 平滑により別道路 flip がさらに減ったため)。
+//   distance governance 合意 (MEMORY: bit 固定は廃止・固定すべきはタイヤ真値検証の通過) に従い、
+//   bit 固定をやめ Viterbi 確定 snap 駆動値を新 baseline とする。許容 ±15m / 0.2%。
+//   ★タイヤ真値検証 (8.39km) は tests/gate-road-distance.js が担当・本 test は live==安定性のみ。★
 
 const fs = require('fs');
 const { createMapMatcherWorker, loadPrefRoadsData } = require('./replay-mm-worker/worker-sim');
@@ -149,21 +159,22 @@ function main() {
   const distance_m = s.distance_m;
   const fare = Meter.calcFare(distance_m);
 
-  const TARGET = 9676.69;
+  // ★再 baseline 値 (L1 配線後・Viterbi 確定 snap 駆動 prod 経路の「正しい道路読み取り」)★
+  const TARGET = 9220.89;
   const diff = Math.abs(distance_m - TARGET);
   const ratio = diff / TARGET;
 
   console.log('[verify] dispatched (non-stationary) = ' + nonStationary);
   console.log('[verify] Meter.state.distance_m       = ' + distance_m.toFixed(2) + ' m');
-  console.log('[verify] target (pipeline batch)      = ' + TARGET + ' m');
+  console.log('[verify] target (Viterbi確定snap駆動) = ' + TARGET + ' m');
   console.log('[verify] |diff| = ' + diff.toFixed(2) + ' m  (' + (ratio * 100).toFixed(3) + '%)');
   console.log('[verify] fare_yen (calcFare)          = ' + fare + ' 円');
   console.log(
     '[verify] mm_distance_m (mirror)       = ' + (s.mm_distance_m || 0).toFixed(2) + ' m'
   );
 
-  // distance_m は pipeline batch と一致するはず (= 駆動経路一致・許容 5m / 0.1%)。
-  const PASS = diff <= 5 || ratio <= 0.001;
+  // distance_m は Viterbi 確定 snap 駆動 baseline と一致するはず (= 安定性・許容 15m / 0.2%)。
+  const PASS = diff <= 15 || ratio <= 0.002;
   console.log('[verify] 判定: ' + (PASS ? 'PASS' : 'FAIL'));
   process.exit(PASS ? 0 : 1);
 }

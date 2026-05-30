@@ -61,30 +61,27 @@ describe('drift-static: meter.js L790 / map-matcher.js L3007 isStationary 早期
     }
   });
 
-  it('B4: map-matcher.js L3007 に msg.isStationary 強制 0 化 pattern が存在', () => {
+  it('B4: map-matcher.js に effectively-stationary 強制 0 化 (mmIncrementM/tentativeIncrementM) pattern が存在', () => {
+    // ★白紙書き直し (2026-05-31・L1/L2/L3 連結性拘束配線)★
+    //   旧: 行アンカー window slice(3240,3300) で freeze block を検出 (= 行 shift で false-fail)。
+    //   2026-05-31 L1 配線で距離源を _confirmedRoadDelta ヘルパへ抽出 (= 上流に関数追加 + inline 短縮)・
+    //   freeze block が下流へ移動したため、行アンカーをやめ ★構造 (= if (_effectivelyStationary) block
+    //   本体に mmIncrementM=0 / tentativeIncrementM=0 が両方あること)★ で検出する (drift 耐性向上)。
+    //   freeze block (= prod 停車中 距離 0 化ロジック) は ★1 byte 不変★・配線変更は freeze 上流のみ。
     const source = loadSource(MAP_MATCHER_JS_PATH);
-    const lines = source.split('\n');
-    // L3007 周辺で if (msg.isStationary === true) { mmIncrementM = 0; tentativeIncrementM = 0; }
-    // Stryker sandbox の line offset 吸収のため window を ±10 line 拡張
-    // 2026-05-26 Phase A+B (map-matcher tentativeDistanceM +28行) で block が L3035 へ移動・window 同期
-    // 2026-05-27 Phase2-a (gap routing guard + 定数追加) で block が L3085 へ移動・window 同期
-    // 2026-05-29 partial commit 早期化で block が L3121 へ移動・window 同期
-    // 2026-05-29 PM real-trace 残存 creep 解析 (= freeze 条件拡張): block が L3159 / pattern も
-    //   if (_effectivelyStationary) へ更新・window slice 同期。
-    // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合): importScripts + tracker manager
-    //   (~58 行) を上流に additive 追加で block が L3251 へ移動・window slice を (3240,3300) へ同期。
-    //   freeze block (= mmIncrementM=0 / tentativeIncrementM=0) は prod 1byte 不変・並列 ingest は freeze 上流。
-    const window = lines.slice(3240, 3300).join('\n');
-    if (!/if\s*\(\s*_effectivelyStationary\s*\)/.test(window)) {
+    const idx = source.indexOf('if (_effectivelyStationary)');
+    if (idx < 0) {
       throw new Error(
-        'map-matcher.js L3147 周辺 (±10) に if (_effectivelyStationary) pattern 未検出 (drift detected)'
+        'map-matcher.js に if (_effectivelyStationary) pattern 未検出 (drift detected)'
       );
     }
+    // freeze block 本体 ~400 文字 を対象 window とする (= mmIncrementM=0 / tentativeIncrementM=0 は冒頭)。
+    const window = source.slice(idx, idx + 400);
     if (!/mmIncrementM\s*=\s*0/.test(window)) {
-      throw new Error('map-matcher.js L3147 周辺 (±10) に mmIncrementM = 0 代入 未検出');
+      throw new Error('effectively-stationary block に mmIncrementM = 0 代入 未検出');
     }
     if (!/tentativeIncrementM\s*=\s*0/.test(window)) {
-      throw new Error('map-matcher.js L3147 周辺 (±10) に tentativeIncrementM = 0 代入 未検出');
+      throw new Error('effectively-stationary block に tentativeIncrementM = 0 代入 未検出');
     }
   });
 });

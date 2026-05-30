@@ -112,6 +112,67 @@ function isStationaryByDisplacement(prev, cur, disp, cfg) {
   return disp < thr;
 }
 
+// ★L2 連結性ハード拘束ヘルパ (decoder 直叩き版)★:
+//   (lat,lng) を ★指定 roadIndex の道路ポリライン★ にだけ投影し snap 結果を返す (or null)。
+//   別道路への偽遷移 (flip) を棄却するため「現点を前点の道路に投影し直すと maxDistM 内に乗るか」
+//   を判定する。乗れば「実際は同一道路の連続走行・snap が隣道へ flip しただけ」= 道なり弧長で算出。
+//   投影式は decoder._searchSnap / SnapCache.snap と byte 等価。snapper 有無に依らず使える。
+function snapPointToRoad(decoder, lat, lng, roadIndex, maxDistM) {
+  const road = decoder.decodeRoadAt(roadIndex);
+  if (!road || !road.points || road.points.length < 2) return null;
+  const prec = decoder.precision || 1e5;
+  const mpd = metersPerDegree(lat);
+  const mpdLat = mpd.lat;
+  const mpdLng = mpd.lng;
+  const maxSq = maxDistM * maxDistM;
+  const pts = road.points;
+  let bestSq = Infinity;
+  let bSeg = -1,
+    bT = 0,
+    bLat = 0,
+    bLng = 0;
+  for (let j = 0; j < pts.length - 1; j++) {
+    const aLat = pts[j][0] / prec;
+    const aLng = pts[j][1] / prec;
+    const bLatp = pts[j + 1][0] / prec;
+    const bLngp = pts[j + 1][1] / prec;
+    const ax = (aLng - lng) * mpdLng;
+    const ay = (aLat - lat) * mpdLat;
+    const bx = (bLngp - lng) * mpdLng;
+    const by = (bLatp - lat) * mpdLat;
+    const abx = bx - ax;
+    const aby = by - ay;
+    const ab2 = abx * abx + aby * aby;
+    let t;
+    if (ab2 < 1e-9) t = 0;
+    else {
+      t = (-ax * abx + -ay * aby) / ab2;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+    }
+    const sx = ax + t * abx;
+    const sy = ay + t * aby;
+    const dsq = sx * sx + sy * sy;
+    if (dsq < bestSq) {
+      bestSq = dsq;
+      bSeg = j;
+      bT = t;
+      bLat = aLat + t * (bLatp - aLat);
+      bLng = aLng + t * (bLngp - aLng);
+    }
+  }
+  if (bSeg < 0 || bestSq > maxSq) return null;
+  return {
+    roadIndex: roadIndex,
+    segmentIndex: bSeg,
+    t: bT,
+    snapLat: bLat,
+    snapLng: bLng,
+    distanceM: Math.sqrt(bestSq),
+    typeCode: road.typeCode,
+  };
+}
+
 // 緯度経度差をメートル換算する係数 (decoder._searchSnap と同一式・平面近似)
 function metersPerDegree(refLat) {
   const toRad = Math.PI / 180;
@@ -764,22 +825,52 @@ function stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, 
         return r.distanceM;
       }
 
-      // ── 別道路 → ★道路網 routing で道なり距離★ ──
-      // 遠距離 (gap 等) は routing せず直線
+      // ── 別道路 → ★L2 連結性ハード拘束 + 道路網 routing で道なり距離★ ──
+      // 遠距離 (gap 等) は routing せず後段 (真の gap = 直線/Doppler) に回す。
       if (router && straight <= cfg.routingMaxStraightM) {
         const routed = router.routeDistance(prevSnap, snap);
         if (routed != null && routed >= 0) {
           const refStraight = straight > 0.1 ? straight : 0.1;
+          // ★連結性 OK (道路網で繋がっている = 正当な交差点/分岐通過)★ → 道なり routing 距離を採用。
           if (routed / refStraight <= cfg.routingMaxRatio && routed <= cfg.perSegmentMaxM) {
             stats.routedSegs++;
             bd.routedM += routed;
             return routed;
           }
-          // 過大 → fallback
+          // routing 過大 (遠回り) → 偽遷移扱いで下の連結性拘束へ落とす。
           stats.routingFallbacks++;
         }
+        // ★★ ここに到達 = 道路網 routing 不能 or 過大 = ★偽遷移 (繋がってない道へ flip)★ ★★
+        //   司さん核心:「greedy の別道路 flip (余計な弦) が距離を水増し」。
+        //   対策 = ★連結性ハード拘束★: flip を ★棄却★ し、現点を ★前点の道路 (prevSnap.roadIndex)★ に
+        //   投影し直す。snapMaxDistM 内に乗れば「実際は同一道路の連続走行・snap が隣道/対向へ
+        //   flip しただけ」= 道なり弧長 (前道路 polyline 沿い) で算出 → 余計な弦が距離に入らない。
+        //   ★距離の小細工はしない (弦補正係数なし)・正しい道路を読み直すだけ★。
+        const reSnap = snapPointToRoad(
+          decoder,
+          cur.lat,
+          cur.lng,
+          prevSnap.roadIndex,
+          cfg.snapMaxDistM
+        );
+        if (reSnap) {
+          const rr = decoder.calcRoadDistance(prevSnap, reSnap);
+          if (
+            rr &&
+            rr.onSameRoad &&
+            typeof rr.distanceM === 'number' &&
+            rr.distanceM >= 0 &&
+            rr.distanceM <= cfg.perSegmentMaxM
+          ) {
+            stats.sameRoadSegs++;
+            stats.flipRejected = (stats.flipRejected || 0) + 1; // 偽遷移棄却カウント (監査用)
+            bd.flipRejectedM = (bd.flipRejectedM || 0) + rr.distanceM; // 棄却 flip の補正距離 (監査用)
+            bd.sameRoadM += rr.distanceM;
+            return rr.distanceM;
+          }
+        }
       }
-      // routing 不能/過大 → calcRoadDistance の直線値 (= snap 間直線) を採用
+      // 連結性拘束でも救えない (= 真に別道路 / 遠距離 gap で前道路へ乗らない) → 直線 fallback。
       stats.straightSegs++;
       let sLine = r.distanceM; // 別道路時は haversine(snapA,snapB)
       if (sLine > cfg.perSegmentMaxM) sLine = straight;
@@ -886,9 +977,36 @@ function createDistanceTracker(decoder, opts) {
         return { deltaM: 0, totalM: total, reason: 'out_of_order' };
       }
       stats.points++;
-      const snap = snapper
-        ? snapper.snap(cur.lat, cur.lng)
-        : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
+      // ★L1 配線 (2026-05-31・clean-rebuild-pipeline・距離源を Viterbi 確定経路へ一本化):
+      //   sample.snap が渡された場合 (= Worker B が Viterbi emission/transition で選んだ
+      //   bestEmit/outSnap)、その ★Viterbi 確定 snap★ を距離計算に使う。greedy per-point
+      //   SnapCache.snap (= 最近傍 nearest-neighbor) は ★呼ばない★。
+      //   これにより距離源が「greedy 最近傍 snap」ではなく「HMM の確定 snap」になる (= (c) 配線完全)。
+      //   externalSnap が roadIndex/snapLat/snapLng を満たす時のみ採用・不足時のみ従来 snap に退避。
+      let snap;
+      const ext = sample.snap;
+      if (
+        ext &&
+        Number.isFinite(ext.roadIndex) &&
+        Number.isFinite(ext.snapLat) &&
+        Number.isFinite(ext.snapLng)
+      ) {
+        // Viterbi 確定 snap を pipeline の snap 形式へ正規化 (stepDistance/calcRoadDistance が要求する key)。
+        snap = {
+          roadIndex: ext.roadIndex,
+          segmentIndex: ext.segmentIndex,
+          t: ext.t,
+          snapLat: ext.snapLat,
+          snapLng: ext.snapLng,
+          distanceM: ext.distanceM,
+          typeCode: ext.typeCode,
+        };
+        stats.viterbiSnaps = (stats.viterbiSnaps || 0) + 1;
+      } else {
+        snap = snapper
+          ? snapper.snap(cur.lat, cur.lng)
+          : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
+      }
       if (snap) stats.snapHit++;
       else stats.snapMiss++;
 
