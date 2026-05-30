@@ -136,6 +136,11 @@ const Meter = (() => {
   const GAP_FILL_THRESHOLD_SEC = 5; // dt がこれ以上で gap 補完発火 (= GPS 空白)
   const GAP_FILL_MAX_SEC = 120; // これ以上の dt は app background 等とみなし補完しない
   const GAP_FILL_MAX_KMH = 160; // 速度の物理上限 clamp (異常 speed での過大補完防止)
+
+  // ★計器 (2026-05-30・実機検証用・課金非関与の診断ログ): engine 実動値を ~1Hz で console 出力。
+  //   debug-log-uploader が trace に収集 → 実機で distance_m/distanceSource(pipeline vs gap)/
+  //   business/creep/速度 が実際どう動いたかをオフライン replay と突合できる。state は read のみ。
+  let _lastEngineLogT = 0;
   // 旧 Off-Road grace period の escape hatch 用 (= テスト互換・新距離では未使用だが API 維持)。
   let _offRoadGraceUntil = 0;
   const OFFROAD_GRACE_AFTER_START_MS = 5000;
@@ -540,6 +545,30 @@ const Meter = (() => {
         TrainingCollector.collectIfEligible(gpsResult);
       } catch (_) {
         /* noop - intentionally empty */
+      }
+    }
+
+    // ★計器: engine 実動値を ~1Hz で console 出力 (実機検証用・課金非関与・state read のみ)。
+    if (typeof dlog === 'function') {
+      const _t = gpsResult.timestamp || 0;
+      if (!_lastEngineLogT || _t - _lastEngineLogT >= 1000) {
+        _lastEngineLogT = _t;
+        dlog(
+          '[ENGINE] dm=' +
+            (state.distance_m || 0).toFixed(1) +
+            ' src=' +
+            state.distanceSource +
+            ' biz=' +
+            (state.business_distance_m || 0).toFixed(1) +
+            ' disp=' +
+            (state.display_distance_m || 0).toFixed(1) +
+            ' spd=' +
+            (gpsResult.speedKmh || 0).toFixed(1) +
+            ' run=' +
+            state.running +
+            ' bizActive=' +
+            state.business_active
+        );
       }
     }
 
