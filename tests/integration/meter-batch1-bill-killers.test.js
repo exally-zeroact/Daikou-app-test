@@ -172,8 +172,11 @@ describe('Batch 1: wait_sec 累積 boundary (= 待機料金集計)', () => {
   });
 });
 
-// ─── display_distance_m: distance_m 下限保証 + 単調非減少 (= 表示予測補間・存続) ──
-describe('Batch 1: display_distance_m (= 表示予測補間・下限/単調)', () => {
+// ─── display_distance_m: ★2026-05-30 過大請求根絶方針★ ──
+//   旧 (= 予測先取り・display ≥ distance_m 下限保証) は overshoot を生み過大請求の穴だった。
+//   新方針: display ≤ distance_m (overshoot ゼロ・先取り廃止) + 単調非減少 + catch-up/latch 収束。
+//   ここでは「上限 (display ≤ distance_m) + 単調非減少 + 復元/latch で一致」を assert する。
+describe('Batch 1: display_distance_m (= overshoot ゼロ・上限/単調/latch)', () => {
   let Meter, fakeWorker;
   beforeEach(() => {
     ({ Meter, fakeWorker } = setupMeter());
@@ -183,30 +186,38 @@ describe('Batch 1: display_distance_m (= 表示予測補間・下限/単調)', (
     delete globalThis.GPS;
   });
 
-  it('display は distance_m を下回らない (= 課金距離下限保証)', () => {
+  it('display は distance_m を超えない (= overshoot ゼロ・過大請求の穴を塞ぐ)', () => {
     Meter.setDistance(500);
     const s = Meter.getState();
-    expect(s.display_distance_m).toBeGreaterThanOrEqual(500);
+    // ★新方針: display ≤ distance_m (= 先取りしない・過大請求不能)。
+    expect(s.display_distance_m).toBeLessThanOrEqual(500 + 1e-6);
   });
 
-  it('pipeline delta で distance_m が増えると display も単調非減少 + 下限保証', () => {
+  it('pipeline delta で distance_m が増えても display ≤ distance_m を維持 + 単調非減少', () => {
     fakeWorker._dispatch({ type: 'mmResult', pipelineDeltaM: 100, snapped: true, committed: true });
     const s1 = Meter.getState();
     expect(s1.distance_m).toBe(100);
-    expect(s1.display_distance_m).toBeGreaterThanOrEqual(100);
+    // ★display は target(distance_m) を超えない (= overshoot ゼロ)。
+    expect(s1.display_distance_m).toBeLessThanOrEqual(100 + 1e-6);
     fakeWorker._dispatch({ type: 'mmResult', pipelineDeltaM: 50, snapped: true, committed: true });
     const s2 = Meter.getState();
     expect(s2.distance_m).toBe(150);
-    expect(s2.display_distance_m).toBeGreaterThanOrEqual(150);
+    expect(s2.display_distance_m).toBeLessThanOrEqual(150 + 1e-6);
+    // 単調非減少は維持 (= 後退しない)。
     expect(s2.display_distance_m).toBeGreaterThanOrEqual(s1.display_distance_m);
   });
 
-  it('setDistance 急増で display は即時同期 (= 復元経路・distance_m 一致)', () => {
+  it('setDistance 急増 + latchDisplay で display == distance_m に一致 (= 復元経路)', () => {
     Meter.setDistance(100);
     const s1 = Meter.getState();
     Meter.setDistance(10000);
+    // ★setDistance 単体では display は target を超えない (overshoot ゼロ)・即時に上へ飛ばない。
+    const sMid = Meter.getState();
+    expect(sMid.display_distance_m).toBeLessThanOrEqual(10000 + 1e-6);
+    // 復元経路は latchDisplay で実距離に一致させる (= index.html checkDrivingRestore と同一配線)。
+    Meter.latchDisplay();
     const s2 = Meter.getState();
-    expect(s2.display_distance_m).toBeGreaterThanOrEqual(10000);
+    expect(s2.display_distance_m).toBeCloseTo(10000, 6);
     expect(s2.display_distance_m).toBeGreaterThan(s1.display_distance_m);
   });
 });

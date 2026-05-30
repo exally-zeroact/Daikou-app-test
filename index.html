@@ -6197,6 +6197,8 @@
           appState = 'driving';
           Meter.start();
           Meter.setDistance(saved.distance_m);
+          // ★復元時 latch: 確定済み実距離なので display を即一致 (= 0→target crawl 回避・overshoot なし)。
+          if (typeof Meter.latchDisplay === 'function') Meter.latchDisplay();
           // ★設計変更宣言 (2026-05-19・B-3・代行中タスクキル elapsed_sec 復元):
           //   Meter.start() で elapsed_accumulated_sec=0 化される直後に・saved 値で再 prime。
           //   タスクキル前の経過時間が連続して継続される (= 業務継続性向上)。
@@ -6775,9 +6777,10 @@
         if (typeof Meter === 'undefined' || typeof Meter.getState !== 'function') return;
         const s = Meter.getState();
 
-        // 表示距離 = 滑らか display (= distance_m を最大 10m まで予測先取り・DISP_PREDICT_MAX_M)。
-        // ★display は distance_m を最大 10m 上回り得る (= 先取り表示)・課金値ではない★。
-        // 最終課金は calcFare(distance_m) で確定し distance_m は不可侵。
+        // 表示距離 = catch-up display (= distance_m へ「下から」滑らかに追従・★実距離を超えない★)。
+        // ★司さん確定方針 (2026-05-30)★: display ≤ distance_m (overshoot ゼロ)。停車/確定で
+        //   latch し display = distance_m に一致。課金は calcFare(display) だが display ≤ 実距離
+        //   ゆえ過大請求は起きず、latch により支払時 メーター=実距離=料金 が一致する。
         // ここでの fallback (|| s.distance_m) は getState が display を未算出の極初期のみ。
         const displayDistM = s.display_distance_m || s.distance_m || 0;
 

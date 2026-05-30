@@ -33,12 +33,11 @@ const TRACE_PATH = process.env.GPS_TRACE || 'C:/Users/zeroa/gpstrace.json';
 const TRIP_GAP_SEC = 120;
 const R = 6371000;
 
-// getState 内の予測補間先取り上限 (= meter.js DISP_PREDICT_MAX_M)。display は
-// target(distance_m) を最大この値だけ先取りする (= 「10m 滑らか先取り」採択済契約)。
-// 本テストはこの先取りが ★10m を超えない★ こと (= 暴走しない・予測 clamp 有効) と
-// 単調・収束を検証する。distance_m (課金値) 自体は verify-new-meter-9677.js が別途 gate。
-const DISP_PREDICT_MAX_M = 10; // meter.js と同値 (= 先取り上限)。
-const OVERSHOOT_TOL_M = DISP_PREDICT_MAX_M + 0.01; // float 誤差吸収込みの先取り許容。
+// ★司さん確定方針 (2026-05-30・過大請求根絶)★: display は target(distance_m) を
+// ★絶対に超えない (overshoot ゼロ)★。先取り (predict lookahead) は撤去済。
+// 本テストは display が「下から catch-up」し target を超えないこと・単調・収束を検証する。
+// distance_m (課金値) 自体は verify-new-meter-9677.js が別途 gate。
+const OVERSHOOT_TOL_M = 0.01; // float 誤差のみ許容 (= 先取りは設計上ゼロ)。
 const CONVERGE_TOL_M = 1.0; // trip 終了時の display↔distance 収束許容。
 const UI_TICKS_PER_GPS = 4; // 1 GPS 点あたり UI ループ呼び出し回数 (= rAF/setInterval 相当)。
 
@@ -155,8 +154,18 @@ function main() {
   let totalTicks = 0;
   let maxGapToTarget = 0; // 走行中 display が distance_m から離れた最大量。
 
+  // ★mock clock★: catch-up は実時間 (Date.now) ベースで target へ収束する。本ハーネスは
+  //   trace を実時間無視で高速 replay するため、Date.now を trace 時刻に同期させて
+  //   「実機で 1Hz・実秒が経過する」状況を再現する (= 時間ベース catch-up を正しく検証)。
+  const _realDateNow = Date.now;
+  let _mockNow = seg.length ? seg[0].t : _realDateNow();
+  Date.now = () => _mockNow;
+
   for (let i = 0; i < seg.length; i++) {
     const p = seg[i];
+    _mockNow = p.t; // GPS 受信時刻 = trace timestamp
+    // 次点までの実経過 (= 1Hz なら ~1000ms)。UI tick はこの間に時間が進むものとして配分。
+    const dtToNext = i + 1 < seg.length ? Math.max(0, Math.min(5000, seg[i + 1].t - p.t)) : 1000;
     const spd = typeof p.spd === 'number' && p.spd >= 0 ? p.spd : null;
     const speedKmh = spd != null ? spd * 3.6 : undefined;
     const input = {
@@ -175,6 +184,8 @@ function main() {
     // UI ループ相当: 1 GPS 点ごとに複数回 getState (= rAF 60Hz / setInterval 100ms の高頻度読出)。
     //   getState は now=Date.now() ベースで予測補間するため、複数回呼んでも単調・課金値以下。
     for (let k = 0; k < UI_TICKS_PER_GPS; k++) {
+      // UI tick ごとに次点までの実時間を配分して進める (= rAF/setInterval が実秒で回る再現)。
+      _mockNow = p.t + Math.round((dtToNext * (k + 1)) / UI_TICKS_PER_GPS);
       const s = Meter.getState();
       const disp = s.display_distance_m || 0;
       const dist = s.distance_m || 0;
@@ -203,12 +214,15 @@ function main() {
   }
 
   // trip 終了後: display は target に収束するまで getState を回す (= UI が止まらない限り追従)。
+  //   mock clock を 100ms/tick 進め、実機で停車後に実秒が経過し catch-up が収束する状況を再現。
   let s = Meter.getState();
   let settleGuard = 0;
   while (s.distance_m - (s.display_distance_m || 0) > CONVERGE_TOL_M && settleGuard < 100000) {
+    _mockNow += 100; // 100ms/tick の実時間経過
     s = Meter.getState();
     settleGuard++;
   }
+  Date.now = _realDateNow; // mock clock 復旧
   const finalDisp = s.display_distance_m || 0;
   const finalDist = s.distance_m || 0;
   const finalBizDisp = s.business_display_distance_m || 0;
@@ -224,18 +238,14 @@ function main() {
   console.log('[display] mono violations (display)   = ' + monoViolations);
   console.log('[display] mono violations (business)  = ' + bizMonoViolations);
   console.log(
-    '[display] max 先取り overshoot (display)  = ' +
+    '[display] max overshoot (display)     = ' +
       maxOvershoot.toFixed(4) +
-      ' m (上限 ' +
-      DISP_PREDICT_MAX_M +
-      'm)'
+      ' m (契約 = 0・先取りゼロ)'
   );
   console.log(
-    '[display] max 先取り overshoot (business) = ' +
+    '[display] max overshoot (business)    = ' +
       maxBizOvershoot.toFixed(4) +
-      ' m (上限 ' +
-      DISP_PREDICT_MAX_M +
-      'm)'
+      ' m (契約 = 0・先取りゼロ)'
   );
   console.log('[display] max gap display→distance    = ' + maxGapToTarget.toFixed(2) + ' m');
   console.log('[display] converge gap (display)      = ' + convergeGap.toFixed(4) + ' m');
@@ -248,13 +258,13 @@ function main() {
     fail('business_display_distance_m が後退した (= 単調非減少違反 ' + bizMonoViolations + ' 回)');
   if (maxOvershoot > OVERSHOOT_TOL_M)
     fail(
-      'display_distance_m の先取りが 10m 設計上限を超えた (= 最大 ' +
+      'display_distance_m が実距離を超えた (= overshoot ゼロ契約違反・最大 ' +
         maxOvershoot.toFixed(4) +
-        ' m・予測補間暴走)'
+        ' m・先取り混入=過大請求の穴)'
     );
   if (maxBizOvershoot > OVERSHOOT_TOL_M)
     fail(
-      'business_display_distance_m の先取りが 10m 設計上限を超えた (= 最大 ' +
+      'business_display_distance_m が実距離を超えた (= overshoot ゼロ契約違反・最大 ' +
         maxBizOvershoot.toFixed(4) +
         ' m)'
     );

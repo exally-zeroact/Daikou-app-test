@@ -1,17 +1,17 @@
 // tests/integration/distance-equals-display-invariant.test.js
 //
-// ★2026-05-28 PM 再構築方針 STEP 1 テストツール先行 (= 司さん指示):
-//   最高精度の本質 = 距離 = 表示 = 道路 polyline 累積 1 本 (= Google MM 式統一)。
-//   既存の α-β filter / 多層 catch-up / display 別計算 = 齟齬の元凶 → ★削除予定★。
-//   新方針: display_distance_m == distance_m + tier2_pending_m の 1 行同期。
-//
-// 本 fixture は ★新方針 (= 距離 = 表示 完全一致) を invariant として強制★ する。
-// ★現状の α-β filter 実装では FAIL する★ → Step 2 実装で緑化する想定。
+// ★2026-05-30 過大請求根絶方針 (= 司さん確定・最新)★:
+//   距離 (distance_m) は道路 polyline 累積 1 本 (= Google MM 式統一)。
+//   display は実距離を ★絶対に超えない (overshoot ゼロ)★ で「下から」catch-up し・
+//   停車 / 確定 / 業務終了 (= 支払タイミング) で実距離に latch し一致する。
+//   旧「display == distance_m 完全一致 (1 行同期)」は走行中ラグを許さず・予測先取りを
+//   招いて overshoot (= 過大請求) を生んだため撤回。新 invariant は「display ≤ distance_m
+//   (+tier2) を全 step で満たし・停車 / latch で一致」へ更新。
 //
 // 絶対ルール準拠:
 //   ・distance_m / calcFare / running gate / business_active gate = 1byte 不変
 //   ・本 fixture は display 専用 layer の動作のみ assert
-//   ・[A] 距離 = 表示 invariant 強制
+//   ・[A] display ≤ distance_m(+tier2) overshoot ゼロ invariant + 停車/latch 一致を強制
 
 'use strict';
 
@@ -57,7 +57,7 @@ function mockGPS() {
   };
 }
 
-describe('★新方針 STEP 1: 距離 = 表示 invariant (= Google MM 式統一・齟齬構造的にゼロ)', () => {
+describe('★新方針 2026-05-30: display ≤ distance_m overshoot ゼロ + 停車/latch 一致', () => {
   let Meter;
   const BASE_TS = 1714100000000;
 
@@ -91,27 +91,26 @@ describe('★新方針 STEP 1: 距離 = 表示 invariant (= Google MM 式統一�
     delete globalThis.GPS;
   });
 
-  // ─── [A-1] trip 側 距離 = 表示 invariant ────────────────────────
-  it('A-1: trip display_distance_m == distance_m + tier2_pending_m が任意 step で成立', () => {
+  // ─── [A-1] trip 側 overshoot ゼロ invariant ────────────────────────
+  it('A-1: trip display_distance_m ≤ distance_m + tier2_pending_m が任意 step で成立 (overshoot ゼロ)', () => {
     Meter.update(gps(0, { speedKmh: 36 }));
     for (let t = 5; t <= 60; t += 5) {
       Meter.update(gps(t, { speedKmh: 36 }));
       const s = Meter.getState();
-      const expected = (s.distance_m || 0) + (s.tier2_pending_m || 0);
-      // ★新方針: display は distance_m + tier2 と完全一致 (= 1 行同期・齟齬ゼロ)
-      // ★現状の α-β filter では・filter 出力で乖離する★ → FAIL 想定
-      const diff = Math.abs(s.display_distance_m - expected);
-      if (diff > 0.01) {
+      const upper = (s.distance_m || 0) + (s.tier2_pending_m || 0);
+      // ★新方針: display は実距離 (+tier2) を超えない (= 先取り禁止・過大請求不能)。
+      const over = (s.display_distance_m || 0) - upper;
+      if (over > 0.01) {
         throw new Error(
-          `A-1 FAIL: step=${t} display=${s.display_distance_m.toFixed(2)} ≠ ` +
-            `distance_m+tier2=${expected.toFixed(2)} (diff=${diff.toFixed(2)})`
+          `A-1 FAIL: step=${t} display=${s.display_distance_m.toFixed(2)} > ` +
+            `distance_m+tier2=${upper.toFixed(2)} (overshoot=${over.toFixed(2)})`
         );
       }
     }
   });
 
-  // ─── [A-2] business 側 距離 = 表示 invariant ────────────────────
-  it('A-2: business display == business_distance_m + business_tier2_pending_m が任意 step で成立', () => {
+  // ─── [A-2] business 側 overshoot ゼロ invariant ────────────────────
+  it('A-2: business display ≤ business_distance_m + business_tier2_pending_m が任意 step で成立 (overshoot ゼロ)', () => {
     if (typeof Meter.businessStart === 'function') {
       Meter.businessStart();
     }
@@ -119,12 +118,12 @@ describe('★新方針 STEP 1: 距離 = 表示 invariant (= Google MM 式統一�
     for (let t = 5; t <= 60; t += 5) {
       Meter.update(gps(t, { speedKmh: 36 }));
       const s = Meter.getState();
-      const expected = (s.business_distance_m || 0) + (s.business_tier2_pending_m || 0);
-      const diff = Math.abs((s.business_display_distance_m || 0) - expected);
-      if (diff > 0.01) {
+      const upper = (s.business_distance_m || 0) + (s.business_tier2_pending_m || 0);
+      const over = (s.business_display_distance_m || 0) - upper;
+      if (over > 0.01) {
         throw new Error(
-          `A-2 FAIL: step=${t} business_display=${(s.business_display_distance_m || 0).toFixed(2)} ≠ ` +
-            `business+tier2=${expected.toFixed(2)} (diff=${diff.toFixed(2)})`
+          `A-2 FAIL: step=${t} business_display=${(s.business_display_distance_m || 0).toFixed(2)} > ` +
+            `business+tier2=${upper.toFixed(2)} (overshoot=${over.toFixed(2)})`
         );
       }
     }
@@ -146,39 +145,36 @@ describe('★新方針 STEP 1: 距離 = 表示 invariant (= Google MM 式統一�
     }
   });
 
-  // ─── [A-4] 課金収束 (= 停車時・display == distance_m に一致) ──────
-  it('A-4: 停車中 (= tier2_pending_m=0) で display_distance_m == distance_m', () => {
+  // ─── [A-4] 課金収束 (= 停止 latch 時・display == distance_m に一致) ──────
+  it('A-4: 停止 latch (= stop) 後に display_distance_m == distance_m (支払時点 一致)', () => {
     Meter.update(gps(0, { speedKmh: 36 }));
     Meter.update(gps(10, { speedKmh: 36 }));
+    // ★停止 = 支払タイミング → display を実距離に latch し一致させる。
+    Meter.stop();
     const s0 = Meter.getState();
-    // 停車 (= isStationary=true) で・tier2 が 0 に収束する想定
-    // ただし・現状実装では tier2 は別経路・停車中も snapshot 据え置きの可能性あり
-    // 本 invariant は「停車かつ tier2=0 のとき display == distance_m」
-    if ((s0.tier2_pending_m || 0) === 0) {
-      const diff = Math.abs(s0.display_distance_m - s0.distance_m);
-      if (diff > 0.01) {
-        throw new Error(
-          `A-4 FAIL: tier2=0 のとき display=${s0.display_distance_m.toFixed(2)} ≠ distance_m=${s0.distance_m.toFixed(2)}`
-        );
-      }
+    const diff = Math.abs((s0.display_distance_m || 0) - (s0.distance_m || 0));
+    if (diff > 0.01) {
+      throw new Error(
+        `A-4 FAIL: stop(latch) 後 display=${s0.display_distance_m.toFixed(2)} ≠ distance_m=${s0.distance_m.toFixed(2)}`
+      );
     }
   });
 
-  // ─── [A-5] running=false (= 空車中) でも business 側 invariant 成立 ─
-  it('A-5: running=false でも business_display == business_distance_m + business_tier2_pending_m', () => {
+  // ─── [A-5] running=false (= 空車中) でも business 側 overshoot ゼロ ─
+  it('A-5: running=false でも business_display ≤ business_distance_m + business_tier2_pending_m (overshoot ゼロ)', () => {
     if (typeof Meter.businessStart === 'function') {
       Meter.businessStart();
     }
-    Meter.stop(); // running=false
+    Meter.stop(); // running=false (= latch)
     Meter.update(gps(0, { speedKmh: 36 }));
     Meter.update(gps(10, { speedKmh: 36 }));
     const s = Meter.getState();
-    const expected = (s.business_distance_m || 0) + (s.business_tier2_pending_m || 0);
-    const diff = Math.abs((s.business_display_distance_m || 0) - expected);
-    if (diff > 0.01) {
+    const upper = (s.business_distance_m || 0) + (s.business_tier2_pending_m || 0);
+    const over = (s.business_display_distance_m || 0) - upper;
+    if (over > 0.01) {
       throw new Error(
-        `A-5 FAIL: running=false business_display=${(s.business_display_distance_m || 0).toFixed(2)} ≠ ` +
-          `business+tier2=${expected.toFixed(2)}`
+        `A-5 FAIL: running=false business_display=${(s.business_display_distance_m || 0).toFixed(2)} > ` +
+          `business+tier2=${upper.toFixed(2)} (overshoot=${over.toFixed(2)})`
       );
     }
   });

@@ -84,12 +84,16 @@ const Meter = (() => {
     gap_fill_total_m: 0, // 旧 gap fill 距離 (= 廃止・常に 0)
   };
 
-  // ─── 表示予測補間の定数 (10m 滑らか・距離値 1 byte 不変の表示専用) ───
-  //   target_velocity_mps = 直近 1 秒の target 増分 / dt (= 自己整合・GPS speed 依存なし)
-  //   予測 = velocity × min(1.0, 経過秒) で・GPS 待ち間も display を滑らかに先取り。
-  //   屋内駐車 / 停車 (= target 0 進捗) → velocity 0 → 予測 0 (= creep しない)。
-  const DISP_V_CLAMP_MPS = 36; // 予測 velocity 上限 (= 約 130km/h)
-  const DISP_PREDICT_MAX_M = 10; // 1 step あたり予測先取りの上限 (= 10m 滑らか)
+  // ─── 表示 catch-up の定数 (= 距離値 1 byte 不変の表示専用 layer) ───
+  //   ★司さん確定方針 (2026-05-30・過大請求根絶)★:
+  //     ・display は実距離 (target=distance_m) を ★絶対に超えない (overshoot ゼロ)★。
+  //       先取り (predict lookahead) は過大請求の穴になるため完全廃止。
+  //     ・display は target に「下から」滑らかに追いつく (catch-up・指数収束)。
+  //     ・確定 / 停車 / 業務終了 (= 支払タイミング) では display を target に latch し
+  //       メーター=実距離=料金 を一致させる (= calcFare(display) ≤ calcFare(distance_m) 保証)。
+  //   旧 predict 先取り (display = target + velocity×経過秒) は overshoot を生むため撤去。
+  const DISP_CATCHUP_TAU_S = 0.4; // catch-up 時定数 (= 0.4s・会議推奨0.3〜0.5s内・lag最小化。実機traceで再調整可)
+  const DISP_LATCH_GAP_M = 0.01; // この残差未満なら target に着地 (= 収束扱い)
 
   // ─── fareConfig (v2・後方互換維持) ───
   let fareConfig = {
@@ -384,6 +388,8 @@ const Meter = (() => {
       state.elapsed_accumulated_sec += Date.now() - state.last_resume_time;
       state.last_resume_time = null;
     }
+    // ★latch: 一時停止 / 確定 (= 支払タイミング) で display を実距離に一致させる。
+    _latchDisplay();
   }
 
   // ─── 業務終了 ───
@@ -395,6 +401,8 @@ const Meter = (() => {
     }
     state.business_active = false;
     _fareConfigFrozen = false;
+    // ★latch: 業務終了 (= 支払タイミング) で display / business_display を実距離に一致させる。
+    _latchDisplay();
     if (mmWorker) {
       try {
         mmWorker.postMessage({ type: 'reset' });
@@ -787,30 +795,51 @@ const Meter = (() => {
     return _activeVehicleId;
   }
 
-  // ─── 表示用 予測補間ヘルパ (= 距離値 1 byte 不変の表示専用 layer・10m 滑らか) ───
-  //   target = 実距離値。velocity = 直近 1 秒の target 増分 / dt (自己整合)。
-  //   display = max(prev_display, target + 予測先取り) で単調増加 + 滑らか化。
+  // ─── 表示用 catch-up ヘルパ (= 距離値 1 byte 不変の表示専用 layer) ───
+  //   ★overshoot ゼロ契約★: 返り値 display は target を ★絶対に超えない★。
+  //   target = 実距離値 (distance_m)。display は前回値から target へ「下から」指数収束する。
+  //   ・display ≥ target なら即 target に着地 (= target が下がる事は無いが防御的に clamp)。
+  //   ・display < target なら gap を 1 - exp(-dt/τ) の割合だけ詰める (= 滑らか catch-up)。
+  //   ・単調非減少: target は単調増加・display は target を上限に増えるのみ。
+  //   prevTarget/prevTargetTime/velRef は呼出側の状態 bookkeeping 維持用 (= 形維持)。
   function _smoothDisplay(target, prevDisplay, prevTarget, prevTargetTime, velRef, now) {
-    let velocity = velRef.v || 0;
-    if (prevTargetTime !== null) {
-      const dt = (now - prevTargetTime) / 1000;
-      if (dt > 0.05) {
-        const inc = target - prevTarget;
-        const instV = inc > 0 ? inc / dt : 0;
-        // 自己整合: target が進んだ時のみ velocity を更新 (= 停車中 velocity 0 → 予測 0)。
-        velocity = instV > 0 ? Math.min(instV, DISP_V_CLAMP_MPS) : 0;
-      }
-    }
-    velRef.v = velocity;
     velRef.prevTarget = target;
     velRef.prevTargetTime = now;
-    let predict = 0;
-    if (velocity > 0 && prevTargetTime !== null) {
-      const sinceTarget = (now - prevTargetTime) / 1000;
-      predict = Math.min(velocity * Math.min(1.0, Math.max(0, sinceTarget)), DISP_PREDICT_MAX_M);
+    velRef.v = 0; // 先取り廃止のため velocity は未使用 (= 形維持のため 0 固定)
+    const tgt = target > 0 ? target : 0;
+    const display = prevDisplay > 0 ? prevDisplay : 0;
+    // 防御的 clamp: display が target を超える事は設計上起きないが万一あれば即 target に揃える。
+    if (display >= tgt) return tgt;
+    const dt = prevTargetTime !== null ? (now - prevTargetTime) / 1000 : 0;
+    if (!(dt > 0)) {
+      // 時間未経過 (= 同一 tick 再読) は据え置き (= overshoot しない・単調維持)。
+      return display;
     }
-    const candidate = target + predict;
-    return Math.max(prevDisplay || 0, candidate);
+    const gap = tgt - display;
+    const ratio = 1 - Math.exp(-dt / DISP_CATCHUP_TAU_S);
+    let next = display + gap * ratio;
+    // 残差が極小なら target に着地 (= 乖離放置せず収束させる)。
+    if (tgt - next < DISP_LATCH_GAP_M) next = tgt;
+    // ★絶対不変条件★: display ≤ target (overshoot ゼロ) かつ 単調非減少。
+    if (next > tgt) next = tgt;
+    if (next < display) next = display;
+    return next;
+  }
+
+  // ─── latch: display を実距離 (target) に即一致させる (= 支払タイミング契約) ───
+  //   stop (一時停止 / 確定) / businessEnd (業務終了) で呼ぶ。これにより
+  //   メーター(display) = 実距離(distance_m) = 料金(calcFare(display)) が一致する。
+  function _latchDisplay() {
+    const d = state.distance_m || 0;
+    state.display_distance_m = d;
+    state._prev_target_distance_m = d;
+    state._prev_target_time = null;
+    state._target_velocity_mps = 0;
+    const b = state.business_distance_m || 0;
+    state.business_display_distance_m = b;
+    state._prev_business_target_distance_m = b;
+    state._prev_business_target_time = null;
+    state._business_target_velocity_mps = 0;
   }
 
   // ─── getState ───
@@ -895,8 +924,10 @@ const Meter = (() => {
     const v = Number.isFinite(distanceM) && distanceM >= 0 ? distanceM : 0;
     state.distance_m = v;
     state.fare_yen = calcFare(v);
-    // 復元時は display を即時同期 (= 0 から数百秒かけて追従するのを防ぐ)。
-    state.display_distance_m = v;
+    // ★overshoot ゼロ★: display は target(v) を超えない (= min clamp)。target が上がっても
+    //   display は getState の catch-up で「下から」追いつく (= 先取りしない)。
+    //   復元 (= 確定済み実距離) で即一致させたい場合は呼出側で Meter.latchDisplay() を使う。
+    if ((state.display_distance_m || 0) > v) state.display_distance_m = v;
     state._prev_target_distance_m = v;
     state._prev_target_time = null;
     state._target_velocity_mps = 0;
@@ -904,7 +935,9 @@ const Meter = (() => {
   function setBusinessDistance(m) {
     const bv = typeof m === 'number' && m >= 0 ? m : 0;
     state.business_distance_m = bv;
-    state.business_display_distance_m = bv;
+    // ★overshoot ゼロ★: business_display は business_distance_m(bv) を超えない (= min clamp)。
+    //   target が上がっても display は getState の catch-up で「下から」追いつく。
+    if ((state.business_display_distance_m || 0) > bv) state.business_display_distance_m = bv;
     state._prev_business_target_distance_m = bv;
     state._prev_business_target_time = null;
     state._business_target_velocity_mps = 0;
@@ -1183,6 +1216,7 @@ const Meter = (() => {
     getSurchargeMultiplier,
     setVehicleType,
     getVehicleType,
+    latchDisplay: _latchDisplay,
     // ★テスト用 escape hatch (prod からは呼ばない)
     _setDrainMmUntil: function (t) {
       _drainMmUntil = typeof t === 'number' ? t : 0;
