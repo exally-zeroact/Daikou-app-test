@@ -5278,6 +5278,18 @@
       let _lastDriveDistKm = null;
       let _lastDriveFareYen = null;
       let _lastTotalDistKm = null;
+      // ★古スマホ対応 ⑤ (2026-05-30・display refresh 適応間引き・CPU/発熱低減):
+      //   rAF は最大 60Hz で _renderMeterReadout (= getState 予測補間 + textContent 比較) を呼ぶ。
+      //   速度変化が小さい (= 定速 / 停車) 局面では 2〜4Hz で十分滑らか。差分が小さい frame は
+      //   描画を間引き、加減速 (= 速度変化大) の局面だけ高頻度描画する。
+      //   ★絶対不可侵★: 本間引きは ★表示読み出し層のみ★。GPS 実測点の ingest / distance_m /
+      //     calcFare には一切触れない (= 距離 1 byte 不変)。getState 予測補間は now ベースのため
+      //     frame を skip しても次回描画で時間差を吸収し連続表示になる。
+      const _DISP_THROTTLE_MS = 250; // 定速時の最小描画間隔 (= 4Hz)
+      const _DISP_VEL_EPS_KMH = 1.5; // 速度変化がこの kmh 未満なら「変化小」とみなす
+      let _dispLastRenderMs = 0;
+      let _dispLastDistKmNum = 0;
+      let _dispLastVelKmh = 0;
       let vehicleId = 'v1';
 
       // GPS 状態 (旧 line 2254-2257)
@@ -6814,7 +6826,34 @@
       //   表示不変時は textContent 比較で DOM 書込ゼロ。★課金経路 1 byte 不変★
       function _rafDisplayTick() {
         try {
-          _renderMeterReadout();
+          // ★⑤ 適応間引き★: 速度変化が小さい局面は最大 4Hz に間引く (= CPU/発熱低減)。
+          //   加減速 (= 速度変化大) の局面は full rate (60Hz) 描画で滑らかさを保つ。
+          //   ★距離値・getState には skip frame で一切触れない (= 表示読み出し層のみ・CPU 節約)。
+          //   getState 予測補間は now ベースのため frame skip しても次描画で時間差を吸収し連続表示。
+          const nowMs = Date.now();
+          const sinceMs = nowMs - _dispLastRenderMs;
+          // 直近 ★描画 frame★ の表示距離から proxy 速度 (km/h) を算出し、その変化で間引き判定。
+          const dtH = sinceMs / 3600000;
+          // _renderMeterReadout が更新する _lastDriveDistKm (= 文字列 km) を数値化して使う。
+          const curDistKmNum = _lastDriveDistKm != null ? parseFloat(_lastDriveDistKm) || 0 : 0;
+          const velKmh =
+            dtH > 0 && _dispLastRenderMs > 0
+              ? Math.abs(curDistKmNum - _dispLastDistKmNum) / dtH
+              : 0;
+          const velChange = Math.abs(velKmh - _dispLastVelKmh);
+          // 速度変化が小さい かつ 直近描画から _DISP_THROTTLE_MS 未満なら本 frame は描画しない。
+          if (
+            _dispLastRenderMs > 0 &&
+            velChange < _DISP_VEL_EPS_KMH &&
+            sinceMs < _DISP_THROTTLE_MS
+          ) {
+            // skip: getState を呼ばず CPU を消費しない。次 frame で再判定。
+          } else {
+            _renderMeterReadout();
+            _dispLastVelKmh = velKmh;
+            _dispLastDistKmNum = _lastDriveDistKm != null ? parseFloat(_lastDriveDistKm) || 0 : 0;
+            _dispLastRenderMs = nowMs;
+          }
         } catch (_) {
           /* rAF tick エラー・graceful skip・次 frame 継続 */
         }

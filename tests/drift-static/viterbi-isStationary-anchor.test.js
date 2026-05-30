@@ -37,7 +37,10 @@ describe('drift-static: map-matcher.js L3007 isStationary 強制 0 化 block 位
     // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合・importScripts + tracker manager ~58 行
     //   を上流に additive 追加): block が L3251 へ移動・window slice を (3240,3300) へ同期。
     //   freeze block (= mmIncrementM=0 / tentativeIncrementM=0 / _effectivelyStationary 宣言) は prod 1byte 不変。
-    const window = lines.slice(3240, 3300).join('\n');
+    // 2026-05-30 古スマホ対応 ① (= decoder メモリ LRU・decoders Map 上流に ~42 行 additive 追加):
+    //   block が L3297 へ移動・window slice を (3280,3340) へ同期。freeze block 自体は prod 1byte 不変
+    //   (= LRU は decoders Map の eviction 追加のみ・freeze / postMessage 経路には一切触れていない)。
+    const window = lines.slice(3280, 3340).join('\n');
     if (!/if\s*\(\s*_effectivelyStationary\s*\)/.test(window)) {
       throw new Error(
         'map-matcher.js L3147 周辺 (±10) に if (_effectivelyStationary) 未検出 (drift detected)'
@@ -65,7 +68,8 @@ describe('drift-static: map-matcher.js L3007 isStationary 強制 0 化 block 位
     let postMessageLineNo = -1;
     // 2026-05-29 PM: anchor pattern を if (_effectivelyStationary) へ更新・range も同期で拡張
     // 2026-05-30 白紙書き直し 第四弾 (= pipeline-distance 並列統合): block が L3251 へ移動・range を 3240..3310 へ同期。
-    for (let i = 3240; i < 3310 && i < lines.length; i++) {
+    // 2026-05-30 古スマホ対応 ① (= decoder メモリ LRU additive ~42 行): block が L3297・postMessage が L3324 へ移動・range を 3280..3360 へ同期。
+    for (let i = 3280; i < 3360 && i < lines.length; i++) {
       if (/if\s*\(\s*_effectivelyStationary\s*\)/.test(lines[i])) {
         forceZeroLineNo = i + 1;
       }

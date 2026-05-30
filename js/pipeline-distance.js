@@ -289,6 +289,12 @@ function RoadGraphRouter(decoder, opts) {
   this._graphCacheCap = this.opts.graphCacheCap || 64; // LRU 風上限 (メモリガード)
 }
 
+// ★古スマホ対応 ③ (snap/routing decode 重複排除) は撤回 (2026-05-30):
+//   実測ベンチ (tests/bench-oldphone-decode-dedup.js) で ③ON は ★0.91x (10% 遅い)★ と判明。
+//   理由: routing は既に _graphCache (署名キーのグラフキャッシュ) を持つため getRoadsNear は
+//   キャッシュミス時のみ呼ばれ (= 全点の約 5%)、dedup の decode 節約 < cell 収集オーバーヘッド。
+//   距離は bit 一致だが速度が逆効果のため不採用。routing は従来 getRoadsNear 経路のみ。
+
 // 道路頂点 (整数 lat*precision, lng*precision) → node キー
 RoadGraphRouter.prototype._nodeKey = function (rawLatInt, rawLngInt) {
   // decoder の precision で実座標化してから quantize で再量子化
@@ -352,7 +358,7 @@ RoadGraphRouter.prototype._buildLocalGraph = function (snapA, snapB) {
   const midLat = (snapA.snapLat + snapB.snapLat) / 2;
   const midLng = (snapA.snapLng + snapB.snapLng) / 2;
 
-  // 中点周辺 + 両端周辺の道路を集める (重複は roadIndex で排除)
+  // 中点周辺 + 両端周辺の道路を集める (重複は始点座標 + 点数キーで排除)
   const roadSet = {};
   const collect = function () {
     return function (lat, lng) {
@@ -618,7 +624,10 @@ MinHeap.prototype.pop = function () {
 //   stats: { points, snapHit, snapMiss, sameRoadSegs, routedSegs, straightSegs,
 //            dopplerSegs, routingFallbacks }
 // }
-function computeDistance(samples, decoder, opts) {
+// ★④ batch 内部処理を sync / async で共有する setup ヘルパ。
+//   ★sync computeDistance と computeDistanceAsync で ★完全に同一の処理ロジック★ を用いる
+//     (= yield 挿入位置以外は 1 byte も差が出ない)。距離は累積和で yield 可換。
+function _prepareBatch(samples, decoder, opts) {
   opts = opts || {};
   const cfg = {};
   for (const k in DEFAULTS) cfg[k] = opts[k] != null ? opts[k] : DEFAULTS[k];
@@ -643,7 +652,6 @@ function computeDistance(samples, decoder, opts) {
     return (a.t || 0) - (b.t || 0);
   });
 
-  let distance_m = 0;
   const bd = { sameRoadM: 0, routedM: 0, straightFallbackM: 0, dopplerM: 0, stationarySkipped: 0 };
   const stats = {
     points: pts.length,
@@ -656,21 +664,18 @@ function computeDistance(samples, decoder, opts) {
     routingFallbacks: 0,
   };
 
-  let prev = null; // 直前 sample
-  let prevSnap = null; // 直前 snap 結果 (null = snap 失敗)
-
-  for (let p = 0; p < pts.length; p++) {
-    const cur = pts[p];
+  // 区間処理の単一実装 (sync/async 共有)。state = {distance_m, prev, prevSnap} を破壊的に更新。
+  function processPoint(state, cur) {
     const snap = snapper
       ? snapper.snap(cur.lat, cur.lng)
       : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
     if (snap) stats.snapHit++;
     else stats.snapMiss++;
 
-    if (prev) {
+    if (state.prev) {
       // ── 静止判定 (ZUPT) ──
-      const spd = speedProvider(cur, prev);
-      const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+      const spd = speedProvider(cur, state.prev);
+      const disp = haversineM(state.prev.lat, state.prev.lng, cur.lat, cur.lng);
       let stationary = false;
       if (spd >= 0) {
         // (1) 速度源が静止を示す → 加算 0
@@ -678,24 +683,39 @@ function computeDistance(samples, decoder, opts) {
       } else {
         // (2) ★spd 不明 (-1)★: 変位 / accuracy ベース fallback で停車ジッタを弾く。
         //     spd-optional 運用や spd 欠落フレーム・spd 非対応端末での creep 再発防止。
-        if (isStationaryByDisplacement(prev, cur, disp, cfg)) stationary = true;
+        if (isStationaryByDisplacement(state.prev, cur, disp, cfg)) stationary = true;
       }
       if (stationary) {
         bd.stationarySkipped++;
         // 加算せず prev/prevSnap だけ更新
-        prev = cur;
-        prevSnap = snap;
-        continue;
+        state.prev = cur;
+        state.prevSnap = snap;
+        return;
       }
 
-      const added = stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, stats);
-      if (added > 0) distance_m += added;
+      const added = stepDistance(
+        decoder,
+        router,
+        state.prev,
+        cur,
+        state.prevSnap,
+        snap,
+        spd,
+        cfg,
+        bd,
+        stats
+      );
+      if (added > 0) state.distance_m += added;
     }
 
-    prev = cur;
-    prevSnap = snap;
+    state.prev = cur;
+    state.prevSnap = snap;
   }
 
+  return { pts: pts, bd: bd, stats: stats, processPoint: processPoint };
+}
+
+function _finishBatch(distance_m, bd, stats) {
   return {
     distance_m: distance_m,
     breakdown: {
@@ -707,6 +727,20 @@ function computeDistance(samples, decoder, opts) {
     },
     stats: stats,
   };
+}
+
+// ★古スマホ対応 ④ (batch replay の Worker yield 版 computeDistanceAsync) は撤回 (2026-05-30):
+//   本番は createDistanceTracker.ingest の逐次計算のみで、batch replay 経路が存在しない
+//   (セッション復元は meter.setDistance(=v) で値を直接戻すため再計算しない)。
+//   = yield する対象が本番に無いため不採用。batch computeDistance は同期のまま (テスト/検証用)。
+
+function computeDistance(samples, decoder, opts) {
+  const prep = _prepareBatch(samples, decoder, opts);
+  const state = { distance_m: 0, prev: null, prevSnap: null };
+  for (let p = 0; p < prep.pts.length; p++) {
+    prep.processPoint(state, prep.pts[p]);
+  }
+  return _finishBatch(state.distance_m, prep.bd, prep.stats);
 }
 
 // 1 区間 (prev→cur) の道なり距離を算出して内訳を更新。戻り値 = 加算メートル。

@@ -153,6 +153,50 @@ function _maybeAdjustViterbiN() {
 const decoders = new Map();
 const loadedPrefs = new Set();
 
+// ★古スマホ対応 ① (2026-05-30・decoder メモリ LRU・OOM 最優先対策):
+//   旧: decoders Map に eviction が一切なく、load した県の RoadDecoder (bytes ×0.75 + grid +
+//       offsetTable) が永久常駐 → 少 RAM 端末 (iOS 300〜450MB / 2〜3GB Android) で
+//       ページクラッシュ (Jetsam kill / WebKit 65% strict) の現実的危険。
+//   新: 常駐県数を LRU で上限 cap (既定 4)。eviction 時に RoadDecoder の bytes/grid/offsetTable
+//       を null 化し GC 解放・loadedPrefs から除外・対応する pipeline tracker も破棄。
+//       県跨ぎは既存 enqueueRetry / loadRoads on-demand 再 load で救済 (代行は同一エリア移動が大半)。
+//   ★距離不変★: decode 結果・snap 判定・routing 発火条件・弧長計算は一切変えない。
+//       変えるのは「何県を RAM に常駐させるか」だけ。再 load された decoder は同一バイト列から
+//       同一結果を再構築する。tracker は per-tick deltaM (累積 total は truth でない・meter が
+//       state.distance_m に積算) のため、再 load 後の初 ingest が 1 回 deltaM=0 ('first') に
+//       なるのみ (= snap-miss gap と同等・許容)。
+const DECODER_LRU_CAP = 4;
+const _decoderRecency = []; // pref を LRU 順 (末尾 = 直近使用)
+function _touchDecoder(pref) {
+  const i = _decoderRecency.indexOf(pref);
+  if (i >= 0) _decoderRecency.splice(i, 1);
+  _decoderRecency.push(pref);
+}
+function _evictDecoderLRU() {
+  while (_decoderRecency.length > DECODER_LRU_CAP) {
+    const victim = _decoderRecency.shift();
+    if (victim == null) break;
+    const dec = decoders.get(victim);
+    if (dec) {
+      // GC 解放のため重量フィールドを明示的に null 化 (bytes/grid/offsetTable)。
+      dec.bytes = null;
+      dec.grid = null;
+      dec.offsetTable = null;
+    }
+    decoders.delete(victim);
+    loadedPrefs.delete(victim);
+    // 対応する pipeline tracker を破棄 (= 次回 _getPipelineTracker で再生成・距離 truth は meter 側)。
+    const tk = _pipelineTrackers.get(victim);
+    if (tk) _pipelineTrackers.delete(victim);
+  }
+}
+function _setDecoderLRU(pref, dec) {
+  decoders.set(pref, dec);
+  loadedPrefs.add(pref);
+  _touchDecoder(pref);
+  _evictDecoderLRU();
+}
+
 // ★白紙書き直し 第四弾 (2026-05-30・新距離エンジン並列トラッカ):
 //   pipeline-distance.js の createDistanceTracker を県別に lazy 生成し、GPS 受信毎に
 //   ingest して道路 snap 道なり増分 (= ingest().deltaM) を算出する。これが新 meter の
@@ -168,6 +212,8 @@ function _getPipelineTracker(pref) {
   if (!pref) return null;
   const dec = decoders.get(pref);
   if (!dec) return null;
+  // ★① LRU touch: 走行中の現在地県を「直近使用」に更新し eviction 対象から外す。
+  _touchDecoder(pref);
   let tk = _pipelineTrackers.get(pref);
   if (!tk) {
     try {
@@ -2461,6 +2507,8 @@ self.onmessage = function (e) {
   if (msg.type === 'loadRoads') {
     try {
       if (loadedPrefs.has(msg.pref)) {
+        // ★① 既 load 済でも recency を touch (再要求された県を eviction 対象から外す)。
+        _touchDecoder(msg.pref);
         self.postMessage({
           type: 'roadsLoaded',
           pref: msg.pref,
@@ -2472,8 +2520,8 @@ self.onmessage = function (e) {
       }
       const dec = new self.RoadDecoder(msg.roadsData);
       dec.buildOffsetTable();
-      decoders.set(msg.pref, dec);
-      loadedPrefs.add(msg.pref);
+      // ★① LRU 登録 (= decoders.set + loadedPrefs.add + recency touch + 上限 eviction)。
+      _setDecoderLRU(msg.pref, dec);
       self.postMessage({
         type: 'roadsLoaded',
         pref: msg.pref,
