@@ -63,6 +63,26 @@ const DEFAULTS = {
   stationaryDispMaxM: 40.0, // accuracy 由来閾値の上限 (acc 巨大時でも過剰緩和しない天井)
   stationaryAccSigma: 2.0, // 変位閾値 = 連続2点 acc を合成した σ × この係数
   stationaryAccM: 30.0, // acc 無し/無効点の既定 accuracy (m)
+
+  // ★Fix④ gap-garbage guard (2026-05-31・★設計変更宣言★・iPhone13 creep+jump 根治・never-over)★
+  //   実機 iPhone13: 79 秒の GPS 穴の後、accuracy 1082m のゴミ位置 (実は停止中) へ 470m 飛び、
+  //   さらにそのゴミ点から実道路へ戻る 798m の弦が出る。穴中は spd 不明 (-1) で coast/straight が
+  //   この弦を加算 → ★停止/ゴミ位置由来の 470m creep + 798m jump (過大課金)★。
+  //   対策: 区間の ★どちらかの端点★ の accuracy がゴミ (> gapGuardAccM) なら、その位置は信用
+  //   できず ★距離を作らない★ (return 0)。入口/出口 両方向のゴミ弦を遮断する。
+  //   never-over 専用 (距離を増やさない方向のみ)。良精度の穴脱出 (トンネル等) は従来通り加算。
+  //   実機調査: Android(maxAcc 10m)/SE(maxAcc 30m) は acc>gapGuardAccM 点が ★ゼロ★ → 両端末
+  //   完全不変。発火は iPhone13 のゴミ点に接する 2 区間のみ。
+  gapGuardAccM: 100, // 端点 accuracy がこれ超 = ゴミ位置 → 弦を加算しない (移動上限 acc 35m の十分上)
+  // ★Fix④ parked-gap guard (2026-05-31・iPhone13 creep 根治・never-over)★:
+  //   長い GPS 穴 (dt > gapStationarySec) を ★停止状態で入った★ (穴入口点 prev.spd が
+  //   停止 < stationarySpdMps) 場合、穴中の位置ドリフトは「駐車中の GPS drift」であり実走行では
+  //   ないので ★距離を加算しない★。実機 iPhone13: 停止中 (spd≈0.04) に入った 112s/144s の穴で
+  //   58m/42m の drift が stationaryDispMaxM(40m) 天井を超え creep 計上されていた事象を遮断。
+  //   Android/SE は「停止で入る 30s 超の穴」が ★ゼロ★ → 完全不変。
+  //   never-over 専用。穴を ★走行中★ (prev.spd >= stationarySpdMps) に入った場合は対象外
+  //   (= トンネル等の実走行穴は従来の coast/routing で正常加算・不変)。
+  gapStationarySec: 30, // この秒超の穴を「長い穴」とする (通常 1Hz・短欠落は対象外)
 };
 
 // ─── 幾何ヘルパ ───────────────────────────────────────────────
@@ -764,7 +784,8 @@ function _prepareBatch(samples, decoder, opts) {
         spd,
         cfg,
         bd,
-        stats
+        stats,
+        -1 // batch (computeDistance) は coast 状態を持たない → 従来 (haversine) 挙動を維持
       );
       if (added > 0) state.distance_m += added;
     }
@@ -805,8 +826,56 @@ function computeDistance(samples, decoder, opts) {
 }
 
 // 1 区間 (prev→cur) の道なり距離を算出して内訳を更新。戻り値 = 加算メートル。
-function stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, stats) {
+//   coastSpdMps: 直近 snap 成功点で確立した連続保持速度 (m/s・-1=未確立)。GPS 穴 (snap 失敗連続)
+//   中に当該点速度が不明な区間を「等速保持 × dt」で補間する (= coasting・never-over)。
+//   batch (computeDistance) は coast 状態を持たないため -1 を渡し従来 (haversine) 挙動を維持する。
+function stepDistance(
+  decoder,
+  router,
+  prev,
+  cur,
+  prevSnap,
+  snap,
+  spd,
+  cfg,
+  bd,
+  stats,
+  coastSpdMps
+) {
   const straight = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+  if (typeof coastSpdMps !== 'number') coastSpdMps = -1;
+
+  // ★Fix④ gap-garbage guard (2026-05-31・iPhone13 creep 根治・never-over)★:
+  //   長い GPS 穴 (dtSec > gapGuardSec) の後、到達点の accuracy がゴミ (> gapGuardAccM) なら、
+  //   その区間は ★距離を加算しない★ (信用できない位置同士を結んで距離を作らない)。
+  //   = iPhone13 の 79s 穴→acc 1082m への 470m creep を遮断。Android/SE は該当点ゼロで不変。
+  //   never-over 専用: 距離を増やすことは一切なく、ゴミ穴の過大加算を 0 にするだけ。
+  if (cfg.gapGuardAccM != null) {
+    const _accCur = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
+    const _accPrev = typeof prev.acc === 'number' && prev.acc >= 0 ? prev.acc : -1;
+    // 区間の ★どちらかの端点★ が acc ゴミ (> gapGuardAccM) なら、その位置は信用できず
+    //   弦距離を作らない (return 0)。iPhone13: acc1082m へ 470m 飛ぶ区間 (cur ゴミ) と、
+    //   その点から実道路へ戻る 798m 区間 (prev ゴミ・dt 2.3s) の ★両方★ を遮断
+    //   (= creep 470m + jump 798m を同時根治)。
+    //   dt 条件は不要: ゴミ acc 点は dt の長短に依らず位置が信用できないため。
+    //   Android(maxAcc 10m)/SE(maxAcc 30m) は acc>100m 点ゼロ → 完全不変 (実機調査済)。
+    //   never-over 専用 (距離を作らない方向のみ)。良精度の穴脱出 (トンネル等) は従来通り加算。
+    if (_accCur > cfg.gapGuardAccM || _accPrev > cfg.gapGuardAccM) {
+      stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
+      bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
+      return 0;
+    }
+    // ★parked-gap guard★: 長い穴を ★停止状態で入った★ なら穴中 drift は駐車 drift → 加算しない。
+    if (cfg.gapStationarySec != null) {
+      const _dt = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      const _prevSpd = typeof prev.spd === 'number' ? prev.spd : -1;
+      if (_dt > cfg.gapStationarySec && _prevSpd >= 0 && _prevSpd < cfg.stationarySpdMps) {
+        stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
+        bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
+        return 0;
+      }
+    }
+  }
 
   // ── 両端 snap 成功 ──
   if (prevSnap && snap) {
@@ -880,8 +949,8 @@ function stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, 
   }
 
   // ── どちらか snap 失敗 → Doppler 速度積分で補間 ──
+  const dtSec = ((cur.t || 0) - (prev.t || 0)) / 1000;
   if (spd >= 0) {
-    const dtSec = ((cur.t || 0) - (prev.t || 0)) / 1000;
     if (dtSec > 0 && dtSec < 120) {
       const dop = spd * dtSec;
       // 過大ガード: Doppler 値が直線距離の routingMaxRatio 倍超なら直線
@@ -894,6 +963,30 @@ function stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, 
       bd.dopplerM += dop;
       return dop;
     }
+  }
+
+  // ── ★coasting★: 当該点速度が不明 (spd<0) かつ 直近 snap 成功点で速度を確立済 (coastSpdMps>=0) ──
+  //   GPS 穴 (トンネル/ビル街の snap 失敗連続) 中も「直前の Doppler/GPS 点速度を等速保持 × dt」で
+  //   distance_m を前進させる。点速度ベースのため過大バイアスが付かない (Ranacher)。
+  //   ★加速度二重積分はしない (発散)・等速保持のみ★。穴脱出 (snap 成功) で実速度に即復帰。
+  if (coastSpdMps >= 0 && dtSec > 0 && dtSec < 120) {
+    let coast = coastSpdMps * dtSec;
+    // ★never-over クランプ (2026-05-31 監査官指摘・課金安全の要)★:
+    //   spd 欠落点を過去の保持速度で coast すると、穴中に車が減速した場合 (保持速度 > 実速度) に
+    //   実際の変位を超えて過大課金しうる (最大 +44% 実測)。観測された GPS 弦 straight (= 両点間の
+    //   実直線変位) を never-over 天井とし、coast がこれを超えないようにする。
+    //   straight は path 長の下限だが、過大ゼロ (認定 −4%〜0%) を最優先し実測変位で coast を抑える
+    //   (発火は spd 欠落かつ減速の稀ケースのみ・通常は Doppler 点速度で正確)。
+    if (straight > 0 && coast > straight) coast = straight;
+    // 同じ過大ガード: coast が直線距離の routingMaxRatio 倍超なら直線 (= GPS 復活点との弦の妥当倍率内)。
+    if (straight > 0.1 && coast / straight > cfg.routingMaxRatio) {
+      stats.straightSegs++;
+      bd.straightFallbackM += straight;
+      return straight;
+    }
+    stats.coastSegs = (stats.coastSegs || 0) + 1;
+    bd.coastM = (bd.coastM || 0) + coast;
+    return coast;
   }
 
   // ── 最終 fallback: 直線 ──
@@ -938,10 +1031,19 @@ function createDistanceTracker(decoder, opts) {
   let total = 0;
   let prev = null;
   let prevSnap = null;
+  // ★coasting 速度★ (B): 直近の有効点速度 (m/s・-1=未確立)。GPS 穴中の補間に使う。
+  let coastSpdMps = -1;
   // breakdown/stats を区間分類のため保持 (stepDistance が要求する構造)
   let bd, stats;
   function freshAccum() {
-    bd = { sameRoadM: 0, routedM: 0, straightFallbackM: 0, dopplerM: 0, stationarySkipped: 0 };
+    bd = {
+      sameRoadM: 0,
+      routedM: 0,
+      straightFallbackM: 0,
+      dopplerM: 0,
+      coastM: 0,
+      stationarySkipped: 0,
+    };
     stats = {
       points: 0,
       snapHit: 0,
@@ -950,6 +1052,7 @@ function createDistanceTracker(decoder, opts) {
       routedSegs: 0,
       straightSegs: 0,
       dopplerSegs: 0,
+      coastSegs: 0,
       routingFallbacks: 0,
     };
   }
@@ -959,6 +1062,7 @@ function createDistanceTracker(decoder, opts) {
     if (stats.sameRoadSegs > beforeStats.sameRoadSegs) return 'sameRoad';
     if (stats.routedSegs > beforeStats.routedSegs) return 'routed';
     if (stats.dopplerSegs > beforeStats.dopplerSegs) return 'doppler';
+    if ((stats.coastSegs || 0) > (beforeStats.coastSegs || 0)) return 'coast';
     if (stats.straightSegs > beforeStats.straightSegs) return 'straight';
     return 'straight';
   }
@@ -1037,11 +1141,42 @@ function createDistanceTracker(decoder, opts) {
         routedSegs: stats.routedSegs,
         straightSegs: stats.straightSegs,
         dopplerSegs: stats.dopplerSegs,
+        coastSegs: stats.coastSegs || 0,
       };
-      const added = stepDistance(decoder, router, prev, cur, prevSnap, snap, spd, cfg, bd, stats);
+      // ★coasting (B)★: この区間は「前点までに確立した coastSpdMps」で補間する。
+      //   よって stepDistance には更新前の coastSpdMps を渡す (= 因果順序の保持)。
+      const added = stepDistance(
+        decoder,
+        router,
+        prev,
+        cur,
+        prevSnap,
+        snap,
+        spd,
+        cfg,
+        bd,
+        stats,
+        coastSpdMps
+      );
       const delta = added > 0 ? added : 0;
       total += delta;
       const reason = classifyReason(beforeStats);
+
+      // ★coastSpdMps 更新 (B-1 + B-2・never-over)★:
+      //   ・当該点速度 (spd) が判明 → coasting 速度を実速度で再確立。ただし ★上方は即時・下方も即時★
+      //     とすると穴中の単発 spike で過大化しうるため、減速 (spd < 現 coast) は即反映 (下方更新)、
+      //     加速側も実速度を採用 (snap 成功点 = 道路上を読めており速度が信頼できる)。
+      //   ・spd 不明 (穴中) → coastSpdMps を僅かに減衰 (0.97)。穴が伸びるほど保守側へ寄せ
+      //     never-over を担保 (= 恒久過小係数ではなく穴中の不確かさ処理・snap 復帰で実速度に即解除)。
+      if (spd >= 0) {
+        if (snap) {
+          coastSpdMps = spd; // snap 成功 = 信頼できる点速度で再確立 (上方/下方とも)
+        } else if (coastSpdMps < 0 || spd < coastSpdMps) {
+          coastSpdMps = spd; // snap 失敗でも減速側は即反映 (過大防止)
+        }
+      } else if (coastSpdMps >= 0) {
+        coastSpdMps = coastSpdMps * 0.97; // 穴中 (spd 不明) は単調減衰で保守側へ
+      }
 
       prev = cur;
       prevSnap = snap;
@@ -1054,6 +1189,7 @@ function createDistanceTracker(decoder, opts) {
       total = 0;
       prev = null;
       prevSnap = null;
+      coastSpdMps = -1;
       freshAccum();
       // ★router/snapper を新インスタンスで完全再生成 (= キャッシュ等の内部状態漏れを根絶)。
       //   旧実装はキャッシュ Map のみ差し替えていたが reset 後再 ingest で 10m 級の残留が出たため、

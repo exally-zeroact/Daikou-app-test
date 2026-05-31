@@ -38,10 +38,12 @@ describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / �
     //   accel主体 pattern が L858 へ移動・window 同期。
     // ★2026-05-30 §4 死コード一掃 (_calcAccelLayerHint + 定数 + _prevAccuracy 除去) で・
     //   -57 行 shift。accel主体 pattern が L801 へ移動・window 同期 (slice 790..815)。
-    const window = lines.slice(790, 815).join('\n');
+    // ★2026-05-31 Fix④ (Doppler-速度ゲート位置受理 + CONFIG.trust_position_acc_m 追加) で
+    //   +34 行 shift。accel主体 pattern が L835 へ移動・window 同期 (slice 824..849)。
+    const window = lines.slice(824, 849).join('\n');
     if (!/finalStationary\s*=\s*c1Stationary\s*&&\s*!c2Moving/.test(window)) {
       throw new Error(
-        'gps-worker.js L801 周辺 (±10) に 加速度主体 静止判定 pattern 未検出 (drift detected)'
+        'gps-worker.js L835 周辺 (±10) に 加速度主体 静止判定 pattern 未検出 (drift detected)'
       );
     }
   });
@@ -57,11 +59,13 @@ describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / �
     // ★2026-05-28 Fix① v2: dwell time logic 追加で +15 行 shift。accel-null pattern が L830 へ。
     // ★2026-05-30 §4 死コード一掃で -57 行 shift。accel-null pattern が L773 へ移動・
     //   window 同期 (slice 762..787)。
-    const window = lines.slice(762, 787).join('\n');
+    // ★2026-05-31 Fix④ (Doppler-速度ゲート位置受理 + CONFIG.trust_position_acc_m 追加) で
+    //   +34 行 shift。accel-null pattern が L807 へ移動・window 同期 (slice 796..821)。
+    const window = lines.slice(796, 821).join('\n');
     // accelVariance === null && accelDeviation === null で位置半径 fallback 採用
     if (!/accelVariance\s*===\s*null\s*&&\s*accelDeviation\s*===\s*null/.test(window)) {
       throw new Error(
-        'gps-worker.js L801 周辺 (±10) に 加速度 null 救済 pattern 未検出 (drift detected)'
+        'gps-worker.js L807 周辺 (±10) に 加速度 null 救済 pattern 未検出 (drift detected)'
       );
     }
   });

@@ -83,6 +83,17 @@ let CONFIG = {
   //     creep 33m を出した事象 (run 26553931113 で観測) を遮断。
   //   3 step = 1Hz 端末で 3 秒・5Hz 端末で 0.6 秒。実走行(持続)は通過・spike は遮断。
   high_speed_dwell_steps: 3,
+  // ★Fix④ (2026-05-31・★設計変更宣言★・過少の根治・billing-critical):
+  //   実機分析: iPhoneSE/iPhone13 で Doppler 速度が 49m/s(176km/h・実 13m/s)の嘘を返し、
+  //   jump/doppler ゲートが ★acc 2m の良い位置 fix★ を「速度が異常」を理由に丸ごと棄却 →
+  //   良いfixが消え距離が過少化(SE −3.2/−13.9%)。Android は Doppler 安定で GPSREJ 0 = 正確。
+  //   根治: ★位置 fix と速度成分を分離★。jump/doppler ゲートは「Doppler 速度の嘘」を検出するが
+  //   位置 fix の精度(accuracy)が良ければ ★位置は信頼できる★ → 位置は受理し、速度成分だけ無効化。
+  //   この accuracy 以下の fix は jump/doppler ゲートで ★棄却しない★ (= lastPosition を更新)。
+  //   業界準拠: GNSS の擬似距離(位置)と Doppler(速度)は独立観測量・片方の異常で他方を捨てない。
+  //   never-over: 良いfixを受理 → 過少が真値へ回復(増える方向)。位置精度が悪い時のみ従来通り棄却。
+  //   観測 acc: 良fix < 10m / 移動中緩和上限 20m → 15m を「位置信頼境界」とする(両者の間)。
+  trust_position_acc_m: 15,
 };
 
 // ─── 状態変数（Worker内で保持） ───
@@ -585,6 +596,11 @@ function processPosition(data) {
   }
 
   // ② ジャンプ判定
+  //   ★Fix④ (2026-05-31): jump は ★位置の実移動 (haversine/dt)★ で判定する (= 既に Doppler 速度
+  //     ではなく実位置移動・本来の正しい信号)。jump_limit 超は「真の位置テレポート」(= multipath /
+  //     大 outlier) なので acc が良くても ★位置ごと棄却維持★ (good acc は teleport を真実化しない)。
+  //     過少の主犯は jump ではなく ②-1 Doppler-速度ゲート (= 速度の嘘で良い位置を捨てる) のため、
+  //     位置受理の救済は Doppler ゲート側でのみ行う (下記 Fix④)。
   if (lastPosition) {
     const jump = calcDistance(lastPosition.lat, lastPosition.lng, lat, lng);
     const timeDiff = (now - lastPosition.timestamp) / 1000;
@@ -617,16 +633,34 @@ function processPosition(data) {
       const dopplerMs = speedKmh / 3.6;
       const speedDiff = Math.abs(dopplerMs - haverMs);
       if (speedDiff > 10) {
-        wlog('[GPS] Doppler-haversine 速度不整合 skip: diff=' + speedDiff.toFixed(1) + 'm/s');
-        _postGpsDbg({
-          rej: 'doppler',
-          spd: speedKmh,
-          src: speedSrc,
-          acc: accuracy,
-          lim: accLimit,
-          stat: isStationary,
-        });
-        return null;
+        // ★Fix④ (2026-05-31): Doppler 速度の嘘 (49m/s 等) を検出。だが ★位置 fix が良い精度
+        //   (< trust_position_acc_m) なら位置は信頼できる★ → 位置は受理し ★速度成分だけ無効化★
+        //   する (= 後段で Doppler 速度を主信号にしない設計と整合・位置は lastPosition 更新)。
+        //   accuracy が悪い時のみ「真の異常 GPS 点」として従来通り位置ごと棄却 (過大の穴ゴミ防止)。
+        //   これが SE 過少の主犯の根治: 良いfixを Doppler の嘘で捨てなくなる。
+        if (accuracy <= CONFIG.trust_position_acc_m) {
+          wlog(
+            '[GPS] Doppler-haversine 速度不整合 diff=' +
+              speedDiff.toFixed(1) +
+              'm/s・acc良好(' +
+              accuracy.toFixed(1) +
+              'm)→位置受理(速度成分のみ distrust)'
+          );
+          // 位置は受理 → 棄却しない。速度成分の distrust は後段の静止判定が accel 主体で
+          // GPS 速度を主信号にしないため、ここで speedKmh を触らずとも distance には Doppler を
+          // 主距離源にしない pipeline (Viterbi 確定経路) が担保。位置 fix のみ前進させる。
+        } else {
+          wlog('[GPS] Doppler-haversine 速度不整合 skip: diff=' + speedDiff.toFixed(1) + 'm/s');
+          _postGpsDbg({
+            rej: 'doppler',
+            spd: speedKmh,
+            src: speedSrc,
+            acc: accuracy,
+            lim: accLimit,
+            stat: isStationary,
+          });
+          return null;
+        }
       }
     }
   }

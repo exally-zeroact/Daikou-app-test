@@ -80,6 +80,29 @@ function installClock(startMs) {
 function advance(ms) {
   _clock += ms;
 }
+// ★rAF 相当の 60Hz ポーリング★ (= 実機の描画ループ): display は rAF が毎フレーム読む。
+//   ms の間を ~60Hz の sub-frame で進めつつ毎フレーム getState() を呼ぶ。
+//   (旧 harness は GPS tick 後 1 回しか読まず inter-tick の数千 ms を無描画にしていたが、
+//    実機 rAF は連続描画なので、表示層の dtFrame 上限 (タブ復帰飛び防止) と整合しない。
+//    実機挙動に合わせて連続ポーリングへ正直化。各 sub-frame で onFrame コールバックも回す。)
+function pollRAF(getState, ms, onFrame) {
+  const FRAME_MS = 1000 / 60;
+  let remaining = ms;
+  let last = null;
+  while (remaining > 1e-6) {
+    const step = remaining > FRAME_MS ? FRAME_MS : remaining;
+    _clock += step;
+    last = getState();
+    if (onFrame) onFrame(last);
+    remaining -= step;
+  }
+  if (last === null) {
+    _clock += ms;
+    last = getState();
+    if (onFrame) onFrame(last);
+  }
+  return last;
+}
 function restoreClock() {
   Date.now = _realDateNow;
 }
@@ -137,15 +160,37 @@ describe('★STEP0: メーター catch-up + latch invariant (= 過大請求根�
       const t = i * 5;
       _clock = gps(t, { speedKmh }).timestamp; // GPS 到着時刻 = trace timestamp
       Meter.update(gps(t, { speedKmh }));
-      advance(readDelayMs); // 新フレーム到着後・実時間経過してから rАF が読む
-      const s = Meter.getState();
-      frames.push({
-        t,
-        display: s.display_distance_m || 0,
-        distance_m: s.distance_m || 0,
-        business_display: s.business_display_distance_m || 0,
-        business_distance_m: s.business_distance_m || 0,
-      });
+      // ★実機 rAF 相当★: GPS tick から次 tick まで (= 5s) を 60Hz で連続ポーリングし、
+      //   各 sub-frame で display を読む。readDelayMs 経過時点の値を当該 tick の代表 frame とする。
+      let rep = null;
+      let elapsed = 0;
+      pollRAF(
+        () => Meter.getState(),
+        5000,
+        (s) => {
+          elapsed += 1000 / 60;
+          if (rep === null && elapsed >= readDelayMs) {
+            rep = {
+              t,
+              display: s.display_distance_m || 0,
+              distance_m: s.distance_m || 0,
+              business_display: s.business_display_distance_m || 0,
+              business_distance_m: s.business_distance_m || 0,
+            };
+          }
+        }
+      );
+      if (rep === null) {
+        const s = Meter.getState();
+        rep = {
+          t,
+          display: s.display_distance_m || 0,
+          distance_m: s.distance_m || 0,
+          business_display: s.business_display_distance_m || 0,
+          business_distance_m: s.business_distance_m || 0,
+        };
+      }
+      frames.push(rep);
     }
     return frames;
   }
@@ -254,17 +299,22 @@ describe('★STEP0: メーター catch-up + latch invariant (= 過大請求根�
     for (let k = 0; k < 30; k++) {
       _clock = stopGps.timestamp + k * 1000;
       Meter.update({ ...stopGps, timestamp: stopGps.timestamp + k * 1000 });
-      advance(200);
-      const s = Meter.getState();
-      lastDisp = s.display_distance_m || 0;
-      lastDist = s.distance_m || 0;
-      // 単調非減少
-      if (lastDisp < prevDisp - 1e-6) {
-        throw new Error(
-          `(c) FAIL: 停車中 display が後退 k=${k} ${lastDisp.toFixed(3)} < ${prevDisp.toFixed(3)}`
-        );
-      }
-      prevDisp = Math.max(prevDisp, lastDisp);
+      // ★実機 rAF 相当★: 1 GPS tick の間 (1s) を 60Hz で連続ポーリング (単調性も全 sub-frame で確認)。
+      pollRAF(
+        () => Meter.getState(),
+        1000,
+        (s) => {
+          const d = s.display_distance_m || 0;
+          if (d < prevDisp - 1e-6) {
+            throw new Error(
+              `(c) FAIL: 停車中 display が後退 k=${k} ${d.toFixed(3)} < ${prevDisp.toFixed(3)}`
+            );
+          }
+          prevDisp = Math.max(prevDisp, d);
+          lastDisp = d;
+          lastDist = s.distance_m || 0;
+        }
+      );
     }
     // 収束: 停車後 display は distance_m に着地している (= 乖離放置なし)
     const gap = Math.abs(lastDist - lastDisp);

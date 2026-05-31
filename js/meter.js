@@ -96,6 +96,9 @@ const Meter = (() => {
   const DISP_LATCH_GAP_M = 0.01; // この残差未満なら target に着地 (= 収束扱い)
   const DISP_RATE_EMA_ALPHA = 0.5; // 等速ペース rate の EMA 平滑係数 (= 直近瞬時レートの寄与・0<α≤1)
   const DISP_RATE_MAX_MPS = 55; // 等速ペース rate の物理上限 (= 198km/h・cold-start/glitch の瞬時値 spike を EMA から除外)
+  const DISP_MAX_FRAME_DT_S = 0.4; // dtFrame 上限秒 (= タブ復帰/描画間引きの一撃飛び防止・残差は次フレーム連続収束)
+  const DISP_CLOSE_TAU_S = 3.0; // gap 収束 spring の時定数 (= lump/復帰時に gap を τ 秒で詰める)
+  const DISP_CATCHUP_MAX_MPS = 24; // 追従速度上限 (= 大 lump 復帰の「ドン」抑制・直近走行速度の妥当倍率内)
   void DISP_CATCHUP_TAU_S; // 等速ペース化で未使用 (= 形維持・lint 黙らせ)
 
   // ─── fareConfig (v2・後方互換維持) ───
@@ -843,14 +846,27 @@ const Meter = (() => {
     }
 
     // ── 等速で gap を詰める ──
-    const dtFrame = lastDisplayTime !== null ? (now - lastDisplayTime) / 1000 : 0;
+    let dtFrame = lastDisplayTime !== null ? (now - lastDisplayTime) / 1000 : 0;
     if (!(dtFrame > 0)) {
       // 時間未経過 (= 同一 tick 再読) は据え置き (= overshoot しない・単調維持)。
       return display;
     }
+    // ★1 フレーム上限 (frame clamp)★: タブ復帰/描画間引きで dtFrame が巨大化 (例 30s) した時の
+    //   一撃飛びを防ぐ。dtFrame そのものを上限で頭打ちにし、残り gap は次フレーム以降で連続収束。
+    //   通常の GPS cadence (1〜5s poll) はこの上限以内なので不変。
+    if (dtFrame > DISP_MAX_FRAME_DT_S) dtFrame = DISP_MAX_FRAME_DT_S;
     const gap = tgt - display;
     const rate = typeof velRef.v === 'number' && velRef.v > 0 ? velRef.v : 0;
-    let step = rate * dtFrame; // 等速ペース前進量
+    // ★gap 収束 spring (1 項)★: rate (実速度ペース) を主とし、gap が残る時のみ gap/τ で下から
+    //   詰める。定速走行時は gap が 1 フレーム分しか無いので寄与が小さく等速ペースを維持。
+    //   lump/穴復帰/停車前減速窓では spring が効いて永続 deficit を τ 秒で解消する
+    //   (= 停車時残差 0・収束残差 0)。山 (cap/gain/bleed) は作らない。
+    const closeRate = gap / DISP_CLOSE_TAU_S;
+    let eff = rate + closeRate; // 実速度ペース + gap 収束 spring (= 永続 lag を残さず target に収束)
+    // ★追従速度上限★: 大 lump 復帰 (穴明け一括加算) を 55m/s 張り付きの「ドン」でなく
+    //   直近走行速度の妥当倍率内で飲む。定速/停車では eff がこの上限を下回るため不発。
+    if (eff > DISP_CATCHUP_MAX_MPS) eff = DISP_CATCHUP_MAX_MPS;
+    let step = eff * dtFrame; // 等速ペース前進量
     if (!(step > 0)) {
       // rate 未確立 (= 最初の数 fix) で gap が残る場合のみ、収束保証のため
       //   残差が極小なら着地。そうでなければ据え置き (= 次 fix で rate 確立後に等速で詰める)。
