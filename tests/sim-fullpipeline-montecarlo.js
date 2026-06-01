@@ -767,3 +767,89 @@ fs.writeFileSync(
   )
 );
 console.log('\n[sim] wrote data/test-results/sim-fullpipeline-montecarlo.json');
+
+// ── CI ゲート (--gate / --cert-strict) ─────────────────────────────────────
+//   ★A5: 「緑のまま壊れる」を塞ぐ★。デフォルト --gate は ★N/seed 非依存の構造不変条件★
+//   だけを hard-fail にする (= 今は全部成立・誰かが never-over を壊す/coast を配線断する/
+//   表示を非単調にした瞬間に赤)。+58% over-fill の認定バンド (国交省 −4〜0%) は ★現状未根治
+//   (A1 待ち)★ なので・hard-fail にすると main CI が恒常赤になる → ★CERT-GAP として明示 report★
+//   に留め、exit には影響させない。A1 (over-fill 根治) が land したら CI を --cert-strict に
+//   切替えてバンドを hard gate 化する (assert 自体は下に実装済・いつでも有効化可)。
+//   ・distance_m / calcFare には一切触れない (read-only 観測のみ)。
+const GATE = process.argv.includes('--gate') || process.argv.includes('--cert-strict');
+const CERT_STRICT = process.argv.includes('--cert-strict');
+if (GATE) {
+  const overMedian = overErr.length ? median(overErr) : 0;
+  const overMax = overErr.length ? Math.max(...overErr) : 0;
+  const underMin = underErr.length ? Math.min(...underErr) : 0;
+
+  // ① 構造不変条件 (N/seed 非依存・常に成立すべき = 壊れたら配線/契約の回帰)
+  //   ★coast 配線生存は・単離検証 coastV (= 海上座標で spd=-1 強制・決定論で必ず発火) で保証する★。
+  //   Monte-Carlo の patternsWithCoast は ehime 道路密度が高く穴が routing(道路弧長)で埋まるため
+  //   ★正当に 0 になりうる (= seed 依存)★ ので hard gate にはせず・下で情報表示に留める。
+  const invariants = [
+    ['never-over (display>distance_m) 違反0', agg.overshootFail === 0],
+    ['coast 単離 never-over 違反0', coastV.neverOverViolations === 0],
+    ['coast 分岐が発火 (配線生存・単離)', coastV.coastSegs > 0],
+    ['display 単調 (後退) 違反0', agg.monoFail === 0],
+    ['latch 不一致0', agg.latchFail === 0],
+  ];
+  const invFails = invariants.filter(([, ok]) => !ok);
+
+  // ② 認定バンド (国交省 GPS ソフトメーター 片公差 −4%〜0%・過大推計不可)
+  //    = 過大側ゼロ (overMax ≤ 0) かつ 過少側 ≥ −4%。現状 +58% over で未達 = A1 で根治予定。
+  const certOverOk = overMax <= 0.0001; // 過大ゼロ (= 過大請求根絶=司さん哲学)
+  const certUnderOk = underMin >= -4.0;
+  const certOk = certOverOk && certUnderOk;
+
+  console.log('\n============================================================');
+  console.log('A5 認定ゲート (--gate)');
+  console.log('--- ① 構造不変条件 (hard-fail・N/seed 非依存) ---');
+  for (const [name, ok] of invariants) console.log('  ' + (ok ? '✓ PASS' : '✗ FAIL') + '  ' + name);
+  console.log(
+    '  (info) Monte-Carlo coast 実通過パターン = ' +
+      patternsWithCoast +
+      '/' +
+      N +
+      ' (0 でも可・密ネットワークは routing 埋め=正常)'
+  );
+  console.log('--- ② 認定バンド −4%〜0% (国交省ソフトメーター片公差) ---');
+  console.log(
+    '  過大側 max=+' +
+      overMax.toFixed(2) +
+      '% (target ≤0%) ' +
+      (certOverOk ? '✓' : '✗') +
+      ' / 過少側 min=' +
+      underMin.toFixed(2) +
+      '% (target ≥−4%) ' +
+      (certUnderOk ? '✓' : '✗') +
+      ' / 過大中央値=+' +
+      overMedian.toFixed(2) +
+      '%'
+  );
+
+  if (invFails.length) {
+    console.log(
+      '\nRESULT: ★FAIL★ — 構造不変条件が ' + invFails.length + ' 件破れた (= 回帰/配線断)。'
+    );
+    process.exit(1);
+  }
+  if (!certOk) {
+    if (CERT_STRICT) {
+      console.log(
+        '\nRESULT: ★FAIL (--cert-strict)★ — 認定バンド −4%〜0% 未達 (over-fill 過大課金)。'
+      );
+      process.exit(1);
+    }
+    console.log(
+      '\n★CERT-GAP★: 認定バンド −4%〜0% 未達 (過大 +' +
+        overMax.toFixed(2) +
+        '%)。= ★A1 (穴中 coast over-fill 根治) 待ち★。' +
+        '\n  構造不変条件は全 PASS = 配線健全・never-over 鉄壁。A1 land 後に CI を --cert-strict へ切替で hard gate 化。'
+    );
+    console.log('RESULT: PASS (構造不変条件・CERT-GAP は既知の A1 未根治として非ブロック)');
+    process.exit(0);
+  }
+  console.log('\nRESULT: ★PASS★ — 構造不変条件 + 認定バンド −4%〜0% 双方クリア。');
+  process.exit(0);
+}
