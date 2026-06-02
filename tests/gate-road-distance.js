@@ -55,6 +55,16 @@ const DIST_MAX_M = TIRE_TRUTH_M * (1 + TOL_RATIO); // 8641.7 m
 const FLIP_TOTAL_MAX = 10; // 全別道路遷移の上限 (legit turn を多少許容)
 const FLIP_BADFLIP_MAX = 0; // ★偽遷移 (連結不能) は 0★ (= 余計な弦ゼロ)
 
+// ── ★認定バンド (国交省 GPS ソフトメーター 片公差・過大側ゼロ)★ ──────────────
+//   タスク A1 の合否基準。±3% 対称帯 (DIST_MIN/MAX) とは別の ★過大ゼロ拘束★。
+//     1km 超: distance_m は [真値×0.96, 真値] = [−4%, 0%] (過大不可)。
+//     1km 以下: [真値−40m, 真値] (過大不可)。← 本 fixture は 8.39km なので %帯を適用。
+//   ★現コード (pre-A1) は distance_m=8489m (+1.18% 過大) = ★この帯の上限 (真値) を超える = RED★。
+//   A1 (routedM de-bias) 後に distance_m ≤ 8390m へ下がり GREEN 化する想定。
+//   ★テスト・ゲーミング禁止: 帯は認定根拠で固定・新値が真値以下に入って初めて GREEN★。
+const CERT_OVER_MAX_M = TIRE_TRUTH_M; // 過大側上限 = 真値 (0%・1m も超えない)
+const CERT_UNDER_MIN_M = TIRE_TRUTH_M * (1 - 0.04); // 過少側下限 = −4% = 8054.4 m
+
 // (d) creep: 停車区間の phantom 距離上限
 const CREEP_MAX_M = 5.0;
 
@@ -433,6 +443,19 @@ function runGate(opts) {
       error_m: +(distM - TIRE_TRUTH_M).toFixed(1),
       error_pct: +(((distM - TIRE_TRUTH_M) / TIRE_TRUTH_M) * 100).toFixed(2),
     },
+    // ★認定バンド (片公差 −4%〜0%・過大ゼロ) = A1 合否★。pre-A1 は +1.18% 過大で over_ok=false (RED)。
+    cert_band: {
+      // 過大側ゼロ: distance_m ≤ 真値 (1m も超えない)。現コードは 8489>8390 で false。
+      over_ok: distM <= CERT_OVER_MAX_M + 0.0001,
+      // 過少側 ≥ −4%: distance_m ≥ 真値×0.96。A1 が削り過ぎて真値割れしないことの裏取り。
+      under_ok: distM >= CERT_UNDER_MIN_M - 0.0001,
+      over_max_m: +CERT_OVER_MAX_M.toFixed(1),
+      under_min_m: +CERT_UNDER_MIN_M.toFixed(1),
+      meter_distance_m: +distM.toFixed(1),
+      error_pct: +(((distM - TIRE_TRUTH_M) / TIRE_TRUTH_M) * 100).toFixed(2),
+      // 認定 PASS = 過大ゼロ かつ 過少 −4% 以内 (= A1 land 後に true 化する想定)。
+      pass: distM <= CERT_OVER_MAX_M + 0.0001 && distM >= CERT_UNDER_MIN_M - 0.0001,
+    },
     // (b) ★実距離源 (Viterbi 確定 snap 駆動) の「余計な弦ゼロ」が真の品質指標★
     b_flip: {
       pass: b_pass,
@@ -562,6 +585,25 @@ function main() {
       r.d_invariants.business_vs_trip_separation.are_distinct_fields
   );
 
+  console.log(
+    '(cert) 認定バンド −4%〜0%: ' +
+      (r.cert_band.pass ? 'PASS' : 'FAIL (A1 待ち)') +
+      '  distance_m=' +
+      r.cert_band.meter_distance_m +
+      'm (' +
+      (r.cert_band.error_pct >= 0 ? '+' : '') +
+      r.cert_band.error_pct +
+      '%)  過大側ゼロ=' +
+      (r.cert_band.over_ok ? 'OK' : '★NG (過大課金)★') +
+      '  過少側≥−4%=' +
+      (r.cert_band.under_ok ? 'OK' : 'NG (過少)') +
+      '  [帯 ' +
+      r.cert_band.under_min_m +
+      '〜' +
+      r.cert_band.over_max_m +
+      'm]'
+  );
+
   console.log('\n=== GATE: ' + (r.gate_pass ? 'PASS' : 'FAIL') + ' ===');
   console.log('配線完了後 (a)(b)(c)(d) 全 GREEN: ' + (r.all_green ? 'YES ✓' : 'NO ✗ (要確認)'));
 
@@ -585,4 +627,6 @@ module.exports = {
   FLIP_TOTAL_MAX,
   FLIP_BADFLIP_MAX,
   CREEP_MAX_M,
+  CERT_OVER_MAX_M,
+  CERT_UNDER_MIN_M,
 };

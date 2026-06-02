@@ -37,10 +37,16 @@ const {
   FLIP_TOTAL_MAX,
   FLIP_BADFLIP_MAX,
   CREEP_MAX_M,
+  CERT_OVER_MAX_M,
+  CERT_UNDER_MIN_M,
 } = require('../gate-road-distance');
 
 // 実 Worker B (1704 sample・実 Viterbi) + roads-ehime decode + pipeline 全部走るため重い (~40s)。
-//   beforeAll で 1 回だけ実行して全 it で共有 (timeout は 120s)。
+//   beforeAll で 1 回だけ実行して全 it で共有。
+//   ★timeout は ★遅い CI/端末★ で gate runtime が 120s を超えると beforeAll が timeout し
+//     全 it が ★skip★ → cert_band assert (認定根拠) が ★一度も実行されない★ false-green になる。
+//     (実測: 速いマシン 37s・遅いマシン 127-195s = 120s 超で skip 事故。) これを塞ぐため
+//     hook timeout を 600s に引き上げ・cert assert が必ず実行されることを保証する。★
 let GATE;
 function gate() {
   return GATE;
@@ -49,7 +55,7 @@ function gate() {
 describe('road-distance gate (STEP0) — 通った道の正確な距離 / iPhone13 / ehime / タイヤ真値 8.39km', () => {
   beforeAll(() => {
     GATE = runGate({ pref: 'ehime' });
-  }, 120000);
+  }, 600000);
 
   it('ハーネスが実 Worker B 経路を完走し roads-ehime を load する', () => {
     const r = gate();
@@ -120,6 +126,35 @@ describe('road-distance gate (STEP0) — 通った道の正確な距離 / iPhone
     expect(r.c_wiring.pass).toBe(true);
     expect(r.d_invariants.pass).toBe(true);
     expect(r.gate_pass).toBe(true);
+  });
+
+  // ── ★A1 認定バンド (片公差 −4%〜0%・過大ゼロ) — テスト先行 (司さん永久警告)★ ──────
+  //   ★この assert は ★現コード (pre-A1) で RED になる★ ことが正解。★
+  //   pre-A1: distance_m=8489m (+1.18% 過大) > 真値 8390m → over_ok=false → ★FAIL (RED)★。
+  //   A1 (routedM de-bias: 分母是正 + never-over クランプ + tail edge投影) land 後に
+  //   distance_m ≤ 8390m (≤0%) へ下がり ★GREEN★ 化する想定。
+  //   ★±3% 対称帯 (上の (a)) は過大 +3% まで許すため認定では不十分 = この帯で過大ゼロを強制する。★
+  //   ★テスト・ゲーミング禁止: 帯は認定根拠 (国交省ソフトメーター片公差) で固定。
+  //     新値が真値以下に入って初めて GREEN。緑化のための帯緩めは禁止。★
+  describe('★A1 認定バンド (pre-A1 で RED が正解・A1 land で GREEN 化)★', () => {
+    it('過大側ゼロ: distance_m ≤ 真値 8390m (1m も超えない = 過大課金根絶)', () => {
+      const r = gate();
+      // pre-A1 (8489m) では ★この expect が落ちる (RED)★ = テスト先行の証明。
+      expect(r.cert_band.over_ok).toBe(true);
+      expect(r.cert_band.meter_distance_m).toBeLessThanOrEqual(CERT_OVER_MAX_M + 0.0001);
+    });
+
+    it('過少側 ≥ −4%: distance_m ≥ 8054.4m (A1 が削り過ぎて真値割れしない裏取り)', () => {
+      const r = gate();
+      // A1 の de-bias が過少化 (−4% 超) を作っていないことを保証 (over-correction guard)。
+      expect(r.cert_band.under_ok).toBe(true);
+      expect(r.cert_band.meter_distance_m).toBeGreaterThanOrEqual(CERT_UNDER_MIN_M - 0.0001);
+    });
+
+    it('認定バンド総合 (over_ok && under_ok)', () => {
+      const r = gate();
+      expect(r.cert_band.pass).toBe(true);
+    });
   });
 
   void TIRE_TRUTH_M;

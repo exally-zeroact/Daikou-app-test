@@ -91,8 +91,14 @@ describe('STEP4 Phase2-a: トンネル gap の道路 routing 検証 (合成 grou
     const der = Math.abs(r.distanceM - trueGapDistM) / trueGapDistM;
     // 道路 routing は真値に一致
     expect(der).toBeLessThan(0.02);
-    // ★過大に振れない★ = 真値 + 5% を超えない (過大課金防止の核心)
-    expect(r.distanceM).toBeLessThanOrEqual(trueGapDistM * 1.05);
+    // ★認定バンド (片公差 −4%〜0%・過大ゼロ) を ★この同一道路 arc 経路にも強制★。★
+    //   旧 assert は +5% の過大を許していた (認定不適合)。calcRoadDistance (同一道路弧長) は
+    //   tail edge投影を経由しない経路なので元々 0% (実測 350.000m = +0.000%) で ★GREEN を維持★。
+    //   ※ routedM (別道路 routeDistance の tailA/tailB 純加算) 由来の過大は A1 の本命であり、
+    //     その over-zero 強制 RED は tests/integration/road-distance-gate.test.js (実 fixture
+    //     8489m>8390m) と sim-fullpipeline-montecarlo --cert-strict が担う。
+    //   ★テスト・ゲーミング禁止: 帯は認定根拠で固定。1m の過大も許さない。★
+    expect(r.distanceM).toBeLessThanOrEqual(trueGapDistM + 0.5);
   });
 
   it('対照: 速度×時間 (旧 gap fill) はカーブで誤差が大きい (= routing の優位を数値化)', () => {

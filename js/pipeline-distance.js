@@ -462,7 +462,17 @@ RoadGraphRouter.prototype._buildLocalGraph = function (snapA, snapB) {
 
   const adj = new Map();
   const nodeLatLng = new Map();
+  // ★along-edge 端tail 用★: 量子化 nodeKey → その node を畳んだ ★丸め前★ polyline 頂点の
+  //   生整数座標 [latInt, lngInt]。端tail は snap 点 (roadIndex/segmentIndex/t 保持) から
+  //   Dijkstra 端 node に対応する ★実 polyline 頂点★ まで沿弧長を辿る際、量子化 nodeLatLng
+  //   ではなく この生頂点座標を終点に使うことで +3.2m/区間 の斜め水増しを除去する。
+  //   (nodeKey 経由でなく生整数座標 == で頂点照合する設計・量子化 seam を残さない)
+  const nodeRaw = new Map();
   const self = this;
+
+  function regRaw(k, latInt, lngInt) {
+    if (!nodeRaw.has(k)) nodeRaw.set(k, [latInt, lngInt]);
+  }
 
   function addEdge(k1, lat1, lng1, k2, lat2, lng2, w) {
     if (!adj.has(k1)) adj.set(k1, []);
@@ -483,6 +493,9 @@ RoadGraphRouter.prototype._buildLocalGraph = function (snapA, snapB) {
       const bLng = pts[j + 1][1] / precision;
       const ka = self._nodeKey(pts[j][0], pts[j][1]);
       const kb = self._nodeKey(pts[j + 1][0], pts[j + 1][1]);
+      // 丸め前の生整数頂点座標を nodeKey に逆引き登録 (端tail の沿弧終点照合用)
+      regRaw(ka, pts[j][0], pts[j][1]);
+      regRaw(kb, pts[j + 1][0], pts[j + 1][1]);
       if (ka === kb) continue;
       const w = haversineM(aLat, aLng, bLat, bLng);
       addEdge(ka, aLat, aLng, kb, bLat, bLng, w);
@@ -493,7 +506,7 @@ RoadGraphRouter.prototype._buildLocalGraph = function (snapA, snapB) {
   //   node を nodeQuantize と同じ粗さの bucket でハッシュ → 近傍 bucket のみ走査。
   const index = this._buildNodeIndex(nodeLatLng);
 
-  const graph = { adj: adj, nodeLatLng: nodeLatLng, index: index };
+  const graph = { adj: adj, nodeLatLng: nodeLatLng, index: index, nodeRaw: nodeRaw };
   // キャッシュ格納 (LRU 風 eviction)
   this._graphCache.set(sig, graph);
   if (this._graphCache.size > this._graphCacheCap) {
@@ -572,12 +585,134 @@ RoadGraphRouter.prototype.routeDistance = function (snapA, snapB) {
   const core = this._dijkstra(graph, startKey, goalKey);
   if (core == null) return null;
 
-  // snap 点 → 採用 node までの端数 (両端)
+  // ★★ start node == goal node (core==0): 両 snap が ★同一 network node★ に落ちる ★★
+  //   この時 network 上に 2 snap 間の interior は無い (両 snap は 1 つの node に co-located)。
+  //   従来は core(0) + tailA + tailB を返していたが、tailA/tailB は ★どちらも同じ node へ★
+  //   向かう along-edge 残弧であり、これを ★足す★ と「snap→node→snap」と node まで往復して
+  //   戻る経路を測ってしまう (実測: chord11.5m の区間で tailA64+tailB75.4=139.5m の phantom)。
+  //   = +647m/110区間 の過大課金源 (C 診断の端tail net-zero とは別の・真の支配源)。
+  //   正しい純幾何 = 2 snap 間の ★直接★ 距離:
+  //     ・同一 roadIndex → その polyline を snapA→snapB へ沿った along-edge 弧長 (往復しない)。
+  //     ・別 roadIndex (OSM way 分割で同一 node 共有) → polyline を共有しないため snap 間
+  //       haversine (= calcRoadDistance のクロス道路 distanceM と同義・<50m で弧≒弦)。
+  //   ★クランプ/補正係数/min(projected,direct) 一切なし・往復誤算を除いた直接幾何のみ★。
+  if (startKey === goalKey) {
+    const direct = this._alongEdgeDirect(snapA, snapB);
+    return direct != null
+      ? direct
+      : haversineM(snapA.snapLat, snapA.snapLng, snapB.snapLat, snapB.snapLng);
+  }
+
+  // start != goal: network interior (core) が存在。snap 点 → 各端 node までの端数 (両端) を加算。
+  // ★along-edge★: 従来は snap 点 → 量子化頂点(nodeLatLng) への斜め haversine 直線で
+  //   +3.2m/区間 を水増ししていた。これを「snap が乗る ★その road の polyline★ を
+  //   snap 点 (segmentIndex,t) から Dijkstra 端 node に対応する実頂点まで沿った残弧長」へ置換。
+  //   端 node の実頂点座標は graph.nodeRaw[key] (丸め前生整数) を使い量子化 seam を残さない。
+  //   snap road 上に該当頂点が無い (OSM way 分割等) 場合のみ従来 haversine fallback。
+  //   ★純幾何のみ・クランプ/補正係数/min(projected,direct) 一切なし★。
   const sNode = graph.nodeLatLng.get(startKey);
   const gNode = graph.nodeLatLng.get(goalKey);
-  const tailA = haversineM(snapA.snapLat, snapA.snapLng, sNode[0], sNode[1]);
-  const tailB = haversineM(snapB.snapLat, snapB.snapLng, gNode[0], gNode[1]);
+  const tailA = this._alongEdgeTail(snapA, graph.nodeRaw.get(startKey), sNode);
+  const tailB = this._alongEdgeTail(snapB, graph.nodeRaw.get(goalKey), gNode);
   return core + tailA + tailB;
+};
+
+// 2 snap が同一 network node に落ちる時 (core==0) の・2 snap 間 ★直接★ 距離 (純幾何)。
+//   ・同一 roadIndex: その polyline を snapA(seg,t)→snapB(seg,t) へ沿った along-edge 弧長。
+//     (snapA→snapB の前方/後方を seg/t で判定し往復せず一方向に累積)
+//   ・別 roadIndex: polyline を共有しないため null を返し呼び出し側で snap 間 haversine に退避。
+//   クランプ・補正係数・死にコード無し。
+RoadGraphRouter.prototype._alongEdgeDirect = function (snapA, snapB) {
+  if (snapA.roadIndex !== snapB.roadIndex) return null;
+  const road = this.decoder.decodeRoadAt(snapA.roadIndex);
+  if (!road || !road.points || road.points.length < 2) return null;
+  const pts = road.points;
+  const prec = this.precision;
+  // 同一 polyline 上の 2 点 (segA,tA) (segB,tB) 間の沿弧長。前後関係を正規化して一方向累積。
+  let segA = snapA.segmentIndex,
+    tA = snapA.t,
+    segB = snapB.segmentIndex,
+    tB = snapB.t;
+  if (segB < segA || (segB === segA && tB < tA)) {
+    const swSeg = segA;
+    segA = segB;
+    segB = swSeg;
+    const swT = tA;
+    tA = tB;
+    tB = swT;
+  }
+  if (segA === segB) {
+    // 同一 segment 内: 弧長 × |tB − tA|
+    return this._segArc(pts, segA, prec) * (tB - tA);
+  }
+  // segA 内の残り (1−tA) + 中間 segment 群 + segB 内の先頭 tB。
+  let arc = this._segArc(pts, segA, prec) * (1 - tA);
+  for (let k = segA + 1; k < segB; k++) {
+    arc += this._segArc(pts, k, prec);
+  }
+  arc += this._segArc(pts, segB, prec) * tB;
+  return arc;
+};
+
+// snap 点 (roadIndex/segmentIndex/t 保持) から、量子化端 node に対応する
+// ★実 polyline 頂点 (rawTarget = [latInt, lngInt] 丸め前)★ まで、snap road の
+// polyline 沿いに辿った残弧長 (along-edge) を返す。
+//   rawTarget が snap road の polyline 頂点に整数座標一致しない場合は
+//   従来通り snap 点 → 量子化頂点 (fallbackNode) の haversine 直線を返す (安全 fallback)。
+// 純幾何のみ。クランプ・補正係数・死にコード無し。
+RoadGraphRouter.prototype._alongEdgeTail = function (snap, rawTarget, fallbackNode) {
+  if (!rawTarget) {
+    return haversineM(snap.snapLat, snap.snapLng, fallbackNode[0], fallbackNode[1]);
+  }
+  const road = this.decoder.decodeRoadAt(snap.roadIndex);
+  if (!road || !road.points || road.points.length < 2) {
+    return haversineM(snap.snapLat, snap.snapLng, fallbackNode[0], fallbackNode[1]);
+  }
+  const pts = road.points;
+  const prec = this.precision;
+  // rawTarget (丸め前生整数座標) と一致する polyline 頂点 index を探す (整数 == 照合)。
+  let vIdx = -1;
+  for (let k = 0; k < pts.length; k++) {
+    if (pts[k][0] === rawTarget[0] && pts[k][1] === rawTarget[1]) {
+      vIdx = k;
+      break;
+    }
+  }
+  if (vIdx < 0) {
+    // この road の頂点ではない (別 road が同一量子化 node を共有 = way 分割等) → fallback
+    return haversineM(snap.snapLat, snap.snapLng, fallbackNode[0], fallbackNode[1]);
+  }
+  const seg = snap.segmentIndex;
+  // snap 点は segment seg (頂点 seg → seg+1) 上の t 比率位置。
+  // 終点頂点 vIdx までの polyline 沿い残弧長を累積する。
+  if (vIdx <= seg) {
+    // 終点は snap 点の「手前側」(seg 始点 vIdx 方向)。
+    //   snap 点 → 頂点 seg まで (= seg 始点まで戻る残弧) を t で按分し、
+    //   その先 seg → seg-1 → ... → vIdx を頂点間弧長で累積。
+    let arc = 0;
+    // snap 点 → seg 始点 (頂点 seg)
+    arc += this._segArc(pts, seg, prec) * snap.t;
+    for (let k = seg; k > vIdx; k--) {
+      arc += this._segArc(pts, k - 1, prec);
+    }
+    return arc;
+  }
+  // vIdx >= seg+1: 終点は snap 点の「先側」(seg+1 以降)。
+  //   snap 点 → 頂点 seg+1 まで (= (1-t) 残弧)、その先 seg+1 → ... → vIdx を累積。
+  let arc = this._segArc(pts, seg, prec) * (1 - snap.t);
+  for (let k = seg + 1; k < vIdx; k++) {
+    arc += this._segArc(pts, k, prec);
+  }
+  return arc;
+};
+
+// polyline 頂点 i → i+1 の弧長 (m)。生整数座標 / precision → haversine。
+RoadGraphRouter.prototype._segArc = function (pts, i, prec) {
+  const aLat = pts[i][0] / prec;
+  const aLng = pts[i][1] / prec;
+  const bLat = pts[i + 1][0] / prec;
+  const bLng = pts[i + 1][1] / prec;
+  return haversineM(aLat, aLng, bLat, bLng);
 };
 
 // graph 内で (lat,lng) に最も近い node キー。

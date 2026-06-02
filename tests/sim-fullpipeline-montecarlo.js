@@ -45,7 +45,11 @@ const path = require('path');
 const { createMapMatcherWorker, loadPrefRoadsData } = require('./replay-mm-worker/worker-sim');
 const { loadMeter } = require('./replay-mm-worker/runner');
 
-const N = parseInt(process.argv[2] || '500', 10);
+// ★N は最初の「数値らしい」引数のみ採用★ (--cert-strict / --gate 等のフラグを N と誤読しない)。
+//   旧: process.argv[2] 固定 → `node montecarlo.js --cert-strict` で parseInt('--cert-strict')=NaN →
+//   for(i<NaN) が 0 回 → firstEvidence=null → L613 crash。フラグ位置非依存に修正。
+const _nArg = process.argv.slice(2).find((a) => /^\d+$/.test(a));
+const N = parseInt(_nArg || '500', 10);
 const PREF = (process.env.ROADS_PREF || 'ehime').toLowerCase();
 const FIXTURE_NAME = 'real-trace-iphone13-8.39km-tire.json';
 const UI_DT_MS = 100; // ★UI 10Hz refresh (= 実アプリの display refresh rate・MEMORY 準拠)★
@@ -323,16 +327,25 @@ function runTrace(samples, pollDisplay) {
       latchGap = Math.abs((fs2.display_distance_m || 0) - (fs2.distance_m || 0));
     }
     const st = pipelineBreakdown && pipelineBreakdown.stats;
+    const rawBd = (pipelineBreakdown && pipelineBreakdown.breakdown) || {};
+    // ★A1 attribution★: 過大源を branch 別に attribute するため full breakdown を返す (read-only)。
+    const bd = {
+      sameRoadM: rawBd.sameRoadM || 0,
+      routedM: rawBd.routedM || 0,
+      straightFallbackM: rawBd.straightFallbackM || 0,
+      dopplerM: rawBd.dopplerM || 0,
+      coastM: rawBd.coastM || 0,
+      flipRejectedM: rawBd.flipRejectedM || 0,
+      gapGuardSkippedM: rawBd.gapGuardSkippedM || 0,
+    };
     return {
       distance_m: fs2.distance_m,
       display_distance_m: fs2.display_distance_m || 0,
       coastSegs: st ? st.coastSegs || 0 : 0,
       straightSegs: st ? st.straightSegs || 0 : 0,
       viterbiSnaps: st ? st.viterbiSnaps || 0 : 0,
-      coastM:
-        pipelineBreakdown && pipelineBreakdown.breakdown
-          ? pipelineBreakdown.breakdown.coastM || 0
-          : 0,
+      coastM: bd.coastM,
+      bd,
       maxOver,
       mono,
       maxJump,
@@ -470,6 +483,7 @@ let holeTotal = 0,
   noHoleTotal = 0,
   noHoleFail = 0;
 const worst = [];
+const overAttrib = []; // ★A1★: 過大 (errPct>0) パターンの branch 別 (holed−dense) 差分内訳
 let firstEvidence = null;
 
 const DIST_TOL_PCT = 5.0; // (7) 距離精度: 真値 ±5% を契約 PASS とする
@@ -487,6 +501,29 @@ for (let i = 0; i < N; i++) {
   errPcts.push(errPct);
   totalCoastSegs += r.coastSegs;
   if (r.coastSegs > 0) patternsWithCoast++;
+
+  // ★A1 attribution★: 過大時 (holed > truth) に・どの branch が余分を出したかを差分で記録。
+  if (errPct > 0 && r.bd && truth.bd) {
+    const keys = [
+      'sameRoadM',
+      'routedM',
+      'straightFallbackM',
+      'dopplerM',
+      'coastM',
+      'flipRejectedM',
+      'gapGuardSkippedM',
+    ];
+    const delta = {};
+    for (const k of keys) delta[k] = +(r.bd[k] - truth.bd[k]).toFixed(1);
+    overAttrib.push({
+      i,
+      errPct: +errPct.toFixed(2),
+      overM: +(r.distance_m - truth.distance_m).toFixed(1),
+      droppedPts: pat.droppedPoints,
+      holes: pat.nHoles,
+      delta,
+    });
+  }
   if (firstEvidence == null) {
     firstEvidence = {
       i,
@@ -767,6 +804,41 @@ fs.writeFileSync(
   )
 );
 console.log('\n[sim] wrote data/test-results/sim-fullpipeline-montecarlo.json');
+
+// ── ★A1 過大源 attribution★ (branch 別・holed−dense 差分) ──────────────────
+//   どの距離経路 (sameRoad / routed / straightFallback / doppler / coast) が過大を出したかを
+//   実証する (= 「coast が真因」等の思い込みでなくコードの出力で特定する)。
+if (overAttrib.length) {
+  // 集計: branch 別の過大寄与 (全過大パターン合算)
+  const sum = {};
+  for (const a of overAttrib)
+    for (const k in a.delta) sum[k] = +((sum[k] || 0) + a.delta[k]).toFixed(1);
+  const topByOver = overAttrib.slice().sort((x, y) => y.overM - x.overM);
+  console.log('\n--- ★A1 過大源 attribution (過大 ' + overAttrib.length + ' 件・branch別)★ ---');
+  console.log('  全過大パターン合算 (holed−dense, m): ' + JSON.stringify(sum));
+  console.log('  過大上位5件 (overM 降順):');
+  for (const a of topByOver.slice(0, 5)) {
+    const dom = Object.entries(a.delta)
+      .filter(([, v]) => v > 0.5)
+      .sort((p, q) => q[1] - p[1])
+      .map(([k, v]) => k + '+' + v)
+      .join(' ');
+    console.log(
+      '    #' +
+        a.i +
+        ' over=+' +
+        a.overM +
+        'm (' +
+        a.errPct +
+        '%) holes=' +
+        a.holes +
+        ' dropped=' +
+        a.droppedPts +
+        '  支配: ' +
+        (dom || '(差分微小)')
+    );
+  }
+}
 
 // ── CI ゲート (--gate / --cert-strict) ─────────────────────────────────────
 //   ★A5: 「緑のまま壊れる」を塞ぐ★。デフォルト --gate は ★N/seed 非依存の構造不変条件★
