@@ -162,6 +162,29 @@
     }
   }
 
+  // ★後半④ rev3: 業務状態スナップショット (1 trace を業務別に自動分割するため) ─
+  //   「1業務=1 trace」の手動送信は面倒 (司さん) → 普通に走って最後に1回送信するだけで、業務
+  //   (代行開始→精算終了) の切れ目が GPS と同じ時間軸で trace に埋め込まれるようにする
+  //   (= console_log との別クロック対応づけ問題を解消)。
+  //   ★passive 厳守: prod の Meter/Business/gps を一切参照しない。business.js が localStorage
+  //     'daikou_business_state' に保存する state を ★読むだけ★ で疎結合を保つ (= index.html と同経路)。★
+  function _bizSnapshot() {
+    try {
+      const raw = localStorage.getItem('daikou_business_state');
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      return {
+        tc: s.trip_count, // 業務(代行)完了回数 = 業務番号の手掛り (onTripEnd で +1)
+        it: s.current_trip ? 1 : 0, // 代行中フラグ (current_trip!=null = 代行開始〜精算終了の窓)
+        act: s.active ? 1 : 0, // 業務 active
+        end: s.ended ? 1 : 0, // 終了(精算前 limbo)
+        td: Math.round(s.total_distance_m || 0), // 業務開始からの総走行距離(m)
+      };
+    } catch (_) {
+      return null; // localStorage 不可 / 未保存 → 業務情報なしで GPS のみ記録
+    }
+  }
+
   function onPosition(p) {
     if (samples.length >= MAX_SAMPLES) return; // 上限到達後は破棄
     const c = p.coords;
@@ -182,6 +205,7 @@
       accel: _accelSinceGps.slice(), // この GPS 区間の加速度 [{x,y,z,t}] (= gps.js が worker へ送る batch 相当)
       gyro: _lastGyro, // 直近ジャイロ {a,b,g} or null
       compass: _lastCompass, // 直近コンパス度 (-1=未取得)
+      biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
     });
     _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');
