@@ -113,6 +113,55 @@
   let watchId = null;
   let startedAt = null;
 
+  // ─── ★センサー記録 (2026-06-03 後半④・設計変更宣言): gps-worker.js のオフライン再現用 ─
+  //   既存 fixture は GPS のみ (lat/lng/acc/spd/hdg/alt) で・加速度/ジャイロ/コンパスが欠落 →
+  //   gps-worker (Doppler fix / 加速度静止判定 / 慣性補間) を replay 不能だった (= 実機 screen 値を
+  //   PC で再現できず収束作業が非接続層に留まった)。ここで DeviceMotion/Orientation を独立 subscribe し
+  //   (training-collector.js と同流儀・gps.js の既存 permission に相乗り・独自 prompt 無し)、各 GPS
+  //   sample に「その区間の accel[] + 直近 gyro/compass」を添える。
+  //   ★診断専用・距離機構 / 課金 / running gate / Worker B / gps.js / gps-worker.js は 1 byte も触らない★。
+  const SENSOR_DOWNSAMPLE_MS = 50; // 20Hz 上限 (= training-collector と同値・payload 肥大防止)
+  const ACCEL_PER_SAMPLE_MAX = 40; // 1 GPS sample あたり accel 上限
+  let _accelSinceGps = []; // 直前 GPS 以降の accel [{x,y,z,t}] (gps-worker の accelSamples 相当)
+  let _lastGyro = null; // 直近 {a,b,g} (rotationRate alpha/beta/gamma)
+  let _lastCompass = -1; // 直近 compass 度 (-1=未取得 sentinel)
+  let _lastMotionT = 0;
+  let _sensorListenersAdded = false;
+
+  function _onMotion(e) {
+    const acc = e.accelerationIncludingGravity;
+    const rot = e.rotationRate;
+    const t = Date.now();
+    if (t - _lastMotionT < SENSOR_DOWNSAMPLE_MS) return;
+    _lastMotionT = t;
+    if (acc) {
+      _accelSinceGps.push({ x: acc.x || 0, y: acc.y || 0, z: acc.z || 0, t: t });
+      if (_accelSinceGps.length > ACCEL_PER_SAMPLE_MAX) _accelSinceGps.shift();
+    }
+    if (rot && (rot.alpha != null || rot.beta != null || rot.gamma != null)) {
+      _lastGyro = { a: rot.alpha || 0, b: rot.beta || 0, g: rot.gamma || 0 };
+    }
+  }
+
+  function _onOrientation(e) {
+    // iOS: webkitCompassHeading (真北) / Android: alpha (磁北)。gps.js と同じ優先順。
+    const h = e.webkitCompassHeading != null ? e.webkitCompassHeading : e.alpha;
+    if (typeof h === 'number') _lastCompass = h;
+  }
+
+  function _addSensorListeners() {
+    if (_sensorListenersAdded) return;
+    if (typeof window === 'undefined') return;
+    try {
+      if (window.DeviceMotionEvent) window.addEventListener('devicemotion', _onMotion, true);
+      if (window.DeviceOrientationEvent)
+        window.addEventListener('deviceorientation', _onOrientation, true);
+      _sensorListenersAdded = true;
+    } catch (_) {
+      /* sensor 不可 → 従来通り GPS のみ記録 (graceful degrade) */
+    }
+  }
+
   function onPosition(p) {
     if (samples.length >= MAX_SAMPLES) return; // 上限到達後は破棄
     const c = p.coords;
@@ -129,7 +178,12 @@
       spd: c.speed == null ? -1 : c.speed,
       hdg: c.heading == null ? -1 : c.heading,
       alt: c.altitude == null ? -9999 : c.altitude,
+      // ★後半④: gps-worker 再現用センサー (既存 GPS field は不変・追加のみ)
+      accel: _accelSinceGps.slice(), // この GPS 区間の加速度 [{x,y,z,t}] (= gps.js が worker へ送る batch 相当)
+      gyro: _lastGyro, // 直近ジャイロ {a,b,g} or null
+      compass: _lastCompass, // 直近コンパス度 (-1=未取得)
     });
+    _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');
     if (countEl) countEl.textContent = String(samples.length);
   }
@@ -150,6 +204,7 @@
 
   // 起動時に・自動 watchPosition 開始 (= 既存 gps.js の watchPosition とは独立・並行 subscribe)
   startWatch();
+  _addSensorListeners(); // ★後半④: 加速度/ジャイロ/コンパスも並行 subscribe (gps.js permission に相乗り)
 
   // ─── upload function (= 「📡 GPS trace 送信」ボタンから呼出・window 公開) ─
   window.uploadGpsTrace = function () {
@@ -174,6 +229,8 @@
           ended_at: endedAt,
           sample_count: samples.length,
           watch_options: 'enableHighAccuracy:true,timeout:3000,maximumAge:0',
+          sensor_capture: _sensorListenersAdded, // ★後半④: accel/gyro/compass 記録の有無
+          sensor_downsample_ms: SENSOR_DOWNSAMPLE_MS,
         },
         samples: samples.slice(),
         writeKey: WRITE_KEY,
