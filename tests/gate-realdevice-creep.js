@@ -70,7 +70,8 @@ function run(label, samples, isIOS) {
   if (typeof Meter._setOffRoadGraceUntil === 'function') Meter._setOffRoadGraceUntil(0);
   let creep = 0,
     lastDm = 0,
-    maxJump = 0;
+    maxJump = 0,
+    lastKnownSpd = -1; // ★穴入口直前の確かな速度★ (= 走行/停止を分類する真の信号)
   for (const g of samples) {
     Meter.update({
       lat: g.lat,
@@ -85,7 +86,18 @@ function run(label, samples, isIOS) {
     const dm = Meter.getState().distance_m || 0;
     const jump = dm - lastDm;
     if (jump > maxJump) maxJump = jump;
-    if (typeof g.spd === 'number' && g.spd < 0.5 && dm - lastDm > 0.01) creep += dm - lastDm;
+    // ★creep 判定の真値 = 「車が実際に停止しているか」★。
+    //   旧実装は当該点 g.spd<0.5 で計上したが、g.spd=-1 (= 速度 ★不明★・ゴミ GPS の sentinel) を
+    //   「停止」と誤分類し、正当な ★走行中の穴 fill★ (= 直前 15.8m/s で走行→79s GPS 欠落→復帰) を
+    //   全量 creep に算入していた (監査 CRITICAL①)。-1 は「停止」ではなく「速度不明」。
+    //   真の停止判定 = ①当該点が 0<=spd<0.5 (実測停止) か、または ②速度不明 (spd<0) かつ
+    //   ★穴入口直前の確かな速度 lastKnownSpd も停止 (0<=lastKnownSpd<0.5)★ の時のみ creep 計上。
+    //   = engine の parked ゲート (停止由来のみ creep) と同義 → 走行 fill を creep に数えない。
+    const curStopped = typeof g.spd === 'number' && g.spd >= 0 && g.spd < 0.5;
+    const unknownButEnteredStopped =
+      (typeof g.spd !== 'number' || g.spd < 0) && lastKnownSpd >= 0 && lastKnownSpd < 0.5;
+    if ((curStopped || unknownButEnteredStopped) && dm - lastDm > 0.01) creep += dm - lastDm;
+    if (typeof g.spd === 'number' && g.spd >= 0) lastKnownSpd = g.spd; // 確かな速度のみ更新
     lastDm = dm;
   }
   adapter.postMessage({ type: 'getPipelineBreakdown' });

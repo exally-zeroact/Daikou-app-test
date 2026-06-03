@@ -868,7 +868,15 @@ function _prepareBatch(samples, decoder, opts) {
     return (a.t || 0) - (b.t || 0);
   });
 
-  const bd = { sameRoadM: 0, routedM: 0, straightFallbackM: 0, dopplerM: 0, stationarySkipped: 0 };
+  const bd = {
+    sameRoadM: 0,
+    routedM: 0,
+    straightFallbackM: 0,
+    dopplerM: 0,
+    gapGuardSkippedM: 0,
+    gapGuardFillM: 0,
+    stationarySkipped: 0,
+  };
   const stats = {
     points: pts.length,
     snapHit: 0,
@@ -940,6 +948,8 @@ function _finishBatch(distance_m, bd, stats) {
       routedM: +bd.routedM.toFixed(2),
       straightFallbackM: +bd.straightFallbackM.toFixed(2),
       dopplerM: +bd.dopplerM.toFixed(2),
+      gapGuardSkippedM: +(bd.gapGuardSkippedM || 0).toFixed(2),
+      gapGuardFillM: +(bd.gapGuardFillM || 0).toFixed(2),
       stationarySkipped: bd.stationarySkipped,
     },
     stats: stats,
@@ -980,27 +990,67 @@ function stepDistance(
   const straight = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
   if (typeof coastSpdMps !== 'number') coastSpdMps = -1;
 
-  // ★Fix④ gap-garbage guard (2026-05-31・iPhone13 creep 根治・never-over)★:
-  //   長い GPS 穴 (dtSec > gapGuardSec) の後、到達点の accuracy がゴミ (> gapGuardAccM) なら、
-  //   その区間は ★距離を加算しない★ (信用できない位置同士を結んで距離を作らない)。
-  //   = iPhone13 の 79s 穴→acc 1082m への 470m creep を遮断。Android/SE は該当点ゼロで不変。
-  //   never-over 専用: 距離を増やすことは一切なく、ゴミ穴の過大加算を 0 にするだけ。
+  // ★Fix④ gap-garbage guard → 速度補足 fill (2026-06-03・設計変更・iPhone13 過少根治・creep 安全)★:
+  //   区間の ★どちらかの端点★ の accuracy がゴミ (> gapGuardAccM) なら、その点の ★位置★ は
+  //   信用できない (lat/lng は一切距離に使わない)。だが旧実装は無条件 return 0 でゼロ消ししており、
+  //   ★走行中★ に入った穴 (iPhone13: prev.spd=15.81m/s で 79s の穴) まで距離を −674m 消して
+  //   過少化させ Android から離していた。
+  //   新方針 = 国交省ソフトメーター認定要領 別表1「GNSS 信号取得不可時は走行信号 (速度) で位置補正」:
+  //     ・穴入口の ★直前の確かな速度★ が停止 (< stationarySpdMps) or 不明 → ★parked★: 従来通り
+  //       return 0 (停止由来 creep をゼロ維持・memory Fix④ の 470m creep / 駐車 drift を遮断)。
+  //     ・走行中 (直前速度 >= stationarySpdMps) → ★速度補足 fill★: 確立済み連続速度 (coastSpdMps) を
+  //       優先し、未確立なら穴入口直前点速度 prev.spd を用いて fillSpd×dt を加算。
+  //   ★ゴミ点の位置 (弦 straight) は距離値に採用しない★ — fill は速度×dt のみ。
+  //   never-over 3 段で過大ゼロを担保 (下記)。Android(maxAcc10)/SE(maxAcc30)/tire(maxAcc33) は
+  //   acc>gapGuardAccM 点ゼロ → fill 分岐に到達せず ★完全不変★ (実機調査済)。
   if (cfg.gapGuardAccM != null) {
     const _accCur = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
     const _accPrev = typeof prev.acc === 'number' && prev.acc >= 0 ? prev.acc : -1;
-    // 区間の ★どちらかの端点★ が acc ゴミ (> gapGuardAccM) なら、その位置は信用できず
-    //   弦距離を作らない (return 0)。iPhone13: acc1082m へ 470m 飛ぶ区間 (cur ゴミ) と、
-    //   その点から実道路へ戻る 798m 区間 (prev ゴミ・dt 2.3s) の ★両方★ を遮断
-    //   (= creep 470m + jump 798m を同時根治)。
-    //   dt 条件は不要: ゴミ acc 点は dt の長短に依らず位置が信用できないため。
-    //   Android(maxAcc 10m)/SE(maxAcc 30m) は acc>100m 点ゼロ → 完全不変 (実機調査済)。
-    //   never-over 専用 (距離を作らない方向のみ)。良精度の穴脱出 (トンネル等) は従来通り加算。
     if (_accCur > cfg.gapGuardAccM || _accPrev > cfg.gapGuardAccM) {
-      stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
-      bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
-      return 0;
+      const _dt = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      // ★穴入口の直前の確かな速度★ (= 走行/停止を分類する信号)。ゴミ点 cur.spd は使わない。
+      //   優先順: 確立済み連続速度 coastSpdMps → 穴入口直前点 prev.spd → 不明(-1)。
+      const _prevSpd = typeof prev.spd === 'number' && prev.spd >= 0 ? prev.spd : -1;
+      const _entrySpd = coastSpdMps >= 0 ? coastSpdMps : _prevSpd;
+      // ★creep 安全ゲート★: 速度不明 or 停止 (< stationarySpdMps) → parked 扱いで return 0 維持。
+      //   memory Fix④ の停止中 (spd≈0.04) に入った穴の drift は _entrySpd<0.5 でここに落ち
+      //   従来どおり距離ゼロ (停止由来 creep を 1byte も復活させない)。速度不明も保守的に parked。
+      if (_entrySpd < 0 || _entrySpd < cfg.stationarySpdMps) {
+        stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
+        bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
+        return 0;
+      }
+      // ★dt 暴走ガード★: 異常 dt は信用せず加算しない (過大ゼロ優先)。
+      if (!(_dt > 0 && _dt < 120)) {
+        stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
+        bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
+        return 0;
+      }
+      // ★走行中の穴 → 速度補足 fill★ (位置は使わず速度×dt)。fillSpd は coastSpdMps 優先
+      //   (穴中 ×0.97 単調減衰の確立済み保守値)・未確立時のみ prev.spd を用いる。
+      const _fillSpd = coastSpdMps >= 0 ? coastSpdMps : _prevSpd;
+      let _fill = _fillSpd * _dt;
+      // ── never-over キャップ (過大ゼロ担保) ──
+      //   (1) 実測弦 straight を天井: ゴミ点位置由来でも距離を ★増やす★ 方向にしか効かないため
+      //       過大抑制のみ (位置を距離に採用するのではなく fill の上限に使うだけ)。
+      if (straight > 0 && _fill > straight) _fill = straight;
+      //   (2) 弦の妥当倍率外 (straight 自体がゴミで極小) → 信用せず return 0。
+      if (straight > 0.1 && _fill / straight > cfg.routingMaxRatio) {
+        stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
+        bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
+        return 0;
+      }
+      if (!(_fill > 0)) {
+        stats.gapGuardSkipped = (stats.gapGuardSkipped || 0) + 1;
+        bd.gapGuardSkippedM = (bd.gapGuardSkippedM || 0) + straight;
+        return 0;
+      }
+      // ★監査用: ゼロ消し (gapGuardSkippedM) とは別カウンタで fill 量を分離計上。
+      stats.gapGuardFilled = (stats.gapGuardFilled || 0) + 1;
+      bd.gapGuardFillM = (bd.gapGuardFillM || 0) + _fill;
+      return _fill;
     }
-    // ★parked-gap guard★: 長い穴を ★停止状態で入った★ なら穴中 drift は駐車 drift → 加算しない。
+    // ★parked-gap guard★ (acc 良好な長穴用): 長い穴を ★停止状態で入った★ なら駐車 drift → 加算しない。
     if (cfg.gapStationarySec != null) {
       const _dt = ((cur.t || 0) - (prev.t || 0)) / 1000;
       const _prevSpd = typeof prev.spd === 'number' ? prev.spd : -1;
@@ -1177,6 +1227,8 @@ function createDistanceTracker(decoder, opts) {
       straightFallbackM: 0,
       dopplerM: 0,
       coastM: 0,
+      gapGuardSkippedM: 0,
+      gapGuardFillM: 0,
       stationarySkipped: 0,
     };
     stats = {
@@ -1189,6 +1241,8 @@ function createDistanceTracker(decoder, opts) {
       dopplerSegs: 0,
       coastSegs: 0,
       routingFallbacks: 0,
+      gapGuardSkipped: 0,
+      gapGuardFilled: 0,
     };
   }
   freshAccum();
@@ -1266,6 +1320,17 @@ function createDistanceTracker(decoder, opts) {
       }
       if (stationary) {
         bd.stationarySkipped++;
+        // ★stale-coast creep guard (2026-06-03・監査 CRITICAL②根治)★:
+        //   静止 (ZUPT) 区間でも coastSpdMps を ★停止速度へ即時降下★ させる。これを怠ると
+        //   「走行 → 停止 → ゴミGPS穴」の順で coastSpdMps が停止前の走行速度を保持し続け、
+        //   gapGuard の _entrySpd (= coastSpdMps 優先) が停止中なのに走行速度を読み、parked
+        //   ゲート (_entrySpd < stationarySpdMps) を素通りして停止中に phantom fill (= creep) を
+        //   生む (memory Fix④ と同一クラス)。停止を観測した時点で「穴入口直前の確かな速度 = 停止」
+        //   が真であるため coastSpdMps を実測停止速度に揃える。
+        //     ・spd 判明 (>=0) → その停止速度 (≈0) を採用 → 次の穴は parked 扱いで return 0。
+        //     ・spd 不明 (-1) → displacement で静止と判定された区間 → coastSpdMps を 0 にクリア
+        //       (停止が確定しているため確実に parked へ落とす)。
+        coastSpdMps = spd >= 0 ? spd : 0;
         prev = cur;
         prevSnap = snap;
         return { deltaM: 0, totalM: total, reason: 'stationary' };
