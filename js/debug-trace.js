@@ -46,7 +46,15 @@
   const WRITE_KEY = 'DAIKOME_DEBUG_2026'; // Firebase rules validation で要求される共有 key
   const DB_URL = 'https://daikou-app-c821a-default-rtdb.asia-southeast1.firebasedatabase.app';
   const DB_PATH = '/debug_traces.json';
-  const MAX_SAMPLES = 5000; // Firebase rules の validate と一致 (= 90 分代行相当の上限)
+  const MAX_SAMPLES = 5000; // Firebase rules の validate と一致 (= 1 record の上限)
+  // ★設計変更宣言 (2026-06-04・auto-flush 分割アップロード):
+  //   旧: buffer をメモリに溜め MAX_SAMPLES(5000) で破棄・手動送信1回のみ → 長時間で 5000 cap 到達で
+  //       後半が切れる(And/SE 6回目消失) / アプリ離脱・リロードで未送信 buffer 消失(iP13 1-4回目消失)。
+  //   新: AUTO_FLUSH_SAMPLES 点ごとに ★1 chunk として自動アップロード+buffer swap★。
+  //       = 各 record は AUTO_FLUSH 点 (≤5000 rule 内) / 長時間でも chunk 連番で全区間記録 /
+  //         リロードしても直前 chunk までは上がってる(損失は未flush の末尾 ≤AUTO_FLUSH 点のみ)。
+  //   解析側は device_id + biz.td(累積) + 時刻順で chunk を連結 → 業務別解析が chunk 跨ぎで成立。
+  const AUTO_FLUSH_SAMPLES = 4500; // Firebase rule の 5000 上限直下。これ毎に自動 chunk upload (= 取りこぼし0で最大限ためる)。
   const WATCH_OPTIONS = { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 };
 
   // ─── Feature flag handling (= ?trace=on/off で切替) ────────
@@ -112,6 +120,7 @@
   let samples = [];
   let watchId = null;
   let startedAt = null;
+  let _chunkSeq = 0; // ★auto-flush: chunk 連番 (解析側の連結順序用)
 
   // ─── ★センサー記録 (2026-06-03 後半④・設計変更宣言): gps-worker.js のオフライン再現用 ─
   //   既存 fixture は GPS のみ (lat/lng/acc/spd/hdg/alt) で・加速度/ジャイロ/コンパスが欠落 →
@@ -210,6 +219,10 @@
     _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');
     if (countEl) countEl.textContent = String(samples.length);
+    // ★auto-flush: 一定点数で自動 chunk upload (5000cap回避・リロード損失最小化)。fire-and-forget。
+    if (samples.length >= AUTO_FLUSH_SAMPLES) {
+      _flushTrace(true);
+    }
   }
 
   function onError() {
@@ -230,10 +243,12 @@
   startWatch();
   _addSensorListeners(); // ★後半④: 加速度/ジャイロ/コンパスも並行 subscribe (gps.js permission に相乗り)
 
-  // ─── upload function (= 「📡 GPS trace 送信」ボタンから呼出・window 公開) ─
-  window.uploadGpsTrace = function () {
+  // ─── upload 内部実装 (= 1 chunk batch を POST・auto-flush と手動送信の共通経路) ─
+  //   ★設計変更宣言 (2026-06-04・auto-flush): 旧 window.uploadGpsTrace のインライン POST を
+  //     _postBatch(batch) + _flushTrace(isAuto) に分解。診断専用・距離/課金は 1 byte も非関与。
+  function _postBatch(batch, batchStartedAt, isAuto) {
     return new Promise(function (resolve) {
-      if (samples.length === 0) {
+      if (!batch || batch.length === 0) {
         resolve({ ok: false, error: 'sample 0 件 (= 業務開始前 or 既送信)' });
         return;
       }
@@ -243,20 +258,24 @@
       } catch (_) {
         /* ignore */
       }
-      const endedAt = samples[samples.length - 1].t;
+      const endedAt = batch[batch.length - 1].t;
+      const seq = _chunkSeq++; // この chunk の連番 (解析側の連結順序用・swap 前に確定)
       const body = {
         meta: {
           device_id: deviceId,
           device_label: label,
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-          started_at: startedAt,
+          started_at: batchStartedAt,
           ended_at: endedAt,
-          sample_count: samples.length,
+          sample_count: batch.length,
           watch_options: 'enableHighAccuracy:true,timeout:3000,maximumAge:0',
           sensor_capture: _sensorListenersAdded, // ★後半④: accel/gyro/compass 記録の有無
           sensor_downsample_ms: SENSOR_DOWNSAMPLE_MS,
+          // ★auto-flush: chunk 連番 + 自動/手動 区別 (= 解析側が device_id でまとめ chunk_seq 順に連結)
+          chunk_seq: seq,
+          auto_flush: !!isAuto,
         },
-        samples: samples.slice(),
+        samples: batch,
         writeKey: WRITE_KEY,
       };
       fetch(DB_URL + DB_PATH, {
@@ -270,18 +289,106 @@
         })
         .then(function (data) {
           const traceId = data && data.name ? data.name : 'unknown';
-          // 送信成功 → samples reset (= 次代行用に buffer 空)
-          samples = [];
-          startedAt = null;
-          const countEl = document.getElementById('traceSampleCount');
-          if (countEl) countEl.textContent = '0';
-          resolve({ ok: true, traceId: traceId });
+          resolve({ ok: true, traceId: traceId, chunk_seq: seq, sample_count: batch.length });
         })
         .catch(function (err) {
-          resolve({ ok: false, error: err.message || 'upload failed' });
+          resolve({
+            ok: false,
+            error: err.message || 'upload failed',
+            _batch: batch,
+            _startedAt: batchStartedAt,
+          });
         });
     });
+  }
+
+  // ─── flush (= 現 buffer を 1 chunk として切り出し POST・即 swap で取りこぼし防止) ─
+  //   isAuto=true: AUTO_FLUSH_SAMPLES 到達の自動分割 (fire-and-forget)。
+  //   isAuto=false: 手動「📡 GPS trace 送信」ボタン (= 残り全部を flush)。
+  function _flushTrace(isAuto) {
+    // ★swap を最優先: POST の await 前に buffer を新配列へ差し替え、POST 中に来る点を別 buffer に蓄積。
+    //   = async POST 中の onPosition push が「送信済み扱いで消える」事故を防ぐ。
+    if (samples.length === 0) {
+      return Promise.resolve({ ok: false, error: 'sample 0 件 (= 業務開始前 or 既送信)' });
+    }
+    const batch = samples;
+    const batchStartedAt = startedAt;
+    samples = [];
+    startedAt = null;
+    const countEl = document.getElementById('traceSampleCount');
+    if (countEl) countEl.textContent = '0';
+    return _postBatch(batch, batchStartedAt, isAuto).then(function (r) {
+      if (!r.ok && r._batch) {
+        // ★失敗時は再キュー: 切り出した batch を現 buffer の先頭に戻す (時刻順保持)。
+        //   POST 中に新点が来ていれば batch + 新点 で連続。次 flush / 手動送信で再送。
+        samples = r._batch.concat(samples);
+        if (startedAt == null) startedAt = r._startedAt;
+        if (countEl) countEl.textContent = String(samples.length);
+      }
+      return r;
+    });
+  }
+
+  // ─── upload function (= 「📡 GPS trace 送信」ボタンから呼出・window 公開) ─
+  window.uploadGpsTrace = function () {
+    return _flushTrace(false);
   };
+
+  // ─── unload flush (= アプリ離脱/リロード/タスクキル直前に末尾 buffer を救出) ─
+  //   ★設計変更宣言 (2026-06-04): fetch は pagehide で kill されるため navigator.sendBeacon で送る
+  //     (= bfcache 退避前に keepalive 送信を保証)。iP13 1-4回目消失 (リロードで未送信 buffer 消失) の根治。
+  //     診断専用・距離/課金は非関与。sendBeacon 不可環境は静かに諦め (= 従来挙動)。
+  function _beaconFlush() {
+    if (samples.length === 0) return;
+    if (typeof navigator === 'undefined' || typeof navigator.sendBeacon !== 'function') return;
+    let label = '';
+    try {
+      label = localStorage.getItem(DEVICE_LABEL_KEY) || '';
+    } catch (_) {
+      /* ignore */
+    }
+    const batch = samples;
+    const batchStartedAt = startedAt;
+    const seq = _chunkSeq++;
+    const body = {
+      meta: {
+        device_id: deviceId,
+        device_label: label,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        started_at: batchStartedAt,
+        ended_at: batch[batch.length - 1].t,
+        sample_count: batch.length,
+        watch_options: 'enableHighAccuracy:true,timeout:3000,maximumAge:0',
+        sensor_capture: _sensorListenersAdded,
+        sensor_downsample_ms: SENSOR_DOWNSAMPLE_MS,
+        chunk_seq: seq,
+        auto_flush: true,
+        beacon: true,
+      },
+      samples: batch,
+      writeKey: WRITE_KEY,
+    };
+    try {
+      const blob = new Blob([JSON.stringify(body)], { type: 'application/json' });
+      const sent = navigator.sendBeacon(DB_URL + DB_PATH, blob);
+      if (sent) {
+        // 退避成功扱い → buffer 空け (戻ってきても二重送信しない)
+        samples = [];
+        startedAt = null;
+      }
+    } catch (_) {
+      /* sendBeacon 失敗 → buffer 保持 (= 復帰後の手動送信で救出) */
+    }
+  }
+  // pagehide (= bfcache/離脱の最終 hook) と visibilitychange(hidden) で beacon flush。
+  try {
+    window.addEventListener('pagehide', _beaconFlush);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') _beaconFlush();
+    });
+  } catch (_) {
+    /* listener 登録不可 → 静かに無視 (= auto-flush/手動送信のみで運用) */
+  }
 
   // ─── DOM 配線 (= #overlaySettings に挿入された UI element に bind) ─
   function bindUI() {
