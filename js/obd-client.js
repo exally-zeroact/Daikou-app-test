@@ -139,9 +139,13 @@
     };
   }
 
-  // pipeline-distance の speedProvider 互換: 鮮度OKなら m/s、それ以外 -1 (= 速度不明)。
-  //   ★これを Meter/worker の speedProvider に差すと OBD 速度が距離計算に使われる。
-  //     未接続/鮮度切れは -1 を返すので、呼び出し側が GPS Doppler に自動 fallback できる。
+  // 鮮度OKなら m/s、それ以外 -1 (= 速度不明) を返す純ヘルパ。
+  //   ★L-1 監査修正(配線の正確化)★: ★現状この関数は距離計算には未配線(=実動経路ではない)★。
+  //   OBD 速度が距離に効く実経路は ★main スレッドの gps.js が speedKmh を OBD 値で上書き★ する方式
+  //   (gps.js の window.OBD_DRIVE_DISTANCE 分岐)。pipeline-distance の speedProvider 注入は
+  //   ★Worker B 内で動き window.OBDClient に到達できないため構造上使えない★(監査で確証)。
+  //   本関数は「同一スレッドで速度源を差したい将来用途」向けの予約 API・単体テストの鮮度検証用。
+  //   二重設計の誤読を避けるため、実配線は gps.js 一本に統一している。
   function speedProvider(/* sample */) {
     const s = getSpeed();
     return s.valid ? s.mps : -1;
@@ -222,6 +226,12 @@
 
   // ─── 受信 (BLE は ~20byte 分割で来るため '>' プロンプトまでバッファ) ──────
   function _onNotify(event) {
+    // ★M-1 監査修正: 待機中の _send が無い時に来た通知 = タイムアウト済みコマンドの ★遅延応答★。
+    //   これを溜めると次コマンドの応答に混ざり stale 車速を誤注入する(クロストーク) → 破棄する。
+    if (!_pendingResolve) {
+      _rxBuffer = '';
+      return;
+    }
     const value = event.target.value; // DataView
     let chunk = '';
     for (let i = 0; i < value.byteLength; i++) {
@@ -247,12 +257,15 @@
   // 1 コマンド送信 → '>' プロンプトまでの応答を待つ
   function _send(cmd) {
     if (!_writeChar) return Promise.reject(new Error('not connected'));
+    // ★M-1 監査修正: 送信前に前コマンド(timeout 等)の残バッファを破棄(クロストーク防止)。
+    _rxBuffer = '';
     const data = _str2buf(cmd + '\r');
     return new Promise(function (resolve, reject) {
       _pendingResolve = resolve;
       _pendingTimer = setTimeout(function () {
         _pendingResolve = null;
         _pendingTimer = null;
+        _rxBuffer = ''; // ★M-1: タイムアウト時も残バッファを破棄
         reject(new Error('OBD timeout: ' + cmd));
       }, CMD_TIMEOUT_MS);
       _writeCharSafe(data).catch(function (e) {
@@ -325,6 +338,18 @@
     _setStatus('disconnected');
     _polling = false;
     _latest = { kmh: -1, mps: -1, ts: 0 };
+    // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
+    //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
+    if (_pendingTimer) {
+      clearTimeout(_pendingTimer);
+      _pendingTimer = null;
+    }
+    if (_pendingResolve) {
+      const r = _pendingResolve;
+      _pendingResolve = null;
+      r(''); // 空応答で解放 → 呼び出し側は parse 失敗で無視(次ループは isConnected=false で停止)
+    }
+    _rxBuffer = '';
     // 自動再接続は呼び出し側(UI)の判断に委ねる (勝手に再接続して電池/混乱を招かない)
   }
 

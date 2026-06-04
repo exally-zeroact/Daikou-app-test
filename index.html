@@ -12717,6 +12717,9 @@
       (function () {
         'use strict';
         function bindObdUI() {
+          // ★L-2 監査修正: 二重 bind / setInterval 多重起動を防ぐ再入ガード
+          if (window.__obdUiBound) return;
+          window.__obdUiBound = true;
           var statusEl = document.getElementById('obdStatus');
           var speedEl = document.getElementById('obdSpeed');
           var noteEl = document.getElementById('obdNote');
