@@ -23,7 +23,7 @@ function loadSource() {
 }
 
 describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / 加速度 null 救済 line anchor (旧 gps-worker-unit.test.js)', () => {
-  it('isStationary 判定が加速度主体 (c1Stationary && !c2Moving) で L892 周辺に存在', () => {
+  it('isStationary 判定が加速度主体 (c1Stationary && !c2Moving) で L829 周辺に存在', () => {
     const source = loadSource();
     const lines = source.split('\n');
     // Stryker sandbox の line offset 吸収のため ±10 line window
@@ -40,17 +40,15 @@ describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / �
     //   -57 行 shift。accel主体 pattern が L801 へ移動・window 同期 (slice 790..815)。
     // ★2026-05-31 Fix④ (Doppler-速度ゲート位置受理 + CONFIG.trust_position_acc_m 追加) で
     //   +34 行 shift。accel主体 pattern が L835 へ移動・window 同期 (slice 824..849)。
-    // ★2026-06-04 直し1 (KalmanGPS.predict 追加 + innovation χ² ゲート + CONFIG innov_* 定数) で
-    //   +57 行 shift。accel主体 pattern が L892 へ移動・window 同期 (slice 882..903)。
-    const window = lines.slice(882, 903).join('\n');
+    const window = lines.slice(824, 849).join('\n');
     if (!/finalStationary\s*=\s*c1Stationary\s*&&\s*!c2Moving/.test(window)) {
       throw new Error(
-        'gps-worker.js L892 周辺 (±10) に 加速度主体 静止判定 pattern 未検出 (drift detected)'
+        'gps-worker.js L835 周辺 (±10) に 加速度主体 静止判定 pattern 未検出 (drift detected)'
       );
     }
   });
 
-  it('加速度サンプル null 救済 (位置半径 fallback) が L864 周辺に存在', () => {
+  it('加速度サンプル null 救済 (位置半径 fallback) が L801 周辺に存在', () => {
     const source = loadSource();
     const lines = source.split('\n');
     // 2026-05-26 更新 (Phase A-3 後退検出 追加): L596 → L616 (+20) 移動・window 同期。
@@ -63,13 +61,11 @@ describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / �
     //   window 同期 (slice 762..787)。
     // ★2026-05-31 Fix④ (Doppler-速度ゲート位置受理 + CONFIG.trust_position_acc_m 追加) で
     //   +34 行 shift。accel-null pattern が L807 へ移動・window 同期 (slice 796..821)。
-    // ★2026-06-04 直し1 (KalmanGPS.predict 追加 + innovation χ² ゲート + CONFIG innov_* 定数) で
-    //   +57 行 shift。accel-null pattern が L864 へ移動・window 同期 (slice 854..875)。
-    const window = lines.slice(854, 875).join('\n');
+    const window = lines.slice(796, 821).join('\n');
     // accelVariance === null && accelDeviation === null で位置半径 fallback 採用
     if (!/accelVariance\s*===\s*null\s*&&\s*accelDeviation\s*===\s*null/.test(window)) {
       throw new Error(
-        'gps-worker.js L864 周辺 (±10) に 加速度 null 救済 pattern 未検出 (drift detected)'
+        'gps-worker.js L807 周辺 (±10) に 加速度 null 救済 pattern 未検出 (drift detected)'
       );
     }
   });
