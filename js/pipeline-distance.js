@@ -83,6 +83,29 @@ const DEFAULTS = {
   //   never-over 専用。穴を ★走行中★ (prev.spd >= stationarySpdMps) に入った場合は対象外
   //   (= トンネル等の実走行穴は従来の coast/routing で正常加算・不変)。
   gapStationarySec: 30, // この秒超の穴を「長い穴」とする (通常 1Hz・短欠落は対象外)
+
+  // ★地力 de-bias: 同一道路 arc 回収 (2026-06-04・★設計変更宣言★・実データ検証で確定)★
+  //   実機 realtest3 業務別の事実: 生GPS(連続点 haversine)は タイヤ比 −1.1%〜+0.8%・端末差≤34m
+  //   と ★最も正確かつ端末一致★。一方 map-matching の道路中心線 arc は カーブ/車線オフセット/
+  //   OSM polyline 粗さ + ジッタ除去で systematically 約1.5〜2%過少 (長距離ほど大・業務3で約200m)。
+  //   この過少は gap/straight の一塊ではなく ★per-segment の同一道路 arc 全体に薄く分散★。
+  //   対策 = ★一律係数でなく地力 de-bias★: 同一道路区間で「生の弦 straight」が arc を上回り、かつ
+  //   ★実走行ゲート (精度OK + 移動中 + 速度整合 + 弦/arc 比が普通走行域)★ を通った時のみ、
+  //   弦まで回収する。幻GPS の off-road ジャンプ (弦≫arc=比超過 / 速度不整合 / 精度悪) は
+  //   ゲートで弾き ★過大ゼロを死守★。低速/停止/穴は対象外 (creep 安全)。デバイス分岐なし。
+  //   ★never-over 保険★: arcRecoverDopplerCap=true で recovery を ★min(弦, spd×dt)★ に抑える
+  //   (Doppler は真値以下に出るため総距離 ≤ ∫v ≤ タイヤ)。false なら弦まで (raw 相当・端末一致優先)。
+  arcRecover: true, // 同一道路 arc 回収を有効化 (OFF=従来 byte 完全等価)
+  arcRecoverMaxRatio: 1.4, // 弦/arc がこれ超 = 幻/外れ snap → 回収しない (普通走行は ~1.05)
+  arcRecoverMaxAccM: 30, // 両端点 accuracy がこれ超 = 位置不確か → 回収しない (実走行ゲート)
+  arcRecoverMaxDtS: 5, // dt がこれ超 = 穴/間引き → 回収しない (通常 1Hz)
+  arcRecoverMinSpdMps: 1.5, // spd がこれ未満 = 低速/停止/不明 → 回収しない (creep/ジッタ安全)
+  arcRecoverSpeedRatio: 1.5, // 弦 > spd×dt×これ = 速度に対し弦過大 (幻ジャンプ) → 回収しない
+  // ★速度条件付き回収 (物理的根拠)★: 高速 (>= arcRecoverRawAboveSpdMps) では GPS ジッタが
+  //   走行距離に対し相対的に小さく ★生の弦が最も正確★ (realtest3: 高速主体の長距離で raw≈−0.5%)
+  //   → 弦まで回収。低速 (< これ) では ジッタが距離を水増しするため ★Doppler 実測 (spd×dt) を
+  //   天井★ にして過大ゼロを死守 (短距離 urban で raw が +0.8% 過大化するのを防ぐ)。
+  arcRecoverRawAboveSpdMps: 8.0, // ≈29km/h。これ以上は弦回収・未満は Doppler cap
 };
 
 // ─── 幾何ヘルパ ───────────────────────────────────────────────
@@ -974,6 +997,40 @@ function computeDistance(samples, decoder, opts) {
 //   coastSpdMps: 直近 snap 成功点で確立した連続保持速度 (m/s・-1=未確立)。GPS 穴 (snap 失敗連続)
 //   中に当該点速度が不明な区間を「等速保持 × dt」で補間する (= coasting・never-over)。
 //   batch (computeDistance) は coast 状態を持たないため -1 を渡し従来 (haversine) 挙動を維持する。
+// ★地力 de-bias: 同一道路 arc を「実走行ゲート」を通った時だけ生の弦まで回収する。★
+//   中心線 arc がカーブ/車線/polyline 粗さで落とす実距離を回収し、幻GPS は弾く (過大ゼロ死守)。
+//   詳細は DEFAULTS.arcRecover* のコメント参照。OFF (cfg.arcRecover!==true) なら arc を素通し
+//   = 従来 byte 完全等価。
+function _recoverArc(arc, straight, prev, cur, spd, cfg, bd, stats) {
+  if (cfg.arcRecover !== true) return arc; // flag OFF → 完全不変
+  if (!(straight > arc)) return arc; // 生が arc 以下 → 回収不要 (過大化しない)
+  // ── 実走行ゲート (幻GPS / ジッタ / 低速 を弾く) ──
+  if (!(spd >= cfg.arcRecoverMinSpdMps)) return arc; // 低速/停止/速度不明 → 回収しない (creep 安全)
+  const dt = ((cur.t || 0) - (prev.t || 0)) / 1000;
+  if (!(dt > 0 && dt <= cfg.arcRecoverMaxDtS)) return arc; // 穴/間引き → arc
+  const accCur = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : cfg.stationaryAccM;
+  const accPrev = typeof prev.acc === 'number' && prev.acc >= 0 ? prev.acc : cfg.stationaryAccM;
+  if (accCur > cfg.arcRecoverMaxAccM || accPrev > cfg.arcRecoverMaxAccM) return arc; // 精度悪 → arc
+  // 弦/arc 比が普通走行域 (~1.05) を大きく超える = off-road ジャンプ/外れ snap → 弾く
+  if (arc > 0.1 && straight / arc > cfg.arcRecoverMaxRatio) return arc;
+  // 速度整合: 弦が spd×dt×ratio を超える = 速度に対し弦過大 (幻ジャンプ) → 弾く
+  const physMax = spd * dt * cfg.arcRecoverSpeedRatio;
+  if (straight > physMax) return arc;
+  // ── 回収量 (速度条件付き never-over) ──
+  //   高速 = 弦が正確 → 弦まで回収。低速 = ジッタ水増し → Doppler 実測 (spd×dt) を天井に抑制。
+  let recovered = straight;
+  if (spd < cfg.arcRecoverRawAboveSpdMps) {
+    const cap = spd * dt; // 低速時は Doppler 実測距離を天井 (= 過大ゼロ死守)
+    if (recovered > cap) recovered = cap;
+  }
+  if (recovered < arc) recovered = arc; // 下限 arc (回収は増やす方向のみ)
+  if (recovered > arc) {
+    bd.arcRecoverM = (bd.arcRecoverM || 0) + (recovered - arc);
+    stats.arcRecovered = (stats.arcRecovered || 0) + 1;
+  }
+  return recovered;
+}
+
 function stepDistance(
   decoder,
   router,
@@ -1075,8 +1132,9 @@ function stepDistance(
           return straight;
         }
         stats.sameRoadSegs++;
-        bd.sameRoadM += r.distanceM;
-        return r.distanceM;
+        const segDist = _recoverArc(r.distanceM, straight, prev, cur, spd, cfg, bd, stats);
+        bd.sameRoadM += segDist;
+        return segDist;
       }
 
       // ── 別道路 → ★L2 連結性ハード拘束 + 道路網 routing で道なり距離★ ──
@@ -1230,6 +1288,7 @@ function createDistanceTracker(decoder, opts) {
       gapGuardSkippedM: 0,
       gapGuardFillM: 0,
       stationarySkipped: 0,
+      arcRecoverM: 0, // ★地力 de-bias: 同一道路 arc 回収で増えた距離 (監査用)
     };
     stats = {
       points: 0,
@@ -1243,6 +1302,7 @@ function createDistanceTracker(decoder, opts) {
       routingFallbacks: 0,
       gapGuardSkipped: 0,
       gapGuardFilled: 0,
+      arcRecovered: 0, // ★地力 de-bias: arc 回収が発火した区間数 (監査用)
     };
   }
   freshAccum();
@@ -1330,7 +1390,25 @@ function createDistanceTracker(decoder, opts) {
         //     ・spd 判明 (>=0) → その停止速度 (≈0) を採用 → 次の穴は parked 扱いで return 0。
         //     ・spd 不明 (-1) → displacement で静止と判定された区間 → coastSpdMps を 0 にクリア
         //       (停止が確定しているため確実に parked へ落とす)。
-        coastSpdMps = spd >= 0 ? spd : 0;
+        // ★しまなみ修正 (2026-06-05・iOS 橋上 GPS 穴の −570m 過少根治)★:
+        //   ただし「静止判定の根拠が低信頼な点」= bad-accuracy (> gapGuardAccM) や dt=0 の重複 fix は
+        //   ★本物の停止ではなく GPS 穴中のゴミ/重複点★。これで coastSpdMps を 0 にすると、穴明けの
+        //   実走行区間 (実機 SE しまなみ idx1390: 87km/h・896m) が _entrySpd=0 で parked 扱い棄却され
+        //   丸ごと −570m 過少になる (SE 34km→1.6km 系の距離損失の一因)。低信頼な静止点では coastSpdMps
+        //   を ★0 にせず保持 (従来の穴中減衰 ×0.97 のみ)★ し、穴明けの走行を殺さない。
+        //   ★creep 安全★: 本物の停止は良 accuracy + 実 dt の点が連続するため _lowConfidenceStop=false で
+        //   従来どおり 0 クリア = 停止中 creep は不変 (低信頼点 1 点が混じっても次の確定停止点で 0 化)。
+        const _accCurStat = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
+        const _dtCurStat = ((cur.t || 0) - (prev.t || 0)) / 1000;
+        const _lowConfidenceStop =
+          (cfg.gapGuardAccM != null && _accCurStat > cfg.gapGuardAccM) || _dtCurStat <= 0;
+        if (spd >= 0) {
+          coastSpdMps = spd; // Doppler 判明 = 信頼できる停止速度 (≈0) を採用
+        } else if (!_lowConfidenceStop) {
+          coastSpdMps = 0; // 高信頼な変位停止 → 0 クリア (= 従来動作・creep 防止)
+        } else if (coastSpdMps >= 0) {
+          coastSpdMps = coastSpdMps * 0.97; // 低信頼(bad-acc/dup) → 保持し穴中減衰のみ (穴明け走行を殺さない)
+        }
         prev = cur;
         prevSnap = snap;
         return { deltaM: 0, totalM: total, reason: 'stationary' };
