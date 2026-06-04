@@ -376,12 +376,27 @@ const Meter = (() => {
     }
     _fareConfigFrozen = true; // F6: 業務開始で凍結
     lastMmUsefulAt = Date.now();
-    _drainMmUntil = Date.now() + MM_DRAIN_AFTER_START_MS;
-    _offRoadGraceUntil = Date.now() + OFFROAD_GRACE_AFTER_START_MS;
-    // Worker B 連続性リセット (= prevSnap / Viterbi 窓初期化・pipeline tracker reset)
+    // ★設計変更宣言 (2026-06-04・直し2 ウォーム始動): 代行開始の「出だしラグ」根治。
+    //   旧: 代行開始で必ず Worker B を 'reset' (Viterbi 窓を flush+再初期化=コールド) + 500ms drain。
+    //       待機中に既に現在道路へ収束済の Viterbi 窓を捨て、再収束する間の最初の区間が計上されず
+    //       メーターが後ろにズレてスタートする (= 出だしラグ・短業務ほど%で過少)。
+    //   新: 待機中 GPS が流れ収束済 (warmupValid) なら ★softReset★ (Viterbi 窓は保持し
+    //       lastCommittedSnap/prevSnap だけクリア=距離会計のみ新規) + drain 無し。
+    //       = 収束済の道路の掴みを引き継ぎ、代行開始の1m目から計上。距離カウンタは business 側で 0 始まり。
+    //   安全分岐: 未収束 (cold-open=アプリ起動直後/タスクキル復帰/待機GPS無し) は従来 'reset'+drain を維持
+    //       (収束してない窓を引き継ぐと逆に幻 snap で不整合になるため)。device 分岐でなく収束状態での分岐。
+    //   distance_m 構造 / calcFare / running gate / business 分離 / 過大ゼロ は不変 (会計は触らない)。
+    if (warmupValid) {
+      _drainMmUntil = Date.now(); // drain 無し (= 収束済の正しい増分を捨てない)
+      _offRoadGraceUntil = Date.now();
+    } else {
+      _drainMmUntil = Date.now() + MM_DRAIN_AFTER_START_MS; // cold-open は従来 drain (creep/不整合保険)
+      _offRoadGraceUntil = Date.now() + OFFROAD_GRACE_AFTER_START_MS;
+    }
+    // Worker B: warmup 済なら softReset (Viterbi 窓保持=ウォーム引き継ぎ) / 未収束なら reset (コールド)
     if (mmWorker) {
       try {
-        mmWorker.postMessage({ type: 'reset' });
+        mmWorker.postMessage({ type: warmupValid ? 'softReset' : 'reset' });
       } catch (e) {
         /* noop - intentionally empty */
       }
