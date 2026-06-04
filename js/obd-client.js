@@ -1,0 +1,385 @@
+// ============================================================
+// js/obd-client.js  (ダイコメ OBD-II 速度源・2026-06-05 新規・obd ブランチ)
+//
+// ★目的★: BLE(Bluetooth Low Energy)接続の ELM327 OBD-II アダプターから
+//   車輪由来の車速 (OBD PID 010D) を読み取り、距離計算の「速度源」として供給する。
+//   GPS Doppler より素直で正確 (タイヤ計に近い) なため、∫v が過大ゼロのまま高精度になりうる。
+//
+// ★前提・制約 (重要)★:
+//   - Web Bluetooth は ★Android Chrome のみ★。iOS Safari / PWA は非対応 →
+//     iPhone(13/SE)は現状の PWA では OBD に繋がらない (将来ネイティブ化が必要)。
+//   - HTTPS + ユーザー操作(クリック)起点でしか requestDevice できない (settings のボタンから呼ぶ)。
+//   - 対応アダプタ = BLE / Bluetooth 4.0+ の ELM327 (WiFi型・classic SPP型は不可)。
+//
+// ★絶対ルール準拠★:
+//   - 距離コア(pipeline-distance.js)/ 課金(calcFare)/ Viterbi 本体には ★依存しない・触らない★。
+//   - 本 module は「最新の車速(m/s)を保持して提供するだけ」の独立部品。
+//     距離側がそれを使うかどうかは呼び出し側の責務 (= pluggable 速度源・既定 OFF)。
+//   - flag/接続が無ければ何もしない (= 既存 GPS 経路は完全不変)。
+//
+// ★公開 API (window.OBDClient)★:
+//   isSupported()  -> bool         Web Bluetooth 利用可否
+//   connect()      -> Promise<bool> デバイス選択(要ユーザー操作)→接続→ELM327初期化→ポーリング開始
+//   disconnect()                    切断
+//   isConnected()  -> bool
+//   getSpeed()     -> {kmh, mps, ts, ageMs, valid}  最新車速 (valid=鮮度OK)
+//   speedProvider(sample) -> mps|-1  pipeline-distance の speedProvider 互換 (鮮度切れ/未接続は -1)
+//   on(event, cb)                   'status' | 'speed' | 'error'
+//   getStatus()    -> string        'idle'|'connecting'|'connected'|'error'|'disconnected'
+//   _parseSpeedKmh(str) -> number|null  ★純関数(単体テスト対象)★ ELM327応答 → km/h
+// ============================================================
+/* eslint-disable no-console -- OBD は実機デバッグが要るため console を残す */
+
+(function (global) {
+  'use strict';
+
+  // ─── 既知の ELM327 BLE プロファイル (service / notify / write の UUID 組) ──────
+  //   アダプタによって UUID が違うため複数を順に試す。最頻出 2 種を既定で持つ。
+  //   - fff0 系: Vgate iCar Pro BLE / Veepeak OBDCheck BLE 等で一般的
+  //   - Nordic UART (NUS): 一部の ELM327 BLE クローン
+  const PROFILES = [
+    {
+      name: 'fff0',
+      service: '0000fff0-0000-1000-8000-00805f9b34fb',
+      notify: '0000fff1-0000-1000-8000-00805f9b34fb',
+      write: '0000fff2-0000-1000-8000-00805f9b34fb',
+    },
+    {
+      name: 'nordic-uart',
+      service: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+      notify: '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
+      write: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+    },
+  ];
+  const ALL_SERVICES = PROFILES.map(function (p) {
+    return p.service;
+  });
+
+  // ELM327 初期化コマンド列 (echo off / linefeed off / spaces off / headers off / auto protocol)
+  const INIT_CMDS = ['ATZ', 'ATE0', 'ATL0', 'ATS0', 'ATH0', 'ATSP0'];
+  const SPEED_PID = '010D'; // Mode 01 PID 0D = Vehicle Speed (km/h・1 byte)
+  const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
+  const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
+  const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
+
+  // ─── 内部状態 ───────────────────────────────────────────────
+  let _device = null;
+  let _server = null;
+  let _writeChar = null;
+  let _notifyChar = null;
+  let _status = 'idle';
+  let _latest = { kmh: -1, mps: -1, ts: 0 };
+  let _rxBuffer = '';
+  let _pendingResolve = null; // 現コマンドの応答待ち resolver
+  let _pendingTimer = null;
+  let _polling = false;
+  let _stopRequested = false;
+  const _listeners = { status: [], speed: [], error: [] };
+
+  function _emit(event, payload) {
+    const arr = _listeners[event];
+    if (!arr) return;
+    for (let i = 0; i < arr.length; i++) {
+      try {
+        arr[i](payload);
+      } catch (_) {
+        /* listener 例外は無視 (本体を止めない) */
+      }
+    }
+  }
+  function _setStatus(s) {
+    _status = s;
+    _emit('status', s);
+  }
+
+  // ─── 純関数: ELM327 応答文字列 → 車速 km/h (単体テスト対象) ──────────────
+  //   応答例: "41 0D 3C" / "410D3C" / "SEARCHING...\r41 0D 00" / 複数行・エコー混在。
+  //   "41 0D" (Mode01応答 41 + PID 0D) の直後 1 byte を km/h として返す。見つからなければ null。
+  function _parseSpeedKmh(str) {
+    if (typeof str !== 'string' || str.length === 0) return null;
+    // 空白・改行・プロンプトを除去して 16 進連結列にする
+    const cleaned = str.replace(/[\s>\r\n]/g, '').toUpperCase();
+    // NO DATA / ERROR / UNABLE 等は速度なし
+    if (/NODATA|ERROR|UNABLE|STOPPED|\?|SEARCHING$/.test(cleaned)) {
+      // SEARCHING を含むだけなら後続にデータがあるかもしれないので継続判定
+      if (!/410D/.test(cleaned)) return null;
+    }
+    const idx = cleaned.indexOf('410D');
+    if (idx < 0 || idx + 6 > cleaned.length) return null;
+    const hex = cleaned.substr(idx + 4, 2);
+    if (!/^[0-9A-F]{2}$/.test(hex)) return null;
+    const kmh = parseInt(hex, 16);
+    if (!Number.isFinite(kmh) || kmh < 0 || kmh > 255) return null;
+    return kmh;
+  }
+
+  // ─── Web Bluetooth サポート判定 ───
+  function isSupported() {
+    return !!(
+      typeof navigator !== 'undefined' &&
+      navigator.bluetooth &&
+      typeof navigator.bluetooth.requestDevice === 'function'
+    );
+  }
+  function isConnected() {
+    return !!(_server && _server.connected);
+  }
+  function getStatus() {
+    return _status;
+  }
+
+  function getSpeed() {
+    const age = _latest.ts > 0 ? _now() - _latest.ts : Infinity;
+    return {
+      kmh: _latest.kmh,
+      mps: _latest.mps,
+      ts: _latest.ts,
+      ageMs: age,
+      valid: _latest.mps >= 0 && age <= SPEED_STALE_MS,
+    };
+  }
+
+  // pipeline-distance の speedProvider 互換: 鮮度OKなら m/s、それ以外 -1 (= 速度不明)。
+  //   ★これを Meter/worker の speedProvider に差すと OBD 速度が距離計算に使われる。
+  //     未接続/鮮度切れは -1 を返すので、呼び出し側が GPS Doppler に自動 fallback できる。
+  function speedProvider(/* sample */) {
+    const s = getSpeed();
+    return s.valid ? s.mps : -1;
+  }
+
+  function _now() {
+    // Date.now を使う (本 module は通常実行環境・workflow制約の外)
+    return typeof Date !== 'undefined' && Date.now ? Date.now() : 0;
+  }
+
+  // ─── 接続 (要ユーザー操作起点) ───────────────────────────────
+  function connect() {
+    if (!isSupported()) {
+      _setStatus('error');
+      _emit('error', 'Web Bluetooth 非対応 (Android Chrome で開いてください)');
+      return Promise.reject(new Error('Web Bluetooth unsupported'));
+    }
+    _stopRequested = false;
+    _setStatus('connecting');
+    return navigator.bluetooth
+      .requestDevice({
+        // ELM327 は名前が "OBDII"/"Vgate"/"Veepeak" 等まちまち → 全デバイス許可 + 必要 service を optional に
+        acceptAllDevices: true,
+        optionalServices: ALL_SERVICES,
+      })
+      .then(function (device) {
+        _device = device;
+        device.addEventListener('gattserverdisconnected', _onDisconnected);
+        return device.gatt.connect();
+      })
+      .then(function (server) {
+        _server = server;
+        return _findProfile(server);
+      })
+      .then(function () {
+        return _initElm();
+      })
+      .then(function () {
+        _setStatus('connected');
+        _startPolling();
+        return true;
+      })
+      .catch(function (e) {
+        _setStatus('error');
+        _emit('error', (e && e.message) || String(e));
+        _cleanup();
+        throw e;
+      });
+  }
+
+  // service/char を既知プロファイル順に探索
+  function _findProfile(server) {
+    let i = 0;
+    function tryNext() {
+      if (i >= PROFILES.length) {
+        return Promise.reject(new Error('対応する BLE service が見つからない (ELM327 BLE か確認)'));
+      }
+      const p = PROFILES[i++];
+      return server
+        .getPrimaryService(p.service)
+        .then(function (svc) {
+          return Promise.all([svc.getCharacteristic(p.notify), svc.getCharacteristic(p.write)]);
+        })
+        .then(function (chars) {
+          _notifyChar = chars[0];
+          _writeChar = chars[1];
+          return _notifyChar.startNotifications();
+        })
+        .then(function () {
+          _notifyChar.addEventListener('characteristicvaluechanged', _onNotify);
+        })
+        .catch(function () {
+          return tryNext(); // このプロファイルは不一致 → 次を試す
+        });
+    }
+    return tryNext();
+  }
+
+  // ─── 受信 (BLE は ~20byte 分割で来るため '>' プロンプトまでバッファ) ──────
+  function _onNotify(event) {
+    const value = event.target.value; // DataView
+    let chunk = '';
+    for (let i = 0; i < value.byteLength; i++) {
+      chunk += String.fromCharCode(value.getUint8(i));
+    }
+    _rxBuffer += chunk;
+    if (_rxBuffer.indexOf('>') >= 0) {
+      const resp = _rxBuffer;
+      _rxBuffer = '';
+      _resolvePending(resp);
+    }
+  }
+  function _resolvePending(resp) {
+    if (_pendingTimer) {
+      clearTimeout(_pendingTimer);
+      _pendingTimer = null;
+    }
+    const r = _pendingResolve;
+    _pendingResolve = null;
+    if (r) r(resp);
+  }
+
+  // 1 コマンド送信 → '>' プロンプトまでの応答を待つ
+  function _send(cmd) {
+    if (!_writeChar) return Promise.reject(new Error('not connected'));
+    const data = _str2buf(cmd + '\r');
+    return new Promise(function (resolve, reject) {
+      _pendingResolve = resolve;
+      _pendingTimer = setTimeout(function () {
+        _pendingResolve = null;
+        _pendingTimer = null;
+        reject(new Error('OBD timeout: ' + cmd));
+      }, CMD_TIMEOUT_MS);
+      _writeCharSafe(data).catch(function (e) {
+        _resolvePending(''); // 書き込み失敗 → 空応答で解放
+        reject(e);
+      });
+    });
+  }
+  function _writeCharSafe(data) {
+    // 一部の実装は writeValueWithoutResponse のみ対応
+    if (typeof _writeChar.writeValueWithoutResponse === 'function') {
+      return _writeChar.writeValueWithoutResponse(data);
+    }
+    return _writeChar.writeValue(data);
+  }
+  function _str2buf(s) {
+    const buf = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) buf[i] = s.charCodeAt(i) & 0xff;
+    return buf;
+  }
+
+  // ─── ELM327 初期化 ───
+  function _initElm() {
+    let chain = Promise.resolve();
+    INIT_CMDS.forEach(function (cmd) {
+      chain = chain.then(function () {
+        return _send(cmd).catch(function () {
+          /* 初期化コマンドの個別失敗は致命ではない (続行) */
+        });
+      });
+    });
+    return chain;
+  }
+
+  // ─── 速度ポーリングループ (010D を連続 query) ───
+  function _startPolling() {
+    if (_polling) return;
+    _polling = true;
+    function loop() {
+      if (_stopRequested || !isConnected()) {
+        _polling = false;
+        return;
+      }
+      const t0 = _now();
+      _send(SPEED_PID)
+        .then(function (resp) {
+          const kmh = _parseSpeedKmh(resp);
+          if (kmh != null) {
+            _latest = { kmh: kmh, mps: kmh / 3.6, ts: _now() };
+            _emit('speed', getSpeed());
+          }
+        })
+        .catch(function () {
+          /* 単発 query 失敗は無視 (次ループで回復) */
+        })
+        .then(function () {
+          if (_stopRequested || !isConnected()) {
+            _polling = false;
+            return;
+          }
+          const elapsed = _now() - t0;
+          const wait = Math.max(0, POLL_MIN_INTERVAL_MS - elapsed);
+          setTimeout(loop, wait);
+        });
+    }
+    loop();
+  }
+
+  function _onDisconnected() {
+    _setStatus('disconnected');
+    _polling = false;
+    _latest = { kmh: -1, mps: -1, ts: 0 };
+    // 自動再接続は呼び出し側(UI)の判断に委ねる (勝手に再接続して電池/混乱を招かない)
+  }
+
+  function disconnect() {
+    _stopRequested = true;
+    _polling = false;
+    try {
+      if (_notifyChar) _notifyChar.removeEventListener('characteristicvaluechanged', _onNotify);
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      if (_server && _server.connected) _server.disconnect();
+    } catch (_) {
+      /* ignore */
+    }
+    _cleanup();
+    _setStatus('idle');
+  }
+  function _cleanup() {
+    _server = null;
+    _writeChar = null;
+    _notifyChar = null;
+    _rxBuffer = '';
+    if (_pendingTimer) {
+      clearTimeout(_pendingTimer);
+      _pendingTimer = null;
+    }
+    _pendingResolve = null;
+  }
+
+  function on(event, cb) {
+    if (_listeners[event] && typeof cb === 'function') _listeners[event].push(cb);
+  }
+
+  global.OBDClient = {
+    isSupported: isSupported,
+    connect: connect,
+    disconnect: disconnect,
+    isConnected: isConnected,
+    getSpeed: getSpeed,
+    speedProvider: speedProvider,
+    getStatus: getStatus,
+    on: on,
+    // 単体テスト/デバッグ用 (純関数)
+    _parseSpeedKmh: _parseSpeedKmh,
+    _PROFILES: PROFILES,
+    _SPEED_STALE_MS: SPEED_STALE_MS,
+  };
+})(
+  typeof window !== 'undefined'
+    ? window
+    : typeof self !== 'undefined'
+      ? self
+      : typeof globalThis !== 'undefined'
+        ? globalThis
+        : this
+);

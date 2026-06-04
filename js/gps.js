@@ -546,8 +546,27 @@ const GPS = (() => {
     }
     // raw 前点を毎回更新 (= reject の有無に依存しない・次フレームの代用速度の基準)
     _rawPrevPos = { lat, lng, t: now };
-    // ★STEP0 診断: speedKmh の源 (Doppler or A3 haversine代用) を worker に伝える (read-only)
-    const _speedSrc = speed != null && speed >= 0 ? 'dop' : 'hav';
+    // ★OBD 速度源 (2026-06-05・obd ブランチ・★既定 OFF★)★:
+    //   window.OBD_DRIVE_DISTANCE が true かつ OBD アダプターから鮮度 OK の車速が来ている時のみ、
+    //   speedKmh を ★車輪由来の OBD 値★ で上書きする。これにより距離計算の速度依存部
+    //   (停車判定 / GPS 穴 fill / Doppler 整合 / arc-recover の Doppler cap) が、GPS Doppler より
+    //   素直で正確な車速で動き、過大ゼロのまま精度が上がりうる。
+    //   ★未接続 / 鮮度切れ / flag OFF (既定) は GPS Doppler のまま = 既存挙動 1byte 不変★。
+    //   実機 OBD で検証後に flag を立てる。距離コアの意味論(道路 snap)は不変・速度源を差すだけ。
+    let _speedFromObd = false;
+    try {
+      if (typeof window !== 'undefined' && window.OBD_DRIVE_DISTANCE && window.OBDClient) {
+        const _obd = window.OBDClient.getSpeed();
+        if (_obd && _obd.valid && _obd.kmh >= 0) {
+          speedKmh = _obd.kmh;
+          _speedFromObd = true;
+        }
+      }
+    } catch (_) {
+      /* OBD 不在/例外は無視し GPS 速度を継続 */
+    }
+    // ★STEP0 診断: speedKmh の源 (obd / Doppler / A3 haversine代用) を worker に伝える (read-only)
+    const _speedSrc = _speedFromObd ? 'obd' : speed != null && speed >= 0 ? 'dop' : 'hav';
     // 加速度サンプル取り出し（案A・2026/04/29）
     const accelSamples = accelBuffer.slice();
     accelBuffer = [];

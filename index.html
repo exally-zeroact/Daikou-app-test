@@ -4919,6 +4919,11 @@
     <script src="js/region-helper.js"></script>
     <script src="js/mm-data-pipeline.js"></script>
 
+    <!-- ★OBD-II 速度源 (2026-06-05・obd ブランチ): Web Bluetooth(Android) → ELM327 → 車速PID。
+         gps.js が window.OBDClient.getSpeed() を実行時参照するため gps.js より前に load。
+         既定 OFF (window.OBD_DRIVE_DISTANCE 未設定)・未接続なら GPS 経路は完全不変。 -->
+    <script src="js/obd-client.js"></script>
+
     <script src="js/gps.js"></script>
 
     <!-- Phase 2.A (2026-05-10): 訓練データ収集 (将来 AI 推論用蓄積)・gps.js の後に load -->
@@ -12023,6 +12028,61 @@
           ></div>
         </div>
 
+        <!-- ★OBD 車速計 (2026-06-05・obd ブランチ・実験機能):
+             BLE(Android Chrome のみ)で ELM327 OBD-II アダプターに接続し、車輪由来の車速を取得。
+             接続して速度が表示できるかの実機確認用。距離計算への反映は別途 flag で制御 (既定 OFF)。 -->
+        <div class="section" id="obdSection">
+          <div class="section-title">OBD 車速計 (実験)</div>
+          <div class="row" style="justify-content: space-between">
+            <div class="row-label" style="color: #8e8e93">状態</div>
+            <div id="obdStatus" style="font-weight: 600; color: #8e8e93">未接続</div>
+          </div>
+          <div class="row" style="justify-content: space-between">
+            <div class="row-label" style="color: #8e8e93">OBD 車速</div>
+            <div id="obdSpeed" style="font-weight: 600; font-family: monospace">— km/h</div>
+          </div>
+          <div class="row" style="justify-content: center; padding-top: 12px; gap: 10px">
+            <button
+              id="btnObdConnect"
+              style="
+                padding: 10px 20px;
+                background: #34c759;
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                font-size: 15px;
+                cursor: pointer;
+              "
+            >
+              📟 OBD 接続
+            </button>
+            <button
+              id="btnObdDisconnect"
+              style="
+                padding: 10px 16px;
+                background: #8e8e93;
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                cursor: pointer;
+              "
+            >
+              切断
+            </button>
+          </div>
+          <div
+            id="obdNote"
+            style="
+              text-align: center;
+              font-size: 12px;
+              color: #8e8e93;
+              margin-top: 8px;
+              min-height: 16px;
+            "
+          ></div>
+        </div>
+
         <div
           style="
             text-align: center;
@@ -12650,5 +12710,70 @@
         <span class="nav-icon">⚙</span><span class="nav-label">設定</span>
       </button>
     </nav>
+
+    <!-- ★OBD UI 配線 (2026-06-05・obd ブランチ): obd-client.js(DOM非依存)と分離し、ここで設定画面の
+         OBD 接続/切断ボタン + 状態/速度表示を bind する。OBDClient 未 load / 要素不在は安全に no-op。 -->
+    <script>
+      (function () {
+        'use strict';
+        function bindObdUI() {
+          var statusEl = document.getElementById('obdStatus');
+          var speedEl = document.getElementById('obdSpeed');
+          var noteEl = document.getElementById('obdNote');
+          var btnC = document.getElementById('btnObdConnect');
+          var btnD = document.getElementById('btnObdDisconnect');
+          if (!btnC || typeof window.OBDClient === 'undefined') {
+            // OBDClient 未 load or UI 不在 → 何もしない
+            if (noteEl && typeof window.OBDClient === 'undefined') {
+              noteEl.textContent = 'OBD モジュール未ロード';
+            }
+            return;
+          }
+          var O = window.OBDClient;
+          var JA = {
+            idle: '未接続',
+            connecting: '接続中…',
+            connected: '接続済み',
+            disconnected: '切断されました',
+            error: 'エラー',
+          };
+          if (!O.isSupported()) {
+            if (noteEl)
+              noteEl.textContent =
+                'この端末は Web Bluetooth 非対応 (Android Chrome で開いてください)';
+            btnC.disabled = true;
+            btnC.style.opacity = '0.5';
+          }
+          O.on('status', function (s) {
+            if (statusEl) statusEl.textContent = JA[s] || s;
+          });
+          O.on('error', function (msg) {
+            if (noteEl) noteEl.textContent = 'エラー: ' + msg;
+          });
+          btnC.addEventListener('click', function () {
+            if (noteEl) noteEl.textContent = '';
+            O.connect().catch(function () {
+              /* status/error は on() 経由で表示済 */
+            });
+          });
+          if (btnD) {
+            btnD.addEventListener('click', function () {
+              O.disconnect();
+            });
+          }
+          // 速度表示を 500ms 毎に更新 (鮮度切れは — 表示)
+          setInterval(function () {
+            if (!speedEl) return;
+            var sp = O.getSpeed();
+            speedEl.textContent = sp.valid ? sp.kmh + ' km/h' : '— km/h';
+          }, 500);
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', bindObdUI);
+        } else {
+          bindObdUI();
+        }
+      })();
+    </script>
   </body>
 </html>

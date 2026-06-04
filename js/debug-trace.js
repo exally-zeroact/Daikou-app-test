@@ -194,6 +194,22 @@
     }
   }
 
+  // ★OBD 車速スナップショット (2026-06-05・obd ブランチ)★:
+  //   window.OBDClient (obd-client.js) が接続済なら直近の車速 km/h を返す。未接続/鮮度切れ/未 load は -1。
+  //   passive 厳守: OBDClient を ★読むだけ★・Meter/Business/距離コアには無参照。
+  //   解析側で ∫v(OBD) を計算し GPS 距離・タイヤ値と比較する用 (OBD 精度の実機検証)。
+  function _obdSpeedSnapshot() {
+    try {
+      if (typeof window === 'undefined' || !window.OBDClient || !window.OBDClient.getSpeed) {
+        return -1;
+      }
+      const s = window.OBDClient.getSpeed();
+      return s && s.valid && s.kmh >= 0 ? s.kmh : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
   function onPosition(p) {
     if (samples.length >= MAX_SAMPLES) return; // 上限到達後は破棄
     const c = p.coords;
@@ -215,6 +231,7 @@
       gyro: _lastGyro, // 直近ジャイロ {a,b,g} or null
       compass: _lastCompass, // 直近コンパス度 (-1=未取得)
       biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
+      obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用
     });
     _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');
