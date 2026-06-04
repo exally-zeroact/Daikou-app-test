@@ -1005,10 +1005,20 @@ const Meter = (() => {
   function setBusinessDistance(m) {
     const bv = typeof m === 'number' && m >= 0 ? m : 0;
     state.business_distance_m = bv;
-    // ★overshoot ゼロ★: business_display は business_distance_m(bv) を超えない (= min clamp)。
-    //   target が上がっても display は getState の catch-up で「下から」追いつく。
-    if ((state.business_display_distance_m || 0) > bv) state.business_display_distance_m = bv;
-    // ★等速ペース化★: _prev_business_target_* / 速度は _smoothDisplay が所有 (= clobber しない)。
+    // ★設計変更宣言 (2026-06-04・表示復元 latch): setBusinessDistance は prime/復元/業務開始の
+    //   ★authoritative な設定★ (= 通常の GPS 累積は本 API を通らず ingest で内部加算)。よって業務
+    //   display を即 bv に latch する。
+    //   旧: display を bv で下クランプのみ (上には latch せず getState catch-up に委ねた) →
+    //       タスクキル復元等で business_distance_m=bv に prime されても business_display_distance_m=0 のままで、
+    //       getReport が business_display>0 になった瞬間 (catch-up 開始) に生 bv 表示から平滑小値へ切替わり
+    //       ★総走行が 0 にガクッと落ちて少しずつ bv へ這い上がる★表示バグになっていた。
+    //   新: prime 時に display=bv へ即 latch (= _latchDisplay の business 部と同等) → 復元/復帰で
+    //       即正値表示・0 への落ち込み無し。★raw business_distance_m / business_tier2_pending_m /
+    //       課金 / distance_m は 1 byte 不変・表示専用 latch★。業務開始(bv=0)では display=0 で従来同等。
+    state.business_display_distance_m = bv;
+    state._prev_business_target_distance_m = bv;
+    state._prev_business_target_time = null;
+    state._business_target_velocity_mps = 0;
   }
   function setBusinessActive(active) {
     state.business_active = !!active;
