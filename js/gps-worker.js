@@ -94,6 +94,13 @@ let CONFIG = {
   //   never-over: 良いfixを受理 → 過少が真値へ回復(増える方向)。位置精度が悪い時のみ従来通り棄却。
   //   観測 acc: 良fix < 10m / 移動中緩和上限 20m → 15m を「位置信頼境界」とする(両者の間)。
   trust_position_acc_m: 15,
+  // ★設計変更宣言 (2026-06-04・直し1): innovation(残差) Mahalanobis ゲート閾値(σ単位・2D χ²準拠)。
+  //   固定 m/s ではなく予測共分散+測定σで自己スケール。3σ≈99% で受理境界・6σ超は明確テレポートで
+  //   硬棄却・間は下重み(R膨張)。出典: Newson-Krumm HMM / NIS chi-square gating / Spangenberg2010
+  //   都市キャニオン adaptive-R。2D χ²: 95%=5.99→2.45σ・99.9%=13.8→3.72σ。本物の取りこぼし(過少)を
+  //   避けつつ幻を落とすため中庸の 3σ を受理境界・6σ を明確テレポートのみ硬棄却とする。
+  innov_gate_sigma: 3.0,
+  innov_hard_sigma: 6.0,
 };
 
 // ─── 状態変数（Worker内で保持） ───
@@ -195,6 +202,26 @@ class KalmanGPS {
   // Phase 1.ZUPT: 停車検出に応じて ZUPT モードを切替
   setZuptActive(active) {
     this._zuptActive = !!active;
+  }
+  // ★設計変更宣言 (2026-06-04・直し1): innovation ゲート用に「次フレームの予測位置と予測σ」を
+  //   返す。状態は一切変更しない (= 読むだけ・update の挙動に副作用なし)。position-only フィルタ
+  //   なので予測位置 = 直前 fused 座標。予測σ = sqrt(_accuracy² + Q²·dt²) (= update の decayed と同式)。
+  //   measSigma = Sage-Husa adaptiveR を反映した測定σ (= update の effectiveAccuracy と同式)。
+  //   Q 選択は update() の ZUPT / qOverride / 動的 Q ロジックを完全ミラー。未収束(_lat===null)は null。
+  predict(timestamp, qOverride, accuracy) {
+    if (this._lat === null || this._timestamp === null) return null;
+    const dt = (timestamp - this._timestamp) / 1000;
+    if (dt <= 0 || dt > 30) return null; // 既存 update の bypass 条件と同一 → ゲートも skip
+    let Q;
+    if (this._zuptActive) Q = ZUPT_Q;
+    else if (qOverride != null) Q = qOverride;
+    else Q = _getDynamicBaseQ();
+    const decayed = Math.sqrt(this._accuracy * this._accuracy + Q * Q * dt * dt);
+    let effR = accuracy;
+    if (this._adaptiveR != null && this._innovBuffer.length >= SAGE_HUSA_MIN_SAMPLES) {
+      effR = Math.max(accuracy, this._adaptiveR);
+    }
+    return { lat: this._lat, lng: this._lng, predSigma: decayed, measSigma: effR };
   }
   update(lat, lng, accuracy, timestamp, qOverride) {
     if (this._lat === null) {
@@ -596,24 +623,51 @@ function processPosition(data) {
   }
 
   // ② ジャンプ判定
-  //   ★Fix④ (2026-05-31): jump は ★位置の実移動 (haversine/dt)★ で判定する (= 既に Doppler 速度
-  //     ではなく実位置移動・本来の正しい信号)。jump_limit 超は「真の位置テレポート」(= multipath /
-  //     大 outlier) なので acc が良くても ★位置ごと棄却維持★ (good acc は teleport を真実化しない)。
-  //     過少の主犯は jump ではなく ②-1 Doppler-速度ゲート (= 速度の嘘で良い位置を捨てる) のため、
-  //     位置受理の救済は Doppler ゲート側でのみ行う (下記 Fix④)。
+  //   ★設計変更宣言 (2026-06-04・直し1): 固定 50m/s の生位置ハード棄却を、Kalman 予測位置に対する
+  //     innovation(残差)の Mahalanobis(χ²)ゲートへ置換。幻(予測と矛盾する突発 multipath)だけ硬棄却・
+  //     本物(予測整合)は受理・曖昧帯は下重み(測定σ膨張→K小)。物理天井(jump_limit_m_per_s)は σ に
+  //     関係ない絶対テレポート保険として OR で残す(= 計量法的にあり得ない移動は過大ゼロ保証で硬棄却)。
+  //     出典: Newson-Krumm HMM 観測尤度ゲート / NIS chi-square innovation gating / Spangenberg2010
+  //     都市キャニオン adaptive-R。これで iPhone の本物点が残り空白が減る / 幻は従来通り落ちて過大化
+  //     しない / Android は予測整合点が大半で挙動ほぼ不変(非悪化)。
+  let _gateRBoost = 1; // 曖昧帯で測定σを膨らませ下重みにする倍率 (=1 で従来と完全同値=非悪化)
   if (lastPosition) {
-    const jump = calcDistance(lastPosition.lat, lastPosition.lng, lat, lng);
     const timeDiff = (now - lastPosition.timestamp) / 1000;
-    if (timeDiff > 0 && jump / timeDiff > CONFIG.jump_limit_m_per_s) {
-      _postGpsDbg({
-        rej: 'jump',
-        spd: speedKmh,
-        src: speedSrc,
-        acc: accuracy,
-        lim: accLimit,
-        stat: isStationary,
-      });
-      return null;
+    const pred = kalman.predict(now, CONFIG._kalman_Q_override, accuracy);
+    if (timeDiff > 0) {
+      // 物理天井: 計量法的にあり得ない移動は σ 無関係に硬棄却 (= 過大ゼロ保険・従来と同一の網)。
+      const jump = calcDistance(lastPosition.lat, lastPosition.lng, lat, lng);
+      if (jump / timeDiff > CONFIG.jump_limit_m_per_s) {
+        _postGpsDbg({
+          rej: 'jump',
+          spd: speedKmh,
+          src: speedSrc,
+          acc: accuracy,
+          lim: accLimit,
+          stat: isStationary,
+        });
+        return null;
+      }
+      if (pred) {
+        const innov = calcDistance(pred.lat, pred.lng, lat, lng);
+        const S = Math.sqrt(pred.predSigma * pred.predSigma + pred.measSigma * pred.measSigma);
+        const nis = S > 0 ? innov / S : 0; // Mahalanobis 距離 (σ単位)
+        if (nis > CONFIG.innov_hard_sigma) {
+          // 明確な幻/テレポート → 従来同様 位置ごと棄却
+          _postGpsDbg({
+            rej: 'innov',
+            spd: speedKmh,
+            src: speedSrc,
+            acc: accuracy,
+            lim: accLimit,
+            stat: isStationary,
+          });
+          return null;
+        } else if (nis > CONFIG.innov_gate_sigma) {
+          // 曖昧帯 → 棄却せず下重み (測定σ膨張→K小→fused ほぼ動かず幻を反映しない)
+          _gateRBoost = nis / CONFIG.innov_gate_sigma; // 1〜2 倍
+        }
+      }
     }
   }
 
@@ -766,7 +820,10 @@ function processPosition(data) {
   //   今 frame の Kalman に ZUPT (Q ≈ 0) を適用して GPS noise 由来 drift を抑制
   //   停車終了で自動的に通常 Q に復帰
   kalman.setZuptActive(_isStationaryLast);
-  const filtered = kalman.update(lat, lng, accuracy, now, CONFIG._kalman_Q_override);
+  // ★設計変更宣言 (2026-06-04・直し1): 曖昧帯 (innovation gate) の点は accuracy を _gateRBoost 倍して
+  //   渡し下重みにする (= effectiveAccuracy 膨張→K 小→fused が幻方向にほぼ動かず Viterbi 過大追走を防ぐ)。
+  //   _gateRBoost=1 (通常点/曖昧帯外) では従来と完全同一引数 = 1byte 挙動不変 (Android 非悪化)。
+  const filtered = kalman.update(lat, lng, accuracy * _gateRBoost, now, CONFIG._kalman_Q_override);
   CONFIG._kalman_Q_override = null; // 使い捨て
 
   // ⑤ 静止判定（★Fix① 2026-05-28・★設計変更宣言★：加速度variance主体に作り直し）

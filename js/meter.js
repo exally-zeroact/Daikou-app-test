@@ -92,14 +92,24 @@ const Meter = (() => {
   //     ・確定 / 停車 / 業務終了 (= 支払タイミング) では display を target に latch し
   //       メーター=実距離=料金 を一致させる (= calcFare(display) ≤ calcFare(distance_m) 保証)。
   //   旧 predict 先取り (display = target + velocity×経過秒) は overshoot を生むため撤去。
-  const DISP_CATCHUP_TAU_S = 0.4; // (旧・指数catch-up 時定数。等速ペース化で未使用・互換のため残置)
+  // ★設計変更 (2026-06-04・直し3)★: 表示層を「速度フィード + 一次 gap 詰め + 24m/s ハード cap」
+  //   から ζ=1 臨界減衰 (critically-damped) スプリングへ置換 (Unity SmoothDamp 等価・閉形式)。
+  //   distance_m / calcFare / 課金経路は 1 byte 不変 (= 表示専用 layer)。
+  //   ・ζ=1 は構造上 overshoot 不能ゆえ「ドン」が出ず人為 cap (DISP_CATCHUP_MAX_MPS) 不要 → 廃止。
+  //   ・先取り (lookahead/predict) は導入せず target=確定 distance_m のみ追従 (過大請求の穴ゼロ)。
+  //   ・display 自身の速度 v を状態に運び毎フレーム ω=2/τ・ζ=1 のバネ-ダンパで下から漸近。
+  //   出典: critically-damped spring (SmoothDamp・Game Programming Gems 4) / OIML R21 / JIS。
+  const DISP_SMOOTH_TAU_S = 0.4; // ★ζ=1 スプリング時定数 (表示専用・唯一の滑らかさノブ)。ω=2/τ。
   const DISP_LATCH_GAP_M = 0.01; // この残差未満なら target に着地 (= 収束扱い)
-  const DISP_RATE_EMA_ALPHA = 0.5; // 等速ペース rate の EMA 平滑係数 (= 直近瞬時レートの寄与・0<α≤1)
-  const DISP_RATE_MAX_MPS = 55; // 等速ペース rate の物理上限 (= 198km/h・cold-start/glitch の瞬時値 spike を EMA から除外)
   const DISP_MAX_FRAME_DT_S = 0.4; // dtFrame 上限秒 (= タブ復帰/描画間引きの一撃飛び防止・残差は次フレーム連続収束)
-  const DISP_CLOSE_TAU_S = 3.0; // gap 収束 spring の時定数 (= lump/復帰時に gap を τ 秒で詰める)
-  const DISP_CATCHUP_MAX_MPS = 24; // 追従速度上限 (= 大 lump 復帰の「ドン」抑制・直近走行速度の妥当倍率内)
-  void DISP_CATCHUP_TAU_S; // 等速ペース化で未使用 (= 形維持・lint 黙らせ)
+  // ★直し3 補修 (2026-06-04)★: 表示の物理速度上限。distance_m が GNSS 穴の gapGuard 速度補完等で
+  //   1 frame に大きく階段増した時、ζ=1 スプリングでも初回 frame の追従ステップが過大(瞬間テレポート)に
+  //   なるのを防ぐ天井 (= display は物理的にあり得ない速度で進まない)。通常走行(display速度≪上限)では
+  //   非発火でスプリングの滑らかさそのまま。大ジャンプ時のみ上限速度で連続収束(スプリングが形を整える)。
+  //   24m/s=86km/h・代行の実速度域より上 → 本物の走行は妨げず幻的な一撃飛びだけ抑える。
+  const DISP_MAX_DISPLAY_MPS = 24;
+  // 廃止 (直し3): DISP_CATCHUP_TAU_S / DISP_RATE_EMA_ALPHA / DISP_RATE_MAX_MPS /
+  //   DISP_CLOSE_TAU_S / DISP_CATCHUP_MAX_MPS は等速ペース層と共に撤去 (= 臨界減衰へ統合)。
 
   // ─── fareConfig (v2・後方互換維持) ───
   let fareConfig = {
@@ -376,12 +386,20 @@ const Meter = (() => {
     }
     _fareConfigFrozen = true; // F6: 業務開始で凍結
     lastMmUsefulAt = Date.now();
-    _drainMmUntil = Date.now() + MM_DRAIN_AFTER_START_MS;
+    // ★設計変更 (2026-06-04・直し2)★: ウォーム始動。待機中 index.html が Meter.update(g) を
+    //   常時呼び Worker B へ GPS を連続供給 → 業務開始の瞬間 Viterbi 窓は実道路に収束済。
+    //   warm 時は drain (収束済窓 flush 分の増分破棄) 不要 = 始動遅れ/短業務過少を解消。
+    //   cold-open (GPS 未収束) 時のみ従来 drain を保つ安全分岐。
+    _drainMmUntil = warmupValid ? 0 : Date.now() + MM_DRAIN_AFTER_START_MS;
     _offRoadGraceUntil = Date.now() + OFFROAD_GRACE_AFTER_START_MS;
-    // Worker B 連続性リセット (= prevSnap / Viterbi 窓初期化・pipeline tracker reset)
+    // ★ウォーム始動 (2026-06-04・直し2): 待機中 (warmupValid=直近 GPS あり) は Viterbi 窓が
+    //   収束済。破壊的 reset でこの収束を捨てると業務開始直後に再収束ラグ→短業務過少。よって
+    //   warm 時は非破壊 softReset (窓維持・lastCommittedSnap/prevSnap のみクリア) でウォーム引継ぎ。
+    //   cold-open (GPS 未収束) 時は従来の reset (完全初期化) を保つ安全分岐。trip 距離 0 起点は
+    //   上記 state.distance_m=0 が担い、softReset 後の prevSnap=null 経路で増分は二重計上しない。
     if (mmWorker) {
       try {
-        mmWorker.postMessage({ type: 'reset' });
+        mmWorker.postMessage({ type: warmupValid ? 'softReset' : 'reset' });
       } catch (e) {
         /* noop - intentionally empty */
       }
@@ -802,84 +820,62 @@ const Meter = (() => {
     return _activeVehicleId;
   }
 
-  // ─── 表示用 catch-up ヘルパ (= 距離値 1 byte 不変の表示専用 layer) ───
-  //   ★等速ペース catch-up★ (2026-05-30・「止まって動いて」脈動の根治):
-  //   target = 実距離値 (distance_m)。display は前回値から target へ「下から」★一定速度★で詰める。
-  //   ・rate = 直近の target 増分速度 (= target増分/target間dt) を EMA 平滑したもの (m/s)。
-  //     1Hz GPS なら rate ≈ 実走行速度。これで display を等速に進めるので「動いて→止まって」が消える。
-  //   ・毎フレーム: display += min(gap, rate*dt_frame)。dt_frame = 直前 display 更新からの経過秒。
-  //     min(gap,…) clamp で ★display は target を絶対に超えない (overshoot ゼロ)★。
-  //   ・gap ≤ 0 (= target に追いついた/停車で target 不進) は据え置き (= 不動・単調非減少・creep 0)。
-  //   ・true-stop (target 進まない) → 新規増分 0 → EMA で rate→0 → display 不動 (phantom 0)。
-  //   ・fps 非依存 (dt_frame ベース)。latch は呼出側 _latchDisplay で維持。
-  //   velRef: { v(=rate EMA m/s), prevTarget(=最後に観測した target), prevTargetTime(=その時刻) }。
+  // ─── 表示用スプリングヘルパ (= 距離値 1 byte 不変の表示専用 layer) ───
+  //   ★設計変更 (2026-06-04・直し3)★: ζ=1 臨界減衰 (critically-damped) スプリング。
+  //   target = 実距離値 (distance_m)。display(位置 x) と display 自身の速度 v を状態に運び、
+  //   毎フレーム x を target へ ω=2/τ・ζ=1 のバネ-ダンパで「下から」漸近させる。
+  //   ・ζ=1 ゆえ overshoot は数学的に発生不能 → 「ドン」(行き過ぎ反動) 構造的にゼロ・人為 cap 不要。
+  //   ・先取り (lookahead) は持たず target=確定 distance_m のみ追従 (= 過大請求の穴ゼロ)。
+  //   ・定速走行では err が 1 フレーム分しか溜まらず v が実速度ペースに収束 → 階段が消える。
+  //   ・停車 (target 不進) では err→0・v→0 で x 不動 (= creep 0・phantom 0・単調非減少)。
+  //   閉形式 (Unity SmoothDamp / Game Programming Gems 4・exact integration):
+  //     ω=2/τ, e=1/(1+ωdt+0.5(ωdt)^2) (= exp(-ωdt) の安定 2次近似・常に 0<e<1),
+  //     err=x-target (≤0), tmp=(v+ω·err)·dt, v_new=(v-ω·tmp)·e, x_new=target+(err+tmp)·e。
+  //   velRef: { v(=display 速度 m/s) }。prevTarget/prevTargetTime は spring 不要だが getState 側
+  //     が read/write するためキーは温存し本関数では touch しない (= 配線を壊さない)。
   //   lastDisplayTime: 直前にこの display を更新した時刻 (= per-frame dt の基準・null 可)。
   function _smoothDisplay(target, prevDisplay, lastDisplayTime, velRef, now) {
     const tgt = target > 0 ? target : 0;
-    let display = prevDisplay > 0 ? prevDisplay : 0;
-
-    // ── rate (EMA) 更新: target が新しい値に増えた fix のたびに瞬時レートを取り込む ──
-    const prevTarget = typeof velRef.prevTarget === 'number' ? velRef.prevTarget : tgt;
-    const prevTargetTime = velRef.prevTargetTime;
-    if (tgt > prevTarget + 1e-9) {
-      // target が増えた = 新 fix 到着。瞬時レート = 増分 / 経過秒 (= 速度近似)。
-      const dtTarget = prevTargetTime !== null ? (now - prevTargetTime) / 1000 : 0;
-      if (dtTarget > 1e-3) {
-        let inst = (tgt - prevTarget) / dtTarget; // m/s
-        // 物理上限 clamp: cold-start (start 直後の極小 dt) や GPS glitch の spike を EMA から除外。
-        if (inst > DISP_RATE_MAX_MPS) inst = DISP_RATE_MAX_MPS;
-        const prevRate = typeof velRef.v === 'number' && velRef.v > 0 ? velRef.v : inst;
-        velRef.v = DISP_RATE_EMA_ALPHA * inst + (1 - DISP_RATE_EMA_ALPHA) * prevRate;
-      }
-      velRef.prevTarget = tgt;
-      velRef.prevTargetTime = now;
-    } else if (prevTargetTime === null) {
-      // 初観測 (= latch/setDistance 直後の時刻基準確立)。レートは据え置き、時刻だけ刻む。
-      velRef.prevTarget = tgt;
-      velRef.prevTargetTime = now;
+    const x = prevDisplay > 0 ? prevDisplay : 0;
+    const v = typeof velRef.v === 'number' && isFinite(velRef.v) && velRef.v > 0 ? velRef.v : 0;
+    // 防御 clamp: x>target は設計上起きないが万一あれば即一致し v=0 (= 過大表示根絶)。
+    if (x >= tgt) {
+      velRef.v = 0;
+      return tgt;
     }
-
-    // 防御的 clamp: display が target を超える事は設計上起きないが万一あれば即 target に揃える。
-    if (display >= tgt) {
-      if (display > tgt) display = tgt;
-      return display;
+    // frame dt (描画間隔)。同一 tick 再読/未経過は据え置き (= overshoot/逆進なし)。
+    let dt = lastDisplayTime !== null ? (now - lastDisplayTime) / 1000 : 0;
+    if (!(dt > 0)) return x;
+    // 1 フレーム上限 (= タブ復帰/描画間引きの一撃飛び防止・残差は次フレーム連続収束)。
+    if (dt > DISP_MAX_FRAME_DT_S) dt = DISP_MAX_FRAME_DT_S;
+    // ★ζ=1 critically-damped spring (SmoothDamp 閉形式・exact integration)★
+    const omega = 2 / DISP_SMOOTH_TAU_S;
+    const od = omega * dt;
+    const e = 1 / (1 + od + 0.5 * od * od); // ≒exp(-od)・常に (0,1)
+    const err = x - tgt; // ≤0 (下から)
+    const tmp = (v + omega * err) * dt;
+    let vNext = (v - omega * tmp) * e; // 表示速度更新
+    let next = tgt + (err + tmp) * e; // 位置更新
+    // ★直し3 補修: 1 frame 前進量を物理速度上限でクランプ (= 瞬間テレポート防止・通常走行は非発火)。
+    //   大ジャンプ時は上限速度で連続収束し、上限を下回ったらスプリングが形を整えて着地する。
+    const maxStep = DISP_MAX_DISPLAY_MPS * dt;
+    if (next - x > maxStep) {
+      next = x + maxStep;
+      vNext = DISP_MAX_DISPLAY_MPS; // 上限速度を持ち越し (= 残差を次 frame も上限で詰める)
     }
-
-    // ── 等速で gap を詰める ──
-    let dtFrame = lastDisplayTime !== null ? (now - lastDisplayTime) / 1000 : 0;
-    if (!(dtFrame > 0)) {
-      // 時間未経過 (= 同一 tick 再読) は据え置き (= overshoot しない・単調維持)。
-      return display;
+    // ★overshoot ゼロ★ (ζ=1 で数学的に next≤tgt だが浮動小数誤差を二重保証):
+    if (next > tgt) {
+      next = tgt;
+      vNext = 0;
     }
-    // ★1 フレーム上限 (frame clamp)★: タブ復帰/描画間引きで dtFrame が巨大化 (例 30s) した時の
-    //   一撃飛びを防ぐ。dtFrame そのものを上限で頭打ちにし、残り gap は次フレーム以降で連続収束。
-    //   通常の GPS cadence (1〜5s poll) はこの上限以内なので不変。
-    if (dtFrame > DISP_MAX_FRAME_DT_S) dtFrame = DISP_MAX_FRAME_DT_S;
-    const gap = tgt - display;
-    const rate = typeof velRef.v === 'number' && velRef.v > 0 ? velRef.v : 0;
-    // ★gap 収束 spring (1 項)★: rate (実速度ペース) を主とし、gap が残る時のみ gap/τ で下から
-    //   詰める。定速走行時は gap が 1 フレーム分しか無いので寄与が小さく等速ペースを維持。
-    //   lump/穴復帰/停車前減速窓では spring が効いて永続 deficit を τ 秒で解消する
-    //   (= 停車時残差 0・収束残差 0)。山 (cap/gain/bleed) は作らない。
-    const closeRate = gap / DISP_CLOSE_TAU_S;
-    let eff = rate + closeRate; // 実速度ペース + gap 収束 spring (= 永続 lag を残さず target に収束)
-    // ★追従速度上限★: 大 lump 復帰 (穴明け一括加算) を 55m/s 張り付きの「ドン」でなく
-    //   直近走行速度の妥当倍率内で飲む。定速/停車では eff がこの上限を下回るため不発。
-    if (eff > DISP_CATCHUP_MAX_MPS) eff = DISP_CATCHUP_MAX_MPS;
-    let step = eff * dtFrame; // 等速ペース前進量
-    if (!(step > 0)) {
-      // rate 未確立 (= 最初の数 fix) で gap が残る場合のみ、収束保証のため
-      //   残差が極小なら着地。そうでなければ据え置き (= 次 fix で rate 確立後に等速で詰める)。
-      if (gap < DISP_LATCH_GAP_M) return tgt;
-      return display;
+    if (next < x) next = x; // ★単調非減少★ (逆進/creep 禁止)
+    if (vNext < 0) vNext = 0; // 表示速度は前進のみ
+    // 残差極小は着地 (乖離放置せず収束・停車契約 = display==distance_m)。
+    if (tgt - next < DISP_LATCH_GAP_M) {
+      next = tgt;
+      vNext = 0;
     }
-    if (step > gap) step = gap; // ★overshoot ゼロ★: target を超えない
-    let next = display + step;
-    // 残差が極小なら target に着地 (= 乖離放置せず収束させる)。
-    if (tgt - next < DISP_LATCH_GAP_M) next = tgt;
-    // ★絶対不変条件★: display ≤ target (overshoot ゼロ) かつ 単調非減少。
-    if (next > tgt) next = tgt;
-    if (next < display) next = display;
+    velRef.v = vNext; // ★spring 速度を持ち越す (状態継続)★
     return next;
   }
 
