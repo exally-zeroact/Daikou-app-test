@@ -5475,6 +5475,28 @@
         if (typeof dlog === 'function') {
           dlog('[MM] worker B ' + (reason === 'init' ? '起動' : '再起動') + '・Meter 注入完了');
         }
+        // ★設計変更宣言 (2026-06-05・★Worker 再起動時の roads 再 forward・しまなみ SE 距離フリーズ根治★):
+        //   init 以外 (= visibility ping 応答なし / error 等で Worker を作り直した場合)、新 Worker は
+        //   道路データ 0 件で起動する (旧実装は再 load しない → 全 snap 失敗で distance 永久フリーズ。
+        //   実機 SE: 34km 走行で 1.6km=−95%)。MMDataPipeline に load 済データの再送を依頼する。
+        //   絶対ルール準拠: pipeline の既存 load 経路を呼ぶだけ・distance_m / calcFare は 1 byte 不変。
+        if (
+          reason !== 'init' &&
+          window._mmPipeline &&
+          typeof window._mmPipeline.reforwardToWorker === 'function'
+        ) {
+          try {
+            window._mmPipeline.reforwardToWorker(_mmWorker).catch(function (e) {
+              if (typeof dlog === 'function') {
+                dlog('[MM] roads 再 forward 失敗: ' + (e && e.message));
+              }
+            });
+          } catch (e) {
+            if (typeof dlog === 'function') {
+              dlog('[MM] roads 再 forward 例外: ' + (e && e.message));
+            }
+          }
+        }
       }
 
       // ★設計変更宣言 (2026-05-13・大改修 C11): _mmReforwardAllState 関数を全削除
