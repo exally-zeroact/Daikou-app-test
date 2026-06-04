@@ -279,11 +279,16 @@ describe('Fix② accuracy cap watchdog (実 gps-worker.js 経由・★新構造)
     }
   });
 
-  it('②-2 acc 30m + 移動 → emit 低 (= Fix② でも 20m 超は reject 維持・ゲート機能)', () => {
+  // ★設計変更宣言 (2026-06-04・bypass化D): 移動時 accuracy 天井を 20m → accuracy_moving_extreme_m
+  //   (=35m) へ引き上げ「真に使い物にならない極端値のみ硬棄却」へ。中程度誤差 (acc 30m) は受理し
+  //   Worker B(Viterbi) に外れ値吸収を委ねる (= 点を消さない bypass 化)。よって本ゲートは検査軸を
+  //   「acc 30m は受理 (= 過少回復)」かつ「acc 45m (= 35m 天井超の極端値) は硬棄却 (= 過大ゼロ保険)」
+  //   の 2 点に更新する。
+  it('②-2 acc 30m + 移動 → emit 多 (= bypass化D で 35m 天井まで受理・点を消さない)', () => {
     const cfg = {
       seed: 29,
       position_noise_stddev_m: 2,
-      accuracy_mean_m: 30, // ★accuracy_moving_max_m=20 を確実に超える
+      accuracy_mean_m: 30, // ★accuracy_moving_extreme_m=35 未満 → 受理されるべき
       accuracy_stddev_m: 3,
       outlier_rate: 0,
       speed_mode: 'dop',
@@ -295,10 +300,34 @@ describe('Fix② accuracy cap watchdog (実 gps-worker.js 経由・★新構造)
     const trace = generateGpsTrace(linearTrueTrace(BASE_LAT, BASE_LNG, N, 40, 1000, 90), cfg);
     const result = runGpsLayerPipeline(trace, { businessActive: true, running: true });
     const emitRatio = result.workerEmittedCount / result.totalSteps;
-    // 30m mean → 20m cap で大半 reject 想定 (= 完全 0 まで求めると σ で揺れる)
+    // 30m mean < 35m 天井 → 大半 accept (= 点を消さず Worker B 委任)。
+    if (emitRatio < 0.6) {
+      throw new Error(
+        `②-2: acc 30m (35m 天井未満) なのに emit_ratio ${emitRatio.toFixed(2)} < 0.6 (過剰棄却) emit=${result.workerEmittedCount}/${result.totalSteps}`
+      );
+    }
+  });
+
+  it('②-2b acc 45m + 移動 → emit 低 (= bypass化D の極端値硬棄却・過大ゼロ保険・35m 天井)', () => {
+    const cfg = {
+      seed: 31,
+      position_noise_stddev_m: 2,
+      accuracy_mean_m: 45, // ★accuracy_moving_extreme_m=35 を確実に超える極端値
+      accuracy_stddev_m: 3,
+      outlier_rate: 0,
+      speed_mode: 'dop',
+      interval_ms: 1000,
+      accel_mode: 'moving',
+      heading_noise_deg: 5,
+      speed_noise_kmh: 1,
+    };
+    const trace = generateGpsTrace(linearTrueTrace(BASE_LAT, BASE_LNG, N, 40, 1000, 90), cfg);
+    const result = runGpsLayerPipeline(trace, { businessActive: true, running: true });
+    const emitRatio = result.workerEmittedCount / result.totalSteps;
+    // 45m mean > 35m 天井 → 大半 reject (= 使い物にならない極端値は距離前に硬棄却)
     if (emitRatio > 0.3) {
       throw new Error(
-        `②-2: 高 accuracy で emit_ratio ${emitRatio.toFixed(2)} > 0.3 (緩すぎる) emit=${result.workerEmittedCount}/${result.totalSteps}`
+        `②-2b: 極端 accuracy 45m で emit_ratio ${emitRatio.toFixed(2)} > 0.3 (天井ゆるすぎ) emit=${result.workerEmittedCount}/${result.totalSteps}`
       );
     }
   });
