@@ -6060,6 +6060,27 @@
       // mm_distance_m / p99_latency_ms を更新
       (function _initMmStatsBadge() {
         if (typeof DEBUG === 'undefined' || !DEBUG.enabled) return;
+        // ★設計変更宣言 (2026-06-06・司さん指示「計測データが代行開始で出るのが邪魔」):
+        //   開発用 HUD 3 種 (右下ステータスバッジ / mmEventLog / Worker B RAM パネル) は
+        //   既定で完全非表示にする。テスト機でも司さんには見えない。
+        //   自分(開発)が必要な時だけ ?hud=1 で表示 (localStorage に永続・?hud=0 で解除)。
+        //   ★Firebase debug-trace のアップロードは本 gate と無関係に継続 = 実機 trace は従来通り取得可。
+        const _hudEnabled = (function () {
+          try {
+            if (location.search.includes('hud=1')) {
+              localStorage.setItem('daikome_show_hud', '1');
+              return true;
+            }
+            if (location.search.includes('hud=0')) {
+              localStorage.removeItem('daikome_show_hud');
+              return false;
+            }
+            return localStorage.getItem('daikome_show_hud') === '1';
+          } catch (_) {
+            return false;
+          }
+        })();
+        if (!_hudEnabled) return;
         const badge = document.createElement('div');
         badge.id = 'mmStatsBadge';
         badge.style.cssText =
