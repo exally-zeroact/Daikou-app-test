@@ -117,6 +117,24 @@ const DEFAULTS = {
   //   → 弦まで回収。低速 (< これ) では ジッタが距離を水増しするため ★Doppler 実測 (spd×dt) を
   //   天井★ にして過大ゼロを死守 (短距離 urban で raw が +0.8% 過大化するのを防ぐ)。
   arcRecoverRawAboveSpdMps: 8.0, // ≈29km/h。これ以上は弦回収・未満は Doppler cap
+
+  // ★生GPS 双方向スムージング距離 (2026-06-06・★設計変更宣言★・司さん裁定「生GPS寄せ+過大対策」)★
+  //   実データ検証(0606b/realtest3/しまなみ・全fixture)で確定した距離の正解:
+  //   生GPS の軌跡を ★双方向移動平均(window)★ で平滑してから弦長を測る。ジッタを ★対称に★ 削るため
+  //   per-segment 床(Doppler/生GPS弦)のような ★上側ノイズだけ拾うラチェット過大化が起きない★。
+  //   結果: 生GPS のジッタ過大(iPhone13 +0.99%・realtest3短距離+0.5〜0.8%)が消えてタイヤ以下に収束し、
+  //   かつ map-matching の過少(Android -2.57%)も埋まる。全fixtureで ★過大ゼロ + 精度 -0.3〜-1.4%★。
+  //   ★平滑弦 ≤ 生弦 (平滑は短縮方向)・生弦 ≈ タイヤ★ なので構造的に過大ゼロ側。
+  //   温存: ①停止 creep (stationary 判定は生 spd/acc で従来通り) ②トンネル/GPS穴 (長dt は平滑弦で角を
+  //   切らず従来の Doppler/coast fill に回す) ③gap-guard (ゴミ acc は従来通り)。
+  //   live meter は smoothWindow/2 サンプル遅延の双方向窓で実装 (createDistanceTracker)。
+  //   OFF (smoothedRawMode !== true) で従来 map-matching 距離に完全復帰 (1byte 不変)。
+  smoothedRawMode: false, // ★検証完了まで既定OFF。harness/監査で過大ゼロ実証後に true へ。
+  smoothWindow: 5, // 移動平均窓 (奇数)。±(win-1)/2 点の位置平均。実データで5が最良。
+  smoothGapSec: 5, // dt がこれ超 = GPS穴/間引き → 平滑弦で角を切らず Doppler/coast へ回す (トンネル温存)
+  smoothDopplerCapRatio: 1.5, // ★never-over (監査CRITICAL-3)★: 平滑弦 > spd×dt×これ なら抑制。
+  //   微速(停止判定を僅かに外れる0.5〜1m/s)の純ジッタが平滑弦に残り creep 化するのを遮断。通常走行は
+  //   平滑弦 ≤ 実路長 ≈ spd×dt なので 1.5 倍までは binding せず無影響 (curve 余裕込み)。
 };
 
 // ─── 幾何ヘルパ ───────────────────────────────────────────────
@@ -127,6 +145,78 @@ function haversineM(lat1, lng1, lat2, lng2) {
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(lat1 * DEG2RAD) * Math.cos(lat2 * DEG2RAD) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   return 2 * EARTH_R * Math.asin(Math.sqrt(a));
+}
+
+// ─── 生GPS 双方向スムージング (位置の前処理) ────────────────────────────
+// pts (t 昇順) の各点 lat/lng を ±(window-1)/2 の近傍点で移動平均し、ジッタを対称に除去する。
+//   acc/spd/t/snap は ★生のまま保持★ (停止判定・gap-guard・速度は生信号を使う)。
+//   ★gap 跨ぎは平滑しない★: 隣接点の dt が gapSec 超 (GPS穴/間引き) ならそこで窓を打ち切り、
+//   穴の両端の位置を混ぜて歪めない (トンネル前後の角を保つ)。
+//   ★bad-acc 除外 (監査 CRITICAL-2)★: acc > badAccM (ゴミ fix) の隣接点は平均母集団から除外する。
+//   これを怠ると停止中の acc=数百m ゴミ点が良精度の隣接点を引っ張り、その区間が gapGuard を素通りして
+//   phantom creep (実測2082m) を生む。ゴミ点自身は acc 生保持のため下流 gapGuard が従来通り処理。
+//   平滑弦は生弦以下 (短縮方向) になるため構造的に過大ゼロ側。
+// ★per-point 平滑 (batch / live tracker 共有・唯一の真実)★:
+//   pts[i] を ±h の近傍点で移動平均した点を返す。dt>gapMs(穴)で窓を打ち切り、acc>badAcc(ゴミ)を除外。
+//   ★batch(_smoothPositions) と live(createDistanceTracker) が ★同一関数★ を呼ぶことで 1点ズレ無く
+//   parity を保証する (監査 CRITICAL-1 指摘「コピペ再実装禁止」)。
+function _smoothOnePoint(pts, i, h, gapMs, badAcc) {
+  const isBad = function (p) {
+    return typeof p.acc === 'number' && p.acc >= 0 && p.acc > badAcc;
+  };
+  let la = pts[i].lat;
+  let ln = pts[i].lng;
+  let n = 1;
+  // 後方近傍 (dt gap で打ち切り・bad-acc は除外)
+  for (let j = i - 1; j >= 0 && j >= i - h; j--) {
+    if (Math.abs((pts[j + 1].t || 0) - (pts[j].t || 0)) > gapMs) break;
+    if (isBad(pts[j])) continue; // ゴミ点は母集団から除外 (汚染防止)
+    la += pts[j].lat;
+    ln += pts[j].lng;
+    n++;
+  }
+  // 前方近傍 (dt gap で打ち切り・bad-acc は除外)
+  for (let j = i + 1; j < pts.length && j <= i + h; j++) {
+    if (Math.abs((pts[j].t || 0) - (pts[j - 1].t || 0)) > gapMs) break;
+    if (isBad(pts[j])) continue; // ゴミ点は母集団から除外 (汚染防止)
+    la += pts[j].lat;
+    ln += pts[j].lng;
+    n++;
+  }
+  const s = pts[i];
+  // 位置のみ平滑・他フィールドは生保持。元の生座標も _rawLat/_rawLng で保持 (監査/将来用)。
+  return {
+    lat: la / n,
+    lng: ln / n,
+    t: s.t,
+    acc: s.acc,
+    spd: s.spd,
+    snap: s.snap,
+    _rawLat: s.lat,
+    _rawLng: s.lng,
+  };
+}
+
+// 窓パラメータ正規化 (batch/tracker 共有)。{ h, gapMs, badAcc } を返す。
+function _smoothParams(cfg) {
+  const w = cfg.smoothWindow >= 3 ? cfg.smoothWindow : 3;
+  return {
+    h: Math.floor((w - 1) / 2),
+    gapMs: (cfg.smoothGapSec > 0 ? cfg.smoothGapSec : 5) * 1000,
+    badAcc:
+      typeof cfg.gapGuardAccM === 'number' && cfg.gapGuardAccM > 0 ? cfg.gapGuardAccM : Infinity,
+  };
+}
+
+function _smoothPositions(pts, window, gapSec, badAccM) {
+  const h = Math.floor(((window >= 3 ? window : 3) - 1) / 2);
+  const gapMs = (gapSec > 0 ? gapSec : 5) * 1000;
+  const badAcc = typeof badAccM === 'number' && badAccM > 0 ? badAccM : Infinity;
+  const out = new Array(pts.length);
+  for (let i = 0; i < pts.length; i++) {
+    out[i] = _smoothOnePoint(pts, i, h, gapMs, badAcc);
+  }
+  return out;
 }
 
 // ─── 速度源 (pluggable) ──────────────────────────────────────
@@ -902,6 +992,13 @@ function _prepareBatch(samples, decoder, opts) {
     return (a.t || 0) - (b.t || 0);
   });
 
+  // ★生GPS スムージング距離モード★: 位置を双方向移動平均で平滑し、距離はその平滑弦で測る。
+  //   batch は全点が揃っているため単純に前処理 (live tracker は遅延窓で同等処理)。
+  const workPts =
+    cfg.smoothedRawMode === true && pts.length >= 2
+      ? _smoothPositions(pts, cfg.smoothWindow, cfg.smoothGapSec, cfg.gapGuardAccM)
+      : pts;
+
   const bd = {
     sameRoadM: 0,
     routedM: 0,
@@ -912,7 +1009,7 @@ function _prepareBatch(samples, decoder, opts) {
     stationarySkipped: 0,
   };
   const stats = {
-    points: pts.length,
+    points: workPts.length,
     snapHit: 0,
     snapMiss: 0,
     sameRoadSegs: 0,
@@ -924,9 +1021,14 @@ function _prepareBatch(samples, decoder, opts) {
 
   // 区間処理の単一実装 (sync/async 共有)。state = {distance_m, prev, prevSnap} を破壊的に更新。
   function processPoint(state, cur) {
-    const snap = snapper
-      ? snapper.snap(cur.lat, cur.lng)
-      : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
+    // ★smoothedRawMode★: snap は距離に使わない (平滑弦が距離) → snap をスキップ (snap=null)。
+    //   これにより stepDistance の two-snap ブランチを飛ばし、長dt穴は Doppler/coast tail へ落とす。
+    const snap =
+      cfg.smoothedRawMode === true
+        ? null
+        : snapper
+          ? snapper.snap(cur.lat, cur.lng)
+          : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
     if (snap) stats.snapHit++;
     else stats.snapMiss++;
 
@@ -971,7 +1073,7 @@ function _prepareBatch(samples, decoder, opts) {
     state.prevSnap = snap;
   }
 
-  return { pts: pts, bd: bd, stats: stats, processPoint: processPoint };
+  return { pts: workPts, bd: bd, stats: stats, processPoint: processPoint };
 }
 
 function _finishBatch(distance_m, bd, stats) {
@@ -984,6 +1086,7 @@ function _finishBatch(distance_m, bd, stats) {
       dopplerM: +bd.dopplerM.toFixed(2),
       gapGuardSkippedM: +(bd.gapGuardSkippedM || 0).toFixed(2),
       gapGuardFillM: +(bd.gapGuardFillM || 0).toFixed(2),
+      smoothedM: +(bd.smoothedM || 0).toFixed(2),
       stationarySkipped: bd.stationarySkipped,
     },
     stats: stats,
@@ -1128,6 +1231,45 @@ function stepDistance(
         return 0;
       }
     }
+  }
+
+  // ── ★生GPS スムージング距離モード★ ──
+  //   prev/cur は平滑済み位置 (acc/spd/t は生)。straight = 平滑弦。通常走行はこれをそのまま距離に
+  //   採用する (平滑弦 ≤ 生弦 ≈ タイヤ = 過大ゼロ側)。長dt穴 (トンネル/間引き) は平滑弦で角を切らず
+  //   下の Doppler/coast tail に回す (snap=null のため two-snap ブランチは飛ぶ)。
+  //   停止 creep は呼び出し側 stationary 判定で従来通り 0 化。bad-acc は上の gap-guard で処理済。
+  if (cfg.smoothedRawMode === true) {
+    const _dtS = ((cur.t || 0) - (prev.t || 0)) / 1000;
+    if (_dtS > 0 && _dtS <= cfg.smoothGapSec) {
+      let sm = straight;
+      // ★never-over Doppler 天井 (監査 CRITICAL-3)★: spd 判明時、平滑弦が spd×dt×ratio を超えたら抑制。
+      //   微速の純ジッタが平滑弦に残って creep 化するのを遮断 (通常走行は平滑弦 ≤ spd×dt なので無影響)。
+      if (spd >= 0) {
+        const cap = spd * _dtS * cfg.smoothDopplerCapRatio;
+        if (sm > cap) sm = cap;
+      }
+      stats.smoothedSegs = (stats.smoothedSegs || 0) + 1;
+      bd.smoothedM = (bd.smoothedM || 0) + sm;
+      return sm;
+    }
+    // ★長dt穴 (トンネル/間引き) の決定的処理★ (監査 CRITICAL-1 parity):
+    //   stateful な coastSpdMps を使うと batch(coast=-1)と live tracker で分岐し parity が崩れる。
+    //   そこで穴は ★状態を持たない決定的ルール★ で埋める: spd 判明 → Doppler(spd×dt・never-over cap)、
+    //   spd 不明 → 平滑弦 straight (角切り・稀=99%は spd 有り)。両経路で batch==tracker を保証。
+    if (_dtS > 0 && _dtS < 120 && spd >= 0) {
+      const dop = spd * _dtS;
+      if (straight > 0.1 && dop / straight > cfg.routingMaxRatio) {
+        stats.straightSegs++;
+        bd.straightFallbackM += straight;
+        return straight;
+      }
+      stats.dopplerSegs++;
+      bd.dopplerM += dop;
+      return dop;
+    }
+    stats.straightSegs++;
+    bd.straightFallbackM += straight;
+    return straight;
   }
 
   // ── 両端 snap 成功 ──
@@ -1300,6 +1442,7 @@ function createDistanceTracker(decoder, opts) {
       coastM: 0,
       gapGuardSkippedM: 0,
       gapGuardFillM: 0,
+      smoothedM: 0, // ★生GPS平滑距離 (smoothedRawMode・監査 MAJOR-4)
       stationarySkipped: 0,
       arcRecoverM: 0, // ★地力 de-bias: 同一道路 arc 回収で増えた距離 (監査用)
     };
@@ -1329,28 +1472,27 @@ function createDistanceTracker(decoder, opts) {
     return 'straight';
   }
 
-  return {
-    ingest: function (sample) {
-      if (!sample || !Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) {
-        // 無効点 (null/NaN/Infinity) は computeDistance の入力整形と同様に黙殺 (距離影響なし)
-        return { deltaM: 0, totalM: total, reason: 'skip' };
-      }
-      const cur = sample;
-      // ★out-of-order ガード★: computeDistance は t 昇順 sort 済みで処理するが live tracker は
-      //   全体 sort できない。遅延到着/順序逆転フレーム (cur.t < prev.t) を破棄し、batch と
-      //   同一の単調増加列だけを処理する (距離水増し防止)。t 欠落点は順序判定をスキップ。
-      if (prev && Number.isFinite(cur.t) && Number.isFinite(prev.t) && cur.t < prev.t) {
-        return { deltaM: 0, totalM: total, reason: 'out_of_order' };
-      }
-      stats.points++;
+  // ★smoothedRawMode 遅延バッファ (監査 CRITICAL-1・本番課金経路に平滑を実装)★:
+  //   live は未来点が要る双方向窓を即時計算できないため、生点を smoothBuf に貯め、後続が h 点
+  //   揃った中心点を _smoothOnePoint(batch と同一関数) で確定し _core へ流す (= batch と parity)。
+  //   末尾 h 点は flush() で片側窓確定。reset で破棄。OFF では一切使わない (従来1byte不変)。
+  const smParams = _smoothParams(cfg);
+  let smoothBuf = [];
+  let smoothNext = 0;
+
+  // 検証済み 1 点を処理する core (snap は smoothedRawMode では使わない=null)。
+  function _core(cur) {
+    stats.points++;
+    // ★smoothedRawMode★: snap は距離に使わない (平滑弦が距離) → null。Viterbi ext snap も使わない。
+    let snap = null;
+    if (cfg.smoothedRawMode !== true) {
       // ★L1 配線 (2026-05-31・clean-rebuild-pipeline・距離源を Viterbi 確定経路へ一本化):
       //   sample.snap が渡された場合 (= Worker B が Viterbi emission/transition で選んだ
       //   bestEmit/outSnap)、その ★Viterbi 確定 snap★ を距離計算に使う。greedy per-point
       //   SnapCache.snap (= 最近傍 nearest-neighbor) は ★呼ばない★。
       //   これにより距離源が「greedy 最近傍 snap」ではなく「HMM の確定 snap」になる (= (c) 配線完全)。
       //   externalSnap が roadIndex/snapLat/snapLng を満たす時のみ採用・不足時のみ従来 snap に退避。
-      let snap;
-      const ext = sample.snap;
+      const ext = cur.snap;
       if (
         ext &&
         Number.isFinite(ext.roadIndex) &&
@@ -1373,105 +1515,166 @@ function createDistanceTracker(decoder, opts) {
           ? snapper.snap(cur.lat, cur.lng)
           : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
       }
-      if (snap) stats.snapHit++;
-      else stats.snapMiss++;
+    }
+    if (snap) stats.snapHit++;
+    else stats.snapMiss++;
 
-      if (!prev) {
-        prev = cur;
-        prevSnap = snap;
-        return { deltaM: 0, totalM: total, reason: 'first' };
-      }
-
-      // 静止判定 (ZUPT) — computeDistance と同一ロジック
-      const spd = speedProvider(cur, prev);
-      const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
-      let stationary = false;
-      if (spd >= 0) {
-        if (spd < cfg.stationarySpdMps) stationary = true;
-      } else {
-        if (isStationaryByDisplacement(prev, cur, disp, cfg)) stationary = true;
-      }
-      if (stationary) {
-        bd.stationarySkipped++;
-        // ★stale-coast creep guard (2026-06-03・監査 CRITICAL②根治)★:
-        //   静止 (ZUPT) 区間でも coastSpdMps を ★停止速度へ即時降下★ させる。これを怠ると
-        //   「走行 → 停止 → ゴミGPS穴」の順で coastSpdMps が停止前の走行速度を保持し続け、
-        //   gapGuard の _entrySpd (= coastSpdMps 優先) が停止中なのに走行速度を読み、parked
-        //   ゲート (_entrySpd < stationarySpdMps) を素通りして停止中に phantom fill (= creep) を
-        //   生む (memory Fix④ と同一クラス)。停止を観測した時点で「穴入口直前の確かな速度 = 停止」
-        //   が真であるため coastSpdMps を実測停止速度に揃える。
-        //     ・spd 判明 (>=0) → その停止速度 (≈0) を採用 → 次の穴は parked 扱いで return 0。
-        //     ・spd 不明 (-1) → displacement で静止と判定された区間 → coastSpdMps を 0 にクリア
-        //       (停止が確定しているため確実に parked へ落とす)。
-        // ★しまなみ修正 (2026-06-05・iOS 橋上 GPS 穴の −570m 過少根治)★:
-        //   ただし「静止判定の根拠が低信頼な点」= bad-accuracy (> gapGuardAccM) や dt=0 の重複 fix は
-        //   ★本物の停止ではなく GPS 穴中のゴミ/重複点★。これで coastSpdMps を 0 にすると、穴明けの
-        //   実走行区間 (実機 SE しまなみ idx1390: 87km/h・896m) が _entrySpd=0 で parked 扱い棄却され
-        //   丸ごと −570m 過少になる (SE 34km→1.6km 系の距離損失の一因)。低信頼な静止点では coastSpdMps
-        //   を ★0 にせず保持 (従来の穴中減衰 ×0.97 のみ)★ し、穴明けの走行を殺さない。
-        //   ★creep 安全★: 本物の停止は良 accuracy + 実 dt の点が連続するため _lowConfidenceStop=false で
-        //   従来どおり 0 クリア = 停止中 creep は不変 (低信頼点 1 点が混じっても次の確定停止点で 0 化)。
-        const _accCurStat = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
-        const _dtCurStat = ((cur.t || 0) - (prev.t || 0)) / 1000;
-        const _lowConfidenceStop =
-          (cfg.gapGuardAccM != null && _accCurStat > cfg.gapGuardAccM) || _dtCurStat <= 0;
-        if (spd >= 0) {
-          coastSpdMps = spd; // Doppler 判明 = 信頼できる停止速度 (≈0) を採用
-        } else if (!_lowConfidenceStop) {
-          coastSpdMps = 0; // 高信頼な変位停止 → 0 クリア (= 従来動作・creep 防止)
-        } else if (coastSpdMps >= 0) {
-          coastSpdMps = coastSpdMps * 0.97; // 低信頼(bad-acc/dup) → 保持し穴中減衰のみ (穴明け走行を殺さない)
-        }
-        prev = cur;
-        prevSnap = snap;
-        return { deltaM: 0, totalM: total, reason: 'stationary' };
-      }
-
-      const beforeStats = {
-        sameRoadSegs: stats.sameRoadSegs,
-        routedSegs: stats.routedSegs,
-        straightSegs: stats.straightSegs,
-        dopplerSegs: stats.dopplerSegs,
-        coastSegs: stats.coastSegs || 0,
-      };
-      // ★coasting (B)★: この区間は「前点までに確立した coastSpdMps」で補間する。
-      //   よって stepDistance には更新前の coastSpdMps を渡す (= 因果順序の保持)。
-      const added = stepDistance(
-        decoder,
-        router,
-        prev,
-        cur,
-        prevSnap,
-        snap,
-        spd,
-        cfg,
-        bd,
-        stats,
-        coastSpdMps
-      );
-      const delta = added > 0 ? added : 0;
-      total += delta;
-      const reason = classifyReason(beforeStats);
-
-      // ★coastSpdMps 更新 (B-1 + B-2・never-over)★:
-      //   ・当該点速度 (spd) が判明 → coasting 速度を実速度で再確立。ただし ★上方は即時・下方も即時★
-      //     とすると穴中の単発 spike で過大化しうるため、減速 (spd < 現 coast) は即反映 (下方更新)、
-      //     加速側も実速度を採用 (snap 成功点 = 道路上を読めており速度が信頼できる)。
-      //   ・spd 不明 (穴中) → coastSpdMps を僅かに減衰 (0.97)。穴が伸びるほど保守側へ寄せ
-      //     never-over を担保 (= 恒久過小係数ではなく穴中の不確かさ処理・snap 復帰で実速度に即解除)。
-      if (spd >= 0) {
-        if (snap) {
-          coastSpdMps = spd; // snap 成功 = 信頼できる点速度で再確立 (上方/下方とも)
-        } else if (coastSpdMps < 0 || spd < coastSpdMps) {
-          coastSpdMps = spd; // snap 失敗でも減速側は即反映 (過大防止)
-        }
-      } else if (coastSpdMps >= 0) {
-        coastSpdMps = coastSpdMps * 0.97; // 穴中 (spd 不明) は単調減衰で保守側へ
-      }
-
+    if (!prev) {
       prev = cur;
       prevSnap = snap;
-      return { deltaM: delta, totalM: total, reason: reason };
+      return { deltaM: 0, totalM: total, reason: 'first' };
+    }
+
+    // 静止判定 (ZUPT) — computeDistance と同一ロジック
+    const spd = speedProvider(cur, prev);
+    const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+    let stationary = false;
+    if (spd >= 0) {
+      if (spd < cfg.stationarySpdMps) stationary = true;
+    } else {
+      if (isStationaryByDisplacement(prev, cur, disp, cfg)) stationary = true;
+    }
+    if (stationary) {
+      bd.stationarySkipped++;
+      // ★stale-coast creep guard (2026-06-03・監査 CRITICAL②根治)★:
+      //   静止 (ZUPT) 区間でも coastSpdMps を ★停止速度へ即時降下★ させる。これを怠ると
+      //   「走行 → 停止 → ゴミGPS穴」の順で coastSpdMps が停止前の走行速度を保持し続け、
+      //   gapGuard の _entrySpd (= coastSpdMps 優先) が停止中なのに走行速度を読み、parked
+      //   ゲート (_entrySpd < stationarySpdMps) を素通りして停止中に phantom fill (= creep) を
+      //   生む (memory Fix④ と同一クラス)。停止を観測した時点で「穴入口直前の確かな速度 = 停止」
+      //   が真であるため coastSpdMps を実測停止速度に揃える。
+      //     ・spd 判明 (>=0) → その停止速度 (≈0) を採用 → 次の穴は parked 扱いで return 0。
+      //     ・spd 不明 (-1) → displacement で静止と判定された区間 → coastSpdMps を 0 にクリア
+      //       (停止が確定しているため確実に parked へ落とす)。
+      // ★しまなみ修正 (2026-06-05・iOS 橋上 GPS 穴の −570m 過少根治)★:
+      //   ただし「静止判定の根拠が低信頼な点」= bad-accuracy (> gapGuardAccM) や dt=0 の重複 fix は
+      //   ★本物の停止ではなく GPS 穴中のゴミ/重複点★。これで coastSpdMps を 0 にすると、穴明けの
+      //   実走行区間 (実機 SE しまなみ idx1390: 87km/h・896m) が _entrySpd=0 で parked 扱い棄却され
+      //   丸ごと −570m 過少になる (SE 34km→1.6km 系の距離損失の一因)。低信頼な静止点では coastSpdMps
+      //   を ★0 にせず保持 (従来の穴中減衰 ×0.97 のみ)★ し、穴明けの走行を殺さない。
+      //   ★creep 安全★: 本物の停止は良 accuracy + 実 dt の点が連続するため _lowConfidenceStop=false で
+      //   従来どおり 0 クリア = 停止中 creep は不変 (低信頼点 1 点が混じっても次の確定停止点で 0 化)。
+      const _accCurStat = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
+      const _dtCurStat = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      const _lowConfidenceStop =
+        (cfg.gapGuardAccM != null && _accCurStat > cfg.gapGuardAccM) || _dtCurStat <= 0;
+      if (spd >= 0) {
+        coastSpdMps = spd; // Doppler 判明 = 信頼できる停止速度 (≈0) を採用
+      } else if (!_lowConfidenceStop) {
+        coastSpdMps = 0; // 高信頼な変位停止 → 0 クリア (= 従来動作・creep 防止)
+      } else if (coastSpdMps >= 0) {
+        coastSpdMps = coastSpdMps * 0.97; // 低信頼(bad-acc/dup) → 保持し穴中減衰のみ (穴明け走行を殺さない)
+      }
+      prev = cur;
+      prevSnap = snap;
+      return { deltaM: 0, totalM: total, reason: 'stationary' };
+    }
+
+    const beforeStats = {
+      sameRoadSegs: stats.sameRoadSegs,
+      routedSegs: stats.routedSegs,
+      straightSegs: stats.straightSegs,
+      dopplerSegs: stats.dopplerSegs,
+      coastSegs: stats.coastSegs || 0,
+    };
+    // ★coasting (B)★: この区間は「前点までに確立した coastSpdMps」で補間する。
+    //   よって stepDistance には更新前の coastSpdMps を渡す (= 因果順序の保持)。
+    const added = stepDistance(
+      decoder,
+      router,
+      prev,
+      cur,
+      prevSnap,
+      snap,
+      spd,
+      cfg,
+      bd,
+      stats,
+      coastSpdMps
+    );
+    const delta = added > 0 ? added : 0;
+    total += delta;
+    const reason = classifyReason(beforeStats);
+
+    // ★coastSpdMps 更新 (B-1 + B-2・never-over)★:
+    //   ・当該点速度 (spd) が判明 → coasting 速度を実速度で再確立。ただし ★上方は即時・下方も即時★
+    //     とすると穴中の単発 spike で過大化しうるため、減速 (spd < 現 coast) は即反映 (下方更新)、
+    //     加速側も実速度を採用 (snap 成功点 = 道路上を読めており速度が信頼できる)。
+    //   ・spd 不明 (穴中) → coastSpdMps を僅かに減衰 (0.97)。穴が伸びるほど保守側へ寄せ
+    //     never-over を担保 (= 恒久過小係数ではなく穴中の不確かさ処理・snap 復帰で実速度に即解除)。
+    if (spd >= 0) {
+      if (snap) {
+        coastSpdMps = spd; // snap 成功 = 信頼できる点速度で再確立 (上方/下方とも)
+      } else if (coastSpdMps < 0 || spd < coastSpdMps) {
+        coastSpdMps = spd; // snap 失敗でも減速側は即反映 (過大防止)
+      }
+    } else if (coastSpdMps >= 0) {
+      coastSpdMps = coastSpdMps * 0.97; // 穴中 (spd 不明) は単調減衰で保守側へ
+    }
+
+    prev = cur;
+    prevSnap = snap;
+    return { deltaM: delta, totalM: total, reason: reason };
+  }
+
+  return {
+    ingest: function (sample) {
+      if (!sample || !Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) {
+        // 無効点 (null/NaN/Infinity) は computeDistance の入力整形と同様に黙殺 (距離影響なし)
+        return { deltaM: 0, totalM: total, reason: 'skip' };
+      }
+      // ★smoothedRawMode★: 生点をバッファし、後続 h 点が揃った中心点を平滑して _core へ流す。
+      if (cfg.smoothedRawMode === true) {
+        const lastRaw = smoothBuf.length ? smoothBuf[smoothBuf.length - 1] : null;
+        // out-of-order ガード (生入力順で判定)
+        if (
+          lastRaw &&
+          Number.isFinite(sample.t) &&
+          Number.isFinite(lastRaw.t) &&
+          sample.t < lastRaw.t
+        ) {
+          return { deltaM: 0, totalM: total, reason: 'out_of_order' };
+        }
+        smoothBuf.push(sample);
+        let res = { deltaM: 0, totalM: total, reason: 'buffered' };
+        while (smoothNext + smParams.h <= smoothBuf.length - 1) {
+          const sm = _smoothOnePoint(
+            smoothBuf,
+            smoothNext,
+            smParams.h,
+            smParams.gapMs,
+            smParams.badAcc
+          );
+          res = _core(sm);
+          smoothNext++;
+        }
+        return res;
+      }
+      // 非 smoothed: 従来通り (out-of-order を prev で判定)。
+      if (prev && Number.isFinite(sample.t) && Number.isFinite(prev.t) && sample.t < prev.t) {
+        return { deltaM: 0, totalM: total, reason: 'out_of_order' };
+      }
+      return _core(sample);
+    },
+    // ★flush★: smoothedRawMode で残バッファ (末尾 h 点) を片側窓で確定する。
+    //   ★業務終了で最終 totalM() を読む前に必ず呼ぶこと★ (末尾区間が未計上のまま課金されるのを防ぐ)。
+    //   非 smoothed では no-op。batch の配列末尾 (前方窓欠落) と同一規則 = parity 維持。
+    flush: function () {
+      if (cfg.smoothedRawMode !== true) return { deltaM: 0, totalM: total };
+      let flushed = 0;
+      while (smoothNext <= smoothBuf.length - 1) {
+        const sm = _smoothOnePoint(
+          smoothBuf,
+          smoothNext,
+          smParams.h,
+          smParams.gapMs,
+          smParams.badAcc
+        );
+        const r = _core(sm);
+        flushed += r && r.deltaM > 0 ? r.deltaM : 0;
+        smoothNext++;
+      }
+      return { deltaM: flushed, totalM: total }; // worker は deltaM を業務距離に加算可
     },
     totalM: function () {
       return total;
@@ -1481,6 +1684,8 @@ function createDistanceTracker(decoder, opts) {
       prev = null;
       prevSnap = null;
       coastSpdMps = -1;
+      smoothBuf = [];
+      smoothNext = 0;
       freshAccum();
       // ★router/snapper を新インスタンスで完全再生成 (= キャッシュ等の内部状態漏れを根絶)。
       //   旧実装はキャッシュ Map のみ差し替えていたが reset 後再 ingest で 10m 級の残留が出たため、
