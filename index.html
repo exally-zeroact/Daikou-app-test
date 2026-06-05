@@ -12041,6 +12041,10 @@
             <div class="row-label" style="color: #8e8e93">OBD 車速</div>
             <div id="obdSpeed" style="font-weight: 600; font-family: monospace">— km/h</div>
           </div>
+          <div class="row" style="justify-content: space-between">
+            <div class="row-label" style="color: #8e8e93">距離の計測源</div>
+            <div id="obdSource" style="font-weight: 700; color: #007aff">📡 GPS</div>
+          </div>
           <div class="row" style="justify-content: center; padding-top: 12px; gap: 10px">
             <button
               id="btnObdConnect"
@@ -12722,6 +12726,7 @@
           window.__obdUiBound = true;
           var statusEl = document.getElementById('obdStatus');
           var speedEl = document.getElementById('obdSpeed');
+          var sourceEl = document.getElementById('obdSource');
           var noteEl = document.getElementById('obdNote');
           var btnC = document.getElementById('btnObdConnect');
           var btnD = document.getElementById('btnObdDisconnect');
@@ -12749,6 +12754,10 @@
           }
           O.on('status', function (s) {
             if (statusEl) statusEl.textContent = JA[s] || s;
+            // ★OBDメイン起動: 接続したら距離源をOBD(∫v)に切替・切断/エラーでGPSへ戻す。
+            //   gps.js が window.OBD_DRIVE_DISTANCE を見て speedSrc='obd' を立て、距離が∫v(OBD)駆動になる。
+            //   (gps.js 側で鮮度切れは自動でGPSにfallbackするので、接続=ONで安全)
+            window.OBD_DRIVE_DISTANCE = s === 'connected';
           });
           O.on('error', function (msg) {
             if (noteEl) noteEl.textContent = 'エラー: ' + msg;
@@ -12764,11 +12773,16 @@
               O.disconnect();
             });
           }
-          // 速度表示を 500ms 毎に更新 (鮮度切れは — 表示)
+          // 速度表示 + 距離源インジケータを 500ms 毎に更新 (鮮度切れは GPS 扱い)
           setInterval(function () {
-            if (!speedEl) return;
             var sp = O.getSpeed();
-            speedEl.textContent = sp.valid ? sp.kmh + ' km/h' : '— km/h';
+            if (speedEl) speedEl.textContent = sp.valid ? sp.kmh + ' km/h' : '— km/h';
+            if (sourceEl) {
+              // 実際に距離を駆動しているのは「flag ON かつ OBD鮮度OK」の時だけ(=gps.jsの判定と一致)
+              var obdDriving = window.OBD_DRIVE_DISTANCE === true && sp.valid;
+              sourceEl.textContent = obdDriving ? '🟢 OBD (車輪速度)' : '📡 GPS';
+              sourceEl.style.color = obdDriving ? '#34c759' : '#007aff';
+            }
           }, 500);
         }
         if (document.readyState === 'loading') {
