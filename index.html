@@ -2061,13 +2061,6 @@
         padding: 6px 16px;
         line-height: 1.4;
       }
-      /* ★業務報告フッタ: 続ける/終了 を画面下部に常時固定 (端末高さに依らず見切れない・2026-06-05)。
-         padding-bottom は固定 bottom-nav(高さ≈50px+safe-area)を避ける既存基準 60px に合わせ、
-         「終了」が bottom-nav の裏に隠れないようにする。 */
-      .report-footer {
-        flex-shrink: 0;
-        padding-bottom: calc(60px + env(safe-area-inset-bottom));
-      }
 
       /* DRIVING */
       .driving-grid {
@@ -4453,37 +4446,36 @@
 
       <!-- BUSINESS REPORT（業務終了画面・日報・2026/05/01追加） -->
 
-      <!-- ★設計変更宣言 (2026-06-05・司さん報告 端末で終了ボタンが見切れる根治):
-           旧: 画面全体が overflow-y:auto = card が長いと 続ける/終了 が下に押し出され、
-               小型端末(iPhone SE 等)で「終了」がスクロールしないと出ない。
-           新: 上部(日時/タイトル/card)だけ ★スクロール領域(.report-scroll)★ にし、
-               続ける/終了 は ★下部フッタ(.report-footer)に常時固定★ → 端末の高さに依らず
-               スクロール不要で「終了」が必ず見える(自動調整)。 -->
+      <!-- ★設計変更宣言 (2026-06-05・司さん報告 端末で終了ボタンが見切れる根治・rev2):
+           真因: 画面下に固定の bottom-nav(業務/使い方/設定) があり、その ★裏に「終了」ボタンが
+                 隠れて★いた(画面に nav 分の下余白が無かった)→ スクロールしないと出てこなかった。
+           修正: スクロール構造にはせず(司さん指示)、自然な並びのまま画面に ★bottom-nav 分の
+                 下余白(padding-bottom 60px+safe-area)★ を確保 → 続ける/終了 が nav の上に出て、
+                 スクロール不要で全体が 1 画面に収まる(自然なバランス維持)。 -->
       <div
         id="screenBusinessReport"
-        style="display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden"
+        style="
+          display: none;
+          flex-direction: column;
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          padding-bottom: calc(60px + env(safe-area-inset-bottom));
+        "
       >
-        <div
-          class="report-scroll"
-          style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch"
-        >
-          <!-- 日時（全画面共通） -->
-          <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
-          <div class="report-title">本日の業務報告</div>
-          <div class="report-card" id="reportCard">
-            <!-- JS で動的生成 -->
-          </div>
+        <!-- 日時（全画面共通） -->
+        <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
+        <div class="report-title">本日の業務報告</div>
+        <div class="report-card" id="reportCard">
+          <!-- JS で動的生成 -->
         </div>
-        <!-- ★フッタ: 続ける/終了 を常時固定表示 (見切れ根治)。landscape は中の要素が
-             display:none で空フッタ(0高)・btn-area 側に表示= 既存挙動維持。 -->
-        <div class="report-footer">
-          <!-- ★設計変更宣言 (2026-05-20・司さん指示・案 D・但し書き 続ける の上に移動 + グレー化):
-               旧: 続ける → note (赤) → 終了 で・終了ボタン (赤枠) と混同リスク。
-               新: note (グレー) → 続ける → 終了 で・「続ける前に読む注記」として自然位置。 -->
-          <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
-          <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
-          <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
-        </div>
+        <!-- ★設計変更宣言 (2026-05-20・司さん指示・案 D・但し書き 続ける の上に移動 + グレー化):
+             旧: 続ける → note (赤) → 終了 で・終了ボタン (赤枠) と混同リスク。
+             新: note (グレー) → 続ける → 終了 で・「続ける前に読む注記」として自然位置。 -->
+        <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
+        <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
+        <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
       </div>
 
       <!-- DRIVING -->
