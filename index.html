@@ -6610,18 +6610,28 @@
       //   完全に dead code (内部の _forwardRoadsToMmWorker は C11 で削除済のため呼出時に
       //   ReferenceError も内包していた)。
 
-      // ─── 古い履歴キー自動削除（今日以外は不要） ───
+      // ─── 古い履歴キー自動削除（保持期間超過分のみ） ───
+      // ★設計変更宣言 (2026-06-06・司さん指示「履歴は全業務記録しとかないかん・20回でも30回でも」):
+      //   旧: 「今日以外の daikou_history_<日付> を全削除」。
+      //       → 代行は深夜営業で日付をまたぐため、22時開始の業務が翌0時以降のアプリ起動で
+      //         「昨日のキー」として消され、前夜分の履歴が永久消失していた(実機 2026-06-06 で再現)。
+      //   新: business.js (daikou_business_history) と同じ ★30 日 retention★ に統一。
+      //       直近 30 日のキーは保持(= 日跨ぎの今夜分も当然残る)・30 日超過 or 日付パース不能のみ削除。
+      //   ※保存・dedup ロジック(_historyDedupeUpsert)は 1 byte も触らない。
       function cleanOldHistoryKeys() {
-        const today = 'daikou_history_' + new Date().toDateString();
+        const PREFIX = 'daikou_history_';
+        const RETENTION_DAYS = 30;
+        const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
         const toDelete = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
-          if (key && key.startsWith('daikou_history_') && key !== today) {
-            toDelete.push(key);
-          }
+          if (!key || !key.startsWith(PREFIX)) continue;
+          const t = Date.parse(key.slice(PREFIX.length)); // "Thu Jun 05 2026" → ms
+          // パース不能(壊れたキー) or retention 超過(古い) のみ削除。直近は保持。
+          if (!Number.isFinite(t) || t < cutoff) toDelete.push(key);
         }
         toDelete.forEach((k) => localStorage.removeItem(k));
-        if (toDelete.length > 0) dlog('[Cleanup] 古い履歴キー削除:', toDelete.length + '件');
+        if (toDelete.length > 0) dlog('[Cleanup] 期限切れ履歴キー削除:', toDelete.length + '件');
       }
 
       // ★設計変更宣言 (2026-05-14): autoResetCheck / setInterval / visibilitychange 全削除
@@ -10619,42 +10629,63 @@
           });
           emptyMsg.style.display = 'flex';
 
-          let rides = [];
+          // ★設計変更宣言 (2026-06-06・司さん指示「全業務記録」・日跨ぎ対応):
+          //   旧: 今日の daikou_history_<日付> キー 1 つだけ読み込み → 日付をまたぐと前夜分が見えなかった。
+          //   新: 保持中の全 daikou_history_<日付> キーをマージし、日付セクション(新しい日が上・各日内は
+          //       保存順=時系列)で表示。上部 summary は表示中の全 ride を合算。
+          let buckets = [];
           try {
-            const today = new Date();
-            const key = 'daikou_history_' + today.toDateString();
-            rides = JSON.parse(localStorage.getItem(key) || '[]');
+            const PREFIX = 'daikou_history_';
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (!k || !k.startsWith(PREFIX)) continue;
+              let arr = [];
+              try {
+                arr = JSON.parse(localStorage.getItem(k) || '[]');
+              } catch (_) {
+                arr = [];
+              }
+              if (!Array.isArray(arr) || arr.length === 0) continue;
+              const ds = k.slice(PREFIX.length);
+              const t = Date.parse(ds);
+              buckets.push({ dateStr: ds, t: Number.isFinite(t) ? t : 0, rides: arr });
+            }
           } catch (e) {
             if (typeof dlog === 'function')
               dlog('[History] localStorage 読込エラー: ' + (e && e.message));
             return;
           }
-          if (!rides || rides.length === 0) return;
+          if (buckets.length === 0) return;
+          buckets.sort(function (a, b) {
+            return b.t - a.t;
+          }); // 新しい日が上
 
           emptyMsg.style.display = 'none';
 
-          // 日付ヘッダー
-          const today = new Date();
           const days = ['日', '月', '火', '水', '木', '金', '土'];
-          const dateStr =
-            today.getFullYear() +
-            '年' +
-            (today.getMonth() + 1) +
-            '月' +
-            today.getDate() +
-            '日（' +
-            days[today.getDay()] +
-            '）';
-          const dateHeader = document.createElement('div');
-          dateHeader.className = 'date-header';
-          dateHeader.textContent = dateStr;
-          wrap.appendChild(dateHeader);
+          function _fmtDateHeader(t, fallback) {
+            const d = Number.isFinite(t) && t > 0 ? new Date(t) : null;
+            if (!d) return fallback || '';
+            return (
+              d.getFullYear() +
+              '年' +
+              (d.getMonth() + 1) +
+              '月' +
+              d.getDate() +
+              '日（' +
+              days[d.getDay()] +
+              '）'
+            );
+          }
 
-          // サマリー計算
-          const totalDist = rides.reduce(function (a, b) {
+          // 上部 summary: 表示中の全 ride 合算
+          const allRides = buckets.reduce(function (acc, b) {
+            return acc.concat(b.rides);
+          }, []);
+          const totalDist = allRides.reduce(function (a, b) {
             return a + (b.distance_m || 0);
           }, 0);
-          const totalFare = rides.reduce(function (a, b) {
+          const totalFare = allRides.reduce(function (a, b) {
             return a + (b.fare || 0);
           }, 0);
           const summary = document.createElement('div');
@@ -10663,7 +10694,7 @@
             '<div class="summary-item">' +
             '<div class="summary-label">走行回数</div>' +
             '<div class="summary-value">' +
-            rides.length +
+            allRides.length +
             '<span class="summary-unit">回</span></div>' +
             '</div>' +
             '<div class="summary-item">' +
@@ -10680,9 +10711,6 @@
             '</div>';
           wrap.appendChild(summary);
 
-          // 走行リスト
-          const list = document.createElement('div');
-          list.className = 'ride-list';
           // ★設計変更宣言 (2026-05-16・履歴画面 経路表示):
           //   ride.start_address / end_address / waypoints[] が記録されている ride のみ
           //   ride-left 内に経路行を追加表示 (「南江戸町 → 道後温泉 → 三津浜」形式)。
@@ -10715,42 +10743,51 @@
               '</div>'
             );
           }
-          rides.forEach(function (ride, i) {
-            const item = document.createElement('div');
-            item.className = 'ride-item';
-            let extrasText = '';
-            if (ride.extras && ride.extras.length > 0) {
-              extrasText = ride.extras
-                .map(function (e) {
-                  return e.name + ' +¥' + (e.amount || 0).toLocaleString();
-                })
-                .join('　');
-            }
-            if (ride.surcharge) extrasText = (extrasText ? extrasText + '　' : '') + '割増あり';
-            const routeHtml = _buildRouteHtml(ride);
-            item.innerHTML =
-              '<div class="ride-left">' +
-              '<div class="ride-num">' +
-              (i + 1) +
-              '回目</div>' +
-              '<div class="ride-time">' +
-              (ride.time || '') +
-              '</div>' +
-              '<div class="ride-dist">' +
-              ((ride.distance_m || 0) / 1000).toFixed(2) +
-              'km</div>' +
-              (extrasText ? '<div class="ride-extras">' + extrasText + '</div>' : '') +
-              routeHtml +
-              '</div>' +
-              '<div class="ride-right">' +
-              '<div class="ride-fare">¥' +
-              (ride.fare || 0).toLocaleString() +
-              '</div>' +
-              '</div>';
-            list.appendChild(item);
+          buckets.forEach(function (bucket) {
+            const dateHeader = document.createElement('div');
+            dateHeader.className = 'date-header';
+            dateHeader.textContent = _fmtDateHeader(bucket.t, bucket.dateStr);
+            wrap.appendChild(dateHeader);
+            const list = document.createElement('div');
+            list.className = 'ride-list';
+            bucket.rides.forEach(function (ride, i) {
+              const item = document.createElement('div');
+              item.className = 'ride-item';
+              let extrasText = '';
+              if (ride.extras && ride.extras.length > 0) {
+                extrasText = ride.extras
+                  .map(function (e) {
+                    return e.name + ' +¥' + (e.amount || 0).toLocaleString();
+                  })
+                  .join('　');
+              }
+              if (ride.surcharge) extrasText = (extrasText ? extrasText + '　' : '') + '割増あり';
+              const routeHtml = _buildRouteHtml(ride);
+              item.innerHTML =
+                '<div class="ride-left">' +
+                '<div class="ride-num">' +
+                (i + 1) +
+                '回目</div>' +
+                '<div class="ride-time">' +
+                (ride.time || '') +
+                '</div>' +
+                '<div class="ride-dist">' +
+                ((ride.distance_m || 0) / 1000).toFixed(2) +
+                'km</div>' +
+                (extrasText ? '<div class="ride-extras">' + extrasText + '</div>' : '') +
+                routeHtml +
+                '</div>' +
+                '<div class="ride-right">' +
+                '<div class="ride-fare">¥' +
+                (ride.fare || 0).toLocaleString() +
+                '</div>' +
+                '</div>';
+              list.appendChild(item);
+            });
+            wrap.appendChild(list);
           });
-          wrap.appendChild(list);
-          if (typeof dlog === 'function') dlog('[History] render: ' + rides.length + ' rides');
+          if (typeof dlog === 'function')
+            dlog('[History] render: ' + allRides.length + ' rides / ' + buckets.length + ' days');
         }
         window._hist_render = _hist_render;
       })();
