@@ -282,6 +282,9 @@ function _confirmedRoadDelta(msg, outSnap) {
       acc: msg.accuracy,
       spd: typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1, // km/h → m/s (無ければ -1)
       snap: _vitSnap, // ★Viterbi 確定 snap (= 距離源)。null なら ingest 内で従来 snap 退避。
+      // ★OBD メインモード: 速度源が OBD 車輪速度なら ∫v(OBD) で距離駆動する印 (gps.js が speedSrc 付与)。
+      //   未設定/'dop'/'hav' は従来の道路 map-matching (byte 不変)。
+      obd: msg.speedSrc === 'obd',
     });
     // 確定道路読み取り (連結性拘束済) の道なり区間増分。正値のみ採用。
     const confirmedDeltaM = res && typeof res.deltaM === 'number' ? res.deltaM : 0;

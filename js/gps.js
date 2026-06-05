@@ -548,9 +548,10 @@ const GPS = (() => {
     _rawPrevPos = { lat, lng, t: now };
     // ★OBD 速度源 (2026-06-05・obd ブランチ・★既定 OFF★)★:
     //   window.OBD_DRIVE_DISTANCE が true かつ OBD アダプターから鮮度 OK の車速が来ている時のみ、
-    //   speedKmh を ★車輪由来の OBD 値★ で上書きする。これにより距離計算の速度依存部
-    //   (停車判定 / GPS 穴 fill / Doppler 整合 / arc-recover の Doppler cap) が、GPS Doppler より
-    //   素直で正確な車速で動き、過大ゼロのまま精度が上がりうる。
+    //   speedKmh を ★車輪由来の OBD 値★ で上書きし、speedSrc='obd' を立てる。
+    //   → worker(map-matcher)→pipeline-distance が ★距離を ∫v(OBD)=車輪速度×dt で駆動★ する
+    //   (OBD メインモード・タクシー認定メーター方式・タイヤ値直結)。道路 map-matching は OBD が
+    //   無効/未接続/iPhone の時のフォールバックに退く。
     //   ★未接続 / 鮮度切れ / flag OFF (既定) は GPS Doppler のまま = 既存挙動 1byte 不変★。
     //   実機 OBD で検証後に flag を立てる。距離コアの意味論(道路 snap)は不変・速度源を差すだけ。
     let _speedFromObd = false;

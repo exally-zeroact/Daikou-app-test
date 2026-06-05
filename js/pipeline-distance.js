@@ -106,6 +106,10 @@ const DEFAULTS = {
   //   → 弦まで回収。低速 (< これ) では ジッタが距離を水増しするため ★Doppler 実測 (spd×dt) を
   //   天井★ にして過大ゼロを死守 (短距離 urban で raw が +0.8% 過大化するのを防ぐ)。
   arcRecoverRawAboveSpdMps: 8.0, // ≈29km/h。これ以上は弦回収・未満は Doppler cap
+
+  // ★OBD メインモード (2026-06-05)★: 速度源が OBD 車輪速度の時、距離を ∫v(OBD)=spd×dt で駆動。
+  //   dt がこれ超 = 異常欠測 → その区間は加算しない(過大ゼロ保険・通常 1Hz polling なら無関係)。
+  obdMaxDtS: 10,
 };
 
 // ─── 幾何ヘルパ ───────────────────────────────────────────────
@@ -1289,6 +1293,7 @@ function createDistanceTracker(decoder, opts) {
       gapGuardFillM: 0,
       stationarySkipped: 0,
       arcRecoverM: 0, // ★地力 de-bias: 同一道路 arc 回収で増えた距離 (監査用)
+      obdM: 0, // ★OBD メイン: ∫v(OBD) で加算した距離 (監査用)
     };
     stats = {
       points: 0,
@@ -1303,6 +1308,7 @@ function createDistanceTracker(decoder, opts) {
       gapGuardSkipped: 0,
       gapGuardFilled: 0,
       arcRecovered: 0, // ★地力 de-bias: arc 回収が発火した区間数 (監査用)
+      obdSegs: 0, // ★OBD メイン: ∫v(OBD) で駆動した区間数 (監査用)
     };
   }
   freshAccum();
@@ -1369,8 +1375,29 @@ function createDistanceTracker(decoder, opts) {
         return { deltaM: 0, totalM: total, reason: 'first' };
       }
 
-      // 静止判定 (ZUPT) — computeDistance と同一ロジック
       const spd = speedProvider(cur, prev);
+
+      // ★★ OBD メインモード (2026-06-05・obd ブランチ) ★★:
+      //   速度源が ★OBD 車輪速度★ の時は、距離を ★∫v(OBD)=車輪速度×dt の積分★ で駆動する
+      //   (= タクシー認定メーター/国交省ソフトメーター方式・タイヤ値直結)。道路 map-matching の
+      //   弧長は OBD が無効/未接続/iPhone の時のフォールバックに退く。
+      //   cur.obd は map-matcher が msg.speedSrc==='obd' (gps.js: OBD_DRIVE_DISTANCE on かつ鮮度OK)
+      //   の時だけ true を立てる。★cur.obd 未設定の通常 GPS 経路は完全に従来通り (byte 不変)★。
+      //   停止は OBD 速度 0 で自然に 0 加算(ZUPT 不要)。異常 dt は弾く(過大ゼロ保険)。
+      if (cur.obd === true && spd >= 0) {
+        const dtObd = ((cur.t || 0) - (prev.t || 0)) / 1000;
+        let obdDelta = 0;
+        if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) obdDelta = spd * dtObd;
+        total += obdDelta;
+        stats.obdSegs = (stats.obdSegs || 0) + 1;
+        bd.obdM = (bd.obdM || 0) + obdDelta;
+        coastSpdMps = spd; // 連続性: 次区間のフォールバック用に実速度を保持
+        prev = cur;
+        prevSnap = snap;
+        return { deltaM: obdDelta, totalM: total, reason: 'obd' };
+      }
+
+      // 静止判定 (ZUPT) — computeDistance と同一ロジック
       const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
       let stationary = false;
       if (spd >= 0) {
