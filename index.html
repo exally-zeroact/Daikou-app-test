@@ -100,21 +100,79 @@
       /* AppBar */
       .appbar {
         background: #007aff;
-        padding: 7px 14px;
-        padding-top: max(7px, env(safe-area-inset-top));
+        padding: 6px 12px;
+        padding-top: max(6px, env(safe-area-inset-top));
         display: flex;
         align-items: center;
         justify-content: space-between;
         flex-shrink: 0;
         position: sticky;
         top: 0;
-        z-index: 50;
+        /* ★2026-06-05: ナビ統合・overlay(z80) より上に出して 使い方/設定 表示中もタブ切替可能に */
+        z-index: 120;
+      }
+      /* ★左グループ: 状態(空車/代行中)チップ + GPS精度ピル + 割増 */
+      .appbar-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
       }
       .appbar-title {
-        font-size: 18px;
+        font-size: 14px;
         font-weight: 700;
         color: #fff;
-        letter-spacing: 2px;
+        letter-spacing: 1px;
+        background: rgba(255, 255, 255, 0.22);
+        border-radius: 13px;
+        padding: 4px 12px;
+        white-space: nowrap;
+      }
+      /* ★右グループ: 業務/使い方/設定 ナビ (青バー内・ラベルのみ・active は白+下線) */
+      .appbar-nav {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-shrink: 0;
+      }
+      .appbar-nav .nav-item {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-family: 'Noto Sans JP', sans-serif;
+        padding: 4px 2px;
+        position: relative;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .appbar-nav .nav-icon {
+        display: none; /* 青バーはラベルのみでスリムに */
+      }
+      .appbar-nav .nav-label {
+        font-size: 14px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.72);
+        letter-spacing: 0.5px;
+      }
+      .appbar-nav .nav-item.active .nav-label {
+        color: #fff;
+      }
+      .appbar-nav .nav-item.active::after {
+        content: '';
+        position: absolute;
+        left: 2px;
+        right: 2px;
+        bottom: -1px;
+        height: 2.5px;
+        border-radius: 2px;
+        background: #fff;
+      }
+      .appbar-nav .nav-item:active {
+        opacity: 0.6;
+      }
+      /* ★代行中/料金 画面は運転中ナビ不要・誤タップ防止でナビ非表示 (司さん指示準拠) */
+      body.screen-driving .appbar-nav,
+      body.screen-fare .appbar-nav {
+        display: none;
       }
       .appbar-right {
         display: flex;
@@ -677,7 +735,16 @@
         z-index: 80;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        padding-bottom: calc(60px + env(safe-area-inset-bottom));
+        /* ★2026-06-05: ナビ統合・appbar(z120) がオーバレイの上に出るので、上に appbar 分の余白を確保。
+           下フッタ撤去のため padding-bottom は safe-area のみ。 */
+        padding-top: calc(40px + env(safe-area-inset-top));
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      /* ★使い方/設定 オーバレイは nav タブ起点=自前の appbar は不要(青バーが常駐ヘッダ)。
+         二重ヘッダ防止で非表示。履歴/料金 は独自 back が要るので自前 appbar を維持。 */
+      #overlayHelp .appbar,
+      #overlaySettings .appbar {
+        display: none;
       }
       /* ★設計変更宣言 (2026-05-14・MA-4-FIX overlay スクロール修正):
    旧: .spa-overlay.show{display:flex;flex-direction:column;}
@@ -1642,9 +1709,10 @@
         font-weight: 700;
         letter-spacing: 0.5px;
       }
-      /* 縦画面：下端固定 + body padding */
+      /* ★2026-06-05: bottom-nav 撤去・ナビは appbar(上) へ。下フッタ分の余白は不要。
+         home indicator 回避の safe-area のみ残す。 */
       body {
-        padding-bottom: calc(60px + env(safe-area-inset-bottom));
+        padding-bottom: env(safe-area-inset-bottom);
       }
       /* ★設計変更宣言 (2026-05-23・ナビ再設計・横画面サイドレール 64px・overlay 連動):
          司さんとモック合意済の最終方針。
@@ -1659,7 +1727,7 @@
       @media (orientation: landscape) {
         body:has(.spa-overlay.show) {
           padding-bottom: 0;
-          padding-left: 64px;
+          padding-left: 0; /* ★2026-06-05: 左サイドレール撤去・余白不要 */
         }
         body:has(.spa-overlay.show) .bottom-nav {
           display: flex !important;
@@ -1691,9 +1759,9 @@
           background: #007aff;
           border-radius: 0 2px 2px 0;
         }
-        /* overlay 自身の・左端を・レール分ずらす (= 重なり防止) */
+        /* ★2026-06-05: 左サイドレール撤去・overlay の左ずらしも不要 */
         body:has(.spa-overlay.show) .spa-overlay.show {
-          left: 64px;
+          left: 0;
         }
         /* ★設計変更宣言 (2026-05-24・空車 + 業務開始 横画面・サイドレール拡張):
            司さん承認 (= 選択肢 A 採用)・screenIdle / screenBusinessStart 横画面でも・サイドレール表示。
@@ -1704,7 +1772,7 @@
         body.screen-idle,
         body.screen-businessstart {
           padding-bottom: 0;
-          padding-left: 64px;
+          padding-left: 0; /* ★2026-06-05: 左サイドレール撤去・余白不要 */
         }
         body.screen-idle .bottom-nav,
         body.screen-businessstart .bottom-nav {
@@ -3927,9 +3995,14 @@
 
     <!-- AppBar -->
 
+    <!-- ★設計変更宣言 (2026-06-05・ナビを青バーに統合・下フッタ/左レール撤去・rev2):
+         左: 状態(空車/代行中)チップ + GPS精度ピル + 割増。 右: 業務/使い方/設定 ナビ。
+         ナビは bottom-nav と同じ onclick(hideAllOverlays/showOverlay)。appbar の z-index を
+         overlay より上に上げ overlay は padding-top で本バーを避けるため、使い方/設定 を開いた
+         ままでもこのナビでタブ切替可能(従来 bottom-nav の役割)。代行中/料金 では誤タップ防止で非表示。 -->
     <div class="appbar" id="appbar">
-      <div class="appbar-title" id="appbarTitle">空　車</div>
-      <div class="appbar-right">
+      <div class="appbar-left">
+        <div class="appbar-title" id="appbarTitle">空　車</div>
         <div class="gps-pill">
           <div class="gps-dot" id="gpsDot"></div>
           <span class="gps-acc" id="gpsAcc">GPS待機</span>
@@ -3942,10 +4015,18 @@
         >
           <span id="surchargeLabel">割増 ON</span>
         </div>
-        <!-- ★設計変更宣言 (2026-05-15・修正1): 業務画面右上ハンバーガーメニュー (≡ menuBtn) 削除。
-             下部ナビ (bottom-nav) に設定タブが常時表示されているため機能的に重複・冗長。
-             onMenuClick() 関数定義 (L6536) と .menu-btn CSS (L1614,1635,2470) も合わせて削除。 -->
       </div>
+      <nav class="appbar-nav" id="appbarNav">
+        <button class="nav-item active" type="button" onclick="window.hideAllOverlays()">
+          <span class="nav-icon">●</span><span class="nav-label">業務</span>
+        </button>
+        <button class="nav-item" type="button" onclick="window.showOverlay('help')">
+          <span class="nav-icon">?</span><span class="nav-label">使い方</span>
+        </button>
+        <button class="nav-item" type="button" onclick="window.showOverlay('settings')">
+          <span class="nav-icon">⚙</span><span class="nav-label">設定</span>
+        </button>
+      </nav>
     </div>
 
     <!-- fareConfig v2 (2026-05-10): 手動 surcharge ボタン群 + 倍率表示 -->
@@ -4461,7 +4542,7 @@
           min-height: 0;
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
-          padding-bottom: calc(60px + env(safe-area-inset-bottom));
+          padding-bottom: env(safe-area-inset-bottom);
         "
       >
         <!-- 日時（全画面共通） -->
@@ -9930,7 +10011,8 @@
         const _NAV_INDEX = { help: 1, settings: 2 };
 
         function _setNavActive(idx) {
-          const items = document.querySelectorAll('.bottom-nav .nav-item');
+          // ★2026-06-05: ナビを appbar に移設したため selector を .appbar-nav に変更
+          const items = document.querySelectorAll('.appbar-nav .nav-item');
           items.forEach(function (btn, i) {
             if (i === idx) btn.classList.add('active');
             else btn.classList.remove('active');
@@ -12666,23 +12748,8 @@
        設定 → window.showOverlay('settings')  (#overlaySettings)
      active class は showOverlay/hideAllOverlays 内部の _setNavActive(idx) が制御。
      dual state は MA-7 で旧 html を redirect 化するまで維持 (直 URL 叩き対策)。 -->
-    <!-- ★設計変更宣言 (2026-05-23・ナビ再設計・3 タブ均等):
-         司さんとモック合意済の最終方針: 履歴タブを縦横とも削除・履歴は独立画面として残す。
-         3 タブ均等配置: [0]業務 / [1]使い方 / [2]設定。
-         履歴アクセス導線は・screenIdle 内 .btn-history (= 縦画面) /
-         .btn-history-landscape-idle (= 横画面) で確保 (= 業務終了後の振り返り運用)。
-         代行中 (= screenDriving) / 料金 (= screenFare) は・運転中ナビ不要 (= 2026-05-19 司さん指示準拠)。
-         横画面 overlay 表示時 (= 履歴/使い方/設定) は・左サイドレール 64px に切替 (= 後段 CSS @media)。 -->
-    <nav class="bottom-nav">
-      <button class="nav-item active" type="button" onclick="window.hideAllOverlays()">
-        <span class="nav-icon">●</span><span class="nav-label">業務</span>
-      </button>
-      <button class="nav-item" type="button" onclick="window.showOverlay('help')">
-        <span class="nav-icon">?</span><span class="nav-label">使い方</span>
-      </button>
-      <button class="nav-item" type="button" onclick="window.showOverlay('settings')">
-        <span class="nav-icon">⚙</span><span class="nav-label">設定</span>
-      </button>
-    </nav>
+    <!-- ★設計変更宣言 (2026-06-05・bottom-nav 撤去): ナビ(業務/使い方/設定)は appbar(青バー)へ移設済。
+         下フッタ(bottom-nav)と横画面の左サイドレールは廃止。アクティブ制御は _setNavActive が
+         .appbar-nav .nav-item に対して行う。履歴導線は screenIdle 内の .btn-history で従来通り。 -->
   </body>
 </html>
