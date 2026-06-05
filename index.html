@@ -741,10 +741,12 @@
         padding-bottom: env(safe-area-inset-bottom);
       }
       /* ★使い方/設定 オーバレイは nav タブ起点=自前の appbar は不要(青バーが常駐ヘッダ)。
-         二重ヘッダ防止で非表示。履歴/料金 は独自 back が要るので自前 appbar を維持。 */
+         二重ヘッダ(青バー2段)防止で非表示。後段の #overlayHelp/.appbar{display:flex} 既存rule を
+         確実に上書きするため !important。履歴/料金 は独自 back が要るので自前 appbar を維持。
+         戻る = 上の青バーの「業務」タブで実現(モダンなタブUIと同じ・別 back ボタン不要)。 */
       #overlayHelp .appbar,
       #overlaySettings .appbar {
-        display: none;
+        display: none !important;
       }
       /* ★設計変更宣言 (2026-05-14・MA-4-FIX overlay スクロール修正):
    旧: .spa-overlay.show{display:flex;flex-direction:column;}
