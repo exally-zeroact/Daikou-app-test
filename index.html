@@ -8755,9 +8755,27 @@
               const _t = document.getElementById('appbarTitle');
               if (_t) _t.textContent = '空　車';
             }
-            // ★設計変更宣言 (2026-05-10): 自動 startGPS() を削除
-            //   旧: startGPS();  ← bs.active 復元時の自動発火
-            //   新: btnSensorPermission 押下時のみ GPS 起動 (user gesture 必須)
+            // ★Android GPS「待機中」固定 根治 (2026-06-05・司さん報告)★:
+            //   業務 active 復元時、iOS は下の sensor banner / btnSensorPermission 経由で GPS が
+            //   起動するが、★Android はセンサー許可バナー自体が出ない設計★のため startGPS が永久に
+            //   呼ばれず GPS が「待機中」で固定される (司さん: 毎回「業務終了→最初→業務開始」で復帰
+            //   させる手間が発生)。Android(非iOS)は geolocation/sensor 権限が永続かつ user gesture
+            //   不要なので、業務 active 復元時に ★自動で startGPS()★ する。
+            //   ・gpsStarted guard で二重起動防止 ・iOS は従来通り banner 経由 (挙動不変)
+            //   ・driving/fare は checkDrivingRestore が既に startGPS 済 (二重は guard で無害)
+            try {
+              const _isIOSrestore = /iPad|iPhone|iPod/.test(navigator.userAgent);
+              if (!_isIOSrestore) {
+                startGPS();
+                if (typeof dlog === 'function')
+                  dlog('[Business] active 復元: Android 自動 startGPS (GPS待機固定 根治)');
+              }
+            } catch (_) {
+              /* startGPS 失敗は致命ではない・既存 banner/業務開始 経路で復帰可能 */
+            }
+            // ★設計変更宣言 (2026-05-10): 自動 startGPS() を削除 (iOS は user gesture 必須のため)
+            //   旧: startGPS();  ← bs.active 復元時の自動発火 (全OS)
+            //   新: iOS は btnSensorPermission 押下時のみ・Android は上で自動 startGPS
             // ★設計変更宣言 (2026-05-10): 業務復元時は iOS PWA で permission lost の
             //   可能性が高い (タスクキルで失効) → orange banner を強制 overlay 表示し
             //   ユーザーに「センサー再起動」の導線を明示
