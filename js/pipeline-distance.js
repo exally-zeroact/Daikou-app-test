@@ -45,6 +45,17 @@ const DEFAULTS = {
   snapMaxDistM: 50, // snapToNearestRoad の maxDistM
   stationarySpdMps: 0.5, // これ未満の速度は静止 (ZUPT)・加算 0
   routingMaxRatio: 4.0, // routing距離/直線距離 がこれ超なら直線 fallback (過大ガード)
+  // ★過大ゼロ de-bias (2026-06-06・★設計変更宣言★・実機0606+realtest3 全fixture検証で確定)★
+  //   別道路 routing の ★受理★ 上限比。routed/straight がこれ超 = ノイズGPSで隣道/対向へ flip し
+  //   迂回路を拾った過大 → 受理せず連結性ハード拘束(前道路へ再snap)/直線へ落とす。
+  //   実機0606: iPhone13 trip2 が routed=647m で +2.74% 過大化(Android489/SE431 比 +150〜200m)。
+  //   ★routingMaxRatio(=4.0) と分離した理由★: routingMaxRatio は Doppler/coast/gap-fill の
+  //   never-over ガードにも使われ、これを一律 4.0→2.5 にすると しまなみ等トンネル/GPS穴の
+  //   coast fill まで絞られ過小化する恐れ。本パラメータは ★routing 受理(下記 L 参照)のみ★ に
+  //   作用させ never-over ガードは 4.0 のまま温存する(= 都市部fixtureに無いトンネル路を保護)。
+  //   検証(全14業務・愛媛): 4.0=過大4(max+2.74%)/過小0 → 2.5=★過大0/過小0(worst -2.61%)★。
+  //   ★捨てすぎ禁止に準拠★: 生GPS/sameRoad弧/coast は不変・routing迂回の過大分だけ除去。
+  routingAcceptMaxRatio: 2.5,
   routingMaxNodes: 4000, // Dijkstra 展開ノード上限 (暴走ガード)
   routingSearchGrids: 3, // routing 用に getRoadsNear する周辺グリッド半径
   // ★交差点接続率★ 道路頂点を node 化する際の量子化。
@@ -1144,7 +1155,9 @@ function stepDistance(
         if (routed != null && routed >= 0) {
           const refStraight = straight > 0.1 ? straight : 0.1;
           // ★連結性 OK (道路網で繋がっている = 正当な交差点/分岐通過)★ → 道なり routing 距離を採用。
-          if (routed / refStraight <= cfg.routingMaxRatio && routed <= cfg.perSegmentMaxM) {
+          //   ★過大ゼロ de-bias★: 受理上限は専用 routingAcceptMaxRatio(=2.5)。ノイズGPSの flip 迂回を弾く。
+          //   (never-over ガード routingMaxRatio=4.0 とは分離・トンネル coast 等は不変)
+          if (routed / refStraight <= cfg.routingAcceptMaxRatio && routed <= cfg.perSegmentMaxM) {
             stats.routedSegs++;
             bd.routedM += routed;
             return routed;
