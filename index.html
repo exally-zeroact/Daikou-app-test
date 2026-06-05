@@ -2061,6 +2061,13 @@
         padding: 6px 16px;
         line-height: 1.4;
       }
+      /* ★業務報告フッタ: 続ける/終了 を画面下部に常時固定 (端末高さに依らず見切れない・2026-06-05)。
+         padding-bottom は固定 bottom-nav(高さ≈50px+safe-area)を避ける既存基準 60px に合わせ、
+         「終了」が bottom-nav の裏に隠れないようにする。 */
+      .report-footer {
+        flex-shrink: 0;
+        padding-bottom: calc(60px + env(safe-area-inset-bottom));
+      }
 
       /* DRIVING */
       .driving-grid {
@@ -4446,30 +4453,37 @@
 
       <!-- BUSINESS REPORT（業務終了画面・日報・2026/05/01追加） -->
 
+      <!-- ★設計変更宣言 (2026-06-05・司さん報告 端末で終了ボタンが見切れる根治):
+           旧: 画面全体が overflow-y:auto = card が長いと 続ける/終了 が下に押し出され、
+               小型端末(iPhone SE 等)で「終了」がスクロールしないと出ない。
+           新: 上部(日時/タイトル/card)だけ ★スクロール領域(.report-scroll)★ にし、
+               続ける/終了 は ★下部フッタ(.report-footer)に常時固定★ → 端末の高さに依らず
+               スクロール不要で「終了」が必ず見える(自動調整)。 -->
       <div
         id="screenBusinessReport"
-        style="
-          display: none;
-          flex-direction: column;
-          flex: 1;
-          min-height: 0;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
-        "
+        style="display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden"
       >
-        <!-- 日時（全画面共通） -->
-        <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
-        <div class="report-title">本日の業務報告</div>
-        <div class="report-card" id="reportCard">
-          <!-- JS で動的生成 -->
+        <div
+          class="report-scroll"
+          style="flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch"
+        >
+          <!-- 日時（全画面共通） -->
+          <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
+          <div class="report-title">本日の業務報告</div>
+          <div class="report-card" id="reportCard">
+            <!-- JS で動的生成 -->
+          </div>
         </div>
-        <!-- ★設計変更宣言 (2026-05-20・司さん指示・案 D・但し書き 続ける の上に移動 + グレー化):
-             旧: 続ける → note (赤) → 終了 で・終了ボタン (赤枠) と混同リスク。
-             新: note (グレー) → 続ける → 終了 で・「続ける前に読む注記」として自然位置。
-             終了との距離が広がり混同完全排除。 -->
-        <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
-        <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
-        <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
+        <!-- ★フッタ: 続ける/終了 を常時固定表示 (見切れ根治)。landscape は中の要素が
+             display:none で空フッタ(0高)・btn-area 側に表示= 既存挙動維持。 -->
+        <div class="report-footer">
+          <!-- ★設計変更宣言 (2026-05-20・司さん指示・案 D・但し書き 続ける の上に移動 + グレー化):
+               旧: 続ける → note (赤) → 終了 で・終了ボタン (赤枠) と混同リスク。
+               新: note (グレー) → 続ける → 終了 で・「続ける前に読む注記」として自然位置。 -->
+          <div class="report-note">※「続ける」でいつでも業務を再開できます</div>
+          <button class="btn-business-resume" onclick="onBusinessResume()">続ける</button>
+          <button class="btn-business-confirm" onclick="onBusinessConfirm()">終了</button>
+        </div>
       </div>
 
       <!-- DRIVING -->
@@ -8767,8 +8781,18 @@
               const _isIOSrestore = /iPad|iPhone|iPod/.test(navigator.userAgent);
               if (!_isIOSrestore) {
                 startGPS();
+                // ★画面が暗くなる/消える 根治 (2026-06-05・司さん報告)★:
+                //   業務中タスクキル→コールド再起動では visibilitychange の hidden→visible 遷移が
+                //   起きないため L5271 の WakeLock 再取得が発火せず、★画面が OS のタイムアウトで消える★。
+                //   (dimTimer は空車5時間なので別)。Android は user gesture 不要で WakeLock 取得可能なので
+                //   復元時に即 acquireWakeLock() し、業務中の画面常時 ON を復活させる。
+                try {
+                  acquireWakeLock();
+                } catch (_) {}
                 if (typeof dlog === 'function')
-                  dlog('[Business] active 復元: Android 自動 startGPS (GPS待機固定 根治)');
+                  dlog(
+                    '[Business] active 復元: Android 自動 startGPS + WakeLock (待機固定/画面消え 根治)'
+                  );
               }
             } catch (_) {
               /* startGPS 失敗は致命ではない・既存 banner/業務開始 経路で復帰可能 */
