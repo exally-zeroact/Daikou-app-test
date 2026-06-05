@@ -59,7 +59,13 @@
         font-family: 'Noto Sans JP', sans-serif;
         background: #fff;
         color: #111;
+        /* ★設計変更宣言 (2026-06-06・司さん指示・Android下部ボタン見切れ根治):
+           100vh は Android のシステムナビバー(◀●■)の ★下まで★ 含むため、body 末尾の .btn-area
+           (追加料金/確定) がナビバーに隠れて見切れていた。100dvh(可視領域だけの動的ビューポート高)に
+           統一し可視領域内に収める(横画面 landscape は既に 100dvh 併用済・縦も統一)。
+           dvh 非対応の古ブラウザは直前の 100vh に fallback。 */
         height: 100vh;
+        height: 100dvh;
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -2436,7 +2442,12 @@
 
       /* ボタンエリア（固定） */
       .btn-area {
-        padding: 10px 16px 40px;
+        /* ★設計変更宣言 (2026-06-06・司さん指示・Android下部ボタン見切れ根治):
+           viewport-fit=cover では body が下部システムバー(Android 3ボタン ◀●■ / iOS ホーム
+           インジケータ)の下まで広がるため、末尾の追加料金/確定ボタンがバーに隠れて見切れていた。
+           下 padding にシステムバー高 env(safe-area-inset-bottom) を加算し可視領域内へ押し上げる
+           (Android=ナビバー高/iOS=ホームインジケータ高・非対応端末は 0 で従来 40px のまま)。 */
+        padding: 10px 16px calc(40px + env(safe-area-inset-bottom));
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
