@@ -81,9 +81,11 @@ describe('3. appbar が overlay より上・代行中/料金でナビ非表示',
     );
   });
 
-  it('使い方/設定 overlay の自前 appbar は非表示 (= 青バー常駐ヘッダ)', () => {
+  it('★全 overlay の自前 appbar は非表示 (= 司さん「青バー統一して無くせ」・履歴/料金も統一)', () => {
+    // 2026-06-06 設計変更: 旧は help/settings のみ非表示で履歴/料金は自前appbar維持だったが、
+    // 司さん指示で履歴/料金も含め全 overlay の二重青バーを統一非表示に。戻るは常駐青バーnav。
     expect(html).toMatch(
-      /#overlayHelp \.appbar,\s*\n?\s*#overlaySettings \.appbar\s*\{[^}]*display:\s*none/
+      /#overlayHelp \.appbar,\s*\n?\s*#overlaySettings \.appbar,\s*\n?\s*#overlayHistory \.appbar,\s*\n?\s*#overlayFare \.appbar\s*\{[^}]*display:\s*none/
     );
   });
 
