@@ -538,13 +538,15 @@ const Meter = (() => {
       (gpsResult.speedKmh || 0) > 0
     ) {
       const gapSec = (gpsResult.timestamp - state.last_timestamp) / 1000;
-      if (gapSec >= GAP_FILL_THRESHOLD_SEC && gapSec < GAP_FILL_MAX_SEC) {
+      const roadsLoading = !!mmWorker && _workerLoadedPrefs.size === 0;
+      const minGapSec = roadsLoading ? 0 : GAP_FILL_THRESHOLD_SEC;
+      if (gapSec >= minGapSec && gapSec < GAP_FILL_MAX_SEC) {
         const spdKmh = Math.min(gpsResult.speedKmh, GAP_FILL_MAX_KMH);
         const gapM = (spdKmh / 3.6) * gapSec;
         if (gapM > 0) {
           state.distance_m += gapM;
           state.fare_yen = calcFare(state.distance_m);
-          state.distanceSource = 'gap';
+          state.distanceSource = roadsLoading ? 'loadfill' : 'gap';
           state.gap_fill_count = (state.gap_fill_count || 0) + 1;
           state.gap_fill_total_m = (state.gap_fill_total_m || 0) + gapM;
           if (state.business_active) {
