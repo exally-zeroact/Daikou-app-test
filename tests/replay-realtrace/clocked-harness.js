@@ -205,9 +205,90 @@ function runRealTraceBusiness(samples, opts) {
       roadsSent = true;
     }
   };
-  sendRoadsIfDue(t0); // 遅延0なら即ロード(従来挙動)
+
+  // ★warmup GPS 供給 (2026-06-08)★: 実機は業務開始 ★前★ から待機中 GPS が流れ続け、
+  //   index.html は常時 Meter.updateGpsOnly(g) + Meter.update(g) を呼ぶ (P3: 業務外でも
+  //   Worker B に GPS が流れ MM がウォームアップ・running=false なので課金加算なし)。
+  //   旧ハーネスはこれを供給せず毎回コールドスタートで測っており、iPhone13 業務1 が
+  //   実機 (-2.5%) より悪い -4.2% に出る ★検証側の人工値★ を作っていた。
+  //   opts.warmupSamples (業務開始前の生サンプル列) を本番同様に流してから業務開始する。
+  //   道路は実機では待機中にロード済 → 遅延注入なし (roadsDelayMs=0) なら warmup 開始時にロード。
+  const warmup = Array.isArray(opts.warmupSamples) ? opts.warmupSamples : [];
+  if (roadsDelayMs === 0) {
+    const wuT0 = warmup.length ? warmup[0].t : t0;
+    clock.set(wuT0);
+    ad.postMessage({ type: 'loadRoads', pref: roadsData.prefecture, roadsData });
+    roadsSent = true;
+  }
+  let _wuPrevRaw = null;
+  const _wuHav = (x) => {
+    if (x.spd >= 0) return x.spd * 3.6;
+    if (_wuPrevRaw) {
+      const dt = (x.t - _wuPrevRaw.t) / 1000;
+      if (dt > 0 && dt < 10) {
+        const R = 6371000,
+          tr = Math.PI / 180;
+        const dLat = (x.lat - _wuPrevRaw.lat) * tr,
+          dLng = (x.lng - _wuPrevRaw.lng) * tr;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(_wuPrevRaw.lat * tr) * Math.cos(x.lat * tr) * Math.sin(dLng / 2) ** 2;
+        const dM = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const kmh = (dM / dt) * 3.6;
+        if (isFinite(kmh) && kmh > 0) return Math.min(kmh, 180);
+      }
+    }
+    return 0;
+  };
+  for (const x of warmup) {
+    clock.set(x.t);
+    sendRoadsIfDue(x.t);
+    const nb = gw.getResults().length;
+    const _k = _wuHav(x);
+    _wuPrevRaw = { lat: x.lat, lng: x.lng, t: x.t };
+    gw.sendMessage({
+      type: 'position',
+      data: {
+        lat: x.lat,
+        lng: x.lng,
+        accuracy: x.acc,
+        speedKmh: _k,
+        heading: x.hdg >= 0 ? x.hdg : null,
+        altitude: x.alt || 0,
+        now: x.t,
+        compassHeading: x.compass != null ? x.compass : null,
+        accelData: null,
+        accelSamples: x.accel || [],
+        gyroData: null,
+        gyroSamples: x.gyro ? [x.gyro] : [],
+        speedSrc: x.spd >= 0 ? 'dop' : 'hav',
+      },
+    });
+    const r = gw.getResults();
+    if (r.length > nb) {
+      const o = r[r.length - 1];
+      const g = {
+        lat: o.lat,
+        lng: o.lng,
+        accuracy: o.accuracy != null ? o.accuracy : x.acc,
+        speedKmh: o.speedKmh != null ? o.speedKmh : _k,
+        speedSrc: o.speedSrc != null ? o.speedSrc : x.spd >= 0 ? 'dop' : 'hav',
+        headingDeg: x.hdg >= 0 ? x.hdg : null,
+        altitude: 0,
+        timestamp: x.t,
+        isStationary: o.isStationary,
+        accelSamples: x.accel || null,
+        compassHeading: x.compass != null ? x.compass : null,
+      };
+      if (typeof Meter.updateGpsOnly === 'function') Meter.updateGpsOnly(g); // 実機 L6799 同等
+      Meter.update(g); // 実機 L6811 同等 (running=false なので加算なし・Worker B ウォームアップ)
+    }
+  }
+
+  clock.set(t0);
+  sendRoadsIfDue(t0); // 遅延注入時 (loadfill 検証) は従来どおり業務開始基準
   if (typeof Meter.setBusinessActive === 'function') Meter.setBusinessActive(true);
-  Meter.start(); // ★drain は 0 化しない=実機どおり cold drain を時刻注入で再現
+  Meter.start(); // ★drain は 0 化しない=実機どおり (warmup 供給時は warm 始動 = softReset 経路)
 
   let emitted = 0,
     rejected = 0,
@@ -313,4 +394,12 @@ function appTdKm(seg) {
   return ((seg[seg.length - 1].biz.td || 0) - (seg[0].biz.td || 0)) / 1000;
 }
 
-module.exports = { runRealTraceBusiness, splitBusinesses, appTdKm, makeClock };
+// ★warmup 抽出 (2026-06-08)★: 業務セグメント開始前 sec 秒の生サンプル (biz 状態問わず) を返す。
+//   実機の「待機中 GPS が流れ続けている」状態を runRealTraceBusiness の opts.warmupSamples へ。
+function warmupBefore(arr, seg, sec) {
+  const t0 = seg[0].t;
+  const from = t0 - sec * 1000;
+  return arr.filter((x) => x && Number.isFinite(x.lat) && x.t >= from && x.t < t0);
+}
+
+module.exports = { runRealTraceBusiness, splitBusinesses, appTdKm, makeClock, warmupBefore };
