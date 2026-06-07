@@ -49,11 +49,13 @@ describe('Phase 1 (★新構造) gate: useGpsWorker + threshold ゲート (creep
     if (firstStat < 0) {
       throw new Error('gate-1: fixture に停止 step が無い');
     }
-    // 停止 phase 前 (= firstStat-1) の after.distance_m と 最後の停止 step の after.distance_m を比較
-    const beforeStat =
-      firstStat > 0
-        ? result.stateSnapshots[firstStat - 1].after.distance_m
-        : result.stateSnapshots[firstStat].before.distance_m;
+    // ★smoothedRawMode 対応 (2026-06-07)★: 平滑距離は h(2) サンプル遅れて確定するため、停止突入直後の
+    //   数 step には「停止直前の実走行区間」の delta が正当に計上される (= creep ではない・一回限り・
+    //   committed ≤ expected で過大なし)。creep 測定は確定遅延 (h+1=3 step) 経過後から行い、
+    //   それ以降の ★純停止 creep = 0★ は従来通り厳格に gate する (エンジン検証: 純停止 creep 0.00m)。
+    const BOOK_DELAY_STEPS = 3; // smoothWindow5 → h=2 + 1 余裕
+    const creepFrom = Math.min(firstStat + BOOK_DELAY_STEPS, lastStat);
+    const beforeStat = result.stateSnapshots[creepFrom].after.distance_m;
     const afterStat = result.stateSnapshots[lastStat].after.distance_m;
     const creepM = afterStat - beforeStat;
     const ctx =

@@ -127,13 +127,20 @@ describe('過大ゼロ routing de-bias (実機fixture・愛媛)', () => {
 
   it('routingAcceptMaxRatio=4.0(旧値)に戻すと過大が復活する (=本パラメータが効いている証明)', () => {
     // 旧値で iPhone13 trip2 が過大化することを確認(回帰の逆証明)。
+    // ★smoothedRawMode 出荷 (2026-06-07)★: 本パラメータは snap-arc (OFF) 経路の routing 受理上限。
+    //   ON では距離源が平滑弦になり flip 迂回が構造的に距離へ入らないため、この逆証明は
+    //   ★OFF (fallback) 経路の契約★ として OFF を明示 pin して検証する (rollback 時の保証を維持)。
     const t = tripsOf('0606-iPhone13.slim.json');
     const tr = t.trips[1]; // trip2 (tire 3.57)
     const seg = t.all.slice(tr.s, tr.e + 1);
     const engOld =
-      computeDistance(seg, dec, { enableRouting: true, routingAcceptMaxRatio: 4.0 }).distance_m /
-      1000;
-    const engNew = computeDistance(seg, dec, { enableRouting: true }).distance_m / 1000;
+      computeDistance(seg, dec, {
+        enableRouting: true,
+        routingAcceptMaxRatio: 4.0,
+        smoothedRawMode: false,
+      }).distance_m / 1000;
+    const engNew =
+      computeDistance(seg, dec, { enableRouting: true, smoothedRawMode: false }).distance_m / 1000;
     expect(engOld / 3.57 - 1).toBeGreaterThan(0.01); // 旧値は +1% 超の過大
     expect(engNew).toBeLessThanOrEqual(3.57 * 1.0005); // 新値は過大ゼロ
     expect(engNew).toBeLessThan(engOld); // 新値の方が小さい(過大を削った)

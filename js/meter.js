@@ -622,6 +622,7 @@ const Meter = (() => {
             timestamp: gpsResult.timestamp,
             accuracy: gpsResult.accuracy,
             speedKmh: gpsResult.speedKmh,
+            speedSrc: gpsResult.speedSrc || null, // ★speedSrc 貫通 (2026-06-07): 'dop'/'hav'
             headingDeg: gpsResult.compassHeading != null ? gpsResult.compassHeading : null,
             altitude: typeof gpsResult.altitude === 'number' ? gpsResult.altitude : null,
             isStationary: true,
@@ -643,6 +644,7 @@ const Meter = (() => {
           timestamp: gpsResult.timestamp,
           accuracy: gpsResult.accuracy,
           speedKmh: gpsResult.speedKmh,
+          speedSrc: gpsResult.speedSrc || null, // ★speedSrc 貫通 (2026-06-07): 'dop'/'hav'
           headingDeg: gpsResult.compassHeading != null ? gpsResult.compassHeading : null,
           altitude: typeof gpsResult.altitude === 'number' ? gpsResult.altitude : null,
           isStationary: gpsResult.isStationary === true,

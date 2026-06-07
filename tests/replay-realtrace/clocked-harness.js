@@ -212,17 +212,45 @@ function runRealTraceBusiness(samples, opts) {
   let emitted = 0,
     rejected = 0,
     statn = 0;
+  // ★忠実再生修正 (2026-06-07)★: 本番 gps.js (L538-550) は ★欠落 Doppler (spd<0) を
+  //   haversine 代用速度 ('hav'・前raw点との chord/dt・180km/h clamp) で置換★ して worker へ送る。
+  //   旧ハーネスは -1→0 (=停止扱い) で食わせており、平滑モードの never-over cap (spd×dt×1.5) が
+  //   業務開始直後の Doppler 欠落区間 (GPS warmup) の実走行 chord を 0 化 = SE 業務1 で -69m の
+  //   ★ハーネス側人工過小★ を作っていた。gps.js と同一の代用則で再現する。
+  const HAVER_SPEED_MAX_KMH = 180; // gps.js _HAVER_SPEED_MAX_KMH と同値
+  let _rawPrev = null;
+  const havSpeedKmh = (x) => {
+    if (x.spd >= 0) return x.spd * 3.6; // Doppler あり
+    if (_rawPrev) {
+      const dt = (x.t - _rawPrev.t) / 1000;
+      if (dt > 0 && dt < 10) {
+        const R = 6371000,
+          tr = Math.PI / 180;
+        const dLat = (x.lat - _rawPrev.lat) * tr,
+          dLng = (x.lng - _rawPrev.lng) * tr;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(_rawPrev.lat * tr) * Math.cos(x.lat * tr) * Math.sin(dLng / 2) ** 2;
+        const dM = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const kmh = (dM / dt) * 3.6;
+        if (isFinite(kmh) && kmh > 0) return Math.min(kmh, HAVER_SPEED_MAX_KMH);
+      }
+    }
+    return 0;
+  };
   for (const x of samples) {
     clock.set(x.t); // ★各サンプルの実時刻にクロックを進める=drain/stall を実機どおり
     sendRoadsIfDue(x.t); // ★道路ロード遅延が明けたら loadRoads 発火((B)再現)
     const nb = gw.getResults().length;
+    const _spdKmh = havSpeedKmh(x);
+    _rawPrev = { lat: x.lat, lng: x.lng, t: x.t };
     gw.sendMessage({
       type: 'position',
       data: {
         lat: x.lat,
         lng: x.lng,
         accuracy: x.acc,
-        speedKmh: x.spd >= 0 ? x.spd * 3.6 : 0,
+        speedKmh: _spdKmh,
         heading: x.hdg >= 0 ? x.hdg : null,
         altitude: x.alt || 0,
         now: x.t,
@@ -231,7 +259,7 @@ function runRealTraceBusiness(samples, opts) {
         accelSamples: x.accel || [],
         gyroData: null,
         gyroSamples: x.gyro ? [x.gyro] : [],
-        speedSrc: 'dop',
+        speedSrc: x.spd >= 0 ? 'dop' : 'hav', // gps.js _speedSrc と同一則
       },
     });
     const r = gw.getResults();
@@ -244,6 +272,7 @@ function runRealTraceBusiness(samples, opts) {
         lng: o.lng,
         accuracy: o.accuracy != null ? o.accuracy : x.acc,
         speedKmh: o.speedKmh != null ? o.speedKmh : x.spd >= 0 ? x.spd * 3.6 : 0,
+        speedSrc: o.speedSrc != null ? o.speedSrc : x.spd >= 0 ? 'dop' : 'hav', // ★speedSrc 貫通
         headingDeg: x.hdg >= 0 ? x.hdg : null,
         altitude: 0,
         timestamp: x.t,

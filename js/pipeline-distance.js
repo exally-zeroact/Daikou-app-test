@@ -129,7 +129,10 @@ const DEFAULTS = {
   //   切らず従来の Doppler/coast fill に回す) ③gap-guard (ゴミ acc は従来通り)。
   //   live meter は smoothWindow/2 サンプル遅延の双方向窓で実装 (createDistanceTracker)。
   //   OFF (smoothedRawMode !== true) で従来 map-matching 距離に完全復帰 (1byte 不変)。
-  smoothedRawMode: false, // ★検証完了まで既定OFF。harness/監査で過大ゼロ実証後に true へ。
+  //   ★出荷有効化 (2026-06-07)★: 5次元監査 (CRITICAL-1/2/3 根治) + batch==tracker+flush parity
+  //   diff 0.0000 + 全fixture過大ゼロ実証済 → true 化。flush 配線は map-matcher.js 'reset' handler
+  //   (回帰: tests/integration/smoothed-flush-on-reset.test.js)。OFF へ戻すのはこの 1 行のみ。
+  smoothedRawMode: true,
   smoothWindow: 5, // 移動平均窓 (奇数)。±(win-1)/2 点の位置平均。実データで5が最良。
   smoothGapSec: 5, // dt がこれ超 = GPS穴/間引き → 平滑弦で角を切らず Doppler/coast へ回す (トンネル温存)
   smoothDopplerCapRatio: 1.5, // ★never-over (監査CRITICAL-3)★: 平滑弦 > spd×dt×これ なら抑制。

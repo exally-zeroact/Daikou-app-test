@@ -206,6 +206,10 @@ function runProdPipeline(pref, samples) {
   let prevRoad = null;
   let prevPref = null;
   for (const m of mmResults) {
+    // ★smoothedRawMode flush (2026-06-07)★: 'reset' 時の末尾 flush delta は ★設計どおり★ meter の
+    //   gate (businessEnd が先に閉じる) で落ちる一回限りの後着 (過小方向・実測 ≤13m)。単一source検査
+    //   (sink == Σδ) は「meter が受け取り得た delta」で行うため flush message は総和から除外する。
+    if (m._reason === 'pipeline flush before reset') continue;
     if (typeof m.pipelineDeltaM === 'number' && m.pipelineDeltaM > 0)
       sumPipeline += m.pipelineDeltaM;
     if (typeof m.mmIncrementM === 'number' && m.mmIncrementM > 0) sumMmIncrement += m.mmIncrementM;

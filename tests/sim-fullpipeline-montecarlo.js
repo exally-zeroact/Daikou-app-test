@@ -391,7 +391,10 @@ function verifyCoastBranch() {
   //   coast 分岐の前提: (1) 先頭 2 点を spd 既知で投入し coastSpdMps を確立 (1 点目は first で
   //   速度未確立・2 点目の doppler 後に確立) → (2) 以降 spd=-1 で coast 誘発。なお ZUPT 誤判定を
   //   避けるため毎秒変位が静止閾値 (acc=8 で ~22m) を超える高速 (30m/s) を使う (= 長大トンネル相当)。
-  const tk = PD.createDistanceTracker(dec, { enableRouting: true });
+  // ★smoothedRawMode 出荷 (2026-06-07)★: 本検証は ★OFF (fallback) 経路の coast 分岐の配線生存★
+  //   を確認するもの (rollback 保険)。ON では通常 cadence が平滑弦で計上され coast は長dt穴のみの
+  //   ため、ここでは OFF を明示 pin して coast 分岐そのものを単離する。
+  const tk = PD.createDistanceTracker(dec, { enableRouting: true, smoothedRawMode: false });
   const lat0 = 33.8,
     lng0 = 132.5; // 沖合 (道路なし)
   const vMps = 30; // 108 km/h 等速 (高速道路トンネル相当)
@@ -501,6 +504,14 @@ for (let i = 0; i < N; i++) {
   errPcts.push(errPct);
   totalCoastSegs += r.coastSegs;
   if (r.coastSegs > 0) patternsWithCoast++;
+
+  // ★診断 (2026-06-07)★: 認定バンド (−4%〜0%) を破るパターンの内訳を即時 dump (病理特定用)。
+  if (errPct > 0.5 || errPct < -4) {
+    console.log(
+      `  ★band違反 #${i}: err=${errPct.toFixed(2)}% truth=${truth.distance_m.toFixed(0)} holed=${r.distance_m.toFixed(0)} holes=${pat.nHoles} stops=${pat.nStops} dropped=${pat.droppedPoints}` +
+        ` | holed.bd=${JSON.stringify(r.bd)} | truth.bd=${JSON.stringify(truth.bd)}`
+    );
+  }
 
   // ★A1 attribution★: 過大時 (holed > truth) に・どの branch が余分を出したかを差分で記録。
   if (errPct > 0 && r.bd && truth.bd) {

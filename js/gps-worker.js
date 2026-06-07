@@ -943,6 +943,11 @@ function processPosition(data) {
     altitude,
     accuracy,
     speedKmh: clampedSpeedKmh,
+    // ★speedSrc 貫通 (2026-06-07)★: gps.js が付与した速度源 ('dop'=本物 Doppler / 'hav'=haversine
+    //   代用) を echo する。エンジン (pipeline-distance) の gap 補完/never-over cap は本物の
+    //   Doppler のみ速度として使う契約 (hav は -1=不明 → straight 補完)。echo しないと worker B が
+    //   代用速度を Doppler と誤認し gap 跨ぎ距離を微速×dt で潰す (0606night SE 業務1 -64m 実測)。
+    speedSrc: typeof speedSrc === 'string' ? speedSrc : null,
     isStationary,
     timestamp: now,
     compassHeading: compassHeading != null ? compassHeading : null,
