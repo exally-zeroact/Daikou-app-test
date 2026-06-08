@@ -141,21 +141,18 @@ describe('adaptiveMode 確定2択方式 (実機fixture)', () => {
     }
   }, 30000);
 
-  it('★出荷=adaptiveMode既定ON / rollback=adaptiveMode:false で従来smoothedRawModeへ1行復帰', () => {
+  it('★adaptiveMode:false=従来smoothedRawModeと一致(rollback契約) / true は別方式に切替', () => {
     const a = load('0606-Android.slim.json');
-    const shipped = computeDistance(a, dec, { enableRouting: true }).distance_m; // 既定=出荷 adaptiveMode:true
-    const rollback = computeDistance(a, dec, {
-      enableRouting: true,
-      adaptiveMode: false,
-    }).distance_m;
+    const on = computeDistance(a, dec, { enableRouting: true, adaptiveMode: true }).distance_m;
+    const off = computeDistance(a, dec, { enableRouting: true, adaptiveMode: false }).distance_m;
     const legacy = computeDistance(a, dec, {
       enableRouting: true,
       adaptiveMode: false,
       smoothedRawMode: true,
     }).distance_m;
-    expect(Math.abs(rollback - legacy)).toBeLessThanOrEqual(0.0001); // rollback=従来win3 と一致
-    expect(shipped).toBeGreaterThan(0);
-    expect(rollback).toBeGreaterThan(0);
-    expect(shipped).not.toBe(rollback); // フラグが距離源を実際に切替えている
+    expect(Math.abs(off - legacy)).toBeLessThanOrEqual(0.0001); // adaptiveMode:false=従来win3 と一致(既定値非依存)
+    expect(on).toBeGreaterThan(0);
+    expect(off).toBeGreaterThan(0);
+    expect(on).not.toBe(off); // フラグが距離源を実際に切替えている
   }, 30000);
 });

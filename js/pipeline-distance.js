@@ -173,7 +173,10 @@ const DEFAULTS = {
   //   停止(ZUPT)は呼び出し側 stationary 判定で従来通り 0。never-over= ①cap + ②速度は過小側 + ZUPT。
   //   実測(realtrace-0609-Android-OBD): 業務1 -0.53% / 業務2 -0.33%(トンネル25秒穴を②が+90m回収)。
   //   OFF(adaptiveMode!==true)で完全 byte 不変。distance_m/calcFare 不可侵。
-  adaptiveMode: true, // ★出荷(2026-06-09): 確定2択方式を既定化 (rollback=false へ1行)★
+  adaptiveMode: false, // ★rollback (2026-06-09): cert-gate(montecarlo劣化シナリオ)で停車creep263m+過大3.86%検出。
+  //   clean fixture(実トレース/愛媛)では過大0だが degraded GPS で MODE②(spd=-1で弦無cap & 停車ZUPT不足)が
+  //   creep/過大を生む=過大請求リスク。既定OFFで認定済 smoothedRawMode へ戻す。adaptiveMode は flag で温存し
+  //   劣化シナリオ硬化(MODE② never-over for spd=-1 + degraded ZUPT 強化)後に再出荷。再ON は true へ1行。★
   //   ★効果(実トレース・3D OFF): OBD全駆動の-3.86%バグを止め GPS平滑+穴埋めへ→業務2 -1.46%(過大ゼロ)。
   //     トンネル25秒穴を speed×dt で +306m 回収。愛媛14業務 過大0件。生GPS弦は愛媛で+1.9%過大化(過大請求)
   //     のため不採用=過大ゼロを守る限り平滑土台が必須(-1.5%が底)。
