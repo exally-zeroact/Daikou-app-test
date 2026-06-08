@@ -4509,6 +4509,34 @@
         </div>
         <!-- 業務開始ボタン（中央配置・大ボタン） -->
         <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
+        <!-- ★OBD 接続ピル (2026-06-08・ホーム配置・一目で接続状態が分かる)★:
+             タップで OBD 接続 (Android Chrome のみ)。接続中=緑「🟢 OBD接続済 ○○km/h」・
+             未接続=灰「📟 OBD未接続 — タップで接続」。距離源インジケータも兼ねる。
+             bindObdUI が状態を 500ms 毎に更新。OBDClient 未対応端末 (iPhone) は灰のまま無効表示。 -->
+        <button
+          id="btnObdHome"
+          type="button"
+          onclick="event.stopPropagation();"
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: #f2f2f7;
+            color: #8e8e93;
+            border: 2px solid #d1d1d6;
+            border-radius: 12px;
+            padding: 12px 22px;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            font-family: 'Noto Sans JP', sans-serif;
+            min-width: 260px;
+          "
+        >
+          <span id="obdHomeLabel">📟 OBD未接続 — タップで接続</span>
+        </button>
         <!-- P6 (2026-05-09): MM 準備状況インジケータ -->
         <!-- ★設計変更宣言 (2026-05-10): 初期 display:none・JS が真の異常時のみ block にする -->
         <div
@@ -4597,6 +4625,22 @@
             <div class="meter-label">走行距離</div>
             <div class="meter-value">
               <span id="driveDist">0.00</span><span class="meter-unit">km</span>
+            </div>
+            <!-- ★OBD 距離源バッジ (2026-06-08・走行中に一目で計測源が分かる)★:
+                 🟢 OBD(車輪速度) = ∫v(OBD) で距離計測中 / 📡 GPS = GPS距離(OBD未接続)。
+                 bindObdUI が 500ms 毎に更新。OBD未接続端末では常に 📡 GPS。 -->
+            <div
+              id="obdDriveBadge"
+              style="
+                text-align: center;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                margin-top: 4px;
+                color: #007aff;
+              "
+            >
+              📡 GPS
             </div>
           </div>
           <!-- ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・waypointCard):
@@ -12909,14 +12953,17 @@
           var noteEl = document.getElementById('obdNote');
           var btnC = document.getElementById('btnObdConnect');
           var btnD = document.getElementById('btnObdDisconnect');
-          if (!btnC || typeof window.OBDClient === 'undefined') {
-            // OBDClient 未 load or UI 不在 → 何もしない
-            if (noteEl && typeof window.OBDClient === 'undefined') {
-              noteEl.textContent = 'OBD モジュール未ロード';
-            }
+          // ★ホーム画面 OBD ピル + 走行中 距離源バッジ (2026-06-08)★
+          var btnHome = document.getElementById('btnObdHome');
+          var homeLabel = document.getElementById('obdHomeLabel');
+          var driveBadge = document.getElementById('obdDriveBadge');
+          if (typeof window.OBDClient === 'undefined') {
+            // OBDClient 未 load → 何もしない (要素は静的初期表示のまま)
+            if (noteEl) noteEl.textContent = 'OBD モジュール未ロード';
             return;
           }
           var O = window.OBDClient;
+          var _obdConnected = false; // 接続状態 (ホームピルのトグル判定用)
           var JA = {
             idle: '未接続',
             connecting: '接続中…',
@@ -12928,11 +12975,17 @@
             if (noteEl)
               noteEl.textContent =
                 'この端末は Web Bluetooth 非対応 (Android Chrome で開いてください)';
-            btnC.disabled = true;
-            btnC.style.opacity = '0.5';
+            if (btnC) {
+              btnC.disabled = true;
+              btnC.style.opacity = '0.5';
+            }
+            // ホームピルも非対応表示 (iPhone 等)
+            if (homeLabel) homeLabel.textContent = '📟 OBDはAndroid Chromeのみ対応';
+            if (btnHome) btnHome.style.opacity = '0.5';
           }
           O.on('status', function (s) {
             if (statusEl) statusEl.textContent = JA[s] || s;
+            _obdConnected = s === 'connected';
             // ★OBDメイン起動: 接続したら距離源をOBD(∫v)に切替・切断/エラーでGPSへ戻す。
             //   gps.js が window.OBD_DRIVE_DISTANCE を見て speedSrc='obd' を立て、距離が∫v(OBD)駆動になる。
             //   (gps.js 側で鮮度切れは自動でGPSにfallbackするので、接続=ONで安全)
@@ -12941,26 +12994,57 @@
           O.on('error', function (msg) {
             if (noteEl) noteEl.textContent = 'エラー: ' + msg;
           });
-          btnC.addEventListener('click', function () {
+          function doConnect() {
             if (noteEl) noteEl.textContent = '';
             O.connect().catch(function () {
               /* status/error は on() 経由で表示済 */
             });
-          });
+          }
+          if (btnC) {
+            btnC.addEventListener('click', doConnect);
+          }
           if (btnD) {
             btnD.addEventListener('click', function () {
               O.disconnect();
+            });
+          }
+          // ★ホームピル: タップで接続 / 接続中タップで切断 (トグル)。Web Bluetooth は
+          //   user gesture 起点必須 → ボタン click から requestDevice が走る。
+          if (btnHome && O.isSupported()) {
+            btnHome.addEventListener('click', function () {
+              if (_obdConnected) O.disconnect();
+              else doConnect();
             });
           }
           // 速度表示 + 距離源インジケータを 500ms 毎に更新 (鮮度切れは GPS 扱い)
           setInterval(function () {
             var sp = O.getSpeed();
             if (speedEl) speedEl.textContent = sp.valid ? sp.kmh + ' km/h' : '— km/h';
+            // 実際に距離を駆動しているのは「flag ON かつ OBD鮮度OK」の時だけ(=gps.jsの判定と一致)
+            var obdDriving = window.OBD_DRIVE_DISTANCE === true && sp.valid;
             if (sourceEl) {
-              // 実際に距離を駆動しているのは「flag ON かつ OBD鮮度OK」の時だけ(=gps.jsの判定と一致)
-              var obdDriving = window.OBD_DRIVE_DISTANCE === true && sp.valid;
               sourceEl.textContent = obdDriving ? '🟢 OBD (車輪速度)' : '📡 GPS';
               sourceEl.style.color = obdDriving ? '#34c759' : '#007aff';
+            }
+            // ★ホームピル: 接続状態を一目で (緑=接続済+車速 / 灰=未接続)★
+            if (homeLabel && btnHome) {
+              if (_obdConnected) {
+                homeLabel.textContent =
+                  '🟢 OBD接続済' + (sp.valid ? ' — ' + sp.kmh + ' km/h' : ' (車速待ち…)');
+                btnHome.style.background = '#e8f9ee';
+                btnHome.style.borderColor = '#34c759';
+                btnHome.style.color = '#1a7f3c';
+              } else {
+                homeLabel.textContent = '📟 OBD未接続 — タップで接続';
+                btnHome.style.background = '#f2f2f7';
+                btnHome.style.borderColor = '#d1d1d6';
+                btnHome.style.color = '#8e8e93';
+              }
+            }
+            // ★走行中バッジ: 計測源を一目で★
+            if (driveBadge) {
+              driveBadge.textContent = obdDriving ? '🟢 OBD(車輪速度)' : '📡 GPS';
+              driveBadge.style.color = obdDriving ? '#34c759' : '#007aff';
             }
           }, 500);
         }
