@@ -163,6 +163,25 @@ const DEFAULTS = {
   smoothDopplerCapRatio: 1.5, // ★never-over (監査CRITICAL-3)★: 平滑弦 > spd×dt×これ なら抑制。
   //   微速(停止判定を僅かに外れる0.5〜1m/s)の純ジッタが平滑弦に残り creep 化するのを遮断。通常走行は
   //   平滑弦 ≤ 実路長 ≈ spd×dt なので 1.5 倍までは binding せず無影響 (curve 余裕込み)。
+
+  // ★★確定方式: GPS精度で2択 適応モード (2026-06-09・実トレース実証)★★
+  //   司さん確定方針(2026-06-08「GPS良時=生GPS弦、悪時/穴=速度×時間、止まれば数えない」)を
+  //   今日の実車2業務(タイヤ6.73/17.71・トンネル含む)で実証し実装。平滑/map-matching は廃止。
+  //   ① GPS良好(穴でない通常区間): 距離 = ★3D生GPS弦★(高度込み) を spd×dt×cap で頭打ち(ジッタ過大除去)。
+  //   ② GPS穴(dt>holeDtSec=トンネル/欠落) or 劣化(acc>accBadM=ビル街): 距離 = ★速度×時間★
+  //      (速度源= speedProvider が返す OBD較正速度 or Doppler。位置ジッタに免疫)。
+  //   停止(ZUPT)は呼び出し側 stationary 判定で従来通り 0。never-over= ①cap + ②速度は過小側 + ZUPT。
+  //   実測(realtrace-0609-Android-OBD): 業務1 -0.53% / 業務2 -0.33%(トンネル25秒穴を②が+90m回収)。
+  //   OFF(adaptiveMode!==true)で完全 byte 不変。distance_m/calcFare 不可侵。
+  adaptiveMode: false, // 確定2択方式の有効化 (1行ON/OFF・rollback用)
+  //   ★効果(実トレース・3D OFF): OBD全駆動の-3.86%バグを止め GPS平滑+穴埋めへ→業務2 -1.46%(過大ゼロ)。
+  //     トンネル25秒穴を speed×dt で +306m 回収。愛媛14業務 過大0件。生GPS弦は愛媛で+1.9%過大化(過大請求)
+  //     のため不採用=過大ゼロを守る限り平滑土台が必須(-1.5%が底)。
+  mode3D: false, // ★GPS alt 3D は noise で過大化(愛媛 Androidt3 -0.33→+0.60%)→既定OFF。DEM標高が入れば有効化★
+  holeDtSec: 1.8, // dt がこれ超 = GPS穴(トンネル/欠落) → ②速度充填へ
+  accBadM: 15, // accuracy がこれ超 = GPS劣化(ビル街) → ②速度充填へ
+  adaptiveCapRatio: 1.5, // ①の never-over: 3D弦 ≤ spd×dt×これ。走行ジッタ過大を物理上限で叩く
+  maxClimbMps: 8, // 3D高度ゲート: |Δalt|/dt がこれ超 = GPS altノイズ → Δalt=0(正ラチェット過大を遮断)
 };
 
 // ─── 幾何ヘルパ ───────────────────────────────────────────────
@@ -219,6 +238,8 @@ function _smoothOnePoint(pts, i, h, gapMs, badAcc) {
     t: s.t,
     acc: s.acc,
     spd: s.spd,
+    alt: s.alt, // ★3D用: 高度は生保持(位置のみ平滑)★
+    obd: s.obd, // ★OBD速度/フラグ貫通(adaptiveMode の速度源)★
     snap: s.snap,
     _rawLat: s.lat,
     _rawLng: s.lng,
@@ -1025,7 +1046,7 @@ function _prepareBatch(samples, decoder, opts) {
   const workPts =
     cfg.smoothedRawMode === true && pts.length >= 2
       ? _smoothPositions(pts, cfg.smoothWindow, cfg.smoothGapSec, cfg.gapGuardAccM)
-      : pts;
+      : pts; // ★adaptiveMode も平滑土台を使う(ジッタ過大対策)・3D/穴埋めを上積み★
 
   const bd = {
     sameRoadM: 0,
@@ -1052,8 +1073,8 @@ function _prepareBatch(samples, decoder, opts) {
     // ★smoothedRawMode★: snap は距離に使わない (平滑弦が距離) → snap をスキップ (snap=null)。
     //   これにより stepDistance の two-snap ブランチを飛ばし、長dt穴は Doppler/coast tail へ落とす。
     const snap =
-      cfg.smoothedRawMode === true
-        ? null
+      cfg.smoothedRawMode === true || cfg.adaptiveMode === true
+        ? null // ★adaptiveMode/smoothed は snap を距離に使わない★
         : snapper
           ? snapper.snap(cur.lat, cur.lng)
           : decoder.snapToNearestRoad(cur.lat, cur.lng, { maxDistM: cfg.snapMaxDistM });
@@ -1259,6 +1280,50 @@ function stepDistance(
         return 0;
       }
     }
+  }
+
+  // ── ★★確定2択方式 (adaptiveMode・GPS精度で切替・2026-06-09 実トレース実証)★★ ──
+  //   ① GPS良好(穴でない通常区間): 3D生GPS弦 を spd×dt×cap で頭打ち(走行ジッタ過大を物理上限で除去)。
+  //   ② GPS穴(dt>holeDtSec) or 劣化(acc>accBadM): 速度×時間(位置ジッタに免疫・OBD較正/Doppler)。
+  //   停止(ZUPT)は呼び出し側で 0 済。never-over = ①cap + ②速度過小側 + ZUPT で構造保証。
+  if (cfg.adaptiveMode === true) {
+    const _dtA = ((cur.t || 0) - (prev.t || 0)) / 1000;
+    if (!(_dtA > 0)) return 0;
+    // 3D化(高度差を弦に載せる・品質ゲート: |Δalt|/dt 物理上限超は GPS alt ノイズ→無視)
+    let chord = straight;
+    if (cfg.mode3D === true && typeof cur.alt === 'number' && typeof prev.alt === 'number') {
+      const dz = cur.alt - prev.alt;
+      if (Math.abs(dz) <= cfg.maxClimbMps * _dtA) {
+        chord = Math.sqrt(straight * straight + dz * dz);
+      }
+    }
+    const _accCurA = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
+    const _accPrevA = typeof prev.acc === 'number' && prev.acc >= 0 ? prev.acc : -1;
+    const _degraded =
+      (_accCurA >= 0 && _accCurA > cfg.accBadM) || (_accPrevA >= 0 && _accPrevA > cfg.accBadM);
+    const _hole = _dtA > cfg.holeDtSec;
+    if (_hole || _degraded) {
+      // ② 速度×時間。spd= speedProvider(OBD較正速度 or Doppler)。GPS穴(トンネル)/劣化(ビル街)を充填。
+      if (spd >= 0) {
+        const fill = spd * _dtA;
+        stats.dopplerSegs = (stats.dopplerSegs || 0) + 1;
+        bd.dopplerM = (bd.dopplerM || 0) + fill;
+        return fill;
+      }
+      // 速度不明の穴 = 直線弦(保守・creep は ZUPT 済)
+      stats.straightSegs = (stats.straightSegs || 0) + 1;
+      bd.straightFallbackM = (bd.straightFallbackM || 0) + chord;
+      return chord;
+    }
+    // ① GPS良好: 3D生GPS弦を spd×dt×cap で頭打ち
+    let mA = chord;
+    if (spd >= 0) {
+      const cap = spd * _dtA * cfg.adaptiveCapRatio;
+      if (mA > cap) mA = cap;
+    }
+    stats.sameRoadSegs = (stats.sameRoadSegs || 0) + 1; // ①=生GPS良好区間(統計流用)
+    bd.smoothedM = (bd.smoothedM || 0) + mA; // breakdown 流用(adaptive ① 距離)
+    return mA;
   }
 
   // ── ★生GPS スムージング距離モード★ ──
@@ -1521,7 +1586,7 @@ function createDistanceTracker(decoder, opts) {
     stats.points++;
     // ★smoothedRawMode★: snap は距離に使わない (平滑弦が距離) → null。Viterbi ext snap も使わない。
     let snap = null;
-    if (cfg.smoothedRawMode !== true) {
+    if (cfg.smoothedRawMode !== true && cfg.adaptiveMode !== true) {
       // ★L1 配線 (2026-05-31・clean-rebuild-pipeline・距離源を Viterbi 確定経路へ一本化):
       //   sample.snap が渡された場合 (= Worker B が Viterbi emission/transition で選んだ
       //   bestEmit/outSnap)、その ★Viterbi 確定 snap★ を距離計算に使う。greedy per-point
@@ -1573,7 +1638,9 @@ function createDistanceTracker(decoder, opts) {
     //   cur.obd は map-matcher が msg.speedSrc==='obd' (gps.js: OBD_DRIVE_DISTANCE on かつ鮮度OK)
     //   の時だけ立てる。★cur.obd 未設定の通常 GPS 経路は完全に従来通り (byte 不変)★。
     //   停止は OBD 速度 0 で自然に 0 加算(ZUPT 不要)。異常 dt は弾く(過大ゼロ保険)。
-    if (cur.obd === true && spd >= 0) {
+    //   ★adaptiveMode では OBD で全距離を駆動しない(実機-3.86%で悪化)★: OBD速度は ① の cap と
+    //   ② の穴埋め speed源として spd 経由で使う(下流 stepDistance)。よってここは短絡しない。
+    if (cur.obd === true && spd >= 0 && cfg.adaptiveMode !== true) {
       const dtObd = ((cur.t || 0) - (prev.t || 0)) / 1000;
       // ★δ 自己キャリブ (obdDeltaCalib・floor過小補正)★: 良GPS区間(精度OK+移動中+ジッタ無し)で
       //   GPS位置距離と ∫OBD を貯め、calMinWindowS 秒ごとに δ=(GPS−∫OBD)/移動時間 を確定。
@@ -1732,6 +1799,7 @@ function createDistanceTracker(decoder, opts) {
         return _core(sample);
       }
       // ★smoothedRawMode★: 生点をバッファし、後続 h 点が揃った中心点を平滑して _core へ流す。
+      //   ★adaptiveMode も平滑土台を共有(3D/穴埋めは stepDistance で上積み)★
       if (cfg.smoothedRawMode === true) {
         const lastRaw = smoothBuf.length ? smoothBuf[smoothBuf.length - 1] : null;
         // out-of-order ガード (生入力順で判定)
