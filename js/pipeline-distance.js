@@ -118,6 +118,11 @@ const DEFAULTS = {
   //   天井★ にして過大ゼロを死守 (短距離 urban で raw が +0.8% 過大化するのを防ぐ)。
   arcRecoverRawAboveSpdMps: 8.0, // ≈29km/h。これ以上は弦回収・未満は Doppler cap
 
+  // ★OBD メインモード (2026-06-05)★: 速度源が OBD 車輪速度の時、距離を ∫v(OBD)=spd×dt で駆動。
+  //   dt がこれ超 = 異常欠測 → その区間は加算しない(過大ゼロ保険・通常 1Hz polling なら無関係)。
+  //   ★OBD は smoothedRawMode より優先 (∫v=タイヤ直結・認定メーター方式)。speedSrc==='obd' 時のみ発火。★
+  obdMaxDtS: 10,
+
   // ★生GPS 双方向スムージング距離 (2026-06-06・★設計変更宣言★・司さん裁定「生GPS寄せ+過大対策」)★
   //   実データ検証(0606b/realtest3/しまなみ・全fixture)で確定した距離の正解:
   //   生GPS の軌跡を ★双方向移動平均(window)★ で平滑してから弦長を測る。ジッタを ★対称に★ 削るため
@@ -1448,6 +1453,7 @@ function createDistanceTracker(decoder, opts) {
       smoothedM: 0, // ★生GPS平滑距離 (smoothedRawMode・監査 MAJOR-4)
       stationarySkipped: 0,
       arcRecoverM: 0, // ★地力 de-bias: 同一道路 arc 回収で増えた距離 (監査用)
+      obdM: 0, // ★OBD メイン: ∫v(OBD) で加算した距離 (監査用)
     };
     stats = {
       points: 0,
@@ -1462,6 +1468,7 @@ function createDistanceTracker(decoder, opts) {
       gapGuardSkipped: 0,
       gapGuardFilled: 0,
       arcRecovered: 0, // ★地力 de-bias: arc 回収が発火した区間数 (監査用)
+      obdSegs: 0, // ★OBD メイン: ∫v(OBD) で駆動した区間数 (監査用)
     };
   }
   freshAccum();
@@ -1530,6 +1537,29 @@ function createDistanceTracker(decoder, opts) {
 
     // 静止判定 (ZUPT) — computeDistance と同一ロジック
     const spd = speedProvider(cur, prev);
+
+    // ★★ OBD メインモード (2026-06-05・obd ブランチ・2026-06-08 平滑土台へ統合) ★★:
+    //   速度源が ★OBD 車輪速度★ (cur.obd===true) の時は、距離を ★∫v(OBD)=車輪速度×dt の積分★ で
+    //   駆動する (= タクシー認定メーター/国交省ソフトメーター方式・タイヤ値直結)。
+    //   ★smoothedRawMode (平滑生GPS弦) より優先★: OBD は車輪源で最も信頼でき、平滑/snap-arc は
+    //   OBD が無効/未接続/iPhone の時のフォールバックに退く。∫v は spd×dt のみで位置に依存しないため
+    //   平滑バッファを透過 (= cur が平滑点でも spd/t は生のまま保持され ∫v は正しい)。
+    //   cur.obd は map-matcher が msg.speedSrc==='obd' (gps.js: OBD_DRIVE_DISTANCE on かつ鮮度OK)
+    //   の時だけ立てる。★cur.obd 未設定の通常 GPS 経路は完全に従来通り (byte 不変)★。
+    //   停止は OBD 速度 0 で自然に 0 加算(ZUPT 不要)。異常 dt は弾く(過大ゼロ保険)。
+    if (cur.obd === true && spd >= 0) {
+      const dtObd = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      let obdDelta = 0;
+      if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) obdDelta = spd * dtObd;
+      total += obdDelta;
+      stats.obdSegs = (stats.obdSegs || 0) + 1;
+      bd.obdM = (bd.obdM || 0) + obdDelta;
+      coastSpdMps = spd; // 連続性: 次区間のフォールバック用に実速度を保持
+      prev = cur;
+      prevSnap = snap;
+      return { deltaM: obdDelta, totalM: total, reason: 'obd' };
+    }
+
     const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
     let stationary = false;
     if (spd >= 0) {
@@ -1625,6 +1655,17 @@ function createDistanceTracker(decoder, opts) {
       if (!sample || !Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) {
         // 無効点 (null/NaN/Infinity) は computeDistance の入力整形と同様に黙殺 (距離影響なし)
         return { deltaM: 0, totalM: total, reason: 'skip' };
+      }
+      // ★OBD バイパス (2026-06-08)★: OBD 速度源 (sample.obd===true) の点は ★平滑バッファを通さず★
+      //   即座に _core へ流し ∫v(OBD) で距離駆動する。理由: 平滑は GPS 位置ジッタ除去のためで、
+      //   ∫v は spd×dt のみ (位置非依存) ゆえ平滑は無意味。かつライブメーターは遅延ゼロが望ましい
+      //   (h サンプル遅延を作らない)。out-of-order は prev で判定 (非平滑と同基準)。
+      //   OBD 全行程なら smoothBuf は空のまま (= 平滑経路に一切干渉しない)。混在遷移時も prev 連続性は保持。
+      if (sample.obd === true) {
+        if (prev && Number.isFinite(sample.t) && Number.isFinite(prev.t) && sample.t < prev.t) {
+          return { deltaM: 0, totalM: total, reason: 'out_of_order' };
+        }
+        return _core(sample);
       }
       // ★smoothedRawMode★: 生点をバッファし、後続 h 点が揃った中心点を平滑して _core へ流す。
       if (cfg.smoothedRawMode === true) {
