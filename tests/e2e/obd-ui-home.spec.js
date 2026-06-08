@@ -32,20 +32,15 @@ async function gotoApp(page) {
   });
 }
 
-test('OBD: ホーム画面に接続ピルが見える + bindObdUI 完走', async ({ page }) => {
+test('OBD: 青バーに常駐 OBD チップが見える + bindObdUI 完走', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await gotoApp(page);
 
-  await page.evaluate(() => {
-    if (typeof showScreen === 'function') showScreen('businessStart');
-    const bs = document.getElementById('screenBusinessStart');
-    if (bs) bs.style.display = 'flex';
-  });
-
-  const pill = page.locator('#btnObdHome');
-  await expect(pill).toBeVisible();
-  await expect(pill).toContainText('OBD');
+  // 青バー(appbar)は全画面常駐 → ホーム表示直後から OBD チップが見える
+  const chip = page.locator('#obdChip');
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText('OBD');
 
   // bindObdUI が完走している (obd-client.js load + 配線が例外なく通った)
   const bound = await page.evaluate(() => window.__obdUiBound === true);
@@ -53,6 +48,19 @@ test('OBD: ホーム画面に接続ピルが見える + bindObdUI 完走', async
 
   // 配線由来の page error が無い
   expect(errors.join('\n')).toBe('');
+});
+
+test('OBD: 青バーチップは走行画面に遷移しても常駐(押せる)', async ({ page }) => {
+  await gotoApp(page);
+  await page.evaluate(() => {
+    if (typeof showScreen === 'function') showScreen('driving');
+    const d = document.getElementById('screenDriving');
+    if (d) d.style.display = 'block';
+  });
+  // 走行画面でも青バーの OBD チップが見える=遷移で消えない(司さん指摘の bypass 解消)
+  const chip = page.locator('#obdChip');
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText('OBD');
 });
 
 test('OBD: 走行画面に距離源バッジが見える (初期=GPS)', async ({ page }) => {

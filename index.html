@@ -4027,6 +4027,26 @@
           <div class="gps-dot" id="gpsDot"></div>
           <span class="gps-acc" id="gpsAcc">GPS待機</span>
         </div>
+        <!-- ★OBD 接続チップ (2026-06-08・青バー常駐・全画面で見える&押せる)★:
+             タップで接続/接続中タップで切断。未接続=灰「📟 OBD」・接続中=緑「🟢 OBD ○○」。
+             業務開始→走行と画面が遷移しても常駐するので、いつでも接続/状態確認できる。
+             Web Bluetooth 非対応(iPhone)は無効表示。bindObdUI が 500ms 毎に更新。 -->
+        <button
+          id="obdChip"
+          type="button"
+          class="gps-pill"
+          style="
+            border: none;
+            cursor: pointer;
+            font-family: 'Noto Sans JP', sans-serif;
+            background: rgba(255, 255, 255, 0.18);
+            color: #fff;
+            font-weight: 700;
+            gap: 4px;
+          "
+        >
+          <span id="obdChipLabel">📟 OBD</span>
+        </button>
         <div
           class="surcharge-badge"
           id="surchargeBadge"
@@ -4509,34 +4529,9 @@
         </div>
         <!-- 業務開始ボタン（中央配置・大ボタン） -->
         <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
-        <!-- ★OBD 接続ピル (2026-06-08・ホーム配置・一目で接続状態が分かる)★:
-             タップで OBD 接続 (Android Chrome のみ)。接続中=緑「🟢 OBD接続済 ○○km/h」・
-             未接続=灰「📟 OBD未接続 — タップで接続」。距離源インジケータも兼ねる。
-             bindObdUI が状態を 500ms 毎に更新。OBDClient 未対応端末 (iPhone) は灰のまま無効表示。 -->
-        <button
-          id="btnObdHome"
-          type="button"
-          onclick="event.stopPropagation();"
-          style="
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            background: #f2f2f7;
-            color: #8e8e93;
-            border: 2px solid #d1d1d6;
-            border-radius: 12px;
-            padding: 12px 22px;
-            font-size: 15px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            cursor: pointer;
-            font-family: 'Noto Sans JP', sans-serif;
-            min-width: 260px;
-          "
-        >
-          <span id="obdHomeLabel">📟 OBD未接続 — タップで接続</span>
-        </button>
+        <!-- ★OBD 接続は青バー(全画面常駐 #obdChip)に移設 (2026-06-08)★:
+             業務開始→走行へ画面遷移しても消えず・どの画面からでも接続/状態確認できる。
+             業務開始画面に置くと遷移で押せなくなる問題(司さん指摘)を解消。 -->
         <!-- P6 (2026-05-09): MM 準備状況インジケータ -->
         <!-- ★設計変更宣言 (2026-05-10): 初期 display:none・JS が真の異常時のみ block にする -->
         <div
@@ -12953,9 +12948,9 @@
           var noteEl = document.getElementById('obdNote');
           var btnC = document.getElementById('btnObdConnect');
           var btnD = document.getElementById('btnObdDisconnect');
-          // ★ホーム画面 OBD ピル + 走行中 距離源バッジ (2026-06-08)★
-          var btnHome = document.getElementById('btnObdHome');
-          var homeLabel = document.getElementById('obdHomeLabel');
+          // ★青バー常駐 OBD チップ + 走行中 距離源バッジ (2026-06-08)★
+          var obdChip = document.getElementById('obdChip');
+          var chipLabel = document.getElementById('obdChipLabel');
           var driveBadge = document.getElementById('obdDriveBadge');
           if (typeof window.OBDClient === 'undefined') {
             // OBDClient 未 load → 何もしない (要素は静的初期表示のまま)
@@ -12979,9 +12974,12 @@
               btnC.disabled = true;
               btnC.style.opacity = '0.5';
             }
-            // ホームピルも非対応表示 (iPhone 等)
-            if (homeLabel) homeLabel.textContent = '📟 OBDはAndroid Chromeのみ対応';
-            if (btnHome) btnHome.style.opacity = '0.5';
+            // 青バーチップも非対応表示 (iPhone 等)
+            if (chipLabel) chipLabel.textContent = '📟 OBD✕';
+            if (obdChip) {
+              obdChip.style.opacity = '0.5';
+              obdChip.title = 'OBDはAndroid Chromeのみ対応';
+            }
           }
           O.on('status', function (s) {
             if (statusEl) statusEl.textContent = JA[s] || s;
@@ -13008,10 +13006,10 @@
               O.disconnect();
             });
           }
-          // ★ホームピル: タップで接続 / 接続中タップで切断 (トグル)。Web Bluetooth は
-          //   user gesture 起点必須 → ボタン click から requestDevice が走る。
-          if (btnHome && O.isSupported()) {
-            btnHome.addEventListener('click', function () {
+          // ★青バーチップ: タップで接続 / 接続中タップで切断 (トグル)。Web Bluetooth は
+          //   user gesture 起点必須 → チップ click から requestDevice が走る。
+          if (obdChip && O.isSupported()) {
+            obdChip.addEventListener('click', function () {
               if (_obdConnected) O.disconnect();
               else doConnect();
             });
@@ -13026,19 +13024,16 @@
               sourceEl.textContent = obdDriving ? '🟢 OBD (車輪速度)' : '📡 GPS';
               sourceEl.style.color = obdDriving ? '#34c759' : '#007aff';
             }
-            // ★ホームピル: 接続状態を一目で (緑=接続済+車速 / 灰=未接続)★
-            if (homeLabel && btnHome) {
+            // ★青バーチップ: 接続状態を一目で (緑=接続済+車速 / 半透明白=未接続)★
+            if (chipLabel && obdChip) {
               if (_obdConnected) {
-                homeLabel.textContent =
-                  '🟢 OBD接続済' + (sp.valid ? ' — ' + sp.kmh + ' km/h' : ' (車速待ち…)');
-                btnHome.style.background = '#e8f9ee';
-                btnHome.style.borderColor = '#34c759';
-                btnHome.style.color = '#1a7f3c';
+                chipLabel.textContent = '🟢 OBD' + (sp.valid ? ' ' + sp.kmh : '');
+                obdChip.style.background = '#34c759';
+                obdChip.style.color = '#fff';
               } else {
-                homeLabel.textContent = '📟 OBD未接続 — タップで接続';
-                btnHome.style.background = '#f2f2f7';
-                btnHome.style.borderColor = '#d1d1d6';
-                btnHome.style.color = '#8e8e93';
+                chipLabel.textContent = '📟 OBD';
+                obdChip.style.background = 'rgba(255,255,255,0.18)';
+                obdChip.style.color = '#fff';
               }
             }
             // ★走行中バッジ: 計測源を一目で★
