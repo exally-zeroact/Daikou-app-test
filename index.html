@@ -12984,10 +12984,12 @@
           O.on('status', function (s) {
             if (statusEl) statusEl.textContent = JA[s] || s;
             _obdConnected = s === 'connected';
-            // ★OBDメイン起動: 接続したら距離源をOBD(∫v)に切替・切断/エラーでGPSへ戻す。
-            //   gps.js が window.OBD_DRIVE_DISTANCE を見て speedSrc='obd' を立て、距離が∫v(OBD)駆動になる。
-            //   (gps.js 側で鮮度切れは自動でGPSにfallbackするので、接続=ONで安全)
-            window.OBD_DRIVE_DISTANCE = s === 'connected';
+            // ★OBD ∫v 全距離駆動は無効化 (2026-06-09・実機trace検証)★:
+            //   実車trace解析で OBD ∫v(車速1km/h floor積分)は GPS より系統過小(-2.85〜-3.86%)と判明。
+            //   接続で距離源を OBD に切替えると精度が悪化する(司さん実走で -3.86%)。よって ★OBDは表示/
+            //   接続状態のみ★ とし、距離は認定済 GPS(smoothedRawMode)のまま。OBDを距離へ使う正しい形
+            //   (穴埋め速度源/停止判定)は adaptiveMode の劣化シナリオ硬化後に再導入する。
+            window.OBD_DRIVE_DISTANCE = false;
           });
           O.on('error', function (msg) {
             if (noteEl) noteEl.textContent = 'エラー: ' + msg;
