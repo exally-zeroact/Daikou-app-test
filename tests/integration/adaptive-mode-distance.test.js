@@ -139,13 +139,21 @@ describe('adaptiveMode 確定2択方式 (実機fixture)', () => {
     }
   }, 30000);
 
-  it('★OFF(adaptiveMode未指定)は従来 smoothedRawMode と完全一致 (rollback不変)', () => {
+  it('★出荷=adaptiveMode既定ON / rollback=adaptiveMode:false で従来smoothedRawModeへ1行復帰', () => {
     const a = load('0606-Android.json');
-    const off = computeDistance(a, dec, { enableRouting: true }).distance_m;
-    const explicitOff = computeDistance(a, dec, {
+    const shipped = computeDistance(a, dec, { enableRouting: true }).distance_m; // 既定=出荷 adaptiveMode:true
+    const rollback = computeDistance(a, dec, {
       enableRouting: true,
       adaptiveMode: false,
     }).distance_m;
-    expect(Math.abs(off - explicitOff)).toBeLessThanOrEqual(0.0001);
+    const legacy = computeDistance(a, dec, {
+      enableRouting: true,
+      adaptiveMode: false,
+      smoothedRawMode: true,
+    }).distance_m;
+    expect(Math.abs(rollback - legacy)).toBeLessThanOrEqual(0.0001); // rollback=従来win3 と一致
+    expect(shipped).toBeGreaterThan(0);
+    expect(rollback).toBeGreaterThan(0);
+    expect(shipped).not.toBe(rollback); // フラグが距離源を実際に切替えている
   }, 30000);
 });

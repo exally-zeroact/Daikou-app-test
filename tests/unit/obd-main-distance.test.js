@@ -22,7 +22,13 @@ const stubDecoder = {
 };
 
 function newTracker() {
-  return PD.createDistanceTracker(stubDecoder, { useSnapCache: false, enableRouting: false });
+  // ★OBD ∫v 全駆動は adaptiveMode(2026-06-09出荷)では廃止(実機-3.86%悪化)。
+  //   本テスト群は rollback 経路(adaptiveMode:false=従来 OBD ∫v)の契約を固定する。★
+  return PD.createDistanceTracker(stubDecoder, {
+    useSnapCache: false,
+    enableRouting: false,
+    adaptiveMode: false,
+  });
 }
 
 const T0 = 1_000_000_000;

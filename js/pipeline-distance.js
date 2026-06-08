@@ -173,7 +173,7 @@ const DEFAULTS = {
   //   停止(ZUPT)は呼び出し側 stationary 判定で従来通り 0。never-over= ①cap + ②速度は過小側 + ZUPT。
   //   実測(realtrace-0609-Android-OBD): 業務1 -0.53% / 業務2 -0.33%(トンネル25秒穴を②が+90m回収)。
   //   OFF(adaptiveMode!==true)で完全 byte 不変。distance_m/calcFare 不可侵。
-  adaptiveMode: false, // 確定2択方式の有効化 (1行ON/OFF・rollback用)
+  adaptiveMode: true, // ★出荷(2026-06-09): 確定2択方式を既定化 (rollback=false へ1行)★
   //   ★効果(実トレース・3D OFF): OBD全駆動の-3.86%バグを止め GPS平滑+穴埋めへ→業務2 -1.46%(過大ゼロ)。
   //     トンネル25秒穴を speed×dt で +306m 回収。愛媛14業務 過大0件。生GPS弦は愛媛で+1.9%過大化(過大請求)
   //     のため不採用=過大ゼロを守る限り平滑土台が必須(-1.5%が底)。
@@ -1020,6 +1020,9 @@ function _prepareBatch(samples, decoder, opts) {
   opts = opts || {};
   const cfg = {};
   for (const k in DEFAULTS) cfg[k] = opts[k] != null ? opts[k] : DEFAULTS[k];
+  // ★M2 (監査)★: adaptiveMode は平滑土台が必須前提(生GPS弦は愛媛+1.9%過大=過大請求)。
+  //   smoothedRawMode を強制 true にし、暗黙依存で過大ゼロが黙って崩れるフットガンを構造的に塞ぐ。
+  if (cfg.adaptiveMode === true) cfg.smoothedRawMode = true;
   const speedProvider =
     typeof opts.speedProvider === 'function' ? opts.speedProvider : gpsSpeedProvider;
   const enableRouting = opts.enableRouting !== false;
@@ -1306,6 +1309,15 @@ function stepDistance(
       // ② 速度×時間。spd= speedProvider(OBD較正速度 or Doppler)。GPS穴(トンネル)/劣化(ビル街)を充填。
       if (spd >= 0) {
         const fill = spd * _dtA;
+        // ★never-over 天井 (監査 overcount-guarantee 指摘・MODE②の構造ガード)★:
+        //   穴明け点が出口加速していると spd_exit×dt が平均速度×dt を超過し過大化しうる。
+        //   既存 gap 分岐と同規律で 直線弦の routingMaxRatio(4.0) 倍超 = 異常 → 直線弦へ落とす。
+        //   トンネル実走(弦167m→fill306m=1.8倍)は通り、出口spike(4.5倍)は弦へ clamp。
+        if (straight > 0.1 && fill / straight > cfg.routingMaxRatio) {
+          stats.straightSegs = (stats.straightSegs || 0) + 1;
+          bd.straightFallbackM = (bd.straightFallbackM || 0) + straight;
+          return straight;
+        }
         stats.dopplerSegs = (stats.dopplerSegs || 0) + 1;
         bd.dopplerM = (bd.dopplerM || 0) + fill;
         return fill;
@@ -1512,6 +1524,9 @@ function createDistanceTracker(decoder, opts) {
   opts = opts || {};
   const cfg = {};
   for (const k in DEFAULTS) cfg[k] = opts[k] != null ? opts[k] : DEFAULTS[k];
+  // ★M2 (監査)★: adaptiveMode は平滑土台が必須前提(生GPS弦は愛媛+1.9%過大=過大請求)。
+  //   smoothedRawMode を強制 true にし、暗黙依存で過大ゼロが黙って崩れるフットガンを構造的に塞ぐ。
+  if (cfg.adaptiveMode === true) cfg.smoothedRawMode = true;
   const speedProvider =
     typeof opts.speedProvider === 'function' ? opts.speedProvider : gpsSpeedProvider;
   const enableRouting = opts.enableRouting !== false;

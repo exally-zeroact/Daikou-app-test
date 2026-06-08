@@ -138,9 +138,14 @@ describe('過大ゼロ routing de-bias (実機fixture・愛媛)', () => {
         enableRouting: true,
         routingAcceptMaxRatio: 4.0,
         smoothedRawMode: false,
+        adaptiveMode: false, // ★rollback経路の routing 受理上限契約を検証(adaptive は snap=null で routing 不通過)★
       }).distance_m / 1000;
     const engNew =
-      computeDistance(seg, dec, { enableRouting: true, smoothedRawMode: false }).distance_m / 1000;
+      computeDistance(seg, dec, {
+        enableRouting: true,
+        smoothedRawMode: false,
+        adaptiveMode: false,
+      }).distance_m / 1000;
     expect(engOld / 3.57 - 1).toBeGreaterThan(0.01); // 旧値は +1% 超の過大
     expect(engNew).toBeLessThanOrEqual(3.57 * 1.0005); // 新値は過大ゼロ
     expect(engNew).toBeLessThan(engOld); // 新値の方が小さい(過大を削った)
