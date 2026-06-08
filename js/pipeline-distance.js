@@ -123,6 +123,21 @@ const DEFAULTS = {
   //   ★OBD は smoothedRawMode より優先 (∫v=タイヤ直結・認定メーター方式)。speedSrc==='obd' 時のみ発火。★
   obdMaxDtS: 10,
 
+  // ★OBD δ 自己キャリブ (2026-06-09・OBD floor 過小 -2.9% 補正・アダプタ非依存)★:
+  //   OBD車速(PID 010D)は 1km/h 整数 floor のため ∫v が系統過小(-2.9%・実機トレース)。
+  //   ★良GPS区間で δ=(GPS位置距離 − ∫OBD)/移動時間 を学習★ し、∫(v+δ) を GPS位置距離(≈タイヤ以下)へ
+  //   寄せる。δ は ±obdDeltaMaxMps(=0.139m/s=0.5km/h・floor量子化の物理上限)にクランプ=ハードコード
+  //   加算でなく観測学習なので「どのアダプタ/車でも」効く(司さん指摘: 何を買うか分からないのに足すな)。
+  //   OFF(obdDeltaCalib!==true)で従来 ∫v そのまま(byte不変)。distance_m/calcFare 不可侵。
+  obdDeltaCalib: false, // δ自己キャリブ有効化 (1行ON/OFF・rollback用)
+  obdDeltaMinMps: -0.139, // δ下限 (-0.5km/h・OBD過大読み端末対策)
+  obdDeltaMaxMps: 0.139, // δ上限 (+0.5km/h・floor過小補正の物理上限=never-over)
+  calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)
+  calMaxChordRatio: 1.5, // GPS弦 > spd×dt×これ = ジッタ汚染窓 → δ母集団から除外
+  calMaxAccM: 30, // 両端 accuracy これ超 = 位置不確か → δ母集団から除外 (良GPS窓のみ学習)
+  calEwmaOld: 0.7, // δ 平滑 (旧値重み・急変を抑え安定化)
+  calEwmaNew: 0.3, // δ 平滑 (新窓重み)
+
   // ★生GPS 双方向スムージング距離 (2026-06-06・★設計変更宣言★・司さん裁定「生GPS寄せ+過大対策」)★
   //   実データ検証(0606b/realtest3/しまなみ・全fixture)で確定した距離の正解:
   //   生GPS の軌跡を ★双方向移動平均(window)★ で平滑してから弦長を測る。ジッタを ★対称に★ 削るため
@@ -1444,6 +1459,12 @@ function createDistanceTracker(decoder, opts) {
   let prevSnap = null;
   // ★coasting 速度★ (B): 直近の有効点速度 (m/s・-1=未確立)。GPS 穴中の補間に使う。
   let coastSpdMps = -1;
+  // ★OBD δ 自己キャリブ状態 (obdDeltaCalib)★: 良GPS窓で (GPS位置距離 − ∫OBD) を貯め δ を学習。
+  let calGpsM = 0; // 良GPS窓の GPS位置距離 累積 (m)
+  let calObdIntM = 0; // 同窓の ∫OBD(spd×dt) 累積 (m)
+  let calTimeS = 0; // 同窓の移動時間 累積 (s)
+  let obdDeltaMps = 0; // 学習済 δ (m/s)
+  let obdDeltaInit = false; // δ を1回でも確定したか
   // breakdown/stats を区間分類のため保持 (stepDistance が要求する構造)
   let bd, stats;
   function freshAccum() {
@@ -1554,8 +1575,46 @@ function createDistanceTracker(decoder, opts) {
     //   停止は OBD 速度 0 で自然に 0 加算(ZUPT 不要)。異常 dt は弾く(過大ゼロ保険)。
     if (cur.obd === true && spd >= 0) {
       const dtObd = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      // ★δ 自己キャリブ (obdDeltaCalib・floor過小補正)★: 良GPS区間(精度OK+移動中+ジッタ無し)で
+      //   GPS位置距離と ∫OBD を貯め、calMinWindowS 秒ごとに δ=(GPS−∫OBD)/移動時間 を確定。
+      //   ★短絡 return 前に学習★(監査HIGH#1: δ計算は OBD return より先)。GPS弦は位置のみ使用。
+      if (
+        cfg.obdDeltaCalib === true &&
+        dtObd > 0 &&
+        dtObd <= cfg.obdMaxDtS &&
+        spd >= cfg.stationarySpdMps
+      ) {
+        const _gpsChord = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+        const _accCur = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
+        const _accPrev = typeof prev.acc === 'number' && prev.acc >= 0 ? prev.acc : -1;
+        const _accOk =
+          (_accCur < 0 || _accCur <= cfg.calMaxAccM) &&
+          (_accPrev < 0 || _accPrev <= cfg.calMaxAccM);
+        // ジッタ汚染窓(弦が spd×dt×ratio 超)は母集団から除外=δ を過大学習させない(never-over)。
+        if (_accOk && _gpsChord <= spd * dtObd * cfg.calMaxChordRatio) {
+          calGpsM += _gpsChord;
+          calObdIntM += spd * dtObd;
+          calTimeS += dtObd;
+          if (calTimeS >= cfg.calMinWindowS) {
+            let dNew = (calGpsM - calObdIntM) / calTimeS;
+            if (dNew < cfg.obdDeltaMinMps) dNew = cfg.obdDeltaMinMps;
+            if (dNew > cfg.obdDeltaMaxMps) dNew = cfg.obdDeltaMaxMps;
+            obdDeltaMps = obdDeltaInit
+              ? cfg.calEwmaOld * obdDeltaMps + cfg.calEwmaNew * dNew
+              : dNew;
+            obdDeltaInit = true;
+            calGpsM = 0;
+            calObdIntM = 0;
+            calTimeS = 0;
+          }
+        }
+      }
       let obdDelta = 0;
-      if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) obdDelta = spd * dtObd;
+      if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) {
+        // ∫(v+δ)。δ は ±0.5km/h クランプ済 = floor過小ぶんだけ持ち上げ過大暴走しない。
+        const vEff = cfg.obdDeltaCalib === true && obdDeltaInit ? spd + obdDeltaMps : spd;
+        obdDelta = (vEff > 0 ? vEff : 0) * dtObd;
+      }
       total += obdDelta;
       stats.obdSegs = (stats.obdSegs || 0) + 1;
       bd.obdM = (bd.obdM || 0) + obdDelta;
@@ -1733,6 +1792,11 @@ function createDistanceTracker(decoder, opts) {
       prev = null;
       prevSnap = null;
       coastSpdMps = -1;
+      calGpsM = 0;
+      calObdIntM = 0;
+      calTimeS = 0;
+      obdDeltaMps = 0;
+      obdDeltaInit = false;
       smoothBuf = [];
       smoothNext = 0;
       freshAccum();
