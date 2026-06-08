@@ -40,7 +40,9 @@ describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / �
     //   -57 行 shift。accel主体 pattern が L801 へ移動・window 同期 (slice 790..815)。
     // ★2026-05-31 Fix④ (Doppler-速度ゲート位置受理 + CONFIG.trust_position_acc_m 追加) で
     //   +34 行 shift。accel主体 pattern が L835 へ移動・window 同期 (slice 824..849)。
-    const window = lines.slice(824, 849).join('\n');
+    // ★2026-06-06 監査 wf_1cd1ef59 (変位継続性ゲート disp_window/disp_net_m + 全点バッファ 追加) で
+    //   +36 行 shift。finalStationary pattern が L871 へ移動・window 同期 (slice 860..885)。
+    const window = lines.slice(860, 885).join('\n');
     if (!/finalStationary\s*=\s*c1Stationary\s*&&\s*!c2Moving/.test(window)) {
       throw new Error(
         'gps-worker.js L835 周辺 (±10) に 加速度主体 静止判定 pattern 未検出 (drift detected)'
@@ -61,7 +63,9 @@ describe('drift-static: gps-worker.js 静止判定(加速度variance主体) / �
     //   window 同期 (slice 762..787)。
     // ★2026-05-31 Fix④ (Doppler-速度ゲート位置受理 + CONFIG.trust_position_acc_m 追加) で
     //   +34 行 shift。accel-null pattern が L807 へ移動・window 同期 (slice 796..821)。
-    const window = lines.slice(796, 821).join('\n');
+    // ★2026-06-06 監査 wf_1cd1ef59 (変位継続性ゲート 追加) で +36 行 shift。
+    //   accel-null pattern が L843 へ移動・window 同期 (slice 832..857)。
+    const window = lines.slice(832, 857).join('\n');
     // accelVariance === null && accelDeviation === null で位置半径 fallback 採用
     if (!/accelVariance\s*===\s*null\s*&&\s*accelDeviation\s*===\s*null/.test(window)) {
       throw new Error(

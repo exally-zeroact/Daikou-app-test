@@ -206,6 +206,21 @@ function _setDecoderLRU(pref, dec) {
 //   - reset (業務リセット) で全トラッカ reset。
 //   - pipeline-distance 未ロード / decoder 未ロード時は no-op (= deltaM=0・既存挙動完全不変)。
 const _pipelineTrackers = new Map(); // pref → tracker
+
+// ★smoothedRawMode 判定 (2026-06-07)★: tracker は opts {} で生成 = DEFAULTS が支配する。
+//   worker 側の「実質停止で pipelineDeltaM 0 化」二重保険は平滑モードでは時間軸がズレる
+//   (delta が h サンプル遅れて確定) ため、この判定で分岐する。lazy 評価 (importScripts 順非依存)。
+function _pdSmoothed() {
+  try {
+    return !!(
+      self.PipelineDistance &&
+      self.PipelineDistance.DEFAULTS &&
+      self.PipelineDistance.DEFAULTS.smoothedRawMode === true
+    );
+  } catch (_) {
+    return false;
+  }
+}
 function _getPipelineTracker(pref) {
   if (typeof self.PipelineDistance === 'undefined' || !self.PipelineDistance.createDistanceTracker)
     return null;
@@ -275,12 +290,19 @@ function _confirmedRoadDelta(msg, outSnap) {
             typeCode: outSnap.typeCode,
           }
         : null;
+    // ★speedSrc 貫通 (2026-06-07)★: エンジンの sample.spd は ★本物の Doppler ('dop') のみ★。
+    //   gps.js の haversine 代用 ('hav') は -1 (=不明) で渡す: gap 補完が straight に正しく落ち、
+    //   never-over cap も不適用 (= エンジン検証 fixture の生 Doppler 契約と完全一致)。
+    //   'hav' を既知速度として渡すと gap 跨ぎ距離が微速×dt で潰れ過小化する (0606night SE -64m)。
+    //   speedSrc 未付与 (旧経路/後方互換) は従来通り speedKmh を採用。
+    const _spdMps =
+      msg.speedSrc === 'hav' ? -1 : typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1;
     const res = tk.ingest({
       lat: msg.lat,
       lng: msg.lng,
       t: msg.timestamp,
       acc: msg.accuracy,
-      spd: typeof msg.speedKmh === 'number' ? msg.speedKmh / 3.6 : -1, // km/h → m/s (無ければ -1)
+      spd: _spdMps, // km/h → m/s ('hav'/欠落は -1 = 不明)
       snap: _vitSnap, // ★Viterbi 確定 snap (= 距離源)。null なら ingest 内で従来 snap 退避。
       // ★OBD メインモード: 速度源が OBD 車輪速度なら ∫v(OBD) で距離駆動する印 (gps.js が speedSrc 付与)。
       //   未設定/'dop'/'hav' は従来の道路 map-matching (byte 不変)。
@@ -2946,6 +2968,41 @@ self.onmessage = function (e) {
       });
     }
     viterbi.reset();
+    // ★smoothedRawMode flush (2026-06-07・出荷有効化)★: 遅延バッファ末尾 (未確定 h 点) を
+    //   片側窓で確定し、tracker 破棄前に最終 pipelineDeltaM として post する (= 末尾取りこぼし回収・
+    //   実測 0〜12.9m 過小方向)。★課金 gate (running/business_active) は main 側で不可侵★:
+    //   実フローでは businessEnd が gate を閉じてから 'reset' を送るため本 delta は課金に入らない
+    //   (= 過大方向リスク ゼロ)。非 smoothed では tracker.flush() は no-op (deltaM=0) で何も出ない。
+    //   回帰: tests/integration/smoothed-flush-on-reset.test.js
+    {
+      let _pipelineFlushM = 0;
+      for (const tk of _pipelineTrackers.values()) {
+        try {
+          if (tk && typeof tk.flush === 'function') {
+            const fr = tk.flush();
+            if (fr && typeof fr.deltaM === 'number' && fr.deltaM > 0) _pipelineFlushM += fr.deltaM;
+          }
+        } catch (_) {
+          /* 例外は既存 reset 経路に影響させない */
+        }
+      }
+      if (_pipelineFlushM > 0) {
+        self.postMessage({
+          type: 'mmResult',
+          mmIncrementM: 0,
+          snap: null,
+          confidence: 1.0,
+          snapped: 0,
+          skipped: 0,
+          latencyMs: 0,
+          candidatesCount: 0,
+          windowSize: 0,
+          committed: true,
+          pipelineDeltaM: _pipelineFlushM,
+          _reason: 'pipeline flush before reset',
+        });
+      }
+    }
     // ★白紙書き直し 第四弾 (2026-05-30): 業務リセットで新距離エンジンも完全初期化 (= trip 単位)。
     _resetPipelineTrackers();
     lastCommittedSnap = null;
@@ -3371,7 +3428,10 @@ self.onmessage = function (e) {
       mmIncrementM = 0;
       tentativeIncrementM = 0;
       // ★白紙書き直し (2026-05-30): effectively stationary 時は新 meter 距離駆動 delta も 0 (= creep 防止二重保険)。
-      _pipelineDeltaM_now = 0;
+      // ★smoothedRawMode 補正 (2026-06-07)★: 平滑は delta が h サンプル遅れて確定するため現在時刻での
+      //   0 化は直前走行 delta を握り潰す (時間軸ズレ・市街地で系統過小)。creep はエンジン側 ZUPT+cap が
+      //   中心点 spd の正しい時間軸で担保 (_pdSmoothed 定義コメント・smoothed-flush-on-reset.test.js 参照)。
+      if (!_pdSmoothed()) _pipelineDeltaM_now = 0;
       if (_frozenTentativeDistanceM !== null) {
         tentativeDistanceM = _frozenTentativeDistanceM;
       }

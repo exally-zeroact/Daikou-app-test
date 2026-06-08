@@ -206,6 +206,10 @@ function runProdPipeline(pref, samples) {
   let prevRoad = null;
   let prevPref = null;
   for (const m of mmResults) {
+    // ★smoothedRawMode flush (2026-06-07)★: 'reset' 時の末尾 flush delta は ★設計どおり★ meter の
+    //   gate (businessEnd が先に閉じる) で落ちる一回限りの後着 (過小方向・実測 ≤13m)。単一source検査
+    //   (sink == Σδ) は「meter が受け取り得た delta」で行うため flush message は総和から除外する。
+    if (m._reason === 'pipeline flush before reset') continue;
     if (typeof m.pipelineDeltaM === 'number' && m.pipelineDeltaM > 0)
       sumPipeline += m.pipelineDeltaM;
     if (typeof m.mmIncrementM === 'number' && m.mmIncrementM > 0) sumMmIncrement += m.mmIncrementM;
@@ -332,10 +336,12 @@ function analyzeWiringStatic() {
   const srcPassesViterbiSnap =
     /const\s+_vitSnap\s*=[\s\S]{0,400}outSnap\.roadIndex/.test(mmSrc) &&
     /tk\.ingest\(\{[\s\S]{0,300}snap:\s*_vitSnap/.test(mmSrc);
-  // ★L1 核心②: pipeline-distance.ingest が sample.snap (= Viterbi 確定) がある時
+  // ★L1 核心②: pipeline-distance.ingest が Viterbi 確定 snap (= sample.snap) がある時
   //   greedy SnapCache.snap を ★呼ばない★ (= greedy 寄与残存ゼロ)。
+  //   ★2026-06-06: smoothedRawMode 追加で ingest 本体を _core(cur) に抽出したため
+  //   変数名が sample.snap → cur.snap に変わった (cur === ingest の sample・配線は同一)。両許容。
   const pipelineUsesExternalSnap =
-    /const\s+ext\s*=\s*sample\.snap/.test(pdSrc) &&
+    /const\s+ext\s*=\s*(sample|cur)\.snap/.test(pdSrc) &&
     /ext\.roadIndex[\s\S]{0,400}snapLat:\s*ext\.snapLat/.test(pdSrc);
 
   // ★旧 false-green 検出器: greedy per-point snap 生値が距離源として残っていないこと★

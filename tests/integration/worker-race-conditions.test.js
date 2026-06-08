@@ -73,6 +73,8 @@ describe('Worker A/B race conditions (㉔)', () => {
   });
 
   it('R1: Worker A 5Hz + Worker B 1Hz の異速度 arrival で distance_m 整合', () => {
+    // 道路ロード完了済を明示 (= loadfill 非発火・ロード完了後は GPS 単独で距離が動かない契約)
+    fw._dispatch({ type: 'roadsLoaded', ok: true, pref: 'ehime' });
     // Worker A から GPS 5 回・Worker B からは 1 回 mmResult
     const baseTs = 1714100000000;
     for (let i = 0; i < 5; i++) {

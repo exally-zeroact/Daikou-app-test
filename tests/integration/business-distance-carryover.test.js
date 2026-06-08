@@ -268,6 +268,8 @@ describe('business-distance-carryover (pipeline 駆動・clean-rebuild-pipeline)
     Meter.setBusinessActive(true);
     Meter.start();
     Meter._setDrainMmUntil(0);
+    // 道路ロード完了済を明示 (= loadfill 非発火・ロード完了後は GPS 単独で距離が動かない契約)
+    fakeWorker._dispatch({ type: 'roadsLoaded', ok: true, pref: 'ehime' });
     // GPS update のみ・worker が delta を返さない (= fake worker は postMessage no-op)
     Meter.update(gpsAt(0));
     Meter.update(gpsAt(1));

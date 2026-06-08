@@ -149,6 +149,8 @@ console.log('\n[case1] pipeline delta → distance_m は道路 snap 道なり累
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  // 道路ロード完了を明示 (= loadfill 非発火・ロード完了後は pipeline delta 単一経路の契約)
+  w._dispatch({ type: 'roadsLoaded', ok: true, pref: 'ehime' });
   // ステップ 0 で last_gps 確定。ステップ 1,2 で worker が 90m delta を返す → distance_m ~180m
   for (let i = 0; i < 3; i++) {
     Meter.update(gpsAt(i));
@@ -170,6 +172,7 @@ console.log('\n[case1b] 絶対ルール: pipeline delta のみで加算 (GPS 直
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  w._dispatch({ type: 'roadsLoaded', ok: true, pref: 'ehime' });
   for (let i = 0; i < 3; i++) {
     Meter.update(gpsAt(i));
     if (i > 0) w._dispatch({ type: 'mmResult', pipelineDeltaM: 90, snapped: 1, committed: true });
@@ -187,6 +190,7 @@ console.log('\n[case2] 絶対ルール: pipeline delta が来ない間は distan
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  w._dispatch({ type: 'roadsLoaded', ok: true, pref: 'ehime' });
   Meter.update(gpsAt(0));
   Meter.update(gpsAt(1));
   w._dispatch({ type: 'mmResult', pipelineDeltaM: 90, snapped: 1, committed: true });
@@ -232,6 +236,7 @@ console.log('\n[case4] delta 不在 → 復帰 → distance_m は復帰分のみ
   Meter.setMapMatcher(w);
   Meter.start();
   if (typeof Meter._setDrainMmUntil === 'function') Meter._setDrainMmUntil(0);
+  w._dispatch({ type: 'roadsLoaded', ok: true, pref: 'ehime' });
   Meter.update(gpsAt(0));
   // delta なしの GPS step (加算なし)
   Meter.update(gpsAt(1));

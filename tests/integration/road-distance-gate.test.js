@@ -52,6 +52,12 @@ function gate() {
   return GATE;
 }
 
+// ★smoothedRawMode 出荷 (2026-06-07・裁定済)★: 距離源は「Viterbi 確定 snap の道なり弧長」から
+//   「平滑生GPS弦 (smoothedRawMode)」へ切替。(b)(c) の ★HOW (距離源アーキ)★ assert はモードで分岐し、
+//   ★WHAT (距離精度 (a)・認定バンド cert_band・不変項目 (d))★ は両モード共通で維持する。
+//   OFF への rollback (DEFAULTS 1 行) 時は legacy assert がそのまま生き返る。
+const SMOOTHED = require('../../js/pipeline-distance.js').DEFAULTS.smoothedRawMode === true;
+
 describe('road-distance gate (STEP0) — 通った道の正確な距離 / iPhone13 / ehime / タイヤ真値 8.39km', () => {
   beforeAll(() => {
     GATE = runGate({ pref: 'ehime' });
@@ -93,39 +99,48 @@ describe('road-distance gate (STEP0) — 通った道の正確な距離 / iPhone
     expect(r.a_distance_accuracy.pass).toBe(true);
   });
 
-  it('(b) flip≈0: 実距離源 (Viterbi 確定 snap 駆動) の余計な弦 = 0m / 直線区間 = 0 — 偽遷移の距離寄与ゼロ', () => {
+  it('(b) flip≈0: 偽遷移の余計な弦が距離に入らない (モード別の距離源契約)', () => {
     const r = gate();
-    // ★タスク核心の「過大の正体 = 別道路 flip の余計な弦」を距離源で根治。★
-    //   実距離源 (Viterbi 確定 snap 駆動 tracker) で straightFallbackM=0 / straightSegs=0
-    //   = 偽遷移由来の直線弦が距離に一切入っていない (= 連結性拘束が全 flip を arc 化/棄却)。
+    // ★タスク核心の「過大の正体 = 別道路 flip の余計な弦」根治指標。★
     expect(r.b_flip.source_straightFallback_m).toBe(0);
     expect(r.b_flip.source_straightSegs).toBe(0);
-    // 距離源が Viterbi 確定 snap で駆動されている裏付け (greedy 最近傍 snap ではない)。
-    expect(r.b_flip.source_viterbi_snaps).toBeGreaterThan(0);
-    expect(r.b_flip.pass).toBe(true);
+    if (SMOOTHED) {
+      // ON: 距離源 = 平滑生GPS弦。snap は距離に使わない (= flip 弦は構造的に距離へ入らない)。
+      expect(r.b_flip.source_viterbi_snaps).toBe(0);
+    } else {
+      // OFF (fallback): 距離源が Viterbi 確定 snap で駆動されている裏付け。
+      expect(r.b_flip.source_viterbi_snaps).toBeGreaterThan(0);
+      expect(r.b_flip.pass).toBe(true);
+    }
   });
 
-  it('(c) 配線完全性: 距離源 = Viterbi 確定 snap・greedy 生値寄与残存ゼロ・単一 source', () => {
+  it('(c) 配線完全性: greedy 生値寄与残存ゼロ・単一 source (モード別)', () => {
     const r = gate();
-    // ★L1 配線: _confirmedRoadDelta が Viterbi 確定 snap (outSnap) を ingest へ渡す。
+    // ★L1 配線: _confirmedRoadDelta が Viterbi 確定 snap (outSnap) を ingest へ渡す (両モード不変)。
     expect(r.c_wiring.static.src_confirmedRoadDelta_passes_viterbi_snap).toBe(true);
-    // ★pipeline-distance が sample.snap (Viterbi) で greedy SnapCache.snap を bypass する。
     expect(r.c_wiring.static.src_pipeline_ingest_uses_external_viterbi_snap).toBe(true);
-    // ★greedy per-point snap 生値 (_ing.deltaM 直結) が距離源として残っていない。
+    // ★greedy per-point snap 生値 (_ing.deltaM 直結) が距離源として残っていない (両モード不変)。
     expect(r.c_wiring.static.src_pipelineDeltaM_from_greedy_ingest).toBe(false);
-    // 距離源 tracker が Viterbi 確定 snap で実際に駆動されている (動的裏付け)。
-    expect(r.c_wiring.dynamic_viterbi_driven).toBe(true);
     expect(r.c_wiring.dynamic_single_source).toBe(true); // 距離 sink == 受信 delta 総和 (他経路混入ゼロ)
-    expect(r.c_wiring.pass).toBe(true);
+    if (SMOOTHED) {
+      // ON: snap は距離源でない = viterbi 駆動カウントは付かない (契約の明文化)。
+      expect(r.c_wiring.dynamic_viterbi_driven).toBe(false);
+    } else {
+      expect(r.c_wiring.dynamic_viterbi_driven).toBe(true);
+      expect(r.c_wiring.pass).toBe(true);
+    }
   });
 
-  it('配線実装後: (a)(b)(c)(d) 全 GREEN・距離真値収束 (gate_pass=true)', () => {
+  it('総合 GREEN: 距離精度 + 不変項目 + 認定バンド (モード共通の WHAT)', () => {
     const r = gate();
     expect(r.a_distance_accuracy.pass).toBe(true);
-    expect(r.b_flip.pass).toBe(true);
-    expect(r.c_wiring.pass).toBe(true);
     expect(r.d_invariants.pass).toBe(true);
-    expect(r.gate_pass).toBe(true);
+    expect(r.cert_band.pass).toBe(true);
+    if (!SMOOTHED) {
+      expect(r.b_flip.pass).toBe(true);
+      expect(r.c_wiring.pass).toBe(true);
+      expect(r.gate_pass).toBe(true);
+    }
   });
 
   // ── ★A1 認定バンド (片公差 −4%〜0%・過大ゼロ) — テスト先行 (司さん永久警告)★ ──────

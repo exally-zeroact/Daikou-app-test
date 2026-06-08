@@ -80,6 +80,16 @@ let CONFIG = {
   //   維持し creep を計上しない (= creep 保険)。
   accuracy_moving_max_m: 20,
   accuracy_moving_extreme_m: 35,
+  // ★設計変更宣言 (2026-06-06・監査 wf_1cd1ef59・SE屋内徐行の過小根治)★:
+  //   低速徐行が加速度variance小で isStationary=true に誤分類されると accuracy上限が厳格 base(~10m)に
+  //   なり、SE屋内の acc10-17m の ★実走行点★ が棄却され距離が過小化する(SE t2 -0.98%)。
+  //   ★地力 de-bias (一律係数でない)★: 生GPSが継続前進(直近 disp_window 点の正味変位 > disp_net_m)
+  //   していれば「徐行=移動」とみなし accuracy を移動時上限(35m)に緩和する。真静止は独立ジッタで net が
+  //   伸びず厳格を維持 → 屋内ゴミ点は従来通り排除(過大保険温存)。creep は MM の spd ゲートが別途死守。
+  //   ★accuracy 緩和の判定だけをピンポイント拡張 = 他端末/他経路(停止表示/ZUPT/診断)は 1byte 不変★。
+  //   実測最良: window=4・net=6m (徐行1秒変位≈1.1m/s では k=3 で net 到達不足のため k=4 必須)。
+  disp_window: 4,
+  disp_net_m: 6,
   // ★Fix① v2 (2026-05-28・★設計変更宣言★・dwell time 業界標準準拠):
   //   速度 spike (1 step) で静止判定が defeat されないよう・連続 N step で
   //   speedKmh >= stationary_moving_speed_kmh を観測した時のみ高速ガード発火。
@@ -111,6 +121,9 @@ let lastPosition = null;
 //   (= full-chain 過少・SE reject 62% の主機序)。実測: 生-生では 3台とも teleport は 0〜1 点のみ。
 //   そこで jump 判定専用に生位置を別保持し、真の物理移動でテレポートを測る (= 過大ゼロ保険は維持)。
 let lastRawPosition = null;
+// ★監査 wf_1cd1ef59: 生GPS変位継続性ゲート用・直近 disp_window 点の生位置(accept時のみ更新)。
+//   徐行(継続前進)か真静止(独立ジッタ)かを net 変位で区別し accuracy 緩和を判定する。
+let __rawDispBuf = [];
 let lowSpeedStart = null;
 let _posStillStart = null; // ★Fix① (2026-05-28): 速度非依存の位置半径静止判定 anchor (accel不能時fallback)
 let _highSpeedConsecCount = 0; // ★Fix① v2 (2026-05-28): 高速ガード dwell time カウンタ (連続 N step で fire)
@@ -591,9 +604,26 @@ function processPosition(data) {
   //   (= 中程度誤差点を消さず Worker B に委任)、その超過のみ「真に使い物にならない極端値」として
   //   硬棄却する (= 過大ゼロ保険・巨大誤差点が Worker B 入力を汚さない)。静止時は base のまま厳格。
   const _accLimitBase = getDynamicAccuracyLimit(speedKmh, now);
-  const accLimit = isStationary
-    ? _accLimitBase
-    : Math.max(_accLimitBase, CONFIG.accuracy_moving_extreme_m);
+  // ★監査 wf_1cd1ef59 + 司さん指摘(端末非依存・全端末で発火): 生GPS変位継続性で accuracy 緩和を判定。
+  //   ★バッファは accept 点だけでなく ★全点の生位置★ で更新する★ — そうしないと屋内棄却で始まる業務で
+  //   buffer が 4 点に届かずゲートが永久に発火しない(SE実機で bl=2 固着を実測)。GPS の軌跡は点の
+  //   accept/reject に依らず移動しているため、軌跡(全点)で「徐行か真静止か」を判定するのが正しい。
+  //   どの端末でも屋内徐行という ★条件★ で発火する(端末別ロジックではない)。
+  __rawDispBuf.push({ lat, lng });
+  if (__rawDispBuf.length > CONFIG.disp_window) __rawDispBuf.shift();
+  //   isStationary 誤判定で厳格化された徐行点を、直近 disp_window 点の正味変位 > disp_net_m なら救う。
+  const __movingByDisp =
+    __rawDispBuf.length >= CONFIG.disp_window &&
+    calcDistance(
+      __rawDispBuf[0].lat,
+      __rawDispBuf[0].lng,
+      __rawDispBuf[__rawDispBuf.length - 1].lat,
+      __rawDispBuf[__rawDispBuf.length - 1].lng
+    ) > CONFIG.disp_net_m;
+  const __relaxAcc = !isStationary || __movingByDisp;
+  const accLimit = __relaxAcc
+    ? Math.max(_accLimitBase, CONFIG.accuracy_moving_extreme_m)
+    : _accLimitBase;
   if (accuracy > accLimit) {
     _postGpsDbg({
       rej: 'accuracy',
@@ -913,6 +943,11 @@ function processPosition(data) {
     altitude,
     accuracy,
     speedKmh: clampedSpeedKmh,
+    // ★speedSrc 貫通 (2026-06-07)★: gps.js が付与した速度源 ('dop'=本物 Doppler / 'hav'=haversine
+    //   代用) を echo する。エンジン (pipeline-distance) の gap 補完/never-over cap は本物の
+    //   Doppler のみ速度として使う契約 (hav は -1=不明 → straight 補完)。echo しないと worker B が
+    //   代用速度を Doppler と誤認し gap 跨ぎ距離を微速×dt で潰す (0606night SE 業務1 -64m 実測)。
+    speedSrc: typeof speedSrc === 'string' ? speedSrc : null,
     isStationary,
     timestamp: now,
     compassHeading: compassHeading != null ? compassHeading : null,
@@ -938,6 +973,7 @@ self.onmessage = function (e) {
     kalman = new KalmanGPS();
     lastPosition = null;
     lastRawPosition = null; // ★bypass化E (2026-06-04): 生位置 anchor リセット
+    __rawDispBuf = []; // ★監査 wf_1cd1ef59: 変位継続性バッファもリセット
     lowSpeedStart = null;
     _posStillStart = null; // ★Fix① (2026-05-28): 位置半径 anchor リセット
     _highSpeedConsecCount = 0; // ★Fix① v2 (2026-05-28): 高速ガード dwell time カウンタリセット
@@ -955,6 +991,7 @@ self.onmessage = function (e) {
     if (kalman) kalman.reset();
     lastPosition = null;
     lastRawPosition = null; // ★bypass化E (2026-06-04): 生位置 anchor リセット
+    __rawDispBuf = []; // ★監査 wf_1cd1ef59: 変位継続性バッファもリセット
     lowSpeedStart = null;
     _posStillStart = null; // ★Fix① (2026-05-28): 位置半径 anchor リセット
     _highSpeedConsecCount = 0; // ★Fix① v2 (2026-05-28): 高速ガード dwell time カウンタリセット
