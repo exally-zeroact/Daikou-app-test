@@ -1792,7 +1792,9 @@ function createDistanceTracker(decoder, opts) {
       //   ∫v は spd×dt のみ (位置非依存) ゆえ平滑は無意味。かつライブメーターは遅延ゼロが望ましい
       //   (h サンプル遅延を作らない)。out-of-order は prev で判定 (非平滑と同基準)。
       //   OBD 全行程なら smoothBuf は空のまま (= 平滑経路に一切干渉しない)。混在遷移時も prev 連続性は保持。
-      if (sample.obd === true) {
+      //   ★adaptiveMode では OBD 全駆動しない(平滑土台+穴埋め)ため、OBD点もバイパスせず平滑経路へ流す
+      //     (= 生位置の愛媛ジッタ過大を防ぐ・OBD速度は spd 経由で①cap/②穴埋めに使う)。★
+      if (sample.obd === true && cfg.adaptiveMode !== true) {
         if (prev && Number.isFinite(sample.t) && Number.isFinite(prev.t) && sample.t < prev.t) {
           return { deltaM: 0, totalM: total, reason: 'out_of_order' };
         }
