@@ -67,12 +67,14 @@ function splitTrips(s) {
 }
 const OPT = { adaptiveMode: true, mode3D: false, enableRouting: false };
 
+// ★fixture は slim 版 (lat/lng/t/acc/spd/biz・リポジトリ追跡済)。full版(accel配列入り)は未追跡で
+//   CI に存在しない (ENOENT)。adaptiveMode は mode3D OFF で alt 不要・slim で過大ゼロ等価実証済。★
 const EHIME = [
-  { f: '0606-Android.json', tire: [null, 3.57, 3.39] },
-  { f: '0606-iPhone13.json', tire: [null, 3.57, 3.39] },
-  { f: '0606-iPhoneSE.json', tire: [null, 3.57, 3.39] },
-  { f: 'realtest3-Android.json', tire: [1.5, 8.58, 9.59, 1.72] },
-  { f: 'realtest3-iPhoneSE.json', tire: [1.5, 8.58, 9.59, 1.72] },
+  { f: '0606-Android.slim.json', tire: [null, 3.57, 3.39] },
+  { f: '0606-iPhone13.slim.json', tire: [null, 3.57, 3.39] },
+  { f: '0606-iPhoneSE.slim.json', tire: [null, 3.57, 3.39] },
+  { f: 'realtest3-Android.slim.json', tire: [1.5, 8.58, 9.59, 1.72] },
+  { f: 'realtest3-iPhoneSE.slim.json', tire: [1.5, 8.58, 9.59, 1.72] },
 ];
 
 describe('adaptiveMode 確定2択方式 (実機fixture)', () => {
@@ -126,8 +128,8 @@ describe('adaptiveMode 確定2択方式 (実機fixture)', () => {
 
   it('★batch == tracker(ingest全点+flush) parity 完全一致', () => {
     for (const f of [
-      '0606-Android.json',
-      'realtest3-iPhoneSE.json',
+      '0606-Android.slim.json',
+      'realtest3-iPhoneSE.slim.json',
       'realtrace-0609-Android-OBD.json',
     ]) {
       const a = load(f);
@@ -140,7 +142,7 @@ describe('adaptiveMode 確定2択方式 (実機fixture)', () => {
   }, 30000);
 
   it('★出荷=adaptiveMode既定ON / rollback=adaptiveMode:false で従来smoothedRawModeへ1行復帰', () => {
-    const a = load('0606-Android.json');
+    const a = load('0606-Android.slim.json');
     const shipped = computeDistance(a, dec, { enableRouting: true }).distance_m; // 既定=出荷 adaptiveMode:true
     const rollback = computeDistance(a, dec, {
       enableRouting: true,
