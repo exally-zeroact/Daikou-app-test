@@ -138,7 +138,12 @@ const DEFAULTS = {
   //   diff 0.0000 + 全fixture過大ゼロ実証済 → true 化。flush 配線は map-matcher.js 'reset' handler
   //   (回帰: tests/integration/smoothed-flush-on-reset.test.js)。OFF へ戻すのはこの 1 行のみ。
   smoothedRawMode: true,
-  smoothWindow: 5, // 移動平均窓 (奇数)。±(win-1)/2 点の位置平均。実データで5が最良。
+  // ★過大ゼロ de-bias 確定 (2026-06-08・実機14業務 sweep)★: 窓は h=floor((win-1)/2) で効く。
+  //   win=5(h=2) は平滑が強く カーブ角を削り過ぎて 系統 −2.0% 過小 (平均)。win=3(h=1) に下げると
+  //   カーブ回収で 平均 −2.02%→−1.42%・最大過大 −1.52%→−0.33% と ★過大ゼロを保ったままタイヤへ接近★。
+  //   win=2 相当(h=0)=生GPS弦=良GPSで +1% 過大化のため不可。creep ガード(ZUPT/cap)は生 spd/変位で
+  //   判定するため窓非依存 (win3/win5 で creep 0.00m 同値・実証済)。検証: tests/_sweep-debias.js。
+  smoothWindow: 3, // 移動平均窓。h=(win-1)/2 点の双方向平均。実機 sweep で 3 が過大ゼロ&最接近。
   smoothGapSec: 5, // dt がこれ超 = GPS穴/間引き → 平滑弦で角を切らず Doppler/coast へ回す (トンネル温存)
   smoothDopplerCapRatio: 1.5, // ★never-over (監査CRITICAL-3)★: 平滑弦 > spd×dt×これ なら抑制。
   //   微速(停止判定を僅かに外れる0.5〜1m/s)の純ジッタが平滑弦に残り creep 化するのを遮断。通常走行は
