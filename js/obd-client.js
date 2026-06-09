@@ -58,6 +58,8 @@
   // ELM327 初期化コマンド列 (echo off / linefeed off / spaces off / headers off / auto protocol)
   const INIT_CMDS = ['ATZ', 'ATE0', 'ATL0', 'ATS0', 'ATH0', 'ATSP0'];
   const SPEED_PID = '010D'; // Mode 01 PID 0D = Vehicle Speed (km/h・1 byte)
+  const ODO_PID = '01A6'; // Mode 01 PID A6 = Odometer (0.1km・4 byte・新しめの車)
+  const ODO_POLL_EVERY = 30; // この回数の速度ポーリングごとに1回 01A6 を混ぜる(odoは0.1km刻みで遅い)
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
@@ -69,6 +71,11 @@
   let _notifyChar = null;
   let _status = 'idle';
   let _latest = { kmh: -1, mps: -1, ts: 0 };
+  // ★OBDオドメーター(01A6・0.1km)★: 走行中も定期ポーリングして trace に記録 → 業務開始/終了の
+  //   差＝この車のタイヤ回転距離(メーター級)をトリップ値と照合できる。_odoSupported はプローブで確定。
+  let _latestOdo = { km: -1, ts: 0 };
+  let _odoSupported = false;
+  let _pollCount = 0;
   let _rxBuffer = '';
   let _pendingResolve = null; // 現コマンドの応答待ち resolver
   let _pendingTimer = null;
@@ -113,6 +120,20 @@
     return kmh;
   }
 
+  // ─── 純関数: ELM327 応答 → オドメーター km (01A6・0.1km×4byte・単体テスト対象) ──────
+  function _parseOdometerKm(str) {
+    if (typeof str !== 'string' || str.length === 0) return null;
+    const cleaned = str.replace(/[\s>\r\n]/g, '').toUpperCase();
+    if (/NODATA|ERROR|UNABLE/.test(cleaned) && !/41A6/.test(cleaned)) return null;
+    const idx = cleaned.indexOf('41A6');
+    if (idx < 0 || idx + 12 > cleaned.length) return null;
+    const hex = cleaned.substr(idx + 4, 8);
+    if (!/^[0-9A-F]{8}$/.test(hex)) return null;
+    const raw = parseInt(hex, 16);
+    if (!Number.isFinite(raw) || raw < 0) return null;
+    return raw * 0.1; // 0.1 km/bit
+  }
+
   // ─── Web Bluetooth サポート判定 ───
   function isSupported() {
     return !!(
@@ -136,6 +157,16 @@
       ts: _latest.ts,
       ageMs: age,
       valid: _latest.mps >= 0 && age <= SPEED_STALE_MS,
+    };
+  }
+
+  // OBDオドメーター(km)。未対応/未取得は km:-1。trace が定期記録 → 業務距離の照合に使う。
+  function getOdometer() {
+    return {
+      km: _latestOdo.km,
+      ts: _latestOdo.ts,
+      supported: _odoSupported,
+      ageMs: _latestOdo.ts > 0 ? _now() - _latestOdo.ts : Infinity,
     };
   }
 
@@ -346,6 +377,11 @@
       // 軽い decode (確認用・生rawも残す。詳細はオフライン解析)
       try {
         results.decoded = _decodeProbe(results.queries);
+        // ★odo対応を確定 → 走行中ポーリングに 01A6 を混ぜ trace 記録★
+        _odoSupported = !!(results.decoded && results.decoded.odometer_supported);
+        if (results.decoded && results.decoded.odometer_km != null) {
+          _latestOdo = { km: results.decoded.odometer_km, ts: _now() };
+        }
       } catch (_) {
         /* decode 失敗は無視 (raw があれば解析可能) */
       }
@@ -399,12 +435,21 @@
         return;
       }
       const t0 = _now();
-      _send(SPEED_PID)
+      // ★速度を主・odoは定期混入★: odo対応かつ ODO_POLL_EVERY ごとに 01A6 を1回叩く。
+      _pollCount++;
+      const _isOdoPoll = _odoSupported && _pollCount % ODO_POLL_EVERY === 0;
+      const _cmd = _isOdoPoll ? ODO_PID : SPEED_PID;
+      _send(_cmd)
         .then(function (resp) {
-          const kmh = _parseSpeedKmh(resp);
-          if (kmh != null) {
-            _latest = { kmh: kmh, mps: kmh / 3.6, ts: _now() };
-            _emit('speed', getSpeed());
+          if (_isOdoPoll) {
+            const km = _parseOdometerKm(resp);
+            if (km != null) _latestOdo = { km: km, ts: _now() };
+          } else {
+            const kmh = _parseSpeedKmh(resp);
+            if (kmh != null) {
+              _latest = { kmh: kmh, mps: kmh / 3.6, ts: _now() };
+              _emit('speed', getSpeed());
+            }
           }
         })
         .catch(function () {
@@ -427,6 +472,9 @@
     _setStatus('disconnected');
     _polling = false;
     _latest = { kmh: -1, mps: -1, ts: 0 };
+    _latestOdo = { km: -1, ts: 0 };
+    _odoSupported = false;
+    _pollCount = 0;
     // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
     //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
     if (_pendingTimer) {
@@ -480,11 +528,13 @@
     disconnect: disconnect,
     isConnected: isConnected,
     getSpeed: getSpeed,
+    getOdometer: getOdometer,
     speedProvider: speedProvider,
     getStatus: getStatus,
     on: on,
     // 単体テスト/デバッグ用 (純関数)
     _parseSpeedKmh: _parseSpeedKmh,
+    _parseOdometerKm: _parseOdometerKm,
     _decodeProbe: _decodeProbe,
     _PROBE_QUERIES: PROBE_QUERIES,
     _PROFILES: PROFILES,

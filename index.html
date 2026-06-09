@@ -13270,8 +13270,14 @@
                 if (vehMakerEl)
                   vehMakerEl.textContent =
                     (info.maker || '?') + (info.year ? ' / ' + info.year : '');
-                // ★未保存でも trace に VIN/メーカーを焼く(型式別解析の最低限)。保存済なら _loadVehProfile が上書き。
-                window.DK_VEHICLE_PROFILE = { vin: vin, maker: info.maker, year: info.year };
+                // ★未保存でも trace に VIN/メーカー/OBD能力を焼く(型式別解析の最低限)。保存済なら _loadVehProfile が上書き。
+                window.DK_VEHICLE_PROFILE = {
+                  vin: vin,
+                  maker: info.maker,
+                  year: info.year,
+                  obdOdoSupported: d.odometer_supported === true,
+                  obdOdoKm: d.odometer_km != null ? d.odometer_km : null,
+                };
                 _loadVehProfile(vin); // 登録済なら車種/型式/タイヤを自動復元(DK_VEHICLE_PROFILE も上書き)
               }
               if (vehObdCapEl) {

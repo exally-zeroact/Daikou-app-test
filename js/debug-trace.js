@@ -209,6 +209,20 @@
       return -1;
     }
   }
+  // ★OBDオドメーター(01A6・km)スナップショット (2026-06-09)★: 走行中の値を trace に記録 →
+  //   業務開始/終了の差＝この車のタイヤ回転距離(メーター級)を トリップ値/GPS と照合(OBD距離源の実機検証)。
+  //   passive: OBDClient を読むだけ。未対応/未取得は -1。
+  function _obdOdoSnapshot() {
+    try {
+      if (typeof window === 'undefined' || !window.OBDClient || !window.OBDClient.getOdometer) {
+        return -1;
+      }
+      const o = window.OBDClient.getOdometer();
+      return o && o.km >= 0 ? o.km : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
 
   function onPosition(p) {
     if (samples.length >= MAX_SAMPLES) return; // 上限到達後は破棄
@@ -232,6 +246,7 @@
       compass: _lastCompass, // 直近コンパス度 (-1=未取得)
       biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
       obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用
+      obd_odo: _obdOdoSnapshot(), // ★OBDオドメーター(01A6・km・-1=未対応/未取得)。業務開始/終了の差=タイヤ回転距離(メーター級)照合用
     });
     _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');

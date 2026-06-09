@@ -37,6 +37,20 @@ describe('OBD probe decode (_decodeProbe)', () => {
     expect(r.dist_since_clear_km).toBe(100);
   });
 
+  it('_parseOdometerKm: 走行中ポーリングの01A6応答を km へ (-1=未取得)', () => {
+    // 41 A6 00 01 E2 40 → 0x0001E240 = 123456 ×0.1 = 12345.6 km
+    expect(OBDClient._parseOdometerKm('41 A6 00 01 E2 40\r>')).toBeCloseTo(12345.6, 1);
+    expect(OBDClient._parseOdometerKm('41A60001E240')).toBeCloseTo(12345.6, 1);
+    expect(OBDClient._parseOdometerKm('NO DATA\r>')).toBeNull();
+    expect(OBDClient._parseOdometerKm('41 0D 3C\r>')).toBeNull(); // 別PID(速度)は odo でない
+  });
+
+  it('getOdometer は未接続で km:-1・supported:false', () => {
+    const o = OBDClient.getOdometer();
+    expect(o.km).toBe(-1);
+    expect(o.supported).toBe(false);
+  });
+
   it('プローブ問い合わせ一覧は距離系PID+VINを含む', () => {
     const cmds = OBDClient._PROBE_QUERIES.map((q) => q[1]);
     expect(cmds).toContain('01A6'); // 標準オドメーター
