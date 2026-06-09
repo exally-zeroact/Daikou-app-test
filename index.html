@@ -12318,6 +12318,121 @@
               min-height: 16px;
             "
           ></div>
+
+          <!-- ★随伴車情報 + OBD距離能力 (2026-06-09・固定随伴車のVIN紐付け・Tier判定)★
+               VIN/メーカー/距離能力は接続プローブで自動取得。車種/型式/タイヤは車検証/側面から手入力(固定車1回)。
+               VINキーで localStorage 保存。タイヤは認定の管理項目(交換→再較正)。 -->
+          <div
+            id="obdVehicleCard"
+            style="
+              margin-top: 14px;
+              padding: 12px;
+              background: #f2f2f7;
+              border-radius: 10px;
+              font-size: 13px;
+            "
+          >
+            <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
+              🚗 随伴車情報 (固定1台・一度登録すれば恒久)
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">VIN(自動)</span>
+              <span id="vehVin" style="font-family: monospace; font-size: 11px"
+                >接続で自動取得</span
+              >
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">メーカー/年式(自動)</span>
+              <span id="vehMaker">—</span>
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">車種</span>
+              <input
+                id="vehModel"
+                type="text"
+                placeholder="例: プリウス"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">型式(車検証)</span>
+              <input
+                id="vehKatashiki"
+                type="text"
+                placeholder="例: DAA-ZVW50"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">タイヤ(側面/ドア)</span>
+              <input
+                id="vehTire"
+                type="text"
+                placeholder="例: 195/65R15"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div style="font-size: 11px; color: #ff9500; margin: 4px 0 8px">
+              ※タイヤは認定の管理項目。交換したら「保存」し直す(摩耗で過大化を防ぐ較正対象)。
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">OBD距離能力</span>
+              <span id="vehObdCap" style="font-weight: 700">接続で判定</span>
+            </div>
+            <div class="row" style="justify-content: center; padding-top: 10px">
+              <button
+                id="btnVehSave"
+                style="
+                  padding: 8px 24px;
+                  background: #007aff;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  cursor: pointer;
+                "
+              >
+                💾 この随伴車を保存(VIN紐付け)
+              </button>
+            </div>
+            <div
+              id="vehSaveNote"
+              style="
+                text-align: center;
+                font-size: 11px;
+                color: #8e8e93;
+                margin-top: 6px;
+                min-height: 14px;
+              "
+            ></div>
+          </div>
         </div>
 
         <div
@@ -12952,6 +13067,136 @@
           var obdChip = document.getElementById('obdChip');
           var chipLabel = document.getElementById('obdChipLabel');
           var driveBadge = document.getElementById('obdDriveBadge');
+          // ★随伴車情報カード (2026-06-09・VIN紐付け・固定1台)★
+          var vehVinEl = document.getElementById('vehVin');
+          var vehMakerEl = document.getElementById('vehMaker');
+          var vehModelEl = document.getElementById('vehModel');
+          var vehKatashikiEl = document.getElementById('vehKatashiki');
+          var vehTireEl = document.getElementById('vehTire');
+          var vehObdCapEl = document.getElementById('vehObdCap');
+          var btnVehSave = document.getElementById('btnVehSave');
+          var vehSaveNoteEl = document.getElementById('vehSaveNote');
+          var _curVin = ''; // 接続中随伴車のVIN(保存キー)
+          // ELM327 0902(VIN)生応答 → 17桁ASCII VIN を抽出
+          function _parseVin(raw) {
+            if (!raw) return '';
+            var c = String(raw).replace(/[\s>]/g, '').toUpperCase();
+            var out = '';
+            var i = 0;
+            // "4902" 区切りの後ろのバイト列を ASCII 化(印字可能のみ)
+            while ((i = c.indexOf('4902', i)) >= 0) {
+              var seg = c.substr(i + 4);
+              for (var j = 0; j + 1 < seg.length; j += 2) {
+                var b = seg.substr(j, 2);
+                if (!/^[0-9A-F]{2}$/.test(b)) break;
+                var code = parseInt(b, 16);
+                if (code >= 0x20 && code <= 0x7e) {
+                  var ch = String.fromCharCode(code);
+                  if (/[A-HJ-NPR-Z0-9]/.test(ch)) out += ch; // VINは I/O/Q 不使用
+                }
+                if (out.length >= 17) break;
+              }
+              if (out.length >= 17) break;
+              i += 4;
+            }
+            return out.slice(0, 17);
+          }
+          // VIN WMI(先頭3桁) → メーカー/年式(簡易・日本車中心)
+          function _vinInfo(vin) {
+            if (!vin || vin.length < 11) return { maker: '', year: '' };
+            var wmi = vin.substr(0, 3);
+            var map = {
+              JT: 'トヨタ',
+              JF: 'スバル',
+              JH: 'ホンダ',
+              JN: '日産',
+              JM: 'マツダ',
+              JS: 'スズキ',
+              JD: 'ダイハツ',
+              JY: 'ヤマハ',
+              JL: 'いすゞ',
+              JT2: 'トヨタ',
+              JTM: 'トヨタ',
+              JTD: 'トヨタ',
+              JTE: 'トヨタ',
+              JTN: 'トヨタ',
+              JHM: 'ホンダ',
+              JHL: 'ホンダ',
+              JN1: '日産',
+              JN8: '日産',
+              JN6: '日産',
+              JM1: 'マツダ',
+              JM3: 'マツダ',
+              JF1: 'スバル',
+              JF2: 'スバル',
+            };
+            var maker = map[wmi] || map[wmi.substr(0, 2)] || wmi;
+            // 10桁目=年式コード(簡易)
+            var yc = vin.charAt(9);
+            var yrMap = {
+              J: 2018,
+              K: 2019,
+              L: 2020,
+              M: 2021,
+              N: 2022,
+              P: 2023,
+              R: 2024,
+              S: 2025,
+              T: 2026,
+            };
+            var year = yrMap[yc] ? String(yrMap[yc]) : '';
+            return { maker: maker, year: year };
+          }
+          function _loadVehProfile(vin) {
+            try {
+              var p = JSON.parse(localStorage.getItem('dk_veh_' + vin) || 'null');
+              if (p) {
+                if (vehModelEl) vehModelEl.value = p.model || '';
+                if (vehKatashikiEl) vehKatashikiEl.value = p.katashiki || '';
+                if (vehTireEl) vehTireEl.value = p.tire || '';
+                // ★登録済プロファイルを trace に焼く (型式別解析用)★
+                window.DK_VEHICLE_PROFILE = p;
+                if (vehSaveNoteEl)
+                  vehSaveNoteEl.textContent = '登録済の随伴車を読込 (' + (p.savedAt || '') + ')';
+              }
+            } catch (_) {
+              /* ignore */
+            }
+          }
+          if (btnVehSave) {
+            btnVehSave.addEventListener('click', function () {
+              if (!_curVin) {
+                if (vehSaveNoteEl) vehSaveNoteEl.textContent = 'VIN未取得(OBD接続してから保存)';
+                return;
+              }
+              try {
+                var info = _vinInfo(_curVin);
+                var prof = {
+                  vin: _curVin,
+                  maker: info.maker,
+                  year: info.year,
+                  model: vehModelEl ? vehModelEl.value.trim() : '',
+                  katashiki: vehKatashikiEl ? vehKatashikiEl.value.trim() : '',
+                  tire: vehTireEl ? vehTireEl.value.trim() : '',
+                  savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+                };
+                localStorage.setItem('dk_veh_' + _curVin, JSON.stringify(prof));
+                // ★trace に焼く + ログ出力 (型式別解析用)★
+                window.DK_VEHICLE_PROFILE = prof;
+                try {
+                  // eslint-disable-next-line no-console
+                  console.log('[OBD-VEHICLE] ' + JSON.stringify(prof));
+                } catch (_) {
+                  /* ignore */
+                }
+                if (vehSaveNoteEl)
+                  vehSaveNoteEl.textContent = '✓ 保存しました(VIN紐付け・恒久・trace焼込)';
+              } catch (e) {
+                if (vehSaveNoteEl)
+                  vehSaveNoteEl.textContent = '保存失敗: ' + ((e && e.message) || e);
+              }
+            });
+          }
           if (typeof window.OBDClient === 'undefined') {
             // OBDClient 未 load → 何もしない (要素は静的初期表示のまま)
             if (noteEl) noteEl.textContent = 'OBD モジュール未ロード';
@@ -13015,6 +13260,27 @@
                 msg = 'OBD距離能力プローブ完了 (結果はログに記録)';
               }
               if (noteEl) noteEl.textContent = msg + ' ※詳細はログ送信で解析';
+              // ── 随伴車カードに反映 (VIN/メーカー/距離能力 + 保存プロファイル読込) ──
+              var q = (res && res.queries) || {};
+              var vin = q.vin_0902 ? _parseVin(q.vin_0902.raw) : '';
+              _curVin = vin;
+              if (vehVinEl) vehVinEl.textContent = vin || '(VIN取得できず)';
+              if (vin) {
+                var info = _vinInfo(vin);
+                if (vehMakerEl)
+                  vehMakerEl.textContent =
+                    (info.maker || '?') + (info.year ? ' / ' + info.year : '');
+                // ★未保存でも trace に VIN/メーカーを焼く(型式別解析の最低限)。保存済なら _loadVehProfile が上書き。
+                window.DK_VEHICLE_PROFILE = { vin: vin, maker: info.maker, year: info.year };
+                _loadVehProfile(vin); // 登録済なら車種/型式/タイヤを自動復元(DK_VEHICLE_PROFILE も上書き)
+              }
+              if (vehObdCapEl) {
+                if (d.odometer_supported === true)
+                  vehObdCapEl.textContent = '🎯 Tier1 オドメーター直結可';
+                else if (d.dist_since_clear_km != null)
+                  vehObdCapEl.textContent = '📡 Tier3 (0131 1km/速度のみ)→GPS';
+                else vehObdCapEl.textContent = '📡 Tier3 (010D速度のみ)→GPS';
+              }
             } catch (_) {
               /* 表示失敗は無視 (ログには残っている) */
             }

@@ -281,6 +281,9 @@
         meta: {
           device_id: deviceId,
           device_label: label,
+          // ★車両プロファイル(VIN/メーカー/車種/型式/タイヤ)を焼く=型式別解析用 (2026-06-09)。
+          //   UI(設定)が window.DK_VEHICLE_PROFILE を保存/読込時に設定。未設定なら null。
+          vehicle: (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null,
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
           started_at: batchStartedAt,
           ended_at: endedAt,
