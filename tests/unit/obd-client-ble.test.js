@@ -45,6 +45,8 @@ function makeMockBluetooth(opts) {
   const responder =
     opts.responder ||
     function (cmd) {
+      // ★_warmup の 0100 には 41 00(supported PIDs)を返し確立成功させる(retry待ち回避)★
+      if (cmd === '0100') return '41 00 BE 3E B8 11\r\r>';
       return cmd === '010D' ? '41 0D 3C\r\r>' : 'OK\r\r>';
     };
   let notifyHandler = null;
@@ -151,7 +153,13 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
     // AT* は自動応答・010D は手動 dispatch で分割を再現
     const mock = makeMockBluetooth({
       responder: (cmd) =>
-        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '010D' ? null : 'NO DATA\r>',
+        cmd.indexOf('AT') === 0
+          ? 'OK\r>'
+          : cmd === '0100'
+            ? '41 00 BE 3E B8 11\r>'
+            : cmd === '010D'
+              ? null
+              : 'NO DATA\r>',
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect(); // init 完了後 010D が pending(未応答)
@@ -166,7 +174,13 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
   it('予期せぬ切断 → status=disconnected・速度invalid・in-flightが宙吊りにならない (M-2)', async () => {
     const mock = makeMockBluetooth({
       responder: (cmd) =>
-        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '010D' ? null : 'NO DATA\r>', // 010D 未応答=in-flight
+        cmd.indexOf('AT') === 0
+          ? 'OK\r>'
+          : cmd === '0100'
+            ? '41 00 BE 3E B8 11\r>'
+            : cmd === '010D'
+              ? null
+              : 'NO DATA\r>', // 010D 未応答=in-flight
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect(); // 010D pending
@@ -182,7 +196,13 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
   it('切断後の迷子通知は破棄され速度を汚染しない (M-1 クロストーク防止)', async () => {
     const mock = makeMockBluetooth({
       responder: (cmd) =>
-        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '010D' ? null : 'NO DATA\r>',
+        cmd.indexOf('AT') === 0
+          ? 'OK\r>'
+          : cmd === '0100'
+            ? '41 00 BE 3E B8 11\r>'
+            : cmd === '010D'
+              ? null
+              : 'NO DATA\r>',
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect();
@@ -206,7 +226,8 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
 
   it('NO DATA / 別PID 応答では速度を更新しない', async () => {
     const mock = makeMockBluetooth({
-      responder: (cmd) => (cmd.indexOf('AT') === 0 ? 'OK\r>' : 'NO DATA\r>'),
+      responder: (cmd) =>
+        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '0100' ? '41 00 BE 3E B8 11\r>' : 'NO DATA\r>',
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect();

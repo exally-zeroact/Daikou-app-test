@@ -55,17 +55,20 @@
     return p.service;
   });
 
-  // ELM327 初期化コマンド列 (echo off / linefeed off / spaces off / headers off / auto protocol)
-  const INIT_CMDS = ['ATZ', 'ATE0', 'ATL0', 'ATS0', 'ATH0', 'ATSP0'];
+  // ELM327 初期化コマンド列。★プロトコル(ATSP)は _warmup でpin/フォールバックするので init では設定しない★。
+  //   ATZ(リセット)はチップ再起動(~1-2s)を伴うため _initElm で長timeout+settleを与える(下記)。
+  const INIT_CMDS = ['ATE0', 'ATL0', 'ATS0', 'ATH0']; // echo/lf/space/headers off
   const SPEED_PID = '010D'; // Mode 01 PID 0D = Vehicle Speed (km/h・1 byte)
   const ODO_PID = '01A6'; // Mode 01 PID A6 = Odometer (0.1km・4 byte・新しめの車)
   const ODO_POLL_EVERY = 30; // この回数の速度ポーリングごとに1回 01A6 を混ぜる(odoは0.1km刻みで遅い)
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
-  const PROTOCOL_TIMEOUT_MS = 7000; // ★初回プロトコル検出(0100)の待ち上限★: ELM327 の ATSP0 自動検出は
+  const PROTOCOL_TIMEOUT_MS = 7000; // ★初回プロトコル検出(0100)の待ち上限★: ELM327 の自動検出は
   //   1回目クエリで数秒かかる。1.5秒では検出中断→以降 STOPPED で全滅(実機で確認)。長く待つ。
-  const WARMUP_RETRIES = 4; // ウォームアップ(0100)のリトライ回数
+  const WARMUP_RETRIES = 3; // 各プロトコルでの 0100 リトライ回数(3プロトコル×3=最大9試行)
+  const WARMUP_RETRY_WAIT_MS = 700; // ★再送前の待機★: 検出進行中に新コマンドを書いて中断するのを防ぐ
+  const RECOVER_AFTER = 5; // 速度ポーリングがこの回数連続失敗したら _warmup で再確立(mid-drive STOPPED回復)
 
   // ─── 内部状態 ───────────────────────────────────────────────
   let _device = null;
@@ -79,6 +82,8 @@
   let _latestOdo = { km: -1, ts: 0 };
   let _odoSupported = false;
   let _pollCount = 0;
+  let _consecFail = 0; // 速度ポーリングの連続失敗数(mid-drive 回復トリガー)
+  let _recovering = false; // _warmup 再確立中フラグ(多重起動防止)
   let _rxBuffer = '';
   let _pendingResolve = null; // 現コマンドの応答待ち resolver
   let _pendingTimer = null;
@@ -189,6 +194,11 @@
     // Date.now を使う (本 module は通常実行環境・workflow制約の外)
     return typeof Date !== 'undefined' && Date.now ? Date.now() : 0;
   }
+  function _sleep(ms) {
+    return new Promise(function (r) {
+      setTimeout(r, ms);
+    });
+  }
 
   // ─── 接続 (要ユーザー操作起点) ───────────────────────────────
   function connect() {
@@ -222,11 +232,15 @@
         // ★プロトコル確立ウォームアップ (probe/速度の前に必ず)★: ECU通信を 0100×長timeout で確立。
         return _warmup();
       })
-      .then(function () {
-        // ★距離能力プローブ (1回・read-only)★: 失敗しても接続/速度ポーリングは続行。
-        return _probe().catch(function () {
-          /* プローブ失敗は致命でない (速度ポーリングは動かす) */
-        });
+      .then(function (established) {
+        // ★確立できた時だけ probe を撃つ★: 未確立で 1.5s の 0100/01A6 を撃つと検出を再中断し
+        //   STOPPED 全滅が再発する(監査指摘)。未確立なら probe を飛ばし、自己回復する速度ポーリングへ。
+        if (established) {
+          return _probe().catch(function () {
+            /* プローブ失敗は致命でない */
+          });
+        }
+        return undefined;
       })
       .then(function () {
         _startPolling();
@@ -333,41 +347,76 @@
     return buf;
   }
 
-  // ─── ★プロトコル確立ウォームアップ (2026-06-09・実機でprobe全滅の根治)★ ───
-  //   ATSP0(自動)直後の最初の OBD クエリ(0100)は ELM327 がプロトコル検出に数秒かかる。
-  //   短いタイムアウトで叩くと検出が中断され以降 STOPPED で全滅する(=前回の実機failの真因)。
-  //   ここで 0100 を ★長いタイムアウト(7s)で数回リトライ★ し、車ECUとの通信(41 00...)が
-  //   返るまで確立させる。確立後は通常クエリ(probe/速度)が速く応答する。
+  // ─── ★プロトコル確立ウォームアップ (2026-06-09・実車probe全滅の根治・監査硬化)★ ───
+  //   真因: ATSP0(自動検出)直後の0100をクローンが数秒かけて検出する間、短timeoutで叩くと検出中断→
+  //   STOPPED全滅。さらにタイムアウト即再送も検出を割り込む。監査の硬化:
+  //   ①プロトコルを ATSP6(ISO15765-4 CAN 11/500=2008年以降の日本車ほぼ全部)に pin → 0→7 へフォールバック。
+  //    auto検出のスキャン遅延を排除(クローン最大の博打を回避)。
+  //   ②各0100は長timeout(7s)。タイムアウト/STOPPED/SEARCHING 時は ★再送前に待機(WARMUP_RETRY_WAIT_MS)★
+  //    してチップを idle に戻し、検出割り込みを起こさない。
+  //   ③4100(ECU応答)が返れば確立成功。全プロトコル失敗で false(connect側で probe をスキップ)。
+  const _WARMUP_PROTOS = ['6', '0', '7']; // ATSP6(CAN11/500)→ATSP0(auto)→ATSP7(CAN29/500)
   function _warmup() {
-    let tries = 0;
-    function attempt() {
-      tries++;
-      return _send('0100', PROTOCOL_TIMEOUT_MS)
-        .then(function (resp) {
-          const c = (resp || '').replace(/[\s>]/g, '').toUpperCase();
-          if (/4100/.test(c)) return true; // ECU応答(41 00 = supported PIDs) = 確立成功
-          if (tries < WARMUP_RETRIES) return attempt(); // SEARCHING/STOPPED/NODATA → 再試行
-          return false; // 確立できず(以降 probe/速度も恐らく不可だが続行はする)
-        })
+    let pi = 0;
+    function tryProto() {
+      if (pi >= _WARMUP_PROTOS.length) return Promise.resolve(false);
+      const sp = _WARMUP_PROTOS[pi++];
+      return _send('ATSP' + sp, 2500)
         .catch(function () {
-          if (tries < WARMUP_RETRIES) return attempt();
-          return false;
+          return '';
+        })
+        .then(function () {
+          return _sleep(300);
+        }) // プロトコル切替後に少し落ち着かせる
+        .then(function () {
+          return attempt(0);
         });
+      function attempt(t) {
+        return _send('0100', PROTOCOL_TIMEOUT_MS)
+          .then(function (resp) {
+            const c = (resp || '').replace(/[\s>]/g, '').toUpperCase();
+            if (/4100/.test(c)) return true; // 確立成功(41 00 = supported PIDs)
+            if (t + 1 < WARMUP_RETRIES)
+              return _sleep(WARMUP_RETRY_WAIT_MS).then(function () {
+                return attempt(t + 1);
+              });
+            return tryProto(); // このプロトコルでは確立できず → 次のプロトコルへ
+          })
+          .catch(function () {
+            // timeout: 検出進行中かもしれない → 待ってから再送(割り込み回避)
+            if (t + 1 < WARMUP_RETRIES)
+              return _sleep(WARMUP_RETRY_WAIT_MS).then(function () {
+                return attempt(t + 1);
+              });
+            return tryProto();
+          });
+      }
     }
-    return attempt();
+    return tryProto();
   }
 
   // ─── ELM327 初期化 ───
+  //   ★ATZ(リセット)はチップ再起動(~1-2s)を伴うため長timeout+settleを与える(短timeoutだと再起動中に
+  //     次の ATE0 が捨てられ echo off が効かない個体がある・監査指摘)。その後 echo/lf/space/headers off。
   function _initElm() {
-    let chain = Promise.resolve();
-    INIT_CMDS.forEach(function (cmd) {
-      chain = chain.then(function () {
-        return _send(cmd).catch(function () {
-          /* 初期化コマンドの個別失敗は致命ではない (続行) */
+    return _send('ATZ', 3000)
+      .catch(function () {
+        /* ATZ 失敗は致命でない */
+      })
+      .then(function () {
+        return _sleep(1000); // リセット後の settle
+      })
+      .then(function () {
+        let chain = Promise.resolve();
+        INIT_CMDS.forEach(function (cmd) {
+          chain = chain.then(function () {
+            return _send(cmd).catch(function () {
+              /* 個別失敗は致命でない */
+            });
+          });
         });
+        return chain;
       });
-    });
-    return chain;
   }
 
   // ─── ★OBD距離能力プローブ (2026-06-09・随伴車のTier判定)★ ───
@@ -476,21 +525,43 @@
         .then(function (resp) {
           if (_isOdoPoll) {
             const km = _parseOdometerKm(resp);
-            if (km != null) _latestOdo = { km: km, ts: _now() };
+            if (km != null) {
+              _latestOdo = { km: km, ts: _now() };
+              _consecFail = 0;
+            }
           } else {
             const kmh = _parseSpeedKmh(resp);
             if (kmh != null) {
               _latest = { kmh: kmh, mps: kmh / 3.6, ts: _now() };
               _emit('speed', getSpeed());
+              _consecFail = 0; // 正常応答 → 失敗カウンタ reset
+            } else {
+              _consecFail++; // NO DATA / STOPPED / 別PID = 通信不全
             }
           }
         })
         .catch(function () {
-          /* 単発 query 失敗は無視 (次ループで回復) */
+          _consecFail++; // timeout = 通信不全
         })
         .then(function () {
           if (_stopRequested || !isConnected()) {
             _polling = false;
+            return;
+          }
+          // ★mid-drive 回復 (監査指摘)★: 走行中にプロトコルが落ちて STOPPED 連発したら、
+          //   1.5s 010D を撃ち続けて検出を毎回中断する thrash を止め、_warmup(長timeout)で確立し直す。
+          if (_consecFail >= RECOVER_AFTER && !_recovering) {
+            _recovering = true;
+            _consecFail = 0;
+            _warmup()
+              .catch(function () {
+                return false;
+              })
+              .then(function () {
+                _recovering = false;
+                if (!_stopRequested && isConnected()) setTimeout(loop, POLL_MIN_INTERVAL_MS);
+                else _polling = false;
+              });
             return;
           }
           const elapsed = _now() - t0;
@@ -508,6 +579,8 @@
     _latestOdo = { km: -1, ts: 0 };
     _odoSupported = false;
     _pollCount = 0;
+    _consecFail = 0;
+    _recovering = false;
     // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
     //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
     if (_pendingTimer) {
