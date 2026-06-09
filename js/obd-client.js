@@ -74,7 +74,7 @@
   let _pendingTimer = null;
   let _polling = false;
   let _stopRequested = false;
-  const _listeners = { status: [], speed: [], error: [] };
+  const _listeners = { status: [], speed: [], error: [], probe: [] };
 
   function _emit(event, payload) {
     const arr = _listeners[event];
@@ -185,6 +185,12 @@
       })
       .then(function () {
         _setStatus('connected');
+        // ★距離能力プローブ (1回・read-only)★: 失敗しても接続/速度ポーリングは続行。
+        return _probe().catch(function () {
+          /* プローブ失敗は致命でない (速度ポーリングは動かす) */
+        });
+      })
+      .then(function () {
         _startPolling();
         return true;
       })
@@ -300,6 +306,89 @@
     return chain;
   }
 
+  // ─── ★OBD距離能力プローブ (2026-06-09・随伴車のTier判定)★ ───
+  //   接続時に1回だけ、距離に関わる標準PIDとVINを問い合わせ「この車が何を出すか」を記録する。
+  //   ★read-only・車に影響ゼロ★。結果は console.log('[OBD-PROBE] ...') で debug-log-uploader が
+  //   Firebase へ上げる + window.OBD_PROBE_RESULT に保持 + 'probe' イベント発火。
+  //   目的: Tier判定 — Tier1=高分解能オドメーター(01A6=0.1km) / Tier2=高分解能車輪速 /
+  //         Tier3=010D(1km/h)のみ。出るものに応じて距離源を決める。生応答を記録しオフライン解析。
+  const PROBE_QUERIES = [
+    ['supported_01_20', '0100'], // 対応PIDビットマスク(01-20)
+    ['supported_21_40', '0120'],
+    ['supported_41_60', '0140'],
+    ['supported_61_80', '0160'],
+    ['supported_81_A0', '0180'],
+    ['supported_A1_C0', '01A0'],
+    ['odometer_01A6', '01A6'], // ★標準オドメーター(0.1km・新しめの車)★
+    ['dist_since_clear_0131', '0131'], // 距離(1km・粗い)
+    ['vin_0902', '0902'], // VIN(メーカー判定)。速度010Dはポーリングで取得済のためプローブから除外
+  ];
+  function _probe() {
+    const results = { v: 1, ts: _now(), queries: {} };
+    let chain = Promise.resolve();
+    PROBE_QUERIES.forEach(function (q) {
+      const label = q[0];
+      const cmd = q[1];
+      chain = chain.then(function () {
+        return _send(cmd)
+          .then(function (resp) {
+            results.queries[label] = {
+              cmd: cmd,
+              raw: (resp || '').replace(/[\r\n>]/g, ' ').trim(),
+            };
+          })
+          .catch(function (e) {
+            results.queries[label] = { cmd: cmd, raw: 'ERR:' + ((e && e.message) || String(e)) };
+          });
+      });
+    });
+    return chain.then(function () {
+      // 軽い decode (確認用・生rawも残す。詳細はオフライン解析)
+      try {
+        results.decoded = _decodeProbe(results.queries);
+      } catch (_) {
+        /* decode 失敗は無視 (raw があれば解析可能) */
+      }
+      global.OBD_PROBE_RESULT = results;
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[OBD-PROBE] ' + JSON.stringify(results));
+      } catch (_) {
+        /* ignore */
+      }
+      _emit('probe', results);
+      return results;
+    });
+  }
+  // 生応答 → 距離系の値を軽く decode (Tier の当たりを付ける・解析はオフライン優先)
+  function _decodeProbe(q) {
+    const out = {};
+    function hexAfter(raw, prefix) {
+      if (!raw) return null;
+      const c = raw.replace(/[\s>]/g, '').toUpperCase();
+      const i = c.indexOf(prefix);
+      if (i < 0) return null;
+      return c.substr(i + prefix.length);
+    }
+    // 01A6 オドメーター: 41 A6 + 4byte ×0.1km
+    if (q.odometer_01A6 && q.odometer_01A6.raw) {
+      const h = hexAfter(q.odometer_01A6.raw, '41A6');
+      if (h && h.length >= 8 && /^[0-9A-F]{8}/.test(h)) {
+        out.odometer_km = parseInt(h.substr(0, 8), 16) * 0.1;
+        out.odometer_supported = true;
+      } else {
+        out.odometer_supported = false;
+      }
+    }
+    // 0131 距離: 41 31 + 2byte km
+    if (q.dist_since_clear_0131 && q.dist_since_clear_0131.raw) {
+      const h = hexAfter(q.dist_since_clear_0131.raw, '4131');
+      if (h && h.length >= 4 && /^[0-9A-F]{4}/.test(h))
+        out.dist_since_clear_km = parseInt(h.substr(0, 4), 16);
+    }
+    return out;
+  }
+
   // ─── 速度ポーリングループ (010D を連続 query) ───
   function _startPolling() {
     if (_polling) return;
@@ -396,6 +485,8 @@
     on: on,
     // 単体テスト/デバッグ用 (純関数)
     _parseSpeedKmh: _parseSpeedKmh,
+    _decodeProbe: _decodeProbe,
+    _PROBE_QUERIES: PROBE_QUERIES,
     _PROFILES: PROFILES,
     _SPEED_STALE_MS: SPEED_STALE_MS,
   };

@@ -12994,6 +12994,31 @@
           O.on('error', function (msg) {
             if (noteEl) noteEl.textContent = 'エラー: ' + msg;
           });
+          // ★OBD距離能力プローブ結果 (2026-06-09・随伴車Tier判定)★:
+          //   接続時に1回、この車が高分解能オドメーター(01A6)を出すか等を判定し現地表示。
+          //   生応答は console.log('[OBD-PROBE]...') で debug-log-uploader が Firebase へ上げる。
+          O.on('probe', function (res) {
+            try {
+              var d = (res && res.decoded) || {};
+              var msg;
+              if (d.odometer_supported === true) {
+                msg =
+                  '🎯 この車: 標準オドメーター対応! ' +
+                  (d.odometer_km != null ? d.odometer_km.toFixed(1) + 'km ' : '') +
+                  '→ OBDで距離直結可(メーター級)';
+              } else if (d.odometer_supported === false) {
+                msg = '📡 標準オドメーター(01A6)は非対応';
+                if (d.dist_since_clear_km != null)
+                  msg += ' / 0131距離=' + d.dist_since_clear_km + 'km(1km粗い)';
+                msg += ' → 距離はGPS';
+              } else {
+                msg = 'OBD距離能力プローブ完了 (結果はログに記録)';
+              }
+              if (noteEl) noteEl.textContent = msg + ' ※詳細はログ送信で解析';
+            } catch (_) {
+              /* 表示失敗は無視 (ログには残っている) */
+            }
+          });
           function doConnect() {
             if (noteEl) noteEl.textContent = '';
             O.connect().catch(function () {

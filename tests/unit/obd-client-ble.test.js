@@ -150,7 +150,8 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
   it('BLE 20byte分割の応答を ">" まで再結合して解決する', async () => {
     // AT* は自動応答・010D は手動 dispatch で分割を再現
     const mock = makeMockBluetooth({
-      responder: (cmd) => (cmd.indexOf('AT') === 0 ? 'OK\r>' : null),
+      responder: (cmd) =>
+        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '010D' ? null : 'NO DATA\r>',
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect(); // init 完了後 010D が pending(未応答)
@@ -164,7 +165,8 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
 
   it('予期せぬ切断 → status=disconnected・速度invalid・in-flightが宙吊りにならない (M-2)', async () => {
     const mock = makeMockBluetooth({
-      responder: (cmd) => (cmd.indexOf('AT') === 0 ? 'OK\r>' : null), // 010D 未応答=in-flight
+      responder: (cmd) =>
+        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '010D' ? null : 'NO DATA\r>', // 010D 未応答=in-flight
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect(); // 010D pending
@@ -179,7 +181,8 @@ describe('OBDClient BLE 経路 (モック実機)', () => {
 
   it('切断後の迷子通知は破棄され速度を汚染しない (M-1 クロストーク防止)', async () => {
     const mock = makeMockBluetooth({
-      responder: (cmd) => (cmd.indexOf('AT') === 0 ? 'OK\r>' : null),
+      responder: (cmd) =>
+        cmd.indexOf('AT') === 0 ? 'OK\r>' : cmd === '010D' ? null : 'NO DATA\r>',
     });
     const O = loadOBD(mock.bluetooth);
     await O.connect();
