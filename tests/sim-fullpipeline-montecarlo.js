@@ -425,6 +425,58 @@ function verifyCoastBranch() {
   };
 }
 
+// ── ★stop-in-hole creep 単離検証 (監査 P0・劣化シナリオ)★ ──
+//   シナリオ: 走行確立 → GPS 穴 (トンネル) 進入 → ★穴の中で物理停車★ (信号/渋滞)・GPS 復帰なし。
+//   gps.js _gapTick は穴中もホールド速度を減衰 (×0.92/s) しながら合成 coast 点 (synthetic・位置据え置き)
+//   を流し続ける。修正前は decay の長い裾を speed×dt で積分し続け phantom +166〜530m (40km/h進入で
+//   +347.5m/144s) が distance_m に乗った = 認定 creep<10m/30s の 35倍超過・過大ゼロ(never-over)違反。
+//   本検証は実 pipeline-distance トラッカに ★合成 coast 列 (減衰速度・位置据え置き・GPS復帰なし)★ を
+//   直接 ingest し、(a) stop-in-hole ガードで前進が ★creep backstop (CREEP_CAP) 内で凍結する★
+//   (b) never-over (距離が単調・負に振れない) を ★実コードで★ 検証する。道路の無い海上座標で snap miss
+//   を強制し、合成 coast 分岐 (cur.synthetic) を単離する。smoothedRawMode は本番既定 (true)。
+function verifyStopInHole() {
+  const PD = require(path.join(__dirname, '..', 'js', 'pipeline-distance.js'));
+  const tk = PD.createDistanceTracker(
+    {
+      snapToNearestRoad: () => null,
+      getRoadsNear: () => [],
+      calcRoadDistance: () => null,
+      decodeRoadAt: () => null,
+    },
+    { useSnapCache: false, enableRouting: false }
+  );
+  const lat0 = 33.8;
+  let lng = 132.5;
+  const t0 = 1780000000000;
+  let v = 40 / 3.6; // 11.1 m/s (40km/h) でトンネル進入
+  // 走行確立 (実点 2 個・東進)
+  tk.ingest({ lat: lat0, lng, t: t0, acc: 5, spd: v });
+  const dLng = (v * 1.0) / (111320 * Math.cos((lat0 * Math.PI) / 180));
+  lng += dLng;
+  tk.ingest({ lat: lat0, lng, t: t0 + 1000, acc: 5, spd: v });
+  const preHole = tk.totalM();
+  // 穴中 物理停車: 位置据え置き (lng 固定) + 減衰ホールド (×0.92/s)・GPS 復帰なし・300s 分。
+  const tickMs = 150;
+  const ticks = Math.round((300 * 1000) / tickMs);
+  let minDelta = Infinity;
+  let t = t0 + 1000;
+  for (let i = 0; i < ticks; i++) {
+    v = v * Math.pow(0.92, tickMs / 1000); // gps.js COAST_DECAY_PER_S=0.92 と同減衰
+    t += tickMs;
+    const r = tk.ingest({ lat: lat0, lng, t, acc: 30, spd: v, synthetic: true });
+    if (r.deltaM < minDelta) minDelta = r.deltaM;
+  }
+  tk.flush();
+  const creep = tk.totalM() - preHole;
+  const CREEP_CAP = 110; // backstop 上限 (旧 +347m が freeze で ~100m 未満に閉じ込められる)
+  return {
+    creep: +creep.toFixed(1),
+    cap: CREEP_CAP,
+    frozen: creep < CREEP_CAP, // backstop が効いている (暴走遮断)
+    neverOver: minDelta >= -1e-9, // 距離が負に振れない (never-over)
+  };
+}
+
 // ── 実行 ──
 const base = loadFixture();
 console.log(
@@ -457,6 +509,24 @@ console.log(
 );
 console.log(
   '  → coast コード経路が ★発火し★ ★直線弦を超えない (never-over)★ ことを実コードで確認\n'
+);
+
+const stopHoleV = verifyStopInHole();
+console.log(
+  '--- ★stop-in-hole creep 単離検証 (実 pipeline-distance・穴中物理停車・GPS復帰なし)★ ---'
+);
+console.log(
+  '  穴中停車 creep=' +
+    stopHoleV.creep +
+    'm (backstop cap ' +
+    stopHoleV.cap +
+    ') ' +
+    (stopHoleV.frozen ? '✓凍結' : '✗暴走') +
+    '  never-over違反=' +
+    (stopHoleV.neverOver ? '0' : '★あり★')
+);
+console.log(
+  '  → 穴中で物理停車しても合成 coast が ★freeze backstop 内で凍結★ し +347m 暴走しないことを実コードで確認 (P0)\n'
 );
 
 const rng = mulberry32(20260531);
@@ -876,6 +946,9 @@ if (GATE) {
     ['coast 分岐が発火 (配線生存・単離)', coastV.coastSegs > 0],
     ['display 単調 (後退) 違反0', agg.monoFail === 0],
     ['latch 不一致0', agg.latchFail === 0],
+    // ★P0: stop-in-hole creep backstop (穴中物理停車で合成 coast が暴走凍結する)★
+    ['stop-in-hole creep backstop 内で凍結 (<' + stopHoleV.cap + 'm)', stopHoleV.frozen],
+    ['stop-in-hole never-over 違反0', stopHoleV.neverOver],
   ];
   const invFails = invariants.filter(([, ok]) => !ok);
 

@@ -123,6 +123,29 @@ const DEFAULTS = {
   //   ★OBD は smoothedRawMode より優先 (∫v=タイヤ直結・認定メーター方式)。speedSrc==='obd' 時のみ発火。★
   obdMaxDtS: 10,
 
+  // ★★stop-in-hole creep ガード (2026-06-10・監査 P0 根治・never-over)★★:
+  //   背景: gps.js _gapTick の合成 coast 点 (synthetic) は GPS 穴中に「直前速度 ×0.97/s 減衰」を
+  //   speed×dt で連続積分する。これは ★走行中★ の穴 (トンネル) では正しい (二葉方式) が、
+  //   ★穴の中で物理的に停車★ (信号/渋滞でトンネル内停止) した場合、保守ホールド速度が
+  //   COAST_MIN_KMH(0.5km/h≈0.139m/s) まで減衰するのに 0.97/s では ~120-160s かかり、その間
+  //   phantom +166〜530m (40km/h進入で実測+347.5m/144s) が distance_m に乗る。認定 creep
+  //   <10m/30s を約35倍超過 = 過大ゼロ(never-over)違反。本ガードは synthetic coast 専用の多層防御:
+  //     (a) ★1穴あたりの累積 coast 時間上限★ (coastHoleMaxSec)。これ超で前進停止 (= 停車是認・凍結)。
+  //         穴入口で時計をリセットし、非 synthetic 点 (実 GPS 復帰) で解除する。
+  //     (b) ★1穴あたりの累積 coast 距離 cap★ (coastHoleMaxM)。これ超で前進停止 (距離側の硬い天井)。
+  //     (c) 合成速度が ★creep 速度域★ (< coastFreezeSpdMps) に減衰したら以後その穴は前進停止
+  //         (= 減速→停車を検出。0.97 減衰の長い裾を creep として積分しない)。
+  //   OBD 接続時は車輪速度が停車で正しく 0 になりガード不要のため ★非OBD synthetic のみ★ に作用。
+  //   never-over 専用 (距離を増やさない方向のみ)。走行継続中の通常トンネル穴 (時間/距離が cap 内) は
+  //   従来通り speed×dt で正常 fill = トンネル連続前進は不変。
+  coastHoleMaxSec: 25, // 1穴あたり合成 coast を許す累積秒数 (認定 creep<30s 内・超過で凍結)
+  coastHoleMaxM: 600, // 1穴あたり合成 coast を許す累積距離 m (高速トンネル ~80km/h×25s=556m を内包・超過で凍結)
+  coastFreezeSpdMps: 2.5, // 合成ホールド速度がこれ未満に減衰=減速停車とみなし以後その穴は前進停止 (≈9km/h)
+  // ★pipeline backstop の限界★: pipeline には加速度が無いため、減速停車は「合成速度の減衰」でしか
+  //   検出できず、freeze 閾値到達までの短い積分 (decay 0.92 で 40km/h→2.5m/s に ~16s = 約88m) は残る。
+  //   ★本物の creep 根治は gps.js の加速度分散 ZUPT★ (停車を即検出して合成送信自体を止める) であり、
+  //   pipeline cap は「ZUPT 取りこぼし時に 347m 級暴走を 100m 未満へ抑える never-over backstop」。
+
   // ★OBD δ 自己キャリブ (2026-06-09・OBD floor 過小 -2.9% 補正・アダプタ非依存)★:
   //   OBD車速(PID 010D)は 1km/h 整数 floor のため ∫v が系統過小(-2.9%・実機トレース)。
   //   ★良GPS区間で δ=(GPS位置距離 − ∫OBD)/移動時間 を学習★ し、∫(v+δ) を GPS位置距離(≈タイヤ以下)へ
@@ -1547,6 +1570,12 @@ function createDistanceTracker(decoder, opts) {
   let prevSnap = null;
   // ★coasting 速度★ (B): 直近の有効点速度 (m/s・-1=未確立)。GPS 穴中の補間に使う。
   let coastSpdMps = -1;
+  // ★stop-in-hole creep ガード状態 (synthetic coast 専用・1穴単位)★:
+  //   合成 coast 連続区間 (= 1 つの GPS 穴) の累積 時間/距離 と「凍結フラグ」。
+  //   非 synthetic 点 (実 GPS 復帰) または OBD 点で穴が明けたらリセットする。
+  let coastHoleSec = 0; // この穴で合成 coast を積分した累積秒数
+  let coastHoleM = 0; // この穴で合成 coast が前進させた累積距離 m
+  let coastHoleFrozen = false; // この穴は cap/減速停車で前進停止済 (以後 synthetic は 0)
   // ★OBD δ 自己キャリブ状態 (obdDeltaCalib)★: 良GPS窓で (GPS位置距離 − ∫OBD) を貯め δ を学習。
   let calGpsM = 0; // 良GPS窓の GPS位置距離 累積 (m)
   let calObdIntM = 0; // 同窓の ∫OBD(spd×dt) 累積 (m)
@@ -1567,7 +1596,8 @@ function createDistanceTracker(decoder, opts) {
       smoothedM: 0, // ★生GPS平滑距離 (smoothedRawMode・監査 MAJOR-4)
       stationarySkipped: 0,
       arcRecoverM: 0, // ★地力 de-bias: 同一道路 arc 回収で増えた距離 (監査用)
-      obdM: 0, // ★OBD メイン: ∫v(OBD) で加算した距離 (監査用)
+      obdM: 0, // ★OBD メイン: ∫v(OBD) で加算した距離 (監査用・δ自己キャリブ適用後)
+      obdRawM: 0, // ★OBD 生∫v(k=1・δ未適用)★: 今の OBD の素の精度を真距離と突合する用 (司さん要望)
     };
     stats = {
       points: 0,
@@ -1704,6 +1734,10 @@ function createDistanceTracker(decoder, opts) {
         // ∫(v+δ)。δ は ±0.5km/h クランプ済 = floor過小ぶんだけ持ち上げ過大暴走しない。
         const vEff = cfg.obdDeltaCalib === true && obdDeltaInit ? spd + obdDeltaMps : spd;
         obdDelta = (vEff > 0 ? vEff : 0) * dtObd;
+        // ★raw ∫v(OBD)(k=1・δ未適用) 並行記録 (司さん要望)★: distance_m には一切影響させず、
+        //   「今の OBD の素の精度」を真距離と突合する監査ベースラインとして bd.obdRawM に別積算する。
+        //   k 補正/δ補正を入れる ★前★ の生車輪積分なので、これと真距離の差が補正係数の根拠になる。
+        bd.obdRawM = (bd.obdRawM || 0) + (spd > 0 ? spd : 0) * dtObd;
       }
       total += obdDelta;
       stats.obdSegs = (stats.obdSegs || 0) + 1;
@@ -1712,6 +1746,74 @@ function createDistanceTracker(decoder, opts) {
       prev = cur;
       prevSnap = snap;
       return { deltaM: obdDelta, totalM: total, reason: 'obd' };
+    }
+
+    // ★★合成タイマー連続前進 coast 枝 (2026-06-10・トンネル一括ドン根治)★★:
+    //   sample.synthetic===true (gps.js _gapTick・GPS stale 中の穴埋め点) で OBD でない場合は、
+    //   ★位置据え置き (弦=0) のため smoothedRawMode の平滑弦が距離を出せない★。よって ★speed×dt の
+    //   coast 積分★ で距離を前進させる (= 二葉方式・国交省ソフトメーター「GNSS 不能時は速度で位置補正」)。
+    //   ★never-over★: 速度 spd は呼出側 (gps.js) で毎 tick ×0.97 減衰済の保守ホールド値。distance は
+    //   spd×dt のみ (位置非依存) で過大バイアスが付かない。異常 dt (>obdMaxDtS) は加算しない (過大ゼロ保険)。
+    //   ★二重計上の核★: この枝も prev=cur で ★prev.t を合成点時刻へ前進★ させる。これにより GPS 復帰
+    //   時の本物 fix は dt=(復帰t − 直前合成t)≈tick となり、smoothedRawMode の never-over cap
+    //   (spd×dt×smoothDopplerCapRatio) で「トンネル全長の弦」が tick 相当へクランプされ「ドン」が消える。
+    //   穴明け区間 = 合成 fill + 復帰点の微小残差 = 加法的に正しく一致 (トンネル全長を二度数えない)。
+    //   停車是認: spd<stationarySpdMps は前進 0 (creep 防止)。gps.js 側も COAST_MIN_KMH で 0 化済。
+    if (cur.synthetic === true && cfg.adaptiveMode !== true) {
+      const dtSyn = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      let synDelta = 0;
+      // ★★stop-in-hole creep 多層ガード (監査 P0)★★: OBD 点 (cur.obd) は車輪速度が停車で正しく 0
+      //   になるため対象外。非OBD の合成 coast のみ、1穴あたりの 累積時間/距離/減速停車 で凍結する。
+      const _obdCoast = cur.obd === true;
+      if (!_obdCoast) {
+        // (c) 減速停車検出: 合成ホールド速度が creep 速度域まで減衰したら以後この穴は前進停止。
+        //   0.97/s 減衰の長い裾 (例 40km/h→0.5km/h に 144s) を creep として積分し続けない。
+        if (spd >= 0 && spd < cfg.coastFreezeSpdMps) coastHoleFrozen = true;
+      }
+      if (
+        spd >= cfg.stationarySpdMps &&
+        dtSyn > 0 &&
+        dtSyn <= cfg.obdMaxDtS &&
+        (_obdCoast || !coastHoleFrozen)
+      ) {
+        synDelta = spd * dtSyn;
+        if (!_obdCoast) {
+          // (a) 累積時間 cap / (b) 累積距離 cap: 超過分は加算せず、超過後は穴明けまで凍結。
+          const remSec = cfg.coastHoleMaxSec - coastHoleSec;
+          const remM = cfg.coastHoleMaxM - coastHoleM;
+          let allowM = synDelta;
+          if (remSec <= 0 || remM <= 0) {
+            allowM = 0;
+            coastHoleFrozen = true;
+          } else {
+            // 時間 cap に届く分だけ許可 (端数 tick で時間超過する場合は速度比で按分)
+            if (dtSyn > remSec) {
+              allowM = Math.min(allowM, spd * remSec);
+              coastHoleFrozen = true;
+            }
+            if (allowM > remM) {
+              allowM = remM;
+              coastHoleFrozen = true;
+            }
+          }
+          coastHoleSec += dtSyn;
+          coastHoleM += allowM;
+          synDelta = allowM;
+        }
+      }
+      total += synDelta;
+      stats.coastSegs = (stats.coastSegs || 0) + 1;
+      bd.coastM = (bd.coastM || 0) + synDelta;
+      if (spd >= 0) coastSpdMps = spd; // 連続性: 次区間/復帰点の保守ホールド初速を更新
+      prev = cur;
+      prevSnap = snap;
+      return { deltaM: synDelta, totalM: total, reason: 'coast' };
+    }
+    // 非 synthetic 点 (実 GPS 復帰 or OBD) = 穴が明けた → stop-in-hole ガード状態をリセット。
+    if (coastHoleSec !== 0 || coastHoleM !== 0 || coastHoleFrozen) {
+      coastHoleSec = 0;
+      coastHoleM = 0;
+      coastHoleFrozen = false;
     }
 
     const disp = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
@@ -1823,6 +1925,41 @@ function createDistanceTracker(decoder, opts) {
         }
         return _core(sample);
       }
+      // ★合成タイマー連続前進 (2026-06-10・gps.js _gapTick)★: GPS stale(穴)中に位置据え置きで t だけ
+      //   前進させた合成点 (sample.synthetic===true・速度既知の coast 源)。★平滑バッファを通さず★ 即
+      //   _core へ流す。理由: 位置が前点と同一 (弦=0) なので平滑(位置ジッタ除去)は無意味かつ、平滑遅延
+      //   で穴埋めが遅れトンネル復帰時に lump が残るのを防ぐ。_core 内で spd×dt の coast/Doppler 経路
+      //   (never-over cap 付き) が距離を前進。OBD 接続中は上の obd 枝が ∫v 駆動。out-of-order は prev で判定。
+      if (sample.synthetic === true && cfg.adaptiveMode !== true) {
+        // ★平滑バッファを ★完全ドレイン★ してから合成点を処理する (二重計上の核)★:
+        //   smoothedRawMode は h 点遅延バッファを持つ。バッファ末尾に「穴入口直前の実点」が
+        //   未処理で残ったまま合成点を _core.prev に被せると、後で穴明けの実点が到着した時に
+        //   バッファ内で「穴入口点 ↔ 穴明け点」を ★トンネルを跨いで平滑★ し chord=全長(1200m級)を
+        //   生んでしまう (= flush 二重計上)。合成前にバッファを片側窓で全確定し prev を ★真の穴入口
+        //   実点★ に揃えれば、合成は正しい起点から speed×dt で前進し、穴明けの実点は ★新しい空
+        //   バッファ★ から始まるため跨ぎ平滑が起きない。
+        if (cfg.smoothedRawMode === true) {
+          while (smoothNext <= smoothBuf.length - 1) {
+            const smPre = _smoothOnePoint(
+              smoothBuf,
+              smoothNext,
+              smParams.h,
+              smParams.gapMs,
+              smParams.badAcc
+            );
+            _core(smPre);
+            smoothNext++;
+          }
+          // ★穴跨ぎ平滑の遮断★: バッファをクリアし、穴明けの実点は新規バッファから開始させる
+          //   (= prev は合成点が前進させ、穴明け点との chord は _core 内 never-over cap で抑制)。
+          smoothBuf = [];
+          smoothNext = 0;
+        }
+        if (prev && Number.isFinite(sample.t) && Number.isFinite(prev.t) && sample.t < prev.t) {
+          return { deltaM: 0, totalM: total, reason: 'out_of_order' };
+        }
+        return _core(sample);
+      }
       // ★smoothedRawMode★: 生点をバッファし、後続 h 点が揃った中心点を平滑して _core へ流す。
       //   ★adaptiveMode も平滑土台を共有(3D/穴埋めは stepDistance で上積み)★
       if (cfg.smoothedRawMode === true) {
@@ -1885,6 +2022,9 @@ function createDistanceTracker(decoder, opts) {
       prev = null;
       prevSnap = null;
       coastSpdMps = -1;
+      coastHoleSec = 0;
+      coastHoleM = 0;
+      coastHoleFrozen = false;
       calGpsM = 0;
       calObdIntM = 0;
       calTimeS = 0;

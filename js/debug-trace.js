@@ -55,6 +55,12 @@
   //         リロードしても直前 chunk までは上がってる(損失は未flush の末尾 ≤AUTO_FLUSH 点のみ)。
   //   解析側は device_id + biz.td(累積) + 時刻順で chunk を連結 → 業務別解析が chunk 跨ぎで成立。
   const AUTO_FLUSH_SAMPLES = 4500; // Firebase rule の 5000 上限直下。これ毎に自動 chunk upload (= 取りこぼし0で最大限ためる)。
+  // ★時間ベース auto-flush (2026-06-10・196 真距離走行の取りこぼし根治)★:
+  //   旧は点数(4500)到達のみで flush → 通常走行(<4500点)は走行中ノー flush で末尾送信/beacon 頼み。
+  //   タスクキル/バックグラウンド回収/送信忘れで ★全区間消失★(今日の And 464/SE 336 がこれ)。
+  //   → 一定時間ごとにも chunk upload し、最大損失を TIME_FLUSH_MS 内に抑える(全区間確実記録)。
+  //   診断専用・距離/課金は 1 byte も非関与。chunk は device_id+chunk_seq+時刻順で解析側が連結。
+  const TIME_FLUSH_MS = 90000; // 90 秒ごとに未送信 buffer を chunk upload (最大損失 ≤90 秒)
   const WATCH_OPTIONS = { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 };
 
   // ─── Feature flag handling (= ?trace=on/off で切替) ────────
@@ -121,6 +127,7 @@
   let watchId = null;
   let startedAt = null;
   let _chunkSeq = 0; // ★auto-flush: chunk 連番 (解析側の連結順序用)
+  let _lastAutoFlushAt = null; // ★時間ベース auto-flush: 直近 flush の GPS 時刻 (2026-06-10)
 
   // ─── ★センサー記録 (2026-06-03 後半④・設計変更宣言): gps-worker.js のオフライン再現用 ─
   //   既存 fixture は GPS のみ (lat/lng/acc/spd/hdg/alt) で・加速度/ジャイロ/コンパスが欠落 →
@@ -251,8 +258,13 @@
     _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');
     if (countEl) countEl.textContent = String(samples.length);
-    // ★auto-flush: 一定点数で自動 chunk upload (5000cap回避・リロード損失最小化)。fire-and-forget。
-    if (samples.length >= AUTO_FLUSH_SAMPLES) {
+    // ★auto-flush: 一定点数 ★または★ 一定時間で自動 chunk upload (5000cap回避・損失最小化)。fire-and-forget。
+    //   時間ベース(2026-06-10)を追加: <4500点の通常走行でも90秒ごとに上げ、タスクキル/送信忘れの全損を断つ。
+    if (_lastAutoFlushAt == null) _lastAutoFlushAt = p.timestamp;
+    const _dueByCount = samples.length >= AUTO_FLUSH_SAMPLES;
+    const _dueByTime = samples.length > 0 && p.timestamp - _lastAutoFlushAt >= TIME_FLUSH_MS;
+    if (_dueByCount || _dueByTime) {
+      _lastAutoFlushAt = p.timestamp;
       _flushTrace(true);
     }
   }

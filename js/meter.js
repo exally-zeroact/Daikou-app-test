@@ -680,7 +680,8 @@ const Meter = (() => {
           timestamp: gpsResult.timestamp,
           accuracy: gpsResult.accuracy,
           speedKmh: gpsResult.speedKmh,
-          speedSrc: gpsResult.speedSrc || null, // ★speedSrc 貫通 (2026-06-07): 'dop'/'hav'
+          speedSrc: gpsResult.speedSrc || null, // ★speedSrc 貫通 (2026-06-07): 'dop'/'hav'/'obd'/'coast'
+          isSynthetic: gpsResult.isSynthetic === true, // ★タイマー穴埋め合成点 (2026-06-10): 平滑バイパス印
           headingDeg: gpsResult.compassHeading != null ? gpsResult.compassHeading : null,
           altitude: typeof gpsResult.altitude === 'number' ? gpsResult.altitude : null,
           isStationary: gpsResult.isStationary === true,

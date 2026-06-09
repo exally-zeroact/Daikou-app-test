@@ -337,6 +337,43 @@ const GPS = (() => {
   //   ★仮説ベース(走行ログ未取得・本ログは静止のみ)・[MMDBG] 走行ログで検証/調整する暫定対策★
   const GPS_MIN_SEND_INTERVAL_MS = 700;
   let _lastWorkerSendT = null;
+  // ★タイマー連続前進 (2026-06-10・トンネル一括ドン根治)★:
+  //   watchPosition は GPS fix が来ないと onPosition を発火しない=トンネルで距離/センサー/OBD が
+  //   丸ごと凍結し、GPS 復帰の1点で「ドン」と一括計上(実機 iPhone13 +1147m)。これを断つため
+  //   ★GPS イベントから独立した自走タイマー★ で「GPS stale(穴)中だけ」距離を連続前進させる。
+  //   速度源優先順 (司さん裁定・二葉方式):
+  //     ① OBD valid (Android接続時) = 車輪速度を speedSrc='obd' で送り pipeline が ∫v(OBD)×dt 積分。
+  //     ② OBD無し (iPhone) = 直近確立速度 _coastHoldKmh を減衰ホールド (speedSrc='coast' = pipeline
+  //        は spd 既知の coast 経路で速度×dt・never-over クランプ付き)。★加速度二重積分は禁止★。
+  //     ③ 速度未確立 (_coastHoldKmh<=0) = 何もしない (過大ゼロ保険)。
+  //   ★二重計上の構造的遮断★: 合成送信でも _lastWorkerSendT と「合成点の t」を前進させる。位置
+  //   (lat/lng) は前回 raw 点に据え置く (位置は動かさず距離だけ前進)。これにより GPS 復帰 fix の
+  //   worker 側 prev.t は ★最後の合成送信時刻★ となり、復帰区間 dt が小さくなって「ドン」が起きない。
+  //   穴明け区間は「合成で埋めた分 + 復帰点の残差」= 加法的に正しく一致 (トンネル全長を二度数えない)。
+  const GAP_TIMER_INTERVAL_MS = 150; // 自走 tick 周期 (~6.7Hz)
+  const GAP_STALE_MS = 1800; // この時間 worker 送信が無い=穴 (watchPosition timeout 3000ms より短く即応)
+  const COAST_DECAY_PER_S = 0.92; // 保守速度ホールドの毎秒減衰 (過大ゼロ側=安全)。
+  //   ★0.97→0.92 へ強化 (監査 P0)★: 走行中トンネルは accel-ZUPT(下記)と穴明け実 fix の速度再確立で
+  //   守られるため、減衰は creep の長い裾を縮める方向に強める。停車中は accel-ZUPT が即凍結し、
+  //   仮に ZUPT を取りこぼしても 0.92 + 累積時間 cap(COAST_HOLE_MAX_SEC) で creep は床に落ちる。
+  const COAST_MIN_KMH = 0.5; // これ未満は 0 とみなし前進停止 (creep 防止・停車是認)
+  // ★stop-in-hole creep ガード (2026-06-10・監査 P0)★: 穴中で物理停車した時、0.97/s 減衰の
+  //   長い裾を speed×dt で積分し続けると phantom creep (40km/h進入で+347.5m/144s) が乗る。
+  //   ① 累積 coast 時間/距離が cap を超えたら以後その穴は前進停止 (= 停車是認・凍結)。
+  //   ② 合成ホールド速度が creep 速度域 (COAST_FREEZE_KMH) まで減衰したら以後その穴は凍結。
+  //   pipeline-distance.js 側にも同等の synthetic-coast cap がある (多層防御)。OBD valid 時は
+  //   車輪速度が停車で 0 になるためガードはホールド coast (非OBD) のみに作用。
+  const COAST_HOLE_MAX_SEC = 25; // 1穴あたり合成 coast を許す累積秒数 (認定 creep<30s 内)
+  const COAST_HOLE_MAX_M = 600; // 1穴あたり合成 coast を許す累積距離 m (高速トンネル内包)
+  const COAST_FREEZE_KMH = 9.0; // ホールド速度がこれ未満に減衰=減速停車 → 以後その穴は前進停止 (≈2.5m/s)
+  let _gapTimer = null; // 自走タイマー id
+  let _coastHoldKmh = 0; // 直近確立速度 (km/h)。穴中の保守ホールドの初速。
+  let _coastHoldUpdatedT = null; // _coastHoldKmh の減衰計算用の最終更新時刻
+  let _lastSyntheticT = null; // 最後の合成送信時刻 (減衰 dt 計算用)
+  // ★穴 (synthetic coast) 1回あたりの累積ガード状態★ (実 fix 復帰でリセット)
+  let _coastHoleSec = 0; // この穴で合成 coast を積分した累積秒数
+  let _coastHoleM = 0; // この穴で合成 coast が前進させた累積距離 m
+  let _coastHoleFrozen = false; // この穴は cap/減速停車で前進停止済
   let isStationary = false;
   let trafficJamSince = null;
   let isTrafficJam = false;
@@ -356,7 +393,25 @@ const GPS = (() => {
     kalman_Q: 3,
     jam_speed_max_kmh: 10,
     jam_duration_sec: 60,
+    // ★加速度 variance ZUPT (gps.js 側・stop-in-hole 凍結用)★: gps-worker.js の同名定数と整合。
+    accel_variance_threshold: 0.1, // m²/s⁴・これ未満=静止 (停車中の穴 coast を凍結)
+    accel_variance_window_ms: 3000, // 直近この時間のサンプルで分散計算 (穴中の即応性のため5s→3s)
+    accel_variance_min_samples: 5, // この件数未満なら判定不能 (null=スキップ)
   };
+
+  // ★加速度 variance 計算 (gap tick ZUPT 用・gps-worker.calcAccelVariance と同式)★:
+  //   accelBuffer は穴中も蓄積され続ける (drain は onPosition のみ) ため、直近窓の |a| 分散で
+  //   「車が物理的に止まっているか」を判定する。静止=分散ほぼ0 (重力のみ)・走行=振動で分散大。
+  //   戻り値: variance (m²/s⁴) | null (サンプル不足 or 加速度なし端末)。
+  function _coastAccelVariance(now) {
+    if (!accelBuffer || accelBuffer.length < CONFIG.accel_variance_min_samples) return null;
+    const w = CONFIG.accel_variance_window_ms;
+    const recent = accelBuffer.filter((s) => s && typeof s.t === 'number' && now - s.t < w);
+    if (recent.length < CONFIG.accel_variance_min_samples) return null;
+    const mags = recent.map((s) => Math.sqrt(s.x * s.x + s.y * s.y + s.z * s.z));
+    const mean = mags.reduce((a, b) => a + b, 0) / mags.length;
+    return mags.reduce((sum, m) => sum + (m - mean) * (m - mean), 0) / mags.length;
+  }
 
   function initWorker() {
     if (typeof Worker === 'undefined') {
@@ -463,6 +518,12 @@ const GPS = (() => {
     }
     // BUG-6（2026/05/01）：リトライ可能なように共通オプション使用
     watchId = navigator.geolocation.watchPosition(onPosition, onError, _WATCH_OPTIONS);
+    // ★タイマー連続前進を起動 (GPS イベント独立・トンネル穴埋め)★
+    _coastHoldKmh = 0;
+    _coastHoldUpdatedT = null;
+    _lastSyntheticT = null;
+    if (_gapTimer) clearInterval(_gapTimer);
+    if (useWorker) _gapTimer = setInterval(_gapTick, GAP_TIMER_INTERVAL_MS);
   }
 
   function stop() {
@@ -479,6 +540,14 @@ const GPS = (() => {
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
     }
+    // ★タイマー連続前進を停止 (穴埋めのゾンビ前進防止)★
+    if (_gapTimer) {
+      clearInterval(_gapTimer);
+      _gapTimer = null;
+    }
+    _coastHoldKmh = 0;
+    _coastHoldUpdatedT = null;
+    _lastSyntheticT = null;
     // 加速度バッファクリア（案A・2026/04/29）
     accelBuffer = [];
     accelData = null;
@@ -545,7 +614,8 @@ const GPS = (() => {
       }
     }
     // raw 前点を毎回更新 (= reject の有無に依存しない・次フレームの代用速度の基準)
-    _rawPrevPos = { lat, lng, t: now };
+    //   acc も保持: タイマー穴埋めの合成点が直近実 accuracy を踏襲し pipeline gapGuard と整合させる。
+    _rawPrevPos = { lat, lng, t: now, acc: accuracy };
     // ★OBD 速度源 (2026-06-05・obd ブランチ・★既定 OFF★)★:
     //   window.OBD_DRIVE_DISTANCE が true かつ OBD アダプターから鮮度 OK の車速が来ている時のみ、
     //   speedKmh を ★車輪由来の OBD 値★ で上書きし、speedSrc='obd' を立てる。
@@ -568,6 +638,20 @@ const GPS = (() => {
     }
     // ★STEP0 診断: speedKmh の源 (obd / Doppler / A3 haversine代用) を worker に伝える (read-only)
     const _speedSrc = _speedFromObd ? 'obd' : speed != null && speed >= 0 ? 'dop' : 'hav';
+    // ★タイマー連続前進の保守ホールド初速を更新★: 本物 fix の妥当な速度 (Doppler or OBD) を
+    //   _coastHoldKmh に確立する。'hav' 代用速度は位置ジッタ由来で過大初速になりうるため除外
+    //   (穴中は確かな直近速度のみを減衰ホールド)。穴明けの実 fix で常に再確立される。
+    if ((_speedSrc === 'dop' || _speedSrc === 'obd') && speedKmh >= 0) {
+      _coastHoldKmh = speedKmh;
+      _coastHoldUpdatedT = now;
+    }
+    // 本物の fix が来た = 穴が明けた。合成タイマーの基準時刻を実 fix に同期し、次フレームの
+    //   合成 dt がゼロ近傍から始まるようにする (= 復帰直後に合成が二重前進しない)。
+    _lastSyntheticT = now;
+    // ★穴明け = stop-in-hole 累積ガードをリセット (次の穴に持ち越さない)★
+    _coastHoleSec = 0;
+    _coastHoleM = 0;
+    _coastHoleFrozen = false;
     // 加速度サンプル取り出し（案A・2026/04/29）
     const accelSamples = accelBuffer.slice();
     accelBuffer = [];
@@ -597,6 +681,111 @@ const GPS = (() => {
     } else {
       const result = processPositionFallback(lat, lng, accuracy, speedKmh, heading, altitude, now);
       if (result && onUpdateCallback) onUpdateCallback(result);
+    }
+  }
+
+  // ★タイマー連続前進 tick (2026-06-10)★: GPS stale 中だけ合成 position を worker へ送り距離を前進。
+  //   GPS が新鮮な間 (now - _lastWorkerSendT < GAP_STALE_MS) は ★何もしない★ = 既存パイプライン
+  //   (onPosition→worker) に完全に任せ二重計上しない。穴中のみ前進させ、合成点は位置据え置き+t前進。
+  function _gapTick() {
+    try {
+      if (!_isBizActive || !useWorker || !worker) return;
+      const now = Date.now();
+      // 穴判定: 直近の worker 送信 (実 fix or 合成) から GAP_STALE_MS 経過したか。
+      if (_lastWorkerSendT == null || now - _lastWorkerSendT < GAP_STALE_MS) return;
+      // 位置の据え置き基準が無い (= まだ1点も受信していない) なら前進しない。
+      if (!_rawPrevPos) return;
+
+      // ── 速度源優先順 (司さん裁定) ──
+      let fillKmh = -1;
+      let fillSrc = 'coast';
+      // ① OBD valid → 車輪速度で連続積分 (トンネルも正確・滑らか)。speedSrc='obd' で pipeline ∫v 駆動。
+      let _obdValid = false;
+      try {
+        if (typeof window !== 'undefined' && window.OBD_DRIVE_DISTANCE && window.OBDClient) {
+          const _obd = window.OBDClient.getSpeed();
+          if (_obd && _obd.valid && _obd.kmh >= 0) {
+            fillKmh = _obd.kmh;
+            fillSrc = 'obd';
+            _obdValid = true;
+            // OBD は車輪源で信頼できる = ホールド初速も OBD 値で更新 (穴中の coast 連続性維持)。
+            _coastHoldKmh = _obd.kmh;
+            _coastHoldUpdatedT = now;
+          }
+        }
+      } catch (_) {
+        /* OBD 不在/例外は無視し ② 保守ホールドへ */
+      }
+      // ② OBD 無し = 直近確立速度を毎秒 ×0.97 減衰してホールド (保守側=過大ゼロ)。
+      if (!_obdValid) {
+        if (_coastHoldKmh > 0 && _coastHoldUpdatedT != null) {
+          const decayDt = (now - _coastHoldUpdatedT) / 1000;
+          if (decayDt > 0) {
+            _coastHoldKmh = _coastHoldKmh * Math.pow(COAST_DECAY_PER_S, decayDt);
+            _coastHoldUpdatedT = now;
+          }
+          fillKmh = _coastHoldKmh;
+        } else {
+          fillKmh = -1; // ③ 速度未確立 = 前進しない (過大ゼロ保険)
+        }
+      }
+      // ③ 停車是認: ホールド速度が閾値未満なら 0 とみなし前進停止 (creep 防止)。
+      if (!_obdValid && (fillKmh < COAST_MIN_KMH || fillKmh < 0)) {
+        // 速度を進めないが _lastWorkerSendT は更新しない (= 次 tick でも穴判定を維持)。
+        // ★last_timestamp 汚染を避けるため worker へは送らない★ = distance 0・凍結是認 (停車)。
+        return;
+      }
+      // ★stop-in-hole creep ガード (監査 P0・非OBD ホールド coast のみ)★:
+      //   OBD valid は車輪速度が停車で正しく 0 になるためガード不要。非OBD の保守ホールド coast は、
+      //   穴中で物理停車した時に減衰の長い裾を積分し続け phantom creep を生むため多層で凍結する。
+      //   (c) ★加速度分散 ZUPT 静止判定★: 穴中も accelBuffer は蓄積され続ける (drain は onPosition のみ)。
+      //       直近窓の |a| 分散が静止閾値未満 = 車が物理的に止まっている → 即凍結 (creep の主防御)。
+      //       ★二重積分は禁止だが「静止検出」は可★ (司さん裁定)。加速度センサ不在端末は null=スキップ。
+      //   ① ホールド速度が creep 速度域 (COAST_FREEZE_KMH) まで減衰 → 以後その穴は凍結。
+      //   ② 累積 coast 時間/距離が cap 超過 → 以後その穴は凍結 (ZUPT 取りこぼし時の最終床)。
+      //   凍結後は worker へ送らず距離 0 (停車是認)。穴明けの実 fix で _coastHole* はリセット済。
+      if (!_obdValid) {
+        const _av = _coastAccelVariance(now);
+        if (_av != null && _av < CONFIG.accel_variance_threshold) _coastHoleFrozen = true;
+        if (fillKmh < COAST_FREEZE_KMH) _coastHoleFrozen = true;
+        if (_coastHoleSec >= COAST_HOLE_MAX_SEC || _coastHoleM >= COAST_HOLE_MAX_M)
+          _coastHoleFrozen = true;
+        if (_coastHoleFrozen) return; // 前進停止 (= 停車是認・creep 防止)
+      }
+
+      // ★gps-worker を ★バイパス★ し onUpdateCallback へ直接 合成 result を渡す★:
+      //   gps-worker の Kalman/静止判定/accuracy 棄却は ★実 GPS ノイズ用★ で、位置据え置きの合成
+      //   coast 点を流すと「変位ゼロ→isStationary=true→meter 早期 return→距離凍結」となり穴埋めが
+      //   死ぬ。よって gps-worker を通さず、worker の出力と同形の result を ★自前で組み★ 直接
+      //   onUpdateCallback (= index.html → Meter.update) へ渡す。isStationary=false・isSynthetic=true。
+      //   distance は Meter._updateMapMatching → mmWorker (map-matcher) で speed×dt 前進する。
+      // ★非OBD coast の累積ガード更新★: 実際に前進させた区間の 時間/距離 を 1 穴単位で積算。
+      //   (_lastSyntheticT は穴明けの実 fix でも更新されるため、穴の起点からの累積を正しく刻む)
+      if (!_obdValid && _lastSyntheticT != null) {
+        const _coastDt = (now - _lastSyntheticT) / 1000;
+        if (_coastDt > 0 && _coastDt <= 10) {
+          _coastHoleSec += _coastDt;
+          _coastHoleM += (fillKmh / 3.6) * _coastDt;
+        }
+      }
+      _lastWorkerSendT = now;
+      _lastSyntheticT = now;
+      if (onUpdateCallback) {
+        onUpdateCallback({
+          lat: _rawPrevPos.lat, // 位置据え置き (距離は速度×dt のみ・位置は動かさない)
+          lng: _rawPrevPos.lng,
+          altitude: null,
+          accuracy: _rawPrevPos.acc != null ? _rawPrevPos.acc : 30, // 直近実 acc を踏襲 (gapGuard 整合)
+          speedKmh: fillKmh,
+          speedSrc: fillSrc, // 'obd' = ∫v(OBD) 駆動 / 'coast' = 速度既知の穴埋め
+          isStationary: false, // ★穴埋めは停車でない (前進させる)。停車是認は上の COAST_MIN_KMH ゲートで処理済。
+          timestamp: now,
+          compassHeading: compassHeading != null ? compassHeading : null,
+          isSynthetic: true, // ★合成印 (map-matcher が平滑バッファをバイパスし即 _core で前進)
+        });
+      }
+    } catch (_) {
+      /* tick の例外は距離パスに影響させない */
     }
   }
 

@@ -307,6 +307,9 @@ function _confirmedRoadDelta(msg, outSnap) {
       // ★OBD メインモード: 速度源が OBD 車輪速度なら ∫v(OBD) で距離駆動する印 (gps.js が speedSrc 付与)。
       //   未設定/'dop'/'hav' は従来の道路 map-matching (byte 不変)。
       obd: msg.speedSrc === 'obd',
+      // ★合成タイマー連続前進: GPS stale 中の coast 穴埋め点 (gps.js _gapTick・位置据え置き+速度既知)。
+      //   平滑バッファをバイパスして即 _core で speed×dt 前進させる印 (トンネル一括ドン根治)。
+      synthetic: msg.isSynthetic === true,
     });
     // 確定道路読み取り (連結性拘束済) の道なり区間増分。正値のみ採用。
     const confirmedDeltaM = res && typeof res.deltaM === 'number' ? res.deltaM : 0;

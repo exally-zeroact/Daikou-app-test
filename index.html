@@ -13365,12 +13365,16 @@
           O.on('status', function (s) {
             if (statusEl) statusEl.textContent = JA[s] || s;
             _obdConnected = s === 'connected';
-            // ★OBD ∫v 全距離駆動は無効化 (2026-06-09・実機trace検証)★:
-            //   実車trace解析で OBD ∫v(車速1km/h floor積分)は GPS より系統過小(-2.85〜-3.86%)と判明。
-            //   接続で距離源を OBD に切替えると精度が悪化する(司さん実走で -3.86%)。よって ★OBDは表示/
-            //   接続状態のみ★ とし、距離は認定済 GPS(smoothedRawMode)のまま。OBDを距離へ使う正しい形
-            //   (穴埋め速度源/停止判定)は adaptiveMode の劣化シナリオ硬化後に再導入する。
-            window.OBD_DRIVE_DISTANCE = false;
+            // ★★OBD メイン距離源 (2026-06-10・司さん裁定)★★:
+            //   OBD = 車輪回転距離 = タクシー認定の基準ローラーが測る量。接続中は OBD を ★メイン距離源★
+            //   にする (∫v(OBD)×k)。トンネルも車輪速度で連続・滑らか (GPS 不要)。未接続/鮮度切れ/iPhone は
+            //   GPS(smoothedRawMode)へ自然フォールバック。
+            //   ★k 補正 (車別)★: OBD 生∫v(k=1) は実車で系統過小 -2.85〜-3.86% (1km/h floor積分由来・
+            //   index.html:13368 記録)。VIN 別 k で下から真値へ合わせ込む (暫定 k≈1.04)。k は ★速度源を
+            //   渡す層 (OBDClient.getSpeed の mps/kmh)★ ではなく ★pipeline の δ自己キャリブ★ で floor 過小を
+            //   学習補正する設計が既存 (obdDeltaCalib)。ここでは OBD をメインにするフラグのみ立てる。
+            //   raw ∫v(k=1) も並行記録される (pipeline bd.obdRawM・精度突合用)。
+            window.OBD_DRIVE_DISTANCE = _obdConnected === true;
           });
           O.on('error', function (msg) {
             if (noteEl) noteEl.textContent = 'エラー: ' + msg;
