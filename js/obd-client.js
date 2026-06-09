@@ -63,6 +63,9 @@
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
+  const PROTOCOL_TIMEOUT_MS = 7000; // ★初回プロトコル検出(0100)の待ち上限★: ELM327 の ATSP0 自動検出は
+  //   1回目クエリで数秒かかる。1.5秒では検出中断→以降 STOPPED で全滅(実機で確認)。長く待つ。
+  const WARMUP_RETRIES = 4; // ウォームアップ(0100)のリトライ回数
 
   // ─── 内部状態 ───────────────────────────────────────────────
   let _device = null;
@@ -216,6 +219,10 @@
       })
       .then(function () {
         _setStatus('connected');
+        // ★プロトコル確立ウォームアップ (probe/速度の前に必ず)★: ECU通信を 0100×長timeout で確立。
+        return _warmup();
+      })
+      .then(function () {
         // ★距離能力プローブ (1回・read-only)★: 失敗しても接続/速度ポーリングは続行。
         return _probe().catch(function () {
           /* プローブ失敗は致命でない (速度ポーリングは動かす) */
@@ -291,12 +298,14 @@
     if (r) r(resp);
   }
 
-  // 1 コマンド送信 → '>' プロンプトまでの応答を待つ
-  function _send(cmd) {
+  // 1 コマンド送信 → '>' プロンプトまでの応答を待つ。timeoutMs 省略時は CMD_TIMEOUT_MS。
+  //   ★初回プロトコル検出(0100)は ELM327 が数秒かかるため長いタイムアウトを渡す(_warmup)。★
+  function _send(cmd, timeoutMs) {
     if (!_writeChar) return Promise.reject(new Error('not connected'));
     // ★M-1 監査修正: 送信前に前コマンド(timeout 等)の残バッファを破棄(クロストーク防止)。
     _rxBuffer = '';
     const data = _str2buf(cmd + '\r');
+    const _to = timeoutMs && timeoutMs > 0 ? timeoutMs : CMD_TIMEOUT_MS;
     return new Promise(function (resolve, reject) {
       _pendingResolve = resolve;
       _pendingTimer = setTimeout(function () {
@@ -304,7 +313,7 @@
         _pendingTimer = null;
         _rxBuffer = ''; // ★M-1: タイムアウト時も残バッファを破棄
         reject(new Error('OBD timeout: ' + cmd));
-      }, CMD_TIMEOUT_MS);
+      }, _to);
       _writeCharSafe(data).catch(function (e) {
         _resolvePending(''); // 書き込み失敗 → 空応答で解放
         reject(e);
@@ -322,6 +331,30 @@
     const buf = new Uint8Array(s.length);
     for (let i = 0; i < s.length; i++) buf[i] = s.charCodeAt(i) & 0xff;
     return buf;
+  }
+
+  // ─── ★プロトコル確立ウォームアップ (2026-06-09・実機でprobe全滅の根治)★ ───
+  //   ATSP0(自動)直後の最初の OBD クエリ(0100)は ELM327 がプロトコル検出に数秒かかる。
+  //   短いタイムアウトで叩くと検出が中断され以降 STOPPED で全滅する(=前回の実機failの真因)。
+  //   ここで 0100 を ★長いタイムアウト(7s)で数回リトライ★ し、車ECUとの通信(41 00...)が
+  //   返るまで確立させる。確立後は通常クエリ(probe/速度)が速く応答する。
+  function _warmup() {
+    let tries = 0;
+    function attempt() {
+      tries++;
+      return _send('0100', PROTOCOL_TIMEOUT_MS)
+        .then(function (resp) {
+          const c = (resp || '').replace(/[\s>]/g, '').toUpperCase();
+          if (/4100/.test(c)) return true; // ECU応答(41 00 = supported PIDs) = 確立成功
+          if (tries < WARMUP_RETRIES) return attempt(); // SEARCHING/STOPPED/NODATA → 再試行
+          return false; // 確立できず(以降 probe/速度も恐らく不可だが続行はする)
+        })
+        .catch(function () {
+          if (tries < WARMUP_RETRIES) return attempt();
+          return false;
+        });
+    }
+    return attempt();
   }
 
   // ─── ELM327 初期化 ───
