@@ -13147,32 +13147,14 @@
             var year = yrMap[yc] ? String(yrMap[yc]) : '';
             return { maker: maker, year: year };
           }
-          function _loadVehProfile(vin) {
-            try {
-              var p = JSON.parse(localStorage.getItem('dk_veh_' + vin) || 'null');
-              if (p) {
-                if (vehModelEl) vehModelEl.value = p.model || '';
-                if (vehKatashikiEl) vehKatashikiEl.value = p.katashiki || '';
-                if (vehTireEl) vehTireEl.value = p.tire || '';
-                // ★登録済プロファイルを trace に焼く (型式別解析用)★
-                window.DK_VEHICLE_PROFILE = p;
-                if (vehSaveNoteEl)
-                  vehSaveNoteEl.textContent = '登録済の随伴車を読込 (' + (p.savedAt || '') + ')';
-              }
-            } catch (_) {
-              /* ignore */
-            }
-          }
           if (btnVehSave) {
             btnVehSave.addEventListener('click', function () {
-              if (!_curVin) {
-                if (vehSaveNoteEl) vehSaveNoteEl.textContent = 'VIN未取得(OBD接続してから保存)';
-                return;
-              }
+              // ★VINは必須にしない (クローンELM327で多フレームVINが取れない事が多い)★。
+              //   固定随伴車なので「手動登録」を主キーにし、VINは取れたらボーナスで併記。
               try {
-                var info = _vinInfo(_curVin);
+                var info = _curVin ? _vinInfo(_curVin) : { maker: '', year: '' };
                 var prof = {
-                  vin: _curVin,
+                  vin: _curVin || '',
                   maker: info.maker,
                   year: info.year,
                   model: vehModelEl ? vehModelEl.value.trim() : '',
@@ -13180,8 +13162,15 @@
                   tire: vehTireEl ? vehTireEl.value.trim() : '',
                   savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
                 };
-                localStorage.setItem('dk_veh_' + _curVin, JSON.stringify(prof));
-                // ★trace に焼く + ログ出力 (型式別解析用)★
+                if (!prof.model && !prof.katashiki) {
+                  if (vehSaveNoteEl)
+                    vehSaveNoteEl.textContent = '車種か型式を入力してから保存してください';
+                  return;
+                }
+                // ★主キー= dk_veh_active(固定随伴車の現役登録)。VINがあれば dk_veh_<VIN> にも保存。★
+                localStorage.setItem('dk_veh_active', JSON.stringify(prof));
+                if (_curVin) localStorage.setItem('dk_veh_' + _curVin, JSON.stringify(prof));
+                // ★trace に焼く + ログ出力 (型式別解析用・VIN無くても効く)★
                 window.DK_VEHICLE_PROFILE = prof;
                 try {
                   // eslint-disable-next-line no-console
@@ -13190,13 +13179,35 @@
                   /* ignore */
                 }
                 if (vehSaveNoteEl)
-                  vehSaveNoteEl.textContent = '✓ 保存しました(VIN紐付け・恒久・trace焼込)';
+                  vehSaveNoteEl.textContent =
+                    '✓ 保存しました(随伴車登録・恒久・trace焼込' +
+                    (_curVin ? '・VIN併記' : '・VINは後で自動付与') +
+                    ')';
               } catch (e) {
                 if (vehSaveNoteEl)
                   vehSaveNoteEl.textContent = '保存失敗: ' + ((e && e.message) || e);
               }
             });
           }
+          // ★起動時: 登録済の現役随伴車を復元 → フィールド表示 + trace に焼く★
+          //   VIN/OBD が無くても(iPhone・OBD未接続でも)全 trace に車両タグが付く=型式別解析が常に成立。
+          (function _loadActiveVehicle() {
+            try {
+              var p = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
+              if (p) {
+                if (vehModelEl && !vehModelEl.value) vehModelEl.value = p.model || '';
+                if (vehKatashikiEl && !vehKatashikiEl.value)
+                  vehKatashikiEl.value = p.katashiki || '';
+                if (vehTireEl && !vehTireEl.value) vehTireEl.value = p.tire || '';
+                window.DK_VEHICLE_PROFILE = p;
+                if (vehSaveNoteEl)
+                  vehSaveNoteEl.textContent =
+                    '登録済の随伴車を読込 (' + (p.model || p.katashiki || '') + ')';
+              }
+            } catch (_) {
+              /* ignore */
+            }
+          })();
           if (typeof window.OBDClient === 'undefined') {
             // OBDClient 未 load → 何もしない (要素は静的初期表示のまま)
             if (noteEl) noteEl.textContent = 'OBD モジュール未ロード';
@@ -13270,15 +13281,22 @@
                 if (vehMakerEl)
                   vehMakerEl.textContent =
                     (info.maker || '?') + (info.year ? ' / ' + info.year : '');
-                // ★未保存でも trace に VIN/メーカー/OBD能力を焼く(型式別解析の最低限)。保存済なら _loadVehProfile が上書き。
-                window.DK_VEHICLE_PROFILE = {
-                  vin: vin,
-                  maker: info.maker,
-                  year: info.year,
-                  obdOdoSupported: d.odometer_supported === true,
-                  obdOdoKm: d.odometer_km != null ? d.odometer_km : null,
-                };
-                _loadVehProfile(vin); // 登録済なら車種/型式/タイヤを自動復元(DK_VEHICLE_PROFILE も上書き)
+                // ★登録済(手動の車種/型式/タイヤ)を保持したまま VIN/メーカー/OBD能力を ★マージ★ する。
+                //   (clobber しない=ユーザーが入れた登録を消さない)。VIN無しでも登録は trace に乗る。
+                var base = window.DK_VEHICLE_PROFILE || {};
+                base.vin = vin;
+                base.maker = info.maker || base.maker;
+                base.year = info.year || base.year;
+                base.obdOdoSupported = d.odometer_supported === true;
+                base.obdOdoKm = d.odometer_km != null ? d.odometer_km : null;
+                window.DK_VEHICLE_PROFILE = base;
+                // VINが取れたら VINキーにも保存(将来の自動復元用)。active も最新化。
+                try {
+                  localStorage.setItem('dk_veh_active', JSON.stringify(base));
+                  if (vin) localStorage.setItem('dk_veh_' + vin, JSON.stringify(base));
+                } catch (_) {
+                  /* ignore */
+                }
               }
               if (vehObdCapEl) {
                 if (d.odometer_supported === true)
