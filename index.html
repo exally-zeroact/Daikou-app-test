@@ -13219,20 +13219,13 @@
               JF2: 'スバル',
             };
             var maker = map[wmi] || map[wmi.substr(0, 2)] || wmi;
-            // 10桁目=年式コード(簡易)
+            // ★10桁目=年式コード (ISO 3779 標準・決まった30年周期=DB/更新不要で新年式に自動対応)★
+            //   コード順 (I/O/Q/U/Z と 0 は不使用) を index 化し 2010+index。2010〜2039 を恒久カバー
+            //   (30年周期ゆえ以降も同アルゴリズムで継続)。旧ハードコード(2026頭打ち)を置換。
             var yc = vin.charAt(9);
-            var yrMap = {
-              J: 2018,
-              K: 2019,
-              L: 2020,
-              M: 2021,
-              N: 2022,
-              P: 2023,
-              R: 2024,
-              S: 2025,
-              T: 2026,
-            };
-            var year = yrMap[yc] ? String(yrMap[yc]) : '';
+            var YEAR_CODES = 'ABCDEFGHJKLMNPRSTVWXY123456789'; // 30コード
+            var yi = YEAR_CODES.indexOf(yc);
+            var year = yi >= 0 ? String(2010 + yi) : '';
             return { maker: maker, year: year };
           }
           if (btnVehSave) {
