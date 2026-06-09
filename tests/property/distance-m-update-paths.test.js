@@ -73,22 +73,32 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     //       よって本 test は「距離加算は += delta 経路のみ・GPS.calcDistance 呼出ゼロ」を検証する。
     const source = loadMeterSource();
     const lines = source.split('\n');
-    // distance_m += は 2 経路: delta (= pipeline 主経路) + gapM (= Worker B 不在時の gap補完・
-    //   速度×時間=認定メーター方式)。いずれも GPS 直線(haversine)課金ではない。
+    // distance_m += は 2 経路 (2026-06-09・随伴車別k校正を反映): cal (= pipeline delta × k) +
+    //   gapCal (= Worker B 不在時 gap補完 gapM × k・速度×時間=認定メーター方式)。
+    //   k は ★同一 delta/gapM へのスカラー器差★であり GPS 直線(haversine)課金ではない。
     //   (setDistance の = v は別カウント)。
     const addPaths = lines.filter((l) => /^\s*state\.distance_m\s*\+=\s*/.test(l));
     if (addPaths.length !== 2) {
       throw new Error(
-        '白紙書き直し違反: state.distance_m += は 2 経路 (= pipeline delta + gap補完 gapM) のはず。実検出 ' +
+        '白紙書き直し違反: state.distance_m += は 2 経路 (= pipeline delta×k cal + gap補完×k gapCal) のはず。実検出 ' +
           addPaths.length +
           ' 件・' +
           JSON.stringify(addPaths.map((l) => l.trim()))
       );
     }
-    if (!/\+=\s*delta/.test(addPaths[0]) || !/\+=\s*gapM/.test(addPaths[1])) {
+    if (!/\+=\s*cal\b/.test(addPaths[0]) || !/\+=\s*gapCal\b/.test(addPaths[1])) {
       throw new Error(
-        '白紙書き直し違反: distance_m 加算は #1 += delta (pipelineDeltaM) / #2 += gapM (gap補完) のはず。実検出: ' +
+        '白紙書き直し違反: distance_m 加算は #1 += cal (pipelineDeltaM×k) / #2 += gapCal (gap補完×k) のはず。実検出: ' +
           JSON.stringify(addPaths.map((l) => l.trim()))
+      );
+    }
+    // ★単一源不変の強化★: cal/gapCal は pipeline delta / gapM の随伴車k倍であり別距離源でない事を検証。
+    if (
+      !/const\s+cal\s*=\s*delta\s*\*\s*_activeVehicleK\b/.test(source) ||
+      !/const\s+gapCal\s*=\s*gapM\s*\*\s*_activeVehicleK\b/.test(source)
+    ) {
+      throw new Error(
+        '白紙書き直し違反: cal/gapCal は delta×_activeVehicleK / gapM×_activeVehicleK のはず (= 単一pipeline源のk校正)'
       );
     }
     // meter.js 内 GPS.calcDistance は 0 件 (= GPS 直線課金経路の混入なし)。

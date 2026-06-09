@@ -12406,6 +12406,71 @@
               <span style="color: #8e8e93">OBD距離能力</span>
               <span id="vehObdCap" style="font-weight: 700">接続で判定</span>
             </div>
+
+            <!-- ★随伴車別 k(メーター定数/器差調整)校正★ -->
+            <div
+              style="
+                border-top: 1px solid #e5e5ea;
+                margin-top: 8px;
+                padding-top: 8px;
+                font-size: 12px;
+                color: #8e8e93;
+              "
+            >
+              <b style="color: #1c1c1e">認定メーター較正 (k)</b><br />
+              業務終了後、随伴車の認定メーター(料金メーター)の距離を入れると、この端末×この車の器差を学習して
+              −0.5〜−1% 帯へ寄せます(過大ゼロは死守)。<br />
+              ※入れるのは「その1業務で認定メーターが示した実距離」。過大値・1業務5%超の急変は自動で弾きます。
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">現在の k</span>
+              <span id="vehKValue" style="font-weight: 700">1.000</span>
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">直近業務のダイコメ距離</span>
+              <span id="vehLastBusinessDistM" style="font-weight: 700">—</span>
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">認定メーター読み(km)</span>
+              <input
+                id="vehCertMeterReadM"
+                type="number"
+                step="0.01"
+                inputmode="decimal"
+                placeholder="例: 8.42"
+                style="
+                  width: 45%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div class="row" style="justify-content: center; padding-top: 6px">
+              <button
+                id="btnVehCalibrate"
+                style="
+                  padding: 7px 20px;
+                  background: #34c759;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 13px;
+                  cursor: pointer;
+                "
+              >
+                🎯 この読みで k を較正
+              </button>
+            </div>
+            <div
+              id="vehCalibrateNote"
+              style="text-align: center; font-size: 11px; color: #8e8e93; padding: 4px 0 0"
+            ></div>
+
             <div class="row" style="justify-content: center; padding-top: 10px">
               <button
                 id="btnVehSave"
@@ -13076,7 +13141,30 @@
           var vehObdCapEl = document.getElementById('vehObdCap');
           var btnVehSave = document.getElementById('btnVehSave');
           var vehSaveNoteEl = document.getElementById('vehSaveNote');
+          // ★随伴車別 k(メーター定数)校正UI (2026-06-09)★
+          var vehKValueEl = document.getElementById('vehKValue');
+          var vehCertMeterReadEl = document.getElementById('vehCertMeterReadM');
+          var vehLastBusinessDistEl = document.getElementById('vehLastBusinessDistM');
+          var btnVehCalibrate = document.getElementById('btnVehCalibrate');
+          var vehCalibrateNoteEl = document.getElementById('vehCalibrateNote');
           var _curVin = ''; // 接続中随伴車のVIN(保存キー)
+          function _renderVehK() {
+            try {
+              var p = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
+              var k = p && typeof p.k === 'number' ? p.k : 1.0;
+              if (vehKValueEl) vehKValueEl.textContent = k.toFixed(3);
+              if (vehLastBusinessDistEl) {
+                var bd =
+                  typeof Meter !== 'undefined' && Meter.getState
+                    ? Meter.getState().business_distance_m || 0
+                    : 0;
+                vehLastBusinessDistEl.textContent =
+                  bd > 0 ? (bd / 1000).toFixed(2) + ' km' : '—(業務終了後に表示)';
+              }
+            } catch (_) {
+              /* ignore */
+            }
+          }
           // ELM327 0902(VIN)生応答 → 17桁ASCII VIN を抽出
           function _parseVin(raw) {
             if (!raw) return '';
@@ -13153,6 +13241,8 @@
               //   固定随伴車なので「手動登録」を主キーにし、VINは取れたらボーナスで併記。
               try {
                 var info = _curVin ? _vinInfo(_curVin) : { maker: '', year: '' };
+                // ★学習済 k を保存で消さない★: 既存 profile から k と較正メタを継承。
+                var _prev = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
                 var prof = {
                   vin: _curVin || '',
                   maker: info.maker,
@@ -13160,6 +13250,8 @@
                   model: vehModelEl ? vehModelEl.value.trim() : '',
                   katashiki: vehKatashikiEl ? vehKatashikiEl.value.trim() : '',
                   tire: vehTireEl ? vehTireEl.value.trim() : '',
+                  k: _prev && typeof _prev.k === 'number' ? _prev.k : 1.0,
+                  k_samples: _prev && _prev.k_samples ? _prev.k_samples : 0,
                   savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
                 };
                 if (!prof.model && !prof.katashiki) {
@@ -13189,6 +13281,46 @@
               }
             });
           }
+          // ★認定メーター読みで k を較正 (随伴車別器差・業務終了後)★
+          if (btnVehCalibrate) {
+            btnVehCalibrate.addEventListener('click', function () {
+              try {
+                if (typeof Meter === 'undefined' || !Meter.calibrateVehicleK) {
+                  if (vehCalibrateNoteEl) vehCalibrateNoteEl.textContent = 'メーター未初期化';
+                  return;
+                }
+                var km = vehCertMeterReadEl ? parseFloat(vehCertMeterReadEl.value) : NaN;
+                if (!(km > 0)) {
+                  if (vehCalibrateNoteEl)
+                    vehCalibrateNoteEl.textContent = '認定メーターの距離(km)を入力してください';
+                  return;
+                }
+                var r = Meter.calibrateVehicleK(km * 1000); // km→m
+                if (r && r.ok) {
+                  if (vehCalibrateNoteEl)
+                    vehCalibrateNoteEl.textContent =
+                      '✓ k=' +
+                      r.k.toFixed(4) +
+                      ' に較正(' +
+                      (r.sampleCount || 1) +
+                      '回目・過大ゼロ維持)';
+                  _renderVehK();
+                } else {
+                  var why =
+                    r && r.reason === 'business_too_short'
+                      ? '業務距離が短すぎ(1km未満)'
+                      : r && r.reason === 'outlier_jump'
+                        ? '1業務で5%超の急変=反映せず(誤入力/異常走行)'
+                        : '較正できず(' + ((r && r.reason) || '不明') + ')';
+                  if (vehCalibrateNoteEl) vehCalibrateNoteEl.textContent = '✗ ' + why;
+                }
+              } catch (e) {
+                if (vehCalibrateNoteEl)
+                  vehCalibrateNoteEl.textContent = '較正失敗: ' + ((e && e.message) || e);
+              }
+            });
+          }
+          _renderVehK();
           // ★起動時: 登録済の現役随伴車を復元 → フィールド表示 + trace に焼く★
           //   VIN/OBD が無くても(iPhone・OBD未接続でも)全 trace に車両タグが付く=型式別解析が常に成立。
           (function _loadActiveVehicle() {

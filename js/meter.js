@@ -40,6 +40,32 @@
 
 // eslint-disable-next-line no-unused-vars -- 他ファイルから Meter をグローバル参照 (cross-file global pattern)
 const Meter = (() => {
+  // ★随伴車別 k(メーター定数/器差調整)★ (2026-06-09・discovery監査スペック準拠):
+  //   engine(pipeline-distance) は無改変。k は ★meter 層の器差定数★ として rawDelta に乗算する。
+  //   ・distance_m / business_distance_m = rawDelta × _activeVehicleK (校正)
+  //   ・mm_distance_m は rawDelta のまま (RAW・校正前監査ベースライン温存)
+  //   ・k は代行開始 (setBusinessActive false→true / 業務外start) でロック=業務別 (途中改ざん無視)
+  //   ・_clampVK で [VK_MIN, VK_MAX] ハードクランプ。★VK_MAX が唯一の過大臨界ノブ★
+  //   ・never-over: 学習基準=認定メーター読み(検定上タイヤ真値以下) → k適用後 ≤ cert ≤ 真値
+  //   ・既定 k=1.0 で全乗算が恒等=現行 1byte 不変 (cert-gate/parity 影響ゼロ)
+  const VK_MIN = 0.9;
+  const VK_MAX = 1.01;
+  let _activeVehicleK = 1.0; // 業務開始でロックされる適用係数
+  function _clampVK(k) {
+    return typeof k === 'number' && isFinite(k) ? Math.min(VK_MAX, Math.max(VK_MIN, k)) : 1.0;
+  }
+  function _resolveVK() {
+    try {
+      return typeof window !== 'undefined' &&
+        window.DK_VEHICLE_PROFILE &&
+        typeof window.DK_VEHICLE_PROFILE.k === 'number'
+        ? window.DK_VEHICLE_PROFILE.k
+        : 1.0;
+    } catch (_) {
+      return 1.0;
+    }
+  }
+
   // ─── state 初期化 ──────────────────────────────────────────
   //   ★既存キーは消さない (index.html / business.js が読む)。
   let state = {
@@ -238,17 +264,19 @@ const Meter = (() => {
       typeof m.pipelineDeltaM === 'number' && m.pipelineDeltaM > 0 ? m.pipelineDeltaM : 0;
     if (delta > 0 && Date.now() >= _drainMmUntil) {
       lastMmUsefulAt = Date.now();
-      // 参照値 mirror (= 後方互換 stats・mm_distance_m は pipeline と同じ道なり距離)
+      // 参照値 mirror (= 後方互換 stats・mm_distance_m は ★RAW★・校正前監査ベースライン温存)
       state.mm_distance_m += delta;
+      // ★随伴車別 k 校正★: 課金距離/業務距離は raw × _activeVehicleK (k=1.0 で恒等=1byte不変)
+      const cal = delta * _activeVehicleK;
       // 課金距離 (running gate・絶対不可侵経路)
       if (state.running) {
-        state.distance_m += delta;
+        state.distance_m += cal;
         state.fare_yen = calcFare(state.distance_m);
         state.distanceSource = 'pipeline';
       }
       // 業務単位累積 (business_active gate・空車中も加算・後付メーター対等)
       if (state.business_active) {
-        state.business_distance_m = (state.business_distance_m || 0) + delta;
+        state.business_distance_m = (state.business_distance_m || 0) + cal;
       }
     } else if (delta > 0 && Date.now() < _drainMmUntil) {
       // drain window 中の残骸は破棄 (= 代行開始直後 0.17km 等を防ぐ)。stats のみ更新。
@@ -299,6 +327,11 @@ const Meter = (() => {
   // ─── 代行開始 ───
   function start() {
     const now = Date.now();
+    // ★k 保険ロック★: 業務外 (単独計測) の start でも k を解決して課金距離を校正。
+    //   業務中 (business_active=true) は ★ロック維持★ (start/resume で再解決しない=業務別不変)。
+    if (!state.business_active) {
+      _activeVehicleK = _clampVK(_resolveVK());
+    }
     const WARMUP_MAX_AGE_MS = 5000;
     const warmupValid =
       lastWarmupGps && lastWarmupGps.timestamp && now - lastWarmupGps.timestamp < WARMUP_MAX_AGE_MS;
@@ -544,13 +577,16 @@ const Meter = (() => {
         const spdKmh = Math.min(gpsResult.speedKmh, GAP_FILL_MAX_KMH);
         const gapM = (spdKmh / 3.6) * gapSec;
         if (gapM > 0) {
-          state.distance_m += gapM;
+          // ★k 校正の穴を塞ぐ★: Worker B 不在 (E2E/startup/loadfill) でも同一 _activeVehicleK を適用。
+          //   gap_fill_total_m (stat) は RAW 維持。
+          const gapCal = gapM * _activeVehicleK;
+          state.distance_m += gapCal;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = roadsLoading ? 'loadfill' : 'gap';
           state.gap_fill_count = (state.gap_fill_count || 0) + 1;
           state.gap_fill_total_m = (state.gap_fill_total_m || 0) + gapM;
           if (state.business_active) {
-            state.business_distance_m = (state.business_distance_m || 0) + gapM;
+            state.business_distance_m = (state.business_distance_m || 0) + gapCal;
           }
         }
       }
@@ -1024,7 +1060,71 @@ const Meter = (() => {
     state._prev_business_target_time = null;
     state._business_target_velocity_mps = 0;
   }
+  // ★随伴車別 k 学習★ (業務終了後・認定メーター読みで器差を更新):
+  //   sample = _activeVehicleK × (cert / business_distance_m) = cert / raw (★複利安全★・
+  //     現kで校正済の業務距離でも sample は生距離比に一致)。
+  //   外れ値拒否: D<1000m (短業務/GPS脱落) ・|sample/kActive−1|>0.05 (1業務で5%超急変)。
+  //   保守 EWMA: k_new = 0.3×sample + 0.7×prevK (1業務が支配しない)。clamp [VK_MIN, VK_MAX]。
+  //   過大ゼロ: cert は検定上タイヤ真値以下 → k適用後距離 ≤ cert ≤ 真値。VK_MAX が上げ硬天井。
+  //   ★業務別のみ★: D = 1業務 (代行開始→精算終了) の business_distance_m (businessEnd で0化されない)。
+  function calibrateVehicleK(certMeterMeters) {
+    if (
+      !(typeof certMeterMeters === 'number' && isFinite(certMeterMeters) && certMeterMeters > 0)
+    ) {
+      return { ok: false, reason: 'invalid_cert', k: _resolveVK() };
+    }
+    const D = (state && state.business_distance_m) || 0;
+    if (D < 1000) {
+      return { ok: false, reason: 'business_too_short', k: _resolveVK() };
+    }
+    const kActive = _activeVehicleK > 0 ? _activeVehicleK : 1.0;
+    const sample = kActive * (certMeterMeters / D); // = cert / raw (複利安全)
+    if (Math.abs(sample / kActive - 1) > 0.05) {
+      return { ok: false, reason: 'outlier_jump', k: _resolveVK() };
+    }
+    const prevK = _resolveVK();
+    const kNew = _clampVK(0.3 * sample + 0.7 * prevK);
+    // 永続化 (window.DK_VEHICLE_PROFILE + dk_veh_active / dk_veh_<VIN>・他フィールド保全)
+    try {
+      if (typeof window !== 'undefined') {
+        if (!window.DK_VEHICLE_PROFILE) window.DK_VEHICLE_PROFILE = {};
+        window.DK_VEHICLE_PROFILE.k = kNew;
+        window.DK_VEHICLE_PROFILE.k_samples = (window.DK_VEHICLE_PROFILE.k_samples || 0) + 1;
+        window.DK_VEHICLE_PROFILE.k_last_cert_m = certMeterMeters;
+        window.DK_VEHICLE_PROFILE.k_last_business_m = D;
+        if (typeof localStorage !== 'undefined') {
+          const json = JSON.stringify(window.DK_VEHICLE_PROFILE);
+          localStorage.setItem('dk_veh_active', json);
+          if (window.DK_VEHICLE_PROFILE.vin) {
+            localStorage.setItem('dk_veh_' + window.DK_VEHICLE_PROFILE.vin, json);
+          }
+        }
+      }
+    } catch (_) {
+      /* persistence best-effort・課金距離には影響しない */
+    }
+    return {
+      ok: true,
+      k: kNew,
+      sample: sample,
+      sampleCount:
+        (typeof window !== 'undefined' &&
+          window.DK_VEHICLE_PROFILE &&
+          window.DK_VEHICLE_PROFILE.k_samples) ||
+        1,
+      reason: 'updated',
+    };
+  }
+
   function setBusinessActive(active) {
+    // ★k 業務別ロック★: 代行開始 (false→true) の瞬間に随伴車 k を確定し業務全体で固定。
+    //   業務途中の profile 編集を無視 = 過大の途中混入を防止。
+    //   ★多区間業務 (stop→resume) の再 true でも k は再解決されるが、profile.k は
+    //     較正 (精算後 calibrateVehicleK) でしか変わらない=1業務中は値不変 → 実効的に 1業務=1k。
+    //     かつ常に _clampVK で ≤VK_MAX のため never-over は再ロックでも不変 (監査確認済 2026-06-09)。
+    if (!!active && !state.business_active) {
+      _activeVehicleK = _clampVK(_resolveVK());
+    }
     state.business_active = !!active;
   }
   function setLastGps(lat, lng, altitude, speedKmh, timestamp) {
@@ -1292,6 +1392,7 @@ const Meter = (() => {
     isMmReady,
     setBusinessDistance,
     setBusinessActive,
+    calibrateVehicleK,
     setSurchargeActive,
     toggleSurcharge,
     getActiveSurcharges,

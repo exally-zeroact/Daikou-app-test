@@ -35,29 +35,31 @@ describe('drift-static: meter.js 距離駆動は pipeline delta 単一経路 (�
         matchedLines.push({ lineNo: i + 1, content: lines[i].trim() });
       }
     }
-    // ★白紙書き直し後 distance_m 書込経路は 3 経路:
-    //   #1 += delta  : pipeline-distance エンジンの道なり区間増分 (= 主経路・Worker B 有)
-    //   #2 += gapM   : gap補完 (= Worker B 不在時のみ・GNSS空白の速度×時間・認定メーター方式)
+    // ★白紙書き直し後 distance_m 書込経路は 3 経路 (2026-06-09・随伴車別k校正を反映):
+    //   #1 += cal    : pipeline delta の随伴車別k校正 (cal = delta × _activeVehicleK・道なり区間増分)
+    //   #2 += gapCal : gap補完の随伴車別k校正 (gapCal = gapM × _activeVehicleK・速度×時間)
     //   #3 = v       : setDistance 復元代入
     //   いずれも GPS 直線 (haversine) 課金ではない (C3 で GPS.calcDistance 0 を別途保証)。
+    //   ★k は ★同一 pipeline delta / gapM に対するスカラー器差★ であり新規距離源ではない
+    //     (cal/gapCal の定義が delta×k / gapM×k であることを下で検証=単一源不変を強化)。
     if (matchedLines.length !== 3) {
       throw new Error(
         '述語 C 違反: 白紙書き直し後 distance_m 書込経路は 3 経路 ' +
-          '(= += delta + += gapM + = v) のはず。検出: ' +
+          '(= += cal + += gapCal + = v) のはず。検出: ' +
           JSON.stringify(matchedLines, null, 2)
       );
     }
-    // 経路 #1 は pipeline delta の加算 (= 道路 snap 道なり区間増分・running gate 内)
-    if (!/\+=\s*delta/.test(matchedLines[0].content)) {
+    // 経路 #1 は pipeline delta の k 校正加算 (= 道路 snap 道なり区間増分・running gate 内)
+    if (!/\+=\s*cal\b/.test(matchedLines[0].content)) {
       throw new Error(
-        '述語 C 違反: 経路 #1 は state.distance_m += delta (= pipelineDeltaM) のはず。実検出: ' +
+        '述語 C 違反: 経路 #1 は state.distance_m += cal (= pipelineDeltaM×k) のはず。実検出: ' +
           matchedLines[0].content
       );
     }
-    // 経路 #2 は gap補完 (= Worker B 不在時・速度×時間)
-    if (!/\+=\s*gapM/.test(matchedLines[1].content)) {
+    // 経路 #2 は gap補完の k 校正 (= Worker B 不在時・速度×時間×k)
+    if (!/\+=\s*gapCal\b/.test(matchedLines[1].content)) {
       throw new Error(
-        '述語 C 違反: 経路 #2 は state.distance_m += gapM (= gap補完・速度×時間) のはず。実検出: ' +
+        '述語 C 違反: 経路 #2 は state.distance_m += gapCal (= gap補完 gapM×k) のはず。実検出: ' +
           matchedLines[1].content
       );
     }
@@ -67,6 +69,15 @@ describe('drift-static: meter.js 距離駆動は pipeline delta 単一経路 (�
         '述語 C 違反: 経路 #3 は state.distance_m = v (= setDistance 復元) のはず。実検出: ' +
           matchedLines[2].content
       );
+    }
+    // ★単一源不変の強化★: cal/gapCal は ★pipeline delta / gapM の k 倍★ であり、別距離源でない事を検証。
+    if (!/const\s+cal\s*=\s*delta\s*\*\s*_activeVehicleK\b/.test(source)) {
+      throw new Error(
+        '述語 C 違反: cal は `delta * _activeVehicleK` (pipeline deltaのk校正) のはず'
+      );
+    }
+    if (!/const\s+gapCal\s*=\s*gapM\s*\*\s*_activeVehicleK\b/.test(source)) {
+      throw new Error('述語 C 違反: gapCal は `gapM * _activeVehicleK` (gap補完のk校正) のはず');
     }
   });
 

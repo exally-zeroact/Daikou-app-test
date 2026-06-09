@@ -399,6 +399,8 @@
         chunk_seq: seq,
         auto_flush: true,
         beacon: true,
+        // ★随伴車別 k 含む車両profile (アプリ離脱trace でも過大ゼロ事後監査可能に・_postBatch と対等)
+        vehicle: (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null,
       },
       samples: batch,
       writeKey: WRITE_KEY,
