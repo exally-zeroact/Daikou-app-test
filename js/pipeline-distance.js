@@ -1881,7 +1881,23 @@ function createDistanceTracker(decoder, opts) {
       stats,
       coastSpdMps
     );
-    const delta = added > 0 ? added : 0;
+    let delta = added > 0 ? added : 0;
+    // ★★P0 根治 (2026-06-10・監査 CRITICAL=過大ゼロ違反)★★:
+    //   合成タイマー fill 直後の「穴明け実点」で速度不明 (speedSrc='hav' → spd=-1) の時、設計が頼る
+    //   smoothedRawMode の never-over cap (spd×dt×ratio) が ★spd>=0 ゲートでスキップ★ され、
+    //   prev(=位置据え置きの穴入口) → cur(穴出口) の「トンネル全長の弦」が無 cap で返り、合成 fill に
+    //   ★二重加算★ されて +41% 過大化する (実証 1698m vs 真 1200m)。これは過大ゼロ(認定)違反。
+    //   → 合成直後 (prev.synthetic===true) かつ spd<0 の弦は、合成 fill が維持した coastSpdMps を
+    //     フォールバック速度に cap (coastSpdMps×dt×smoothDopplerCapRatio) して tick 相当へ頭打ちする。
+    //     = 設計が意図した never-over cap を Doppler 不在でも成立させ「ドン」の二重計上を断つ。
+    //   ★OBD/Doppler 有時 (spd>=0) は従来の cap が効くため不変。穴は合成 fill 分だけ計上 (保守=過大ゼロ側)。★
+    if (prev.synthetic === true && spd < 0 && coastSpdMps >= 0) {
+      const _dtExit = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      if (_dtExit > 0) {
+        const _exitCap = coastSpdMps * _dtExit * cfg.smoothDopplerCapRatio;
+        if (delta > _exitCap) delta = _exitCap;
+      }
+    }
     total += delta;
     const reason = classifyReason(beforeStats);
 

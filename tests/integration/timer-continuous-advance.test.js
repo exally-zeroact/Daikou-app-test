@@ -211,4 +211,36 @@ describe('タイマー連続前進 (synthetic coast) 二重計上ガード', () 
     expect(total).toBeGreaterThanOrEqual(afterGps);
     expect(total - afterGps).toBeLessThan(v * 1 + 10); // 1200m 級の暴走は構造的に無い (< ~25m)
   });
+
+  it('⑥ ★過大ゼロ根治 (監査 CRITICAL P0)★: 穴明け実点が Doppler 無し (spd=-1) でも二重計上しない', () => {
+    // 監査が捕捉した P0: 合成 fill 直後の穴明け実点が speedSrc=hav (spd=-1) だと never-over cap
+    //   (spd>=0 ゲート) がスキップされ、トンネル全長の弦が合成 fill に二重加算され +41%過大(1698 vs 1200)。
+    //   修正: prev.synthetic かつ spd<0 の弦を維持済み coastSpdMps で cap → 二重計上を断つ。
+    const tk = createDistanceTracker(stubDec, OPT);
+    const lat = 34,
+      lng = 133;
+    let t = T0;
+    const v = 20;
+    let p = { lat, lng };
+    tk.ingest({ lat: p.lat, lng: p.lng, t, acc: 5, spd: v });
+    t += 1000;
+    p = moveEast(p.lat, p.lng, v);
+    tk.ingest({ lat: p.lat, lng: p.lng, t, acc: 5, spd: v });
+    const pre = tk.totalM();
+    // 60s トンネルを合成 coast で埋める (位置据え置き)
+    const ticks = Math.round((60 * 1000) / 150);
+    for (let i = 0; i < ticks; i++) {
+      t += 150;
+      tk.ingest({ lat: p.lat, lng: p.lng, t, acc: 30, spd: v, synthetic: true });
+    }
+    // ★穴明け実点: Doppler 無し (spd=-1) で トンネル全長(1200m)東へジャンプ★
+    const exit = moveEast(p.lat, p.lng, v * 60);
+    t += 150;
+    tk.ingest({ lat: exit.lat, lng: exit.lng, t, acc: 5, spd: -1 });
+    tk.flush();
+    const total = tk.totalM();
+    const ideal = pre + v * 60; // ~1200m
+    // ★never-over (過大ゼロ): 合成fill + 微小残差 で理想を超えない (修正前は1698m=+41%で FAIL)★
+    expect(total).toBeLessThanOrEqual(ideal + 10);
+  });
 });
