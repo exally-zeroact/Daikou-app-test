@@ -33,17 +33,17 @@ describe('1. ナビは appbar (.appbar-nav) に移設・3 タブ・履歴タブ�
     expect(buttons.length).toBe(3);
   });
 
-  it('appbar-nav 内に・業務/使い方/設定 ラベル・履歴は無し', () => {
+  it('appbar-nav 内に・ホーム/使い方/設定 ラベル・履歴は無し', () => {
     const m = html.match(/<nav class="appbar-nav"[\s\S]*?<\/nav>/);
     const navBlock = m[0];
-    expect(navBlock).toMatch(/>業務</);
+    expect(navBlock).toMatch(/>ホーム</); // ★2026-06-11: ナビ「業務」→「ホーム」改名
     expect(navBlock).toMatch(/>使い方</);
     expect(navBlock).toMatch(/>設定</);
     expect(navBlock).not.toMatch(/>履歴</);
     expect(navBlock).not.toMatch(/showOverlay\(['"]history['"]\)/);
   });
 
-  it('業務→hideAllOverlays / 使い方→help / 設定→settings の onclick', () => {
+  it('ホーム→hideAllOverlays / 使い方→help / 設定→settings の onclick', () => {
     const m = html.match(/<nav class="appbar-nav"[\s\S]*?<\/nav>/);
     const navBlock = m[0];
     expect(navBlock).toMatch(/onclick="window\.hideAllOverlays\(\)"/);
