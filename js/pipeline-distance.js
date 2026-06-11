@@ -152,7 +152,22 @@ const DEFAULTS = {
   //   寄せる。δ は ±obdDeltaMaxMps(=0.139m/s=0.5km/h・floor量子化の物理上限)にクランプ=ハードコード
   //   加算でなく観測学習なので「どのアダプタ/車でも」効く(司さん指摘: 何を買うか分からないのに足すな)。
   //   OFF(obdDeltaCalib!==true)で従来 ∫v そのまま(byte不変)。distance_m/calcFare 不可侵。
-  obdDeltaCalib: false, // δ自己キャリブ有効化 (1行ON/OFF・rollback用)
+  // ★★出荷有効化 (2026-06-11・司さん確定方針「認定が通ってるものから丸写し」)★★:
+  //   これは ★認定メーター(計量法JIS D5609/国交省ソフトメーター・矢崎/二葉/岡部)の計算法そのもの★:
+  //     距離 = 車速パルス(車輪回転)積算 ÷ 車両定数K、K は基準巻尺/ローラーの真距離に指示距離を
+  //     合わせ込んで ★距離に焼く★(過大ゼロ=片側公差 −4%〜0% を K で担保)。
+  //   ダイコメ写像: 距離源=OBD車輪速度∫v(認定の「走行信号」と同土俵=PID010D車輪速度直結)、
+  //     K相当=δ。δを ★distance_m に直接焼く★(total += obdDelta・別計上でない)=認定の pulse×K と同型。
+  //   ★過大ゼロは構造保証★: δ∈[-0.139,+0.139]m/s=±0.5km/h=OBD車速1km/h floor量子化の物理上限。
+  //     δ最大でも「floorで失った量子化誤差ぶんの回収」しかできず真距離を超えられない(認定の保守側校正)。
+  //   ★プラスα(ダイコメのデータ優位)★: 認定はワンショット基準走行(基準巻尺コース)で校正→固定。
+  //     ダイコメは全業務の良GPS区間で連続的にδを再学習(EWMA・公知のスケール係数連続校正一般手法のみ・
+  //     特許実装は写さない)=タイヤ摩耗/空気圧/車両差をオンライン追従。
+  //   実証(tests/truedist-obd-engine-gate.js・0610b-Android KP真距離): δ OFF -2.11%/-2.38% →
+  //     ON -1.12%/-1.51% = 過大ゼロ維持(≤真距離)のまま誤差 ~1pt 改善・obdSegs=2485 実発火。
+  //   ★cur.obd===true 区間のみ作用★ = GPS経路(OBD未接続/iPhone)は δ 非作用で byte不変(L1735ゲート)。
+  //   OFF へ戻すのはこの 1 行のみ (rollback)。
+  obdDeltaCalib: true, // δ自己キャリブ有効化 (1行ON/OFF・rollback用)
   obdDeltaMinMps: -0.139, // δ下限 (-0.5km/h・OBD過大読み端末対策)
   obdDeltaMaxMps: 0.139, // δ上限 (+0.5km/h・floor過小補正の物理上限=never-over)
   calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)
@@ -1771,7 +1786,12 @@ function createDistanceTracker(decoder, opts) {
       let obdDelta = 0;
       if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) {
         // ∫(v+δ)。δ は ±0.5km/h クランプ済 = floor過小ぶんだけ持ち上げ過大暴走しない。
-        const vEff = cfg.obdDeltaCalib === true && obdDeltaInit ? spd + obdDeltaMps : spd;
+        // ★δ は移動中(spd≥stationarySpdMps)のみ適用★: δ は「走行中に1km/h floorで失った量子化分の回収」
+        //   であり、停車/微速(OBD≈0)区間に δ を足すと creep を製造して認定要件(<10m/30s)を破る。
+        //   学習ゲート(L1744 spd≥stationarySpdMps)と対称に、適用も移動区間に限定=停車で δ 非作用。
+        const applyDelta =
+          cfg.obdDeltaCalib === true && obdDeltaInit && spd >= cfg.stationarySpdMps;
+        const vEff = applyDelta ? spd + obdDeltaMps : spd;
         obdDelta = (vEff > 0 ? vEff : 0) * dtObd;
         // ★raw ∫v(OBD)(k=1・δ未適用) 並行記録 (司さん要望)★: distance_m には一切影響させず、
         //   「今の OBD の素の精度」を真距離と突合する監査ベースラインとして bd.obdRawM に別積算する。
