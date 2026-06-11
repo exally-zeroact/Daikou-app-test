@@ -4039,7 +4039,7 @@
         <div class="appbar-title" id="appbarTitle">空　車</div>
         <div class="gps-pill">
           <div class="gps-dot" id="gpsDot"></div>
-          <span class="gps-acc" id="gpsAcc">GPS待機</span>
+          <span class="gps-acc" id="gpsAcc">GPS</span>
         </div>
         <!-- ★OBD 接続チップ (2026-06-11・最小化スッキリ rev・青バー常駐・全画面で見える&押せる)★:
              GPSピルと同じ「ドット + OBD」の小ピル。接続状態は #obdDot の色だけ(緑=接続済 / 半透明白=未接続)。
@@ -6838,8 +6838,12 @@
               }
               const dot = document.getElementById('gpsDot');
               dot.className = 'gps-dot ok';
-              document.getElementById('gpsAcc').textContent =
-                '精度' + parseFloat(g.accuracy).toFixed(0) + 'm';
+              dot.title = 'GPS 精度 ' + parseFloat(g.accuracy).toFixed(0) + 'm';
+              // ★精度数字は表示しない(司さん指示・繋がってるかはドット色だけ)。
+              //   精度値は debug パネル用に dot の data 属性に保持。gpsAcc ラベルは「GPS」固定。
+              dot.dataset.acc = parseFloat(g.accuracy).toFixed(0);
+              const _gpsAccEl = document.getElementById('gpsAcc');
+              if (_gpsAccEl) _gpsAccEl.textContent = 'GPS';
               // 起動時warm up（2026/04/30追加）：常にGPSをMeterに渡す
               // 代行開始前でもlastWarmupGpsを保持・押した瞬間に即時計測開始
               if (typeof Meter.updateGpsOnly === 'function') Meter.updateGpsOnly(g);
@@ -6928,16 +6932,20 @@
       (function () {
         if (typeof GPS === 'undefined' || !GPS.onStatusChange) return;
         GPS.onStatusChange(function (s) {
-          const el = document.getElementById('gpsAcc');
-          if (!el || !s || !s.state) return;
-          if (s.state === 'denied') {
-            el.textContent = 'GPS拒否';
-          } else if (s.state === 'unavailable') {
-            el.textContent = 'GPS信号弱';
-          } else if (s.state === 'timeout') {
-            el.textContent = 'GPS待機中';
+          // ★繋がってるかはドット色だけで示す(司さん指示・精度数字/エラー文言は出さない)。
+          //   エラー時はドットを淡色(gps-dot=未接続)に戻し、理由は title(長押しヒント)に持たせる。
+          const dot = document.getElementById('gpsDot');
+          if (!dot || !s || !s.state) return;
+          if (s.state === 'denied' || s.state === 'unavailable' || s.state === 'timeout') {
+            dot.className = 'gps-dot'; // 淡色=未接続/不良
+            dot.title =
+              s.state === 'denied'
+                ? 'GPS拒否'
+                : s.state === 'unavailable'
+                  ? 'GPS信号弱'
+                  : 'GPS待機中';
           }
-          // granted: 既存 callback が「精度Xm」に上書きするので何もしない
+          // granted: 既存 callback が dot を 'gps-dot ok'(緑)+ title 精度 に更新するので何もしない
         });
       })();
 
@@ -8366,13 +8374,12 @@
             if ((s.wait_sec || 0) >= 60) {
               _lines.push(`待機: ${Math.floor(s.wait_sec / 60)}分`);
             }
-            // GPS 精度 (#gpsAcc DOM text "精度Xm" から parse・"GPS待機"等は skip)
+            // GPS 精度 (#gpsDot の data-acc から取得・表示は「GPS」固定にしたので dot data 属性が真値源)
             try {
-              const _gpsAccEl = document.getElementById('gpsAcc');
-              const _accText = _gpsAccEl ? _gpsAccEl.textContent || '' : '';
-              const _accMatch = _accText.match(/精度(\d+)m/);
-              if (_accMatch) {
-                _lines.push(`GPS精度: ${_accMatch[1]}m`);
+              const _dot = document.getElementById('gpsDot');
+              const _acc = _dot ? _dot.dataset.acc : '';
+              if (_acc) {
+                _lines.push(`GPS精度: ${_acc}m`);
               }
             } catch (_) {}
             // センサー有無 (常時表示・compass + motion 両方許可で「あり」)
