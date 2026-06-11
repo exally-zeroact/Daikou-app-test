@@ -187,6 +187,26 @@ const DEFAULTS = {
   //   微速(停止判定を僅かに外れる0.5〜1m/s)の純ジッタが平滑弦に残り creep 化するのを遮断。通常走行は
   //   平滑弦 ≤ 実路長 ≈ spd×dt なので 1.5 倍までは binding せず無影響 (curve 余裕込み)。
 
+  // ★★両端速度 台形補間 穴埋め(公知: linear-velocity trapezoid) (2026-06-10・GPS実装班・公知手法)★★:
+  //   smoothedRawMode の長dt穴 (dt>smoothGapSec=トンネル/間引き) は従来「入口速度×dt」(片端 Doppler)
+  //   で埋めていた。これは穴の ★入口の点速度だけ★ で全区間を等速外挿するため、穴中に車が加減速すると
+  //   出口で帳尻が合わずドリフトする (入口高速→出口減速で過大、入口低速→出口加速で過少)。
+  //   ★両端速度台形補間(公知 Newton-Cotes)の核★: 穴を ★入口GPS + 出口GPS の両端に拘束★ し、その間の運動を
+  //   最小二乗 min‖Dv−a‖² (= 最小加速度 = 区間内一定加速度) で復元する。1区間に対する両端拘束の
+  //   厳密解は ★台形積分★ (v0+v1)/2 × dt (= 入口速度 v0 と 出口速度 v1 の平均速度 × dt)。
+  //   これにより ★出口で速度が帳尻★ し片端外挿のドリフトが消える。入口のみ外挿に比べ ★過大に伸びにくい★
+  //   (出口減速を必ず織り込むため)。両端 GPS が無い (どちらか spd 不明) 穴は従来の片端式に退避。
+  //   ★never-over 維持★: 台形 fill にも従来同様 (1)実測弦 straight 天井 (2)routingMaxRatio 倍ガード を
+  //   かけ、distance ≤ 実変位 を死守する (両端拘束は構造的に過大側へ出ないが、保険として温存)。
+  //   ★実データ注記 (2026-06-10)★: 0610b-Android は業務内に穴が ★無い★ (全区間 smoothed 弦) ため
+  //   本枝は発火せず 0610b の数値は完全不変。効果はトンネル/間引きを含む trace (iPhone13 の 79s 穴等)
+  //   と将来の実走で出る。OFF (boundaryGapFill!==true) で従来の片端 spd×dt に完全復帰 (byte 不変)。
+  //   ★本番既定=OFF (2026-06-11)★: 台形穴埋めは未実機検証 + 減速途中で出口 spd が入口より
+  //     高い瞬間に台形平均が片端式を上回り過大化する余地 (合成 trace で +31% 観測) があるため、
+  //     過大ゼロ死守を優先し ★既定 false★。安全な片端 spd×dt フォールバックが走る (byte 不変)。
+  //     実走トンネル trace で過大ゼロを実証してから flip する (機構はテスト温存)。
+  boundaryGapFill: false, // 両端アンカー(台形)穴埋め。既定OFF=従来 入口速度×dt (過大ゼロ安全)。
+
   // ★★確定方式: GPS精度で2択 適応モード (2026-06-09・実トレース実証)★★
   //   司さん確定方針(2026-06-08「GPS良時=生GPS弦、悪時/穴=速度×時間、止まれば数えない」)を
   //   今日の実車2業務(タイヤ6.73/17.71・トンネル含む)で実証し実装。平滑/map-matching は廃止。
@@ -1393,15 +1413,34 @@ function stepDistance(
     //   そこで穴は ★状態を持たない決定的ルール★ で埋める: spd 判明 → Doppler(spd×dt・never-over cap)、
     //   spd 不明 → 平滑弦 straight (角切り・稀=99%は spd 有り)。両経路で batch==tracker を保証。
     if (_dtS > 0 && _dtS < 120 && spd >= 0) {
-      const dop = spd * _dtS;
-      if (straight > 0.1 && dop / straight > cfg.routingMaxRatio) {
+      // ★両端速度台形補間(公知) 穴埋め★: 穴は (入口GPS, 出口GPS) の両端に拘束。
+      //   spd = 出口点速度 (gpsSpeedProvider(cur) = cur.spd)。prev.spd = 入口点速度。
+      //   両端速度が揃えば 1区間両端拘束の最小加速度解 = 台形積分 (v0+v1)/2 × dt を採用し、
+      //   片端 (入口) 外挿のドリフトを除く (出口で帳尻 → 過大に伸びにくい)。どちらか欠ければ片端式。
+      let fill = spd * _dtS; // 既定 = 従来の片端 (出口速度×dt)
+      let fillReason = 'doppler';
+      if (cfg.boundaryGapFill === true) {
+        const v0 = typeof prev.spd === 'number' && prev.spd >= 0 ? prev.spd : -1;
+        const v1 = spd; // 出口速度 (>=0 が if 条件で保証済)
+        if (v0 >= 0) {
+          fill = ((v0 + v1) / 2) * _dtS; // 両端アンカー台形 (= 区間一定加速度の厳密距離)
+          fillReason = 'boundary';
+        }
+      }
+      // ── never-over (両端拘束でも保険として温存) ──
+      if (straight > 0.1 && fill / straight > cfg.routingMaxRatio) {
         stats.straightSegs++;
         bd.straightFallbackM += straight;
         return straight;
       }
-      stats.dopplerSegs++;
-      bd.dopplerM += dop;
-      return dop;
+      if (fillReason === 'boundary') {
+        stats.boundaryGapSegs = (stats.boundaryGapSegs || 0) + 1;
+        bd.boundaryGapM = (bd.boundaryGapM || 0) + fill;
+      } else {
+        stats.dopplerSegs++;
+        bd.dopplerM += fill;
+      }
+      return fill;
     }
     stats.straightSegs++;
     bd.straightFallbackM += straight;

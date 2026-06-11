@@ -231,6 +231,67 @@
     }
   }
 
+  // ★speedSrc スナップショット (2026-06-10・OBD-main 発火診断)★:
+  //   現状 trace は obd 速度しか記録せず「prod の距離計算がどの速度源(obd/dop/hav/coast)で
+  //   駆動したか」を後から判定不能だった (= 実走で OBD valid 100% でも distance が GPS になった
+  //   真因を静的に追えなかった)。ここで ★gps.js L629 と同じ条件★ を passive に評価し、
+  //   実際に prod が OBD-main を発火させる状態だったかを trace に焼く。
+  //   passive 厳守: window.OBD_DRIVE_DISTANCE と window.OBDClient を ★読むだけ★。
+  //     距離コア / Meter / 課金 / running gate は 1 byte も非参照・無代入。
+  //   返り値 (gps.js の _speedSrc 決定ロジックと同義):
+  //     'obd'   = OBD_DRIVE_DISTANCE 有効 かつ OBD 車速が鮮度OK(valid) → prod は speedSrc='obd'
+  //     'dop'   = 上記不成立 かつ coords.speed が有効(>=0) → prod は Doppler 速度
+  //     'hav'   = coords.speed 無効(null/-1) → prod は haversine 代用
+  //   ※ 'coast'(穴埋め減衰ホールド) は実点が来ない瞬間の prod 内部状態で、本 passive watch は
+  //     実点ごとにしか発火しないため observable でない → ここでは判定対象外(実点の速度源のみ記録)。
+  function _speedSrcSnapshot(coords) {
+    try {
+      const obdOn =
+        typeof window !== 'undefined' && window.OBD_DRIVE_DISTANCE === true && !!window.OBDClient;
+      if (obdOn && window.OBDClient.getSpeed) {
+        const s = window.OBDClient.getSpeed();
+        if (s && s.valid && s.kmh >= 0) return 'obd';
+      }
+      const spd = coords && coords.speed;
+      return spd != null && spd >= 0 ? 'dop' : 'hav';
+    } catch (_) {
+      return null; // 評価不能 → null (記録漏れと区別)
+    }
+  }
+
+  // ★OBD-main ゲート状態スナップショット (2026-06-10)★: window.OBD_DRIVE_DISTANCE の生値。
+  //   speedSrc が 'obd' にならなかった時、ゲート自体が落ちていたのか(=起動バグ) /
+  //   ゲートは立ったが OBD 速度が valid でなかったのかを切り分ける診断軸。
+  //   passive: フラグを読むだけ。1=有効 / 0=無効 / -1=未設定(未 load) sentinel。
+  function _obdGateSnapshot() {
+    try {
+      if (typeof window === 'undefined' || typeof window.OBD_DRIVE_DISTANCE === 'undefined') {
+        return -1;
+      }
+      return window.OBD_DRIVE_DISTANCE === true ? 1 : 0;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  // ★distanceSource スナップショット (2026-06-10)★: prod が直近で distance_m を更新したソース。
+  //   Meter.getMMStats().distance_source = 'pipeline'(MM本線) / 'gap'(穴埋め) / 'loadfill'(道路ロード中) /
+  //   'inline'。OBD-main 発火時も距離は pipeline(∫v は map-matcher 経由)ゆえ、speedSrc('obd') と
+  //   distanceSource を併記して「OBD 速度で pipeline が動いたか / gap に落ちたか」を解析側で判定する。
+  //   passive 厳守: Meter.getMMStats() を ★呼んで読むだけ★ (副作用なし getter)・Meter へ無代入。
+  //   未 load / 非 browser / getter 不在は null (記録漏れと区別)。
+  function _distSrcSnapshot() {
+    try {
+      if (typeof Meter === 'undefined' || !Meter || typeof Meter.getMMStats !== 'function') {
+        return null;
+      }
+      const st = Meter.getMMStats();
+      return st && typeof st.distance_source === 'string' ? st.distance_source : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function onPosition(p) {
     if (samples.length >= MAX_SAMPLES) return; // 上限到達後は破棄
     const c = p.coords;
@@ -254,6 +315,10 @@
       biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
       obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用
       obd_odo: _obdOdoSnapshot(), // ★OBDオドメーター(01A6・km・-1=未対応/未取得)。業務開始/終了の差=タイヤ回転距離(メーター級)照合用
+      // ★OBD-main 発火診断 (2026-06-10・追加のみ・既存 field 不変・passive)★:
+      spdsrc: _speedSrcSnapshot(c), // 速度源 'obd'/'dop'/'hav' (gps.js L629 と同条件で評価・null=評価不能)。OBD-main が実際に発火したか
+      obd_gate: _obdGateSnapshot(), // window.OBD_DRIVE_DISTANCE 生値 1/0/-1。ゲート落ち(起動バグ) vs OBD速度未valid の切り分け
+      dsrc: _distSrcSnapshot(), // distanceSource 'pipeline'/'gap'/'loadfill'/'inline' (Meter.getMMStats読むだけ・null=未load)。距離が GPS/穴埋めに落ちたか
     });
     _accelSinceGps = []; // 次 GPS 区間用に clear (= gps.js の worker 送信毎 batch と同じ区切り)
     const countEl = document.getElementById('traceSampleCount');
