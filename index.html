@@ -204,6 +204,20 @@
         opacity: 1;
         background: #4ade80;
       }
+      /* ★OBD接続チップ (2026-06-11・最小化スッキリ rev)★: 絵文字/緑ベタ塗り/速度重複を廃止し
+         GPSピルと同じ「ドット + OBD」の小ピルに統一。接続状態は #obdDot の色だけで示す
+         (.gps-dot.ok=緑=接続済 / 既定=半透明白=未接続)。状態色はJSが classList で切替(inline style廃止)。 */
+      .obd-chip {
+        border: none;
+        cursor: pointer;
+        font-family: 'Noto Sans JP', sans-serif;
+        font-weight: 700;
+        color: #fff;
+      }
+      .obd-chip.is-disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
       /* PWAインストール促進バナー */
       .pwa-banner {
         display: none;
@@ -4027,25 +4041,13 @@
           <div class="gps-dot" id="gpsDot"></div>
           <span class="gps-acc" id="gpsAcc">GPS待機</span>
         </div>
-        <!-- ★OBD 接続チップ (2026-06-08・青バー常駐・全画面で見える&押せる)★:
-             タップで接続/接続中タップで切断。未接続=灰「📟 OBD」・接続中=緑「🟢 OBD ○○」。
-             業務開始→走行と画面が遷移しても常駐するので、いつでも接続/状態確認できる。
-             Web Bluetooth 非対応(iPhone)は無効表示。bindObdUI が 500ms 毎に更新。 -->
-        <button
-          id="obdChip"
-          type="button"
-          class="gps-pill"
-          style="
-            border: none;
-            cursor: pointer;
-            font-family: 'Noto Sans JP', sans-serif;
-            background: rgba(255, 255, 255, 0.18);
-            color: #fff;
-            font-weight: 700;
-            gap: 4px;
-          "
-        >
-          <span id="obdChipLabel">📟 OBD</span>
+        <!-- ★OBD 接続チップ (2026-06-11・最小化スッキリ rev・青バー常駐・全画面で見える&押せる)★:
+             GPSピルと同じ「ドット + OBD」の小ピル。接続状態は #obdDot の色だけ(緑=接続済 / 半透明白=未接続)。
+             絵文字/緑ベタ塗り/速度重複は廃止(車速はメーター本体に表示)。タップで接続/接続中タップで切断。
+             業務開始→走行と画面が遷移しても常駐。Web Bluetooth 非対応(iPhone)は .is-disabled。bindObdUI が 500ms 毎に更新。 -->
+        <button id="obdChip" type="button" class="gps-pill obd-chip">
+          <span class="gps-dot" id="obdDot"></span>
+          <span id="obdChipLabel">OBD</span>
         </button>
         <div
           class="surcharge-badge"
@@ -4058,7 +4060,7 @@
       </div>
       <nav class="appbar-nav" id="appbarNav">
         <button class="nav-item active" type="button" onclick="window.hideAllOverlays()">
-          <span class="nav-icon">●</span><span class="nav-label">業務</span>
+          <span class="nav-icon">●</span><span class="nav-label">ホーム</span>
         </button>
         <button class="nav-item" type="button" onclick="window.showOverlay('help')">
           <span class="nav-icon">?</span><span class="nav-label">使い方</span>
@@ -13356,9 +13358,9 @@
               btnC.style.opacity = '0.5';
             }
             // 青バーチップも非対応表示 (iPhone 等)
-            if (chipLabel) chipLabel.textContent = '📟 OBD✕';
+            if (chipLabel) chipLabel.textContent = 'OBD';
             if (obdChip) {
-              obdChip.style.opacity = '0.5';
+              obdChip.classList.add('is-disabled');
               obdChip.title = 'OBDはAndroid Chromeのみ対応';
             }
           }
@@ -13478,18 +13480,10 @@
               sourceEl.textContent = obdDriving ? '🟢 OBD (車輪速度)' : '📡 GPS';
               sourceEl.style.color = obdDriving ? '#34c759' : '#007aff';
             }
-            // ★青バーチップ: 接続状態を一目で (緑=接続済+車速 / 半透明白=未接続)★
-            if (chipLabel && obdChip) {
-              if (_obdConnected) {
-                chipLabel.textContent = '🟢 OBD' + (sp.valid ? ' ' + sp.kmh : '');
-                obdChip.style.background = '#34c759';
-                obdChip.style.color = '#fff';
-              } else {
-                chipLabel.textContent = '📟 OBD';
-                obdChip.style.background = 'rgba(255,255,255,0.18)';
-                obdChip.style.color = '#fff';
-              }
-            }
+            // ★青バーチップ: 接続状態は #obdDot の色だけで示す (緑=接続済 / 半透明白=未接続)★
+            //   ラベルは常に「OBD」固定 (速度はメーター本体に表示・ここでは重複させない)。
+            var obdDot = document.getElementById('obdDot');
+            if (obdDot) obdDot.className = _obdConnected ? 'gps-dot ok' : 'gps-dot';
             // ★走行中バッジ: 計測源を一目で★
             if (driveBadge) {
               driveBadge.textContent = obdDriving ? '🟢 OBD(車輪速度)' : '📡 GPS';
