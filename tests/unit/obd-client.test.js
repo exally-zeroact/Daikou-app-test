@@ -48,6 +48,36 @@ describe('OBDClient ELM327 速度パース (_parseSpeedKmh)', () => {
   });
 });
 
+describe('OBDClient ELM327 RPMパース (_parseRpm・010C・(256A+B)/4)', () => {
+  const O = loadOBD();
+  const cases = [
+    ['41 0C 0F A0', 1000], // (256*15+160)/4 = 4000/4
+    ['410C0BB8', 750], // idle (256*11+184)/4 = 3000/4
+    ['41 0C 1A F8', 1726], // (256*26+248)/4 = 6904/4
+    ['41 0C 00 00', 0],
+    ['SEARCHING...\r41 0C 0F A0', 1000],
+    ['41 0C 0F A0\r>', 1000],
+    ['NO DATA', null],
+    ['ERROR', null],
+    ['41 0D 3C', null], // 速度PID(0D)はRPMではない
+    ['41 0C 0F', null], // 1byteしかない(2byte必要)
+    ['', null],
+    [null, null],
+    [undefined, null],
+  ];
+  it.each(cases)('parse(%o) = %o', (input, expected) => {
+    expect(O._parseRpm(input)).toBe(expected);
+  });
+
+  it('最大値16383.75rpm(FFFF)を正しく扱う', () => {
+    expect(O._parseRpm('41 0C FF FF')).toBe(16383.75);
+  });
+
+  it('getRpm() 初期値は rpm:-1 (未取得)', () => {
+    expect(O.getRpm().rpm).toBe(-1);
+  });
+});
+
 describe('OBDClient 環境判定 / speedProvider 鮮度', () => {
   it('Web Bluetooth 非対応環境では isSupported()=false', () => {
     const O = loadOBD({}); // navigator あり・bluetooth なし

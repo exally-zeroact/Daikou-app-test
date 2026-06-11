@@ -61,6 +61,12 @@
   const SPEED_PID = '010D'; // Mode 01 PID 0D = Vehicle Speed (km/h・1 byte)
   const ODO_PID = '01A6'; // Mode 01 PID A6 = Odometer (0.1km・4 byte・新しめの車)
   const ODO_POLL_EVERY = 30; // この回数の速度ポーリングごとに1回 01A6 を混ぜる(odoは0.1km刻みで遅い)
+  // ★RPM 記録 (2026-06-11)★: Mode01 PID 0C = Engine RPM(0.25rpm刻み=速度の1km/h floorより遥かに高解像度)。
+  //   OBD車速は1km/h整数floorで∫vが系統過小(-2.9%)。RPM(高解像度)+ギア比学習で細かい速度を復元すれば
+  //   floor過小を ★根から★ 消せる(US9679422 等の公知手法)。本コミットでは ★記録のみ★(距離計算には未配線)。
+  //   次走行traceに rpm を残し、オフラインでギア比学習法を実データ検証可能にする。010C は1996年以降ほぼ全車対応の標準PID。
+  const RPM_PID = '010C'; // Mode 01 PID 0C = Engine RPM ((256A+B)/4 rpm・2 byte)
+  const RPM_POLL_EVERY = 10; // 速度ポーリング10回に1回 010C を混ぜる(速度主ポーリングをほぼ邪魔しない)
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
@@ -81,6 +87,7 @@
   //   差＝この車のタイヤ回転距離(メーター級)をトリップ値と照合できる。_odoSupported はプローブで確定。
   let _latestOdo = { km: -1, ts: 0 };
   let _odoSupported = false;
+  let _latestRpm = { rpm: -1, ts: 0 }; // ★最新エンジンRPM(010C・-1=未取得)。記録専用・距離計算には未配線★
   let _pollCount = 0;
   let _consecFail = 0; // 速度ポーリングの連続失敗数(mid-drive 回復トリガー)
   let _recovering = false; // _warmup 再確立中フラグ(多重起動防止)
@@ -142,6 +149,23 @@
     return raw * 0.1; // 0.1 km/bit
   }
 
+  // ─── 純関数: ELM327 応答 → エンジンRPM (010C・(256A+B)/4・2byte・単体テスト対象) ──────
+  //   応答例: "41 0C 1A F8" / "410C1AF8"。"41 0C" の直後 2 byte (A,B) を ((256A+B)/4) rpm として返す。
+  function _parseRpm(str) {
+    if (typeof str !== 'string' || str.length === 0) return null;
+    const cleaned = str.replace(/[\s>\r\n]/g, '').toUpperCase();
+    if (/NODATA|ERROR|UNABLE/.test(cleaned) && !/410C/.test(cleaned)) return null;
+    const idx = cleaned.indexOf('410C');
+    if (idx < 0 || idx + 8 > cleaned.length) return null;
+    const hex = cleaned.substr(idx + 4, 4);
+    if (!/^[0-9A-F]{4}$/.test(hex)) return null;
+    const a = parseInt(hex.substr(0, 2), 16);
+    const b = parseInt(hex.substr(2, 2), 16);
+    const rpm = (256 * a + b) / 4;
+    if (!Number.isFinite(rpm) || rpm < 0 || rpm > 16383.75) return null;
+    return rpm;
+  }
+
   // ─── Web Bluetooth サポート判定 ───
   function isSupported() {
     return !!(
@@ -175,6 +199,16 @@
       ts: _latestOdo.ts,
       supported: _odoSupported,
       ageMs: _latestOdo.ts > 0 ? _now() - _latestOdo.ts : Infinity,
+    };
+  }
+
+  // ★エンジンRPM(010C)★。未取得は rpm:-1。trace が定期記録 → 次走行でギア比学習(floor過小de-quant)の実検証用。
+  //   記録専用: 距離計算には未配線(距離源は gps.js の OBD速度上書き一本)。
+  function getRpm() {
+    return {
+      rpm: _latestRpm.rpm,
+      ts: _latestRpm.ts,
+      ageMs: _latestRpm.ts > 0 ? _now() - _latestRpm.ts : Infinity,
     };
   }
 
@@ -517,16 +551,23 @@
         return;
       }
       const t0 = _now();
-      // ★速度を主・odoは定期混入★: odo対応かつ ODO_POLL_EVERY ごとに 01A6 を1回叩く。
+      // ★速度を主・odo/rpmは定期混入★: odo対応かつ ODO_POLL_EVERY ごとに 01A6、RPM_POLL_EVERY ごとに 010C を1回叩く。
       _pollCount++;
       const _isOdoPoll = _odoSupported && _pollCount % ODO_POLL_EVERY === 0;
-      const _cmd = _isOdoPoll ? ODO_PID : SPEED_PID;
+      const _isRpmPoll = !_isOdoPoll && _pollCount % RPM_POLL_EVERY === 0; // odoと衝突時はodo優先
+      const _cmd = _isOdoPoll ? ODO_PID : _isRpmPoll ? RPM_PID : SPEED_PID;
       _send(_cmd)
         .then(function (resp) {
           if (_isOdoPoll) {
             const km = _parseOdometerKm(resp);
             if (km != null) {
               _latestOdo = { km: km, ts: _now() };
+              _consecFail = 0;
+            }
+          } else if (_isRpmPoll) {
+            const rpm = _parseRpm(resp);
+            if (rpm != null) {
+              _latestRpm = { rpm: rpm, ts: _now() }; // 記録専用(距離計算には未配線)
               _consecFail = 0;
             }
           } else {
@@ -578,6 +619,7 @@
     _latest = { kmh: -1, mps: -1, ts: 0 };
     _latestOdo = { km: -1, ts: 0 };
     _odoSupported = false;
+    _latestRpm = { rpm: -1, ts: 0 };
     _pollCount = 0;
     _consecFail = 0;
     _recovering = false;
@@ -635,12 +677,14 @@
     isConnected: isConnected,
     getSpeed: getSpeed,
     getOdometer: getOdometer,
+    getRpm: getRpm,
     speedProvider: speedProvider,
     getStatus: getStatus,
     on: on,
     // 単体テスト/デバッグ用 (純関数)
     _parseSpeedKmh: _parseSpeedKmh,
     _parseOdometerKm: _parseOdometerKm,
+    _parseRpm: _parseRpm,
     _decodeProbe: _decodeProbe,
     _PROBE_QUERIES: PROBE_QUERIES,
     _PROFILES: PROFILES,

@@ -231,6 +231,21 @@
     }
   }
 
+  // ★エンジンRPM スナップショット (2026-06-11・RPMギア比学習データ収集)★: passive=OBDClient.getRpm()読むだけ。
+  //   RPM(010C・高解像度)+ギア比でOBD車速1km/h floor過小をde-quantする将来法の ★実データ★ を次走行traceに残す。
+  //   -1=未取得/非対応。距離計算には未配線(記録専用)。
+  function _obdRpmSnapshot() {
+    try {
+      if (typeof window === 'undefined' || !window.OBDClient || !window.OBDClient.getRpm) {
+        return -1;
+      }
+      const r = window.OBDClient.getRpm();
+      return r && r.rpm >= 0 ? r.rpm : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
   // ★speedSrc スナップショット (2026-06-10・OBD-main 発火診断)★:
   //   現状 trace は obd 速度しか記録せず「prod の距離計算がどの速度源(obd/dop/hav/coast)で
   //   駆動したか」を後から判定不能だった (= 実走で OBD valid 100% でも distance が GPS になった
@@ -315,6 +330,7 @@
       biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
       obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用
       obd_odo: _obdOdoSnapshot(), // ★OBDオドメーター(01A6・km・-1=未対応/未取得)。業務開始/終了の差=タイヤ回転距離(メーター級)照合用
+      rpm: _obdRpmSnapshot(), // ★エンジンRPM(010C・-1=未取得)。RPM+ギア比でfloor過小de-quantする法の実データ収集(記録専用・距離未配線)
       // ★OBD-main 発火診断 (2026-06-10・追加のみ・既存 field 不変・passive)★:
       spdsrc: _speedSrcSnapshot(c), // 速度源 'obd'/'dop'/'hav' (gps.js L629 と同条件で評価・null=評価不能)。OBD-main が実際に発火したか
       obd_gate: _obdGateSnapshot(), // window.OBD_DRIVE_DISTANCE 生値 1/0/-1。ゲート落ち(起動バグ) vs OBD速度未valid の切り分け
