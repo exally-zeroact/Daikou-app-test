@@ -49,3 +49,25 @@ jobs:
 
       - name: Full-pipeline certification gate (never-over/coast/単調/latch hard-fail・認定バンドは CERT-GAP report)
         run: npm run test:sim-cert
+
+      # ── 真距離KP採点ゲート (truedist-kp-gate・2026-06-12 配線) ──
+      # 0610b-Android(KP38-49全12点通過・OBD有)を eps=0(過大1mも不可)で採点。
+      # 過大(error>0)が1業務でも出たら hard-fail。3台朝traceはKP回廊外=ここでは使わない(空緑回避)。
+      - name: True-distance KP gate (0610b-Android・eps=0 過大ゼロ hard-fail)
+        run: npm run test:gate-kp
+
+      # ── OBD実エンジン発火ゲート (truedist-obd-engine-gate) ──
+      # 実Meter+map-matcher worker に OBD車速を流し obdSegs 発火＋δ OFF/ON 真距離採点。
+      - name: OBD-main engine gate (obdSegs発火・δ真距離採点 hard-fail)
+        run: npm run test:obd-engine
+
+      # ── Doppler棄却配線ゲート (gate-realdevice-doppler-rej) ──
+      - name: Doppler rejection wiring gate
+        run: npm run test:gate-doppler
+
+      # ── 端末間収束(spread)ゲート ── ★現状RED(spread790m=未解決の⑤)★
+      # 過大ゼロ+spread<420m を測る。⑤seam収束が未実装ゆえ現状FAIL。
+      # 修正land まで continue-on-error で「可視化only(非ブロック)」。fix後にこの行を外して hard-fail化。
+      - name: Device-spread gate (★RED可視化・⑤seam未実装まで非ブロック★)
+        run: npm run test:gate-spread
+        continue-on-error: true
