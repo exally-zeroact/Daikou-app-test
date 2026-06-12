@@ -63,6 +63,12 @@ jobs:
       - name: OBD-main engine gate (obdSegs発火・δ真距離採点 hard-fail)
         run: npm run test:obd-engine
 
+      # ── source-aware k 過大ゼロ&-1%以内ゲート (OBD+センサーメイン・2026-06-12) ──
+      # δ-OFF + OBD∫v×手動k=1.02 が 196号KP RTK真値に対し -1%以内かつ過大ゼロ(≤真値)を hard-fail 検証。
+      # 二重補正(δ-ON×k)の過大も可視化。source-aware k(OBD駆動のみ)+VK_MAX 1.02 の回帰検出器。
+      - name: source-aware k never-over gate (δ-OFF+OBD∫v×k 過大ゼロ&-1%以内 hard-fail)
+        run: npm run test:k-neverover
+
       # ── Doppler棄却配線ゲート (gate-realdevice-doppler-rej) ──
       - name: Doppler rejection wiring gate
         run: npm run test:gate-doppler

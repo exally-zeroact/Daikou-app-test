@@ -260,7 +260,11 @@ function _resetPipelineTrackers() {
 //   = Viterbi/HMM の「繋がってない道へ遷移しない」拘束を距離計算へ接続したもの。
 //   prefecture は outSnap の県を優先・無ければ最寄り道路を持つ県を解決 (加算ではなく県特定のみ)。
 //   未ロード / ingest 失敗 / 静止は 0 (= no-op・既存挙動不変)。
+//   ★_lastDeltaSrc★: 直近 _confirmedRoadDelta が算出した delta の距離源 ('obd'=∫v(OBD)駆動 / 'gps'=その他)。
+//     呼出側が mmResult.pipelineDeltaSrc として meter へ渡し、source-aware k 適用に使う。
+let _lastDeltaSrc = 'gps';
 function _confirmedRoadDelta(msg, outSnap) {
+  _lastDeltaSrc = 'gps'; // 既定 (ingest 前/失敗/静止 = gps扱い=随伴車k非適用=安全側)
   try {
     let pref = outSnap && outSnap.prefecture ? outSnap.prefecture : null;
     if (!pref && loadedPrefs.size > 0) {
@@ -312,6 +316,9 @@ function _confirmedRoadDelta(msg, outSnap) {
       synthetic: msg.isSynthetic === true,
     });
     // 確定道路読み取り (連結性拘束済) の道なり区間増分。正値のみ採用。
+    // ★距離源タグ (2026-06-12・OBD+センサーメイン・アーキ)★: この delta が ∫v(OBD) 駆動か否かを
+    //   meter へ伝える (= source-aware k: OBD駆動だけ随伴車k適用・GPS駆動は×1.0で過大ゼロ)。
+    _lastDeltaSrc = res && res.reason === 'obd' ? 'obd' : 'gps';
     const confirmedDeltaM = res && typeof res.deltaM === 'number' ? res.deltaM : 0;
     return confirmedDeltaM > 0 ? confirmedDeltaM : 0;
   } catch (_) {
@@ -3002,6 +3009,7 @@ self.onmessage = function (e) {
           windowSize: 0,
           committed: true,
           pipelineDeltaM: _pipelineFlushM,
+          pipelineDeltaSrc: 'gps', // ★flush は平滑バッファ末尾(OBDはバッファ非経由)=gps扱い=随伴車k非適用★
           _reason: 'pipeline flush before reset',
         });
       }
@@ -3420,9 +3428,13 @@ self.onmessage = function (e) {
     //   state.distance_m += pipelineDeltaM を実行する (= 単一経路・道路 snap 道なり)。
     //   ★(c) 配線完全性: 距離源は greedy per-point snap 生値ではなく・連結性拘束を通した確定道路読み取り★。
     let _pipelineDeltaM_now = 0;
+    let _pipelineDeltaSrc = 'gps'; // ★距離源 ('obd'=∫v(OBD)駆動)・source-aware k 用★
     {
       const _confirmed = _confirmedRoadDelta(msg, outSnap);
-      if (_confirmed > 0) _pipelineDeltaM_now = _confirmed;
+      if (_confirmed > 0) {
+        _pipelineDeltaM_now = _confirmed;
+        _pipelineDeltaSrc = _lastDeltaSrc;
+      }
     }
 
     const _lowSpeed = msg.speedKmh != null && msg.speedKmh < 2;
@@ -3482,6 +3494,7 @@ self.onmessage = function (e) {
       //   isStationary (= effectively stationary) freeze 時は ingest 側 ZUPT が deltaM=0 を返すため
       //   別途 0 化不要だが・freeze と整合させるため下の effectivelyStationary block で 0 に念押しする。
       pipelineDeltaM: _pipelineDeltaM_now,
+      pipelineDeltaSrc: _pipelineDeltaSrc, // ★source-aware k: 'obd'=随伴車k適用 / 'gps'=×1.0★
     });
   }
 };

@@ -159,7 +159,7 @@ function hitFor(i0, i1, kpNum) {
 //   obdDeltaCalib は worker の PipelineDistance.DEFAULTS を実行時に差し替えて ON/OFF する
 //   (本番 flip と同じ設定面。createDistanceTracker(dec,{}) が DEFAULTS を読むため反映される)。
 // ============================================================================
-function runEngine(obdDeltaCalib) {
+function runEngine(obdDeltaCalib, vehicleK) {
   const worker = createMapMatcherWorker({ debug: false });
   let roadsLoaded = false;
   worker.on((e) => {
@@ -179,7 +179,12 @@ function runEngine(obdDeltaCalib) {
   }
 
   const roadsData = loadPrefRoadsData('ehime');
-  const Meter = loadMeter({ debug: false });
+  // ★随伴車別 k 注入 (vehicleK 指定時)★: meter は業務開始ロックで window.DK_VEHICLE_PROFILE.k を読む。
+  //   k=1.0 / 未指定 は profile 不在 = 恒等(byte 不変)。VK_MAX clamp は meter 側で効く(=テストが実態を反映)。
+  const Meter = loadMeter({
+    debug: false,
+    vehicleProfile: vehicleK ? { k: vehicleK, k_samples: 1, vin: 'TESTK' } : undefined,
+  });
   Meter.setFareConfig(FARE);
   Meter.reset();
 
@@ -523,6 +528,95 @@ console.log(
   '※obdDeltaCalib flip 判断は ①obdSegs>0(実発火) ②過大ゼロ維持 ③誤差改善 の3点を本出力で確認すること。'
 );
 console.log('===========================================================');
+
+// ============================================================================
+// ★--k-neverover★ : OBD+センサーメイン・アーキ検証 (テスト先行・2026-06-12)
+//   司さん確定アーキ(memory: obd_sensor_main_architecture): OBD接続中は OBD∫v×手動k で距離・
+//   GPSベースδは二重補正になるので OFF。これを ★196号KP RTK真値★ で過大ゼロ検証する:
+//     (1) δ-OFF + k=1.02 → 全業務 ★-1%以内 かつ 過大ゼロ(≤真値)★ (本命・実装前REDの想定)
+//     (2) δ-ON  + k=1.02 → ★二重補正で過大★ になることを可視化(=δ-OFF を採る根拠)
+//   ★実装前(VK_MAX=1.01でkが1.01にclampされる)は (1)が -1.13%級で「-1%以内」を満たさず RED。
+//     VK_MAX→1.02(source-aware・OBD駆動のみ)実装後に GREEN。★ フラグ無し時はCI現行と完全に不変。
+// ============================================================================
+const K_NEVEROVER = process.argv.slice(2).includes('--k-neverover');
+if (K_NEVEROVER) {
+  console.log('\n===========================================================');
+  console.log('★--k-neverover : OBD∫v×手動k 過大ゼロ&-1%以内 検証 (RTK真値)★');
+  console.log('===========================================================');
+  let kFail = false;
+  const K = 1.02;
+  // (1) 本命: δ-OFF + k
+  let eOff;
+  try {
+    eOff = runEngine(false, K);
+  } catch (e) {
+    console.log('δ-OFF+k ENGINE ERROR: ' + e.message);
+    process.exit(1);
+  }
+  const scOff = scoreRun(eOff);
+  console.log(
+    '【δ-OFF + k=' + K + ' (本命: OBD∫v×手動k・GPSベースδ無し)】 obdSegs=' + eOff.obdSegs
+  );
+  for (const r of scOff.rows) {
+    if (!r.scored) {
+      console.log('  ' + r.label.padEnd(14) + ' 採点スキップ(' + r.reason + ')');
+      continue;
+    }
+    const withinTarget = r.errPct >= -1.0 && r.errPct <= EPS; // -1%以内 かつ 過大ゼロ
+    if (!withinTarget) kFail = true;
+    console.log(
+      '  ' +
+        r.label.padEnd(14) +
+        ' 真距離' +
+        r.trueKm.toFixed(1) +
+        'km vs ' +
+        r.engKm.toFixed(3) +
+        'km = ' +
+        fmtPct(r.errPct).padStart(8) +
+        '  → ' +
+        (r.errPct > EPS
+          ? '★過大(FAIL)★'
+          : r.errPct < -1.0
+            ? '★-1%未達(FAIL)★'
+            : '✓ -1%以内&過大ゼロ')
+    );
+  }
+  // (2) 負例: δ-ON + k = 二重補正の過大を可視化
+  let eOn;
+  try {
+    eOn = runEngine(true, K);
+  } catch (e) {
+    eOn = null;
+  }
+  if (eOn) {
+    const scOn = scoreRun(eOn);
+    const anyOverOn = scOn.rows.some((r) => r.scored && r.errPct > EPS);
+    console.log('【δ-ON + k=' + K + ' (負例: δとkの二重補正)】');
+    for (const r of scOn.rows) {
+      if (!r.scored) continue;
+      console.log(
+        '  ' +
+          r.label.padEnd(14) +
+          ' = ' +
+          fmtPct(r.errPct).padStart(8) +
+          (r.errPct > EPS ? ' ★過大=二重補正の証拠(δ-OFFを採る根拠)★' : '')
+      );
+    }
+    console.log(
+      '  → δ-ON+k 過大あり: ' +
+        (anyOverOn ? 'YES(=δとkを重ねるな・OBD車はδ-OFF)' : 'NO(clampで未到達)')
+    );
+  }
+  console.log('───────────────────────────────────────────────────────────');
+  console.log(
+    kFail
+      ? '★K-GATE FAIL★ — δ-OFF+k で -1%以内&過大ゼロ 未達 (実装前の想定RED or 実装後の回帰)。exit 1。'
+      : '★K-GATE PASS★ — δ-OFF+k で全業務 -1%以内 かつ 過大ゼロ(≤RTK真値)。'
+  );
+  console.log('===========================================================');
+  if (JSON_OUT) console.log('\n' + JSON.stringify(report, null, 2));
+  process.exit(kFail ? 1 : gateFail ? 1 : 0);
+}
 
 if (JSON_OUT) console.log('\n' + JSON.stringify(report, null, 2));
 

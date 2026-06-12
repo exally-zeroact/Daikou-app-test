@@ -167,7 +167,14 @@ const DEFAULTS = {
   //     ON -1.12%/-1.51% = 過大ゼロ維持(≤真距離)のまま誤差 ~1pt 改善・obdSegs=2485 実発火。
   //   ★cur.obd===true 区間のみ作用★ = GPS経路(OBD未接続/iPhone)は δ 非作用で byte不変(L1735ゲート)。
   //   OFF へ戻すのはこの 1 行のみ (rollback)。
-  obdDeltaCalib: true, // δ自己キャリブ有効化 (1行ON/OFF・rollback用)
+  // ★★2026-06-12 既定 OFF へ変更 (司さんアーキ: OBD+センサーメイン・GPSを距離から外す)★★:
+  //   δは「良GPS区間で GPS距離−OBD∫v」= ★GPSを距離補正に使う★ → OBDメイン方針と矛盾。さらに
+  //   随伴車別 手動k(真距離校正・source-aware)と ★二重補正★ になり過大化(実証: δ-ON×k1.02=+0.74%過大)。
+  //   ∴ OBD車は ★δ-OFF + OBD∫v×手動k★ に一本化(GPS除去+二重補正回避)。δ-OFF生-2.11%×k1.02=-0.16%(真値下)。
+  //   未校正(k=1.0)時はδ-OFF=-2.11%(バンド内・過大ゼロ)で、手動k校正で-1%以内へ。memory:
+  //   project_daikome_obd_sensor_main_architecture_2026-06-12。ON へ戻すのはこの 1 行のみ。
+  obdDeltaCalib: false, // ★δ自己キャリブ 既定OFF (GPS依存+kと二重補正のため・OBD車はk一本)★
+
   obdDeltaMinMps: -0.139, // δ下限 (-0.5km/h・OBD過大読み端末対策)
   obdDeltaMaxMps: 0.139, // δ上限 (+0.5km/h・floor過小補正の物理上限=never-over)
   calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)

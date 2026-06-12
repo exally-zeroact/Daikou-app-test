@@ -49,7 +49,11 @@ const Meter = (() => {
   //   ・never-over: 学習基準=認定メーター読み(検定上タイヤ真値以下) → k適用後 ≤ cert ≤ 真値
   //   ・既定 k=1.0 で全乗算が恒等=現行 1byte 不変 (cert-gate/parity 影響ゼロ)
   const VK_MIN = 0.9;
-  const VK_MAX = 1.01;
+  //   ★VK_MAX 1.02 (2026-06-12・source-aware化で安全に引上げ)★: 随伴車k は ★OBD∫v駆動distanceだけ★に
+  //   適用する source-aware 化により、GPS距離が k で過大化する経路を断った。よって OBD車が必要とする
+  //   k≈1.02(196号KP RTH実証: δ-OFF OBD生-2.11%×1.02=-0.16%=真値の下)へ上限を上げても過大ゼロを保つ。
+  //   GPS駆動は常に×1.0(上記 source-aware)なので VK_MAX 引上げの影響を受けない。
+  const VK_MAX = 1.02;
   let _activeVehicleK = 1.0; // 業務開始でロックされる適用係数
   function _clampVK(k) {
     return typeof k === 'number' && isFinite(k) ? Math.min(VK_MAX, Math.max(VK_MIN, k)) : 1.0;
@@ -266,8 +270,13 @@ const Meter = (() => {
       lastMmUsefulAt = Date.now();
       // 参照値 mirror (= 後方互換 stats・mm_distance_m は ★RAW★・校正前監査ベースライン温存)
       state.mm_distance_m += delta;
-      // ★随伴車別 k 校正★: 課金距離/業務距離は raw × _activeVehicleK (k=1.0 で恒等=1byte不変)
-      const cal = delta * _activeVehicleK;
+      // ★source-aware 随伴車別 k 校正 (2026-06-12・OBD+センサーメイン・アーキ)★:
+      //   随伴車k(器差/タイヤ距離補正値)は ★OBD ∫v 駆動 distance だけ★に適用する。
+      //   GPS駆動distanceは位置由来でタイヤ器差と無関係+既に真値近い → ×1.0(k非適用)。
+      //   これで VK_MAX を 1.02 へ上げても GPS距離が過大化しない(過大ゼロ構造保証)。
+      //   k=1.0(未校正)なら obd/gps とも恒等 = 1byte 不変。
+      const _kForDelta = m.pipelineDeltaSrc === 'obd' ? _activeVehicleK : 1.0;
+      const cal = delta * _kForDelta;
       // 課金距離 (running gate・絶対不可侵経路)
       if (state.running) {
         state.distance_m += cal;
@@ -577,9 +586,10 @@ const Meter = (() => {
         const spdKmh = Math.min(gpsResult.speedKmh, GAP_FILL_MAX_KMH);
         const gapM = (spdKmh / 3.6) * gapSec;
         if (gapM > 0) {
-          // ★k 校正の穴を塞ぐ★: Worker B 不在 (E2E/startup/loadfill) でも同一 _activeVehicleK を適用。
+          // ★source-aware (2026-06-12)★: gap-fill は GPS速度×時間(loadfill/E2E)= ★OBD∫v駆動でない★
+          //   → 随伴車k 非適用(×1.0)。VK_MAX=1.02 でも GPS由来のgapが過大化しない(過大ゼロ)。
           //   gap_fill_total_m (stat) は RAW 維持。
-          const gapCal = gapM * _activeVehicleK;
+          const gapCal = gapM * 1.0;
           state.distance_m += gapCal;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = roadsLoading ? 'loadfill' : 'gap';

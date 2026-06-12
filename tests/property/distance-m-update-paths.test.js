@@ -73,10 +73,11 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
     //       よって本 test は「距離加算は += delta 経路のみ・GPS.calcDistance 呼出ゼロ」を検証する。
     const source = loadMeterSource();
     const lines = source.split('\n');
-    // distance_m += は 2 経路 (2026-06-09・随伴車別k校正を反映): cal (= pipeline delta × k) +
-    //   gapCal (= Worker B 不在時 gap補完 gapM × k・速度×時間=認定メーター方式)。
-    //   k は ★同一 delta/gapM へのスカラー器差★であり GPS 直線(haversine)課金ではない。
-    //   (setDistance の = v は別カウント)。
+    // distance_m += は 2 経路 (2026-06-12・source-aware 随伴車別k校正を反映): cal (= pipeline delta ×
+    //   _kForDelta) + gapCal (= Worker B 不在時 gap補完 gapM × 1.0・速度×時間=認定メーター方式)。
+    //   ★source-aware★: _kForDelta は OBD∫v駆動delta のみ _activeVehicleK・GPS駆動は 1.0(過大ゼロ)。
+    //   gap-fill は GPS速度×時間(OBD∫vでない)ゆえ ×1.0。k は ★同一 delta へのスカラー器差★であり
+    //   GPS 直線(haversine)課金ではない。(setDistance の = v は別カウント)。
     const addPaths = lines.filter((l) => /^\s*state\.distance_m\s*\+=\s*/.test(l));
     if (addPaths.length !== 2) {
       throw new Error(
@@ -92,13 +93,17 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
           JSON.stringify(addPaths.map((l) => l.trim()))
       );
     }
-    // ★単一源不変の強化★: cal/gapCal は pipeline delta / gapM の随伴車k倍であり別距離源でない事を検証。
+    // ★単一源不変の強化 (source-aware・2026-06-12)★: cal は pipeline delta × _kForDelta(OBD駆動のみk)、
+    //   gapCal は gapM × 1.0 (GPS gap-fill は k非適用)。別距離源(haversine等)でない事を検証。
     if (
-      !/const\s+cal\s*=\s*delta\s*\*\s*_activeVehicleK\b/.test(source) ||
-      !/const\s+gapCal\s*=\s*gapM\s*\*\s*_activeVehicleK\b/.test(source)
+      !/const\s+cal\s*=\s*delta\s*\*\s*_kForDelta\b/.test(source) ||
+      !/const\s+gapCal\s*=\s*gapM\s*\*\s*1\.0\b/.test(source) ||
+      !/_kForDelta\s*=\s*m\.pipelineDeltaSrc\s*===\s*'obd'\s*\?\s*_activeVehicleK\s*:\s*1\.0/.test(
+        source
+      )
     ) {
       throw new Error(
-        '白紙書き直し違反: cal/gapCal は delta×_activeVehicleK / gapM×_activeVehicleK のはず (= 単一pipeline源のk校正)'
+        '白紙書き直し違反: cal=delta×_kForDelta / gapCal=gapM×1.0 / _kForDelta=obd?_activeVehicleK:1.0 のはず (source-aware k)'
       );
     }
     // meter.js 内 GPS.calcDistance は 0 件 (= GPS 直線課金経路の混入なし)。

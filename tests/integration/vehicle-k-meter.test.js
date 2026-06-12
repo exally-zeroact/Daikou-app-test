@@ -1,10 +1,11 @@
 // tests/integration/vehicle-k-meter.test.js
 // ★随伴車別 k(メーター定数/器差調整)校正 の契約テスト (2026-06-09・discovery監査スペック準拠)★
 //   設計: k は engine(pipeline-distance) 無改変・meter 層の器差定数として適用。
-//     - distance_m / business_distance_m は rawDelta × _activeVehicleK (校正)
+//     - ★source-aware (2026-06-12)★: distance_m/business_distance_m は ★OBD∫v駆動delta だけ★
+//       rawDelta × _activeVehicleK (校正)。GPS駆動delta は ×1.0(k非適用・過大ゼロ構造保証)。
 //     - mm_distance_m は rawDelta のまま (RAW・校正前監査ベースライン温存)
 //     - k は代行開始(setBusinessActive false→true / start)でロック=業務別
-//     - _clampVK で [VK_MIN=0.90, VK_MAX=1.01] ハードクランプ (VK_MAX=唯一の過大臨界)
+//     - _clampVK で [VK_MIN=0.90, VK_MAX=1.02] ハードクランプ (VK_MAX=唯一の過大臨界・source-aware化で1.02へ)
 //     - calibrateVehicleK: sample=cert/raw(複利安全)・D<1000m/5%超急変は拒否・保守EWMA(0.3)
 //   絶対ルール: 過大ゼロ(cert≤真値 → k適用後≤cert≤真値)・業務別のみ・k=1.0で現行1byte不変。
 
@@ -58,8 +59,16 @@ function makeFakeWorker() {
   };
 }
 
-function deltaResult(deltaM) {
-  return { type: 'mmResult', pipelineDeltaM: deltaM, snapped: true, committed: true };
+// ★source-aware k (2026-06-12)★: 随伴車k は ★OBD∫v駆動delta だけ★に適用(GPS駆動は×1.0)。
+//   k機構(clamp/EWMA/業務ロック)の検証は OBD-tag delta で行う。GPS×1.0 は別途 (b2) で検証。
+function deltaResult(deltaM, src) {
+  return {
+    type: 'mmResult',
+    pipelineDeltaM: deltaM,
+    pipelineDeltaSrc: src || 'obd',
+    snapped: true,
+    committed: true,
+  };
 }
 
 // 業務を開始して running+business_active+drain解除にする
@@ -114,12 +123,22 @@ describe('随伴車別 k 校正 (meter 層器差定数)', () => {
     expect(s.mm_distance_m).toBeCloseTo(450, 4); // RAW
   });
 
-  it('(c) 壊れた学習値 k=1.65 を注入しても適用は VK_MAX=1.01 にハードクランプ', () => {
+  it('(b2) ★source-aware★: GPS駆動delta(pipelineDeltaSrc!=="obd")は k 非適用(×1.0)', () => {
+    setProfile(1.005);
+    startBusiness(Meter);
+    w._dispatch(deltaResult(100, 'gps')); // GPS駆動 → ×1.0 (×1.005でない)
+    w._dispatch(deltaResult(200, 'obd')); // OBD駆動 → ×1.005
+    const s = Meter.getState();
+    expect(s.distance_m).toBeCloseTo(100 * 1.0 + 200 * 1.005, 4); // 100 + 201 = 301
+    expect(s.mm_distance_m).toBeCloseTo(300, 4); // RAW は source 不問
+  });
+
+  it('(c) 壊れた学習値 k=1.65 を注入しても適用は VK_MAX=1.02 にハードクランプ', () => {
     setProfile(1.65);
     startBusiness(Meter);
     w._dispatch(deltaResult(1000));
     const s = Meter.getState();
-    expect(s.distance_m).toBeCloseTo(1000 * 1.01, 4); // 1010 (1650でない)
+    expect(s.distance_m).toBeCloseTo(1000 * 1.02, 4); // 1020 (1650でない・VK_MAX=1.02)
     expect(s.mm_distance_m).toBeCloseTo(1000, 4);
   });
 
@@ -179,10 +198,10 @@ describe('随伴車別 k 校正 (meter 層器差定数)', () => {
       setProfile(1.0);
       startBusiness(Meter);
       for (let i = 0; i < 100; i++) w._dispatch(deltaResult(100)); // raw=10000
-      // cert=10400 → sample=1.04 (許容内) → k=0.3*1.04+0.7*1.0=1.012 → clamp 1.01
+      // cert=10400 → sample=1.04 (許容内) → k=0.3*1.04+0.7*1.0=1.012 (VK_MAX=1.02 未クランプ)
       const r = Meter.calibrateVehicleK(10400);
       expect(r.ok).toBe(true);
-      expect(globalThis.DK_VEHICLE_PROFILE.k).toBeCloseTo(1.01, 4); // VK_MAX クランプ
+      expect(globalThis.DK_VEHICLE_PROFILE.k).toBeCloseTo(1.012, 4); // EWMA 1.012 < VK_MAX 1.02
     });
 
     it('(h) never-over: cert(真値以下) を学習基準 → 次業務の k 適用後距離 ≤ cert', () => {
