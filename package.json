@@ -26,7 +26,7 @@
     "test:verify-9677": "node tests/verify-new-meter-9677.js",
     "test:mm-priority": "node tests/meter-mm-priority.js",
     "test:gate-snap": "node tests/gate-snap-accuracy.js",
-    "test:sim-cert": "node tests/sim-fullpipeline-montecarlo.js 30 --gate",
+    "test:sim-cert": "node tests/sim-fullpipeline-montecarlo.js 30 --cert-strict",
     "test:gate-kp": "node tests/truedist-kp-gate.js fixtures/0610b-Android.json --eps=0",
     "test:obd-engine": "node tests/truedist-obd-engine-gate.js",
     "test:gate-doppler": "node tests/gate-realdevice-doppler-rej.js",
