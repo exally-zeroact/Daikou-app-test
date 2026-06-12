@@ -39,7 +39,13 @@ function batchVsTracker(fx) {
 }
 
 describe('長トンネル batch==tracker parity (gap-guard coastSpdMps 一致)', () => {
-  const FIXTURES = ['shimanami-iPhone13.json', 'shimanami-iPhoneSE.json', 'shimanami-Android.json'];
+  // ★slim版 (必須フィールドのみ・coord 6桁)★ をコミット (full は 21MB で重い)。
+  //   slim は parity 破綻を保持 (PRE-FIX で iPhone13 263.87m/SE 335.89m=full と同等) = 有効なガード。
+  const FIXTURES = [
+    'shimanami-iPhone13.slim.json',
+    'shimanami-iPhoneSE.slim.json',
+    'shimanami-Android.slim.json',
+  ];
   for (const f of FIXTURES) {
     it(`★ ${f}: batch == tracker (+flush) (1点ズレなし)`, () => {
       const r = batchVsTracker(loadFixture(f));
@@ -48,7 +54,7 @@ describe('長トンネル batch==tracker parity (gap-guard coastSpdMps 一致)',
   }
 
   it('★ never-over 不変: batch も tracker も穴埋めで過大を作らない (両者一致かつ有限)', () => {
-    const r = batchVsTracker(loadFixture('shimanami-iPhone13.json'));
+    const r = batchVsTracker(loadFixture('shimanami-iPhone13.slim.json'));
     expect(Number.isFinite(r.batch)).toBe(true);
     expect(Number.isFinite(r.tracker)).toBe(true);
     expect(r.tracker).toBeGreaterThan(0);
