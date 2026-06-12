@@ -12426,10 +12426,13 @@
                 color: #8e8e93;
               "
             >
-              <b style="color: #1c1c1e">認定メーター較正 (k)</b><br />
-              業務終了後、随伴車の認定メーター(料金メーター)の距離を入れると、この端末×この車の器差を学習して
-              −0.5〜−1% 帯へ寄せます(過大ゼロは死守)。<br />
-              ※入れるのは「その1業務で認定メーターが示した実距離」。過大値・1業務5%超の急変は自動で弾きます。
+              <b style="color: #1c1c1e">k 校正 (真距離基準)</b><br />
+              業務終了後、その業務の<b>真距離</b>(国道196号KP /
+              基準巻尺など)を入れると、この端末×この車の 器差(タイヤ補正値 k)を学習して −0.5〜−1%
+              帯へ寄せます(過大ゼロは死守)。<br />
+              ※入れるのは「その1業務の<b>真距離</b>」。随伴車メーター(DM
+              Light)は認定でなく長めに出るため
+              非推奨(入れると過大化リスク=随伴車合わせ込みであり認定校正ではない)。過大値・5%超急変は自動で弾く。
             </div>
             <div class="row" style="justify-content: space-between; padding: 3px 0">
               <span style="color: #8e8e93">現在の k</span>
@@ -12443,13 +12446,13 @@
               class="row"
               style="justify-content: space-between; padding: 3px 0; align-items: center"
             >
-              <span style="color: #8e8e93">認定メーター読み(km)</span>
+              <span style="color: #8e8e93">真距離(km)</span>
               <input
                 id="vehCertMeterReadM"
                 type="number"
                 step="0.01"
                 inputmode="decimal"
-                placeholder="例: 8.42"
+                placeholder="例: 9.00 (真距離)"
                 style="
                   width: 45%;
                   padding: 4px 8px;
@@ -13283,7 +13286,7 @@
               }
             });
           }
-          // ★認定メーター読みで k を較正 (随伴車別器差・業務終了後)★
+          // ★真距離(196号KP/基準巻尺)で k を較正 (随伴車別器差・業務終了後・DM Lightは非推奨)★
           if (btnVehCalibrate) {
             btnVehCalibrate.addEventListener('click', function () {
               try {
@@ -13294,7 +13297,7 @@
                 var km = vehCertMeterReadEl ? parseFloat(vehCertMeterReadEl.value) : NaN;
                 if (!(km > 0)) {
                   if (vehCalibrateNoteEl)
-                    vehCalibrateNoteEl.textContent = '認定メーターの距離(km)を入力してください';
+                    vehCalibrateNoteEl.textContent = '真距離(km)を入力してください';
                   return;
                 }
                 var r = Meter.calibrateVehicleK(km * 1000); // km→m
