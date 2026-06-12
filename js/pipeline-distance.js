@@ -1163,6 +1163,15 @@ function _prepareBatch(samples, decoder, opts) {
       }
       if (stationary) {
         bd.stationarySkipped++;
+        // ★coastSpdMps 更新 (tracker L1905-1915 と同一・長トンネル parity)★:
+        //   高信頼停止は 0 クリア (creep防止)・低信頼 (bad-acc/dt<=0) は保持し穴中減衰のみ (穴明け走行を殺さない)。
+        const _accCurStat = typeof cur.acc === 'number' && cur.acc >= 0 ? cur.acc : -1;
+        const _dtCurStat = ((cur.t || 0) - (state.prev.t || 0)) / 1000;
+        const _lowConfidenceStop =
+          (cfg.gapGuardAccM != null && _accCurStat > cfg.gapGuardAccM) || _dtCurStat <= 0;
+        if (spd >= 0) state.coastSpdMps = spd;
+        else if (!_lowConfidenceStop) state.coastSpdMps = 0;
+        else if (state.coastSpdMps >= 0) state.coastSpdMps = state.coastSpdMps * 0.97;
         // 加算せず prev/prevSnap だけ更新
         state.prev = cur;
         state.prevSnap = snap;
@@ -1180,9 +1189,17 @@ function _prepareBatch(samples, decoder, opts) {
         cfg,
         bd,
         stats,
-        -1 // batch (computeDistance) は coast 状態を持たない → 従来 (haversine) 挙動を維持
+        state.coastSpdMps // ★tracker と同一の coastSpdMps を渡す (更新前=因果順序保持・長トンネル parity)★
       );
       if (added > 0) state.distance_m += added;
+      // ★coastSpdMps 更新 (tracker L1969-1977 と同一)★: spd 判明=snap成功で再確立/snap無は減速側のみ即反映、
+      //   spd 不明 (穴中) は ×0.97 減衰で保守側へ。synthetic 分岐は batch に合成点が来ないため不要。
+      if (spd >= 0) {
+        if (snap) state.coastSpdMps = spd;
+        else if (state.coastSpdMps < 0 || spd < state.coastSpdMps) state.coastSpdMps = spd;
+      } else if (state.coastSpdMps >= 0) {
+        state.coastSpdMps = state.coastSpdMps * 0.97;
+      }
     }
 
     state.prev = cur;
@@ -1216,7 +1233,9 @@ function _finishBatch(distance_m, bd, stats) {
 
 function computeDistance(samples, decoder, opts) {
   const prep = _prepareBatch(samples, decoder, opts);
-  const state = { distance_m: 0, prev: null, prevSnap: null };
+  // ★coastSpdMps を batch も保持 (2026-06-12・長トンネル parity 根治)★: gap-guard が参照する
+  //   coastSpdMps を tracker と同一の状態機械で更新し、bad-acc 穴の fill/skip 判定を一致させる。
+  const state = { distance_m: 0, prev: null, prevSnap: null, coastSpdMps: -1 };
   for (let p = 0; p < prep.pts.length; p++) {
     prep.processPoint(state, prep.pts[p]);
   }
