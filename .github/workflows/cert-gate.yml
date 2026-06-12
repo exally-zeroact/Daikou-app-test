@@ -71,3 +71,23 @@ jobs:
       - name: Device-spread gate (★RED可視化・⑤seam未実装まで非ブロック★)
         run: npm run test:gate-spread
         continue-on-error: true
+
+      # ── 認定二段公差ゲート (cert-3env-gate・別表2 ≤1km:-40〜0m / >1km:-4〜0%) ──
+      # 0610b-Android で現状PASS(緑)→ hard-fail で配線。負例runは --negraw でメタ検証。
+      - name: Cert two-tier tolerance gate (別表2二段公差 hard-fail)
+        run: npm run test:gate-cert3env
+
+      # ── トンネル連続性ゲート ── ★現状RED(出口ドン=未解決の④)★ 非ブロック可視化
+      - name: Tunnel-continuity gate (★RED可視化・④トンネル本体未修正まで非ブロック★)
+        run: npm run test:gate-tunnel
+        continue-on-error: true
+
+      # ── 画面ロック凍結→resume一括計上ゲート ── ★現状RED(未解決)★ 非ブロック可視化
+      - name: Background-freeze resume gate (★RED可視化・lifecycle本体未修正まで非ブロック★)
+        run: npm run test:gate-bg-freeze
+        continue-on-error: true
+
+      # ── GNSS不安定(生弦+10%膨張)never-overゲート ── ★現状RED(欠陥検出)★ 非ブロック可視化
+      - name: GNSS-degraded never-over gate (★RED可視化・本体未修正まで非ブロック★)
+        run: npm run test:gate-gnss-degraded
+        continue-on-error: true
