@@ -177,6 +177,15 @@ const DEFAULTS = {
 
   obdDeltaMinMps: -0.139, // δ下限 (-0.5km/h・OBD過大読み端末対策)
   obdDeltaMaxMps: 0.139, // δ上限 (+0.5km/h・floor過小補正の物理上限=never-over)
+  // ★★OBD量子化補正 obdQuantCorrectMps (2026-06-13・全車普遍・manual k/GPS δ 不要)★★:
+  //   OBD車速(PID010D)は1km/h刻みで ★切り捨て(floor)★ → ∫v が systematically 過少(196号KP実測 -2〜-2.5%)。
+  //   真の速度は[v,v+1)km/hで平均 v+0.5 → 各点に +0.5km/h(=0.139m/s) 足せば ★車によらず普遍的に★
+  //   量子化floor過少を回収(GPS基準δも随伴車別manual kも不要・どの車でも自動)。実証(196号KP RTK):
+  //   ∫v -2〜-2.5% → +0.5km/h で -1〜-1.4%(改善・残差はタイヤ器差で別)。★移動中(spd≥stationary)のみ
+  //   適用=停車(OBD≈0)で足すとcreep製造で認定要件破る→非適用。δ-ON時はδが量子化込み補正するので
+  //   二重補正回避でquant非適用(applyDelta時は足さない)。never-over: floor過少≥補正なので真値超えない。
+  //   0 で完全OFF(rollback・1行)。bd.obdRawM(監査raw∫v)は補正前のまま。
+  obdQuantCorrectMps: 0.139, // +0.5km/h 量子化floor補正 (既定ON・全車普遍・rollback=0)
   calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)
   calMaxChordRatio: 1.5, // GPS弦 > spd×dt×これ = ジッタ汚染窓 → δ母集団から除外
   calMaxAccM: 30, // 両端 accuracy これ超 = 位置不確か → δ母集団から除外 (良GPS窓のみ学習)
@@ -1878,7 +1887,13 @@ function createDistanceTracker(decoder, opts) {
         //   学習ゲート(L1744 spd≥stationarySpdMps)と対称に、適用も移動区間に限定=停車で δ 非作用。
         const applyDelta =
           cfg.obdDeltaCalib === true && obdDeltaInit && spd >= cfg.stationarySpdMps;
-        const vEff = applyDelta ? spd + obdDeltaMps : spd;
+        // ★量子化補正 (+半量子・1km/h floor回収・全車普遍・2026-06-13)★: δ非適用かつ移動中(spd≥stationary)
+        //   のみ +0.5km/h。停車(OBD≈0)は creep製造防止で非適用。δ-ON時はδが量子化込み補正=二重回避で非適用。
+        const _quantMps =
+          !applyDelta && spd >= cfg.stationarySpdMps && cfg.obdQuantCorrectMps > 0
+            ? cfg.obdQuantCorrectMps
+            : 0;
+        const vEff = (applyDelta ? spd + obdDeltaMps : spd) + _quantMps;
         obdDelta = (vEff > 0 ? vEff : 0) * dtObd;
         // ★raw ∫v(OBD)(k=1・δ未適用) 並行記録 (司さん要望)★: distance_m には一切影響させず、
         //   「今の OBD の素の精度」を真距離と突合する監査ベースラインとして bd.obdRawM に別積算する。
