@@ -186,15 +186,19 @@ const DEFAULTS = {
   //   二重補正回避でquant非適用(applyDelta時は足さない)。never-over: floor過少≥補正なので真値超えない。
   //   0 で完全OFF(rollback・1行)。bd.obdRawM(監査raw∫v)は補正前のまま。
   obdQuantCorrectMps: 0.139, // +0.5km/h 量子化floor補正 (既定ON・全車普遍・rollback=0)
-  // ★★OBDティア 過大ゼロ天井 (2026-06-13・赤チーム致命穴是正)★★:
-  //   OBD∫v は摩耗で過大読みのECU(PID010D)だと真速度を超え、min天井ゼロで焼くと過大ゼロ(認定 over=0・法的)を破る。
-  //   車輪非経由の独立速度=GNSS Doppler(cur.dopMps=coords.speed・搬送波由来=タイヤ器差ゼロ)の窓内★下側分位(p25)★を
-  //   保守的な真速度推定とし、obdDelta = min(vEff·dt, dopP25·dt) で毎点クランプ。p25は上向きマルチパススパイクを
-  //   構造的に無視。Doppler無し区間(トンネル)は天井退避(従来∫v・後続STEPで保持k/never-over)。0 で完全OFF(rollback)。
-  obdDopplerCeiling: true, // OBD∫v に Doppler下側分位天井を適用 (過大ゼロ・既定ON)
-  obdDopWinSec: 30, // Doppler下側分位の窓長(s)
-  obdDopMinN: 5, // この点数貯まるまで Doppler下側分位は非適用→cold-start k0 が保護
-  obdDopQuantile: 0.25, // 下側分位(p25)=保守的真速度・上向きスパイク棄却
+  // ★★OBDティア 過大ゼロ天井 + 精度ラチェット (2026-06-13・赤チーム致命穴是正)★★:
+  //   OBD∫v は摩耗で過大読みのECU(PID010D)だと真速度を超え、天井ゼロで焼くと過大ゼロ(認定 over=0・法的)を破る。
+  //   車輪非経由の独立速度=GNSS Doppler(cur.dopMps=搬送波由来=タイヤ器差ゼロ)を使うが、★窓に貯めるのは絶対速度でなく
+  //   比 r = Doppler/vEff (=タイヤ器差スケール)★。速度は速く変動するが器差スケールは~一定なので、窓 p25 が
+  //   「保守的な真スケール k_p25」を与える。obdDelta = vEff·dt·min(k_now, k_p25) で過大ゼロ。
+  //   ★絶対速度の窓 p25 を天井にすると変速時に遅い窓値で速い区間を刈り過少暴走する(実走検証で-16%判明)→比方式で是正★。
+  //   Doppler無し区間(トンネル)は k_now 保持(業務内不変=死区間も正確)。0 で完全OFF(rollback)。
+  obdDopplerCeiling: true, // OBD∫v に Doppler由来スケール天井を適用 (過大ゼロ・既定ON)
+  obdDopWinSec: 30, // 比(スケール)窓長(s)
+  obdDopMinN: 5, // この比点数貯まるまで下側分位非適用→cold-start k0 が保護
+  obdDopQuantile: 0.25, // 比の下側分位(p25)=保守的真スケール・上向きスパイク棄却
+  obdRatioMinSpd: 2.8, // 比を取る最低速度(m/s=10km/h・低速の比ノイズ除外)
+  obdRatioMax: 1.1, // 比の上側クランプ(マルチパス上向きスパイクの比爆発を構造遮断)
   // ★cold-start k0★: Doppler窓が貯まる前(dopMsは来てるが点数不足)の保守スケール。摩耗で過大読みのECUを
   //   真距離以下に抑える物理上限=1/(1+δ_max)。δ_max≈3%(タイヤサイズ既知での摩耗+空気圧)→k0≈0.97。
   //   ★dopMs を一度も観測してない区間(旧fixture/GPS皆無)では非適用=既存挙動byte不変(過大ゼロは別経路)★。
@@ -1762,8 +1766,9 @@ function createDistanceTracker(decoder, opts) {
   let calTimeS = 0; // 同窓の移動時間 累積 (s)
   let obdDeltaMps = 0; // 学習済 δ (m/s)
   let obdDeltaInit = false; // δ を1回でも確定したか
-  // ★OBDティア過大ゼロ天井 状態★: 直近 obdDopWinSec の Doppler(dopMps≥0) を貯め下側分位(p25)を天井に。
-  let dopWin = []; // [{t, dop(m/s)}] リングバッファ (窓長 obdDopWinSec)
+  // ★OBDティア過大ゼロ天井 状態★: 直近 obdDopWinSec の 比 r=Doppler/vEff (タイヤ器差スケール) を貯め
+  //   下側分位(p25)=保守的真スケール k_p25 を得る。絶対速度でなく比を貯めるのが核(変速で過少暴走しないため)。
+  let kWin = []; // [{t, r(=dop/vEff)}] リングバッファ (窓長 obdDopWinSec)
   // ★精度ラチェット状態★: k_now=業務内の適用スケール(上方向のみ)・kEwma=観測スケールの平滑値。
   let kNow = -1; // 業務内ラチェットk (-1=未確定→cold-start k0/従来挙動)
   let kEwma = 0; // k_obs の EWMA 平滑値
@@ -1932,46 +1937,46 @@ function createDistanceTracker(decoder, opts) {
             ? cfg.obdQuantCorrectMps
             : 0;
         const vEff = (applyDelta ? spd + obdDeltaMps : spd) + _quantMps;
-        // ★★OBDティア 過大ゼロ天井 + 精度ラチェット (Doppler下側分位・2026-06-13)★★:
-        //   車輪非経由の独立速度 Doppler(cur.dopMps=搬送波由来=タイヤ非経由)を窓に貯め、下側分位 p25
-        //   (保守的真速度・上向きマルチパススパイクを構造的に無視)を2用途に:
-        //   (A) ★精度ラチェット★: k_now を観測スケール k_obs=p25/vEff へ★上方向のみ★前進(EWMA平滑・obdKMax上限)。
-        //       過少読み車(モコ)の vEff·k_now を真値へ回収。過去距離不変=単調=認定。
-        //   (B) ★過大ゼロ天井★: obdDelta = min(vEff·dt·k_now, p25·dt)。摩耗過大読み車を真距離以下へ毎点クランプ。
-        //   Doppler無し(トンネル/GPS皆無)は k_now 保持(業務内不変=死区間も正確)・窓未充足は cold-start k0。
-        //   ★dopMs を一度も観測しない区間(旧fixture/GPS皆無)は k_now=-1 のまま=従来∫v(byte不変)★。
-        let _dopP25 = -1;
+        // ★★OBDティア 過大ゼロ天井 + 精度ラチェット (比方式・2026-06-13)★★:
+        //   車輪非経由の独立速度 Doppler(cur.dopMps=搬送波由来=タイヤ非経由)と vEff の ★比 r=dop/vEff
+        //   (=タイヤ器差スケール・~一定)★ を窓に貯め、下側分位 p25 = 保守的真スケール k_p25 を得る。
+        //   (A) ★精度ラチェット★: k_now を k_p25 へ★上方向のみ★前進(EWMA平滑・obdKMax上限)→過少読み車を真値回収。
+        //   (B) ★過大ゼロ天井★: k_apply=min(k_now, k_p25) で vEff·dt に乗算。k_p25≤真スケールなので過大ゼロ。
+        //   ★絶対速度の窓p25を天井にすると変速時に遅い窓値が速い区間を刈り過少暴走(実走-16%)→比方式で是正★。
+        //   Doppler無し(トンネル/GPS皆無)は k_now 保持・窓未充足は cold-start k0・dopMs皆無は従来∫v(byte不変)。
+        let _kP25 = -1;
         if (cfg.obdDopplerCeiling !== false) {
           const _dop = typeof cur.dopMps === 'number' ? cur.dopMps : -1;
-          if (_dop >= 0) {
-            dopWin.push({ t: cur.t || 0, dop: _dop });
+          if (_dop >= 0 && vEff >= cfg.obdRatioMinSpd) {
+            // 比 r=dop/vEff を上側クランプ(スパイクの比爆発遮断)して窓へ。
+            const _r = Math.min(_dop / vEff, cfg.obdRatioMax);
+            kWin.push({ t: cur.t || 0, r: _r });
             const _winMs = cfg.obdDopWinSec * 1000;
-            while (dopWin.length && (cur.t || 0) - dopWin[0].t > _winMs) dopWin.shift();
+            while (kWin.length && (cur.t || 0) - kWin[0].t > _winMs) kWin.shift();
           }
-          if (dopWin.length >= cfg.obdDopMinN) {
-            _dopP25 = _lowerQuantile(
-              dopWin.map((x) => x.dop),
+          if (kWin.length >= cfg.obdDopMinN) {
+            _kP25 = _lowerQuantile(
+              kWin.map((x) => x.r),
               cfg.obdDopQuantile
             );
           }
         }
-        // (A) 精度ラチェット: k_obs=p25/vEff を EWMA 平滑し k_now を上方向のみ更新(obdKMax 一方向クランプ)。
-        if (cfg.obdRatchet !== false && _dopP25 >= 0 && vEff > 0.1) {
-          const _kObs = Math.min(cfg.obdKMax, _dopP25 / vEff); // ≤ obdKMax (過大ゼロ余地)
+        // (A) 精度ラチェット: k_p25(≤真スケール) を EWMA 平滑し k_now を上方向のみ更新(obdKMax 一方向クランプ)。
+        if (cfg.obdRatchet !== false && _kP25 >= 0) {
+          const _kObs = Math.min(cfg.obdKMax, _kP25); // ≤ obdKMax
           kEwma = kEwmaInit ? cfg.calEwmaOld * kEwma + cfg.calEwmaNew * _kObs : _kObs;
           kEwmaInit = true;
           const _kBase = kNow > 0 ? kNow : cfg.obdColdStartK > 0 ? cfg.obdColdStartK : 1.0;
           kNow = Math.max(_kBase, Math.min(cfg.obdKMax, kEwma)); // 後退ゼロ(単調)
         }
-        // 適用スケール: ラチェット確定=k_now / cold-start(Doppler観測済・窓未充足)=k0 / Doppler皆無=1.0(byte不変)
-        const _kApply =
-          kNow > 0 ? kNow : cfg.obdColdStartK > 0 && dopWin.length > 0 ? cfg.obdColdStartK : 1.0;
+        // (B) 適用スケール k_apply = min(k_now, k_p25) ≤ 真スケール ⇒ 過大ゼロ。
+        //   Doppler有り: min(k_now, k_p25)で安全クランプ / Doppler無しだが k_now確定: 保持k_now(≤保守スケール) /
+        //   cold-start(Doppler観測済・窓未充足): k0 / dopMs皆無: 1.0(byte不変)。
+        let _kApply;
+        if (_kP25 >= 0) _kApply = kNow > 0 ? Math.min(kNow, _kP25) : _kP25;
+        else if (kNow > 0) _kApply = kNow;
+        else _kApply = cfg.obdColdStartK > 0 && kWin.length > 0 ? cfg.obdColdStartK : 1.0;
         obdDelta = (vEff > 0 ? vEff : 0) * dtObd * _kApply;
-        // (B) 過大ゼロ天井: Doppler下側分位 × dt で min クランプ(安全・ラチェットと独立に真距離以下を保証)。
-        if (_dopP25 >= 0) {
-          const _ceil = _dopP25 * dtObd;
-          if (_ceil >= 0 && _ceil < obdDelta) obdDelta = _ceil;
-        }
         // ★raw ∫v(OBD)(k=1・δ未適用) 並行記録 (司さん要望)★: distance_m には一切影響させず、
         //   「今の OBD の素の精度」を真距離と突合する監査ベースラインとして bd.obdRawM に別積算する。
         //   k 補正/δ補正を入れる ★前★ の生車輪積分なので、これと真距離の差が補正係数の根拠になる。
@@ -2284,7 +2289,7 @@ function createDistanceTracker(decoder, opts) {
       calTimeS = 0;
       obdDeltaMps = 0;
       obdDeltaInit = false;
-      dopWin = [];
+      kWin = [];
       kNow = -1;
       kEwma = 0;
       kEwmaInit = false;
