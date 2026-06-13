@@ -69,6 +69,41 @@ describe('OBDティア 精度ラチェット (過少読み回収)', () => {
     expect(tk.totalM()).toBeLessThanOrEqual(vTrue * 180 + 0.5);
   });
 
+  it('★トンネル死区間: Doppler確立後にDoppler消失(長トンネル)→ k_now保持でOBD連続・正確・過大ゼロ・単調', () => {
+    // 山越えトンネルの忠実シナリオ: 196号でDopplerがk_nowを真スケールへ確立 → トンネルでDoppler消失(dopMps=-1)
+    //   → k_now を保持してOBD∫v×k_now で連続前進(トンネルも正確)。過大ゼロ・後退ゼロを死区間で保つ。
+    const tk = newTracker({ obdRatchet: true });
+    const vTrue = 16; // m/s (≈58km/h・山道)
+    const vObd = 15.68; // -2% 過少読み
+    let t = T0;
+    tk.ingest({ lat: 34, lng: 133, t, acc: 5, spd: vObd, obd: true, dopMps: vTrue });
+    // 前半60s: Doppler有り → k_now を真スケールへ確立
+    for (let i = 1; i <= 60; i++) {
+      t += 1000;
+      tk.ingest({ lat: 34, lng: 133, t, acc: 5, spd: vObd, obd: true, dopMps: vTrue });
+    }
+    const preTunnelTotal = tk.totalM();
+    // 後半120s: ★トンネル=Doppler消失(dopMps=-1)・OBDは継続★
+    let mono = true,
+      prev = preTunnelTotal;
+    for (let i = 61; i <= 180; i++) {
+      t += 1000;
+      const r = tk.ingest({ lat: 34, lng: 133, t, acc: 5, spd: vObd, obd: true, dopMps: -1 });
+      if (r.deltaM < -1e-9) mono = false; // 後退ゼロ
+      if (tk.totalM() < prev - 1e-9) mono = false;
+      prev = tk.totalM();
+      expect(r.reason).toBe('obd'); // トンネルでもOBD駆動継続
+    }
+    const totalTrue = vTrue * 180;
+    const tunnelTrue = vTrue * 120;
+    const tunnelDist = tk.totalM() - preTunnelTotal;
+    expect(mono).toBe(true); // 死区間でも単調(認定)
+    expect(tk.totalM()).toBeLessThanOrEqual(totalTrue + 0.5); // 過大ゼロ(死区間込み)
+    // トンネル区間も保持k_nowで真値近く前進(生-2%でなく回収後スケール)= -1%以内
+    expect(tunnelDist / tunnelTrue - 1).toBeGreaterThan(-1.0 / 100);
+    expect(tunnelDist).toBeGreaterThan(0); // 凍結せず連続前進(2026-06-10一括ドン根治の維持)
+  });
+
   it('業務内 k は単調増加のみ (後退ゼロ・認定要件) — Doppler一時悪化でも下げない', () => {
     const tk = newTracker({ obdRatchet: true });
     const vTrue = 12,
