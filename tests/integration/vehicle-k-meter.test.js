@@ -1,13 +1,11 @@
 // tests/integration/vehicle-k-meter.test.js
-// ★随伴車別 k(メーター定数/器差調整)校正 の契約テスト (2026-06-09・discovery監査スペック準拠)★
-//   設計: k は engine(pipeline-distance) 無改変・meter 層の器差定数として適用。
-//     - ★source-aware (2026-06-12)★: distance_m/business_distance_m は ★OBD∫v駆動delta だけ★
-//       rawDelta × _activeVehicleK (校正)。GPS駆動delta は ×1.0(k非適用・過大ゼロ構造保証)。
-//     - mm_distance_m は rawDelta のまま (RAW・校正前監査ベースライン温存)
-//     - k は代行開始(setBusinessActive false→true / start)でロック=業務別
-//     - _clampVK で [VK_MIN=0.90, VK_MAX=1.02] ハードクランプ (VK_MAX=唯一の過大臨界・source-aware化で1.02へ)
-//     - calibrateVehicleK: sample=cert/raw(複利安全)・D<1000m/5%超急変は拒否・保守EWMA(0.3)
-//   絶対ルール: 過大ゼロ(cert≤真値 → k適用後≤cert≤真値)・業務別のみ・k=1.0で現行1byte不変。
+// ★OBD per-vehicle k は pipeline ラチェットへ一本化 (2026-06-13・司さん裁定A)★
+//   旧設計(2026-06-12): meter が OBD∫v駆動delta に手動 _activeVehicleK を乗算(source-aware k)。
+//   新設計: pipeline-distance が Doppler自動ラチェット(kNow)で per-vehicle スケールを既に適用 →
+//     meter で再度乗算すると ★二重適用=過大課金(過大ゼロ違反)★。∴ meter は ★全 delta ×1.0(恒等)★。
+//   本テストは「meter は手動k/source に依らず ×1.0(二重適用ゼロ)」を契約として固定する。
+//   calibrateVehicleK/_activeVehicleK は dormant(距離に非作用・UI表示/将来用に学習関数は温存)。
+//   過大ゼロは pipeline の Doppler下側分位天井が構造保証(別テスト: obd-doppler-ceiling/obd-overcount-zero)。
 
 const path = require('path');
 const METER_JS_PATH = path.join(__dirname, '..', '..', 'js', 'meter.js');
@@ -113,65 +111,66 @@ describe('随伴車別 k 校正 (meter 層器差定数)', () => {
     expect(s.mm_distance_m).toBeCloseTo(450, 6);
   });
 
-  it('(b) k=1.005 → distance_m/business_distance_m は ×1.005 校正・mm_distance_m は RAW(校正しない)', () => {
+  it('(b) ★二重適用ゼロ★: 手動k=1.005でも distance_m/business は ×1.0(pipelineラチェットが per-vehicle k)', () => {
     setProfile(1.005);
     startBusiness(Meter);
     [100, 200, 150].forEach((d) => w._dispatch(deltaResult(d)));
     const s = Meter.getState();
-    expect(s.distance_m).toBeCloseTo(450 * 1.005, 4); // 452.25
-    expect(s.business_distance_m).toBeCloseTo(450 * 1.005, 4);
+    expect(s.distance_m).toBeCloseTo(450, 4); // ×1.0 (×1.005でない=二重適用なし)
+    expect(s.business_distance_m).toBeCloseTo(450, 4);
     expect(s.mm_distance_m).toBeCloseTo(450, 4); // RAW
   });
 
-  it('(b2) ★source-aware★: GPS駆動delta(pipelineDeltaSrc!=="obd")は k 非適用(×1.0)', () => {
+  it('(b2) source 不問で ×1.0: OBD駆動も GPS駆動も meter は手動k非適用(二重適用ゼロ)', () => {
     setProfile(1.005);
     startBusiness(Meter);
-    w._dispatch(deltaResult(100, 'gps')); // GPS駆動 → ×1.0 (×1.005でない)
-    w._dispatch(deltaResult(200, 'obd')); // OBD駆動 → ×1.005
+    w._dispatch(deltaResult(100, 'gps')); // GPS駆動 → ×1.0
+    w._dispatch(deltaResult(200, 'obd')); // OBD駆動 → ×1.0 (旧: ×1.005 で二重→廃止)
     const s = Meter.getState();
-    expect(s.distance_m).toBeCloseTo(100 * 1.0 + 200 * 1.005, 4); // 100 + 201 = 301
-    expect(s.mm_distance_m).toBeCloseTo(300, 4); // RAW は source 不問
+    expect(s.distance_m).toBeCloseTo(300, 4); // 100 + 200 (両方×1.0)
+    expect(s.mm_distance_m).toBeCloseTo(300, 4);
   });
 
-  it('(c) 壊れた学習値 k=1.65 を注入しても適用は VK_MAX=1.02 にハードクランプ', () => {
+  it('(c) 壊れた手動k=1.65 を注入しても distance に影響なし(×1.0・二重過大の経路自体が無い)', () => {
     setProfile(1.65);
     startBusiness(Meter);
     w._dispatch(deltaResult(1000));
     const s = Meter.getState();
-    expect(s.distance_m).toBeCloseTo(1000 * 1.02, 4); // 1020 (1650でない・VK_MAX=1.02)
+    expect(s.distance_m).toBeCloseTo(1000, 4); // ×1.0 (1650/1020でない=手動k非作用)
     expect(s.mm_distance_m).toBeCloseTo(1000, 4);
   });
 
-  it('(c2) k=0.5 注入も VK_MIN=0.90 にクランプ(下側)', () => {
+  it('(c2) 手動k=0.5 注入も distance に影響なし(×1.0)', () => {
     setProfile(0.5);
     startBusiness(Meter);
     w._dispatch(deltaResult(1000));
-    expect(Meter.getState().distance_m).toBeCloseTo(900, 4); // 0.90 下限
+    expect(Meter.getState().distance_m).toBeCloseTo(1000, 4); // ×1.0 (900でない)
   });
 
-  it('(d) 業務途中で profile.k を変えても当該業務は開始時ロック値のまま(業務別)', () => {
+  it('(d) 業務途中で profile.k を変えても distance は ×1.0 のまま(手動k は距離に非作用)', () => {
     setProfile(1.005);
-    startBusiness(Meter); // ここで k=1.005 ロック
-    w._dispatch(deltaResult(100)); // ×1.005 = 100.5
-    globalThis.DK_VEHICLE_PROFILE.k = 0.9; // 業務途中で改ざん
-    w._dispatch(deltaResult(100)); // ★依然 ×1.005★ = 100.5 (0.9でない)
+    startBusiness(Meter);
+    w._dispatch(deltaResult(100)); // ×1.0 = 100
+    globalThis.DK_VEHICLE_PROFILE.k = 0.9; // 業務途中で改ざんしても距離に効かない
+    w._dispatch(deltaResult(100)); // ×1.0 = 100
     const s = Meter.getState();
-    expect(s.distance_m).toBeCloseTo(201.0, 4); // 100.5 + 100.5
+    expect(s.distance_m).toBeCloseTo(200.0, 4); // 100 + 100 (×1.0)
     expect(s.mm_distance_m).toBeCloseTo(200, 4);
   });
 
   describe('calibrateVehicleK (k学習)', () => {
-    it('(e) 複利安全: sample=cert/raw に収束(現kで校正済の業務距離でも正しく学習)', () => {
-      setProfile(1.005);
+    it('(e) ★calibrateVehicleK は dormant★: 学習しても distance_m は ×1.0 のまま(学習kが距離に漏れない=二重適用ゼロ)', () => {
+      setProfile(1.0);
       startBusiness(Meter);
-      // raw 合計 10000 → business_distance_m = 10050 (×1.005 校正済)
+      // business は RAW = 10000 (×1.0)
       for (let i = 0; i < 100; i++) w._dispatch(deltaResult(100));
-      expect(Meter.getState().business_distance_m).toBeCloseTo(10050, 2);
-      // cert=10000 → sample = cert/raw = 10000/10000 = 1.0 (複利でなく)
-      const r = Meter.calibrateVehicleK(10000);
-      expect(r.ok).toBe(true);
-      // k_new = 0.3*sample + 0.7*prevK = 0.3*1.0 + 0.7*1.005 = 1.0035
-      expect(globalThis.DK_VEHICLE_PROFILE.k).toBeCloseTo(1.0035, 4);
+      expect(Meter.getState().business_distance_m).toBeCloseTo(10000, 2);
+      // 学習を発火(k を 1.0 超へ動かそうとする)
+      Meter.calibrateVehicleK(10300);
+      // ★学習後も distance は ×1.0★: 次の delta=100 はそのまま +100 (×学習k でない=距離非作用)
+      const before = Meter.getState().distance_m;
+      w._dispatch(deltaResult(100, 'obd'));
+      expect(Meter.getState().distance_m).toBeCloseTo(before + 100, 4);
     });
 
     it('(f1) 短業務 D<1000m は拒否(GPS脱落/誤校正防止)・k 不変', () => {

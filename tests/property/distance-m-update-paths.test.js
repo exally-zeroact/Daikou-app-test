@@ -93,17 +93,17 @@ describe('ZEROact 共通テスト基盤: distance_m 更新経路の不変条件 
           JSON.stringify(addPaths.map((l) => l.trim()))
       );
     }
-    // ★単一源不変の強化 (source-aware・2026-06-12)★: cal は pipeline delta × _kForDelta(OBD駆動のみk)、
-    //   gapCal は gapM × 1.0 (GPS gap-fill は k非適用)。別距離源(haversine等)でない事を検証。
+    // ★単一源不変の強化 (2026-06-13・OBD per-vehicle k は pipeline ラチェットへ一本化)★:
+    //   cal は pipeline delta × _kForDelta、gapCal は gapM × 1.0。
+    //   ★_kForDelta=1.0★ (OBD用手動k は二重適用防止のため meter で非適用=pipeline ラチェットが per-vehicle k)。
+    //   別距離源(haversine等)でない事を検証。
     if (
       !/const\s+cal\s*=\s*delta\s*\*\s*_kForDelta\b/.test(source) ||
       !/const\s+gapCal\s*=\s*gapM\s*\*\s*1\.0\b/.test(source) ||
-      !/_kForDelta\s*=\s*m\.pipelineDeltaSrc\s*===\s*'obd'\s*\?\s*_activeVehicleK\s*:\s*1\.0/.test(
-        source
-      )
+      !/_kForDelta\s*=\s*1\.0/.test(source)
     ) {
       throw new Error(
-        '白紙書き直し違反: cal=delta×_kForDelta / gapCal=gapM×1.0 / _kForDelta=obd?_activeVehicleK:1.0 のはず (source-aware k)'
+        '白紙書き直し違反: cal=delta×_kForDelta / gapCal=gapM×1.0 / _kForDelta=1.0 のはず (OBD k は pipeline ラチェット一本化)'
       );
     }
     // meter.js 内 GPS.calcDistance は 0 件 (= GPS 直線課金経路の混入なし)。

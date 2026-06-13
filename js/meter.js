@@ -270,12 +270,13 @@ const Meter = (() => {
       lastMmUsefulAt = Date.now();
       // 参照値 mirror (= 後方互換 stats・mm_distance_m は ★RAW★・校正前監査ベースライン温存)
       state.mm_distance_m += delta;
-      // ★source-aware 随伴車別 k 校正 (2026-06-12・OBD+センサーメイン・アーキ)★:
-      //   随伴車k(器差/タイヤ距離補正値)は ★OBD ∫v 駆動 distance だけ★に適用する。
-      //   GPS駆動distanceは位置由来でタイヤ器差と無関係+既に真値近い → ×1.0(k非適用)。
-      //   これで VK_MAX を 1.02 へ上げても GPS距離が過大化しない(過大ゼロ構造保証)。
-      //   k=1.0(未校正)なら obd/gps とも恒等 = 1byte 不変。
-      const _kForDelta = m.pipelineDeltaSrc === 'obd' ? _activeVehicleK : 1.0;
+      // ★OBD per-vehicle k は pipeline ラチェット(kNow)へ一本化 (2026-06-13・司さん裁定A)★:
+      //   旧: meter が OBD delta に手動 _activeVehicleK を乗算(source-aware k)。
+      //   新: pipeline-distance が ★Doppler自動ラチェット(kNow)で per-vehicle スケールを既に適用済★。
+      //   ∴ meter で再度 _activeVehicleK を掛けると ★二重適用=過大課金(過大ゼロ違反)★ になる。
+      //   よって meter は OBD/GPS とも ×1.0(恒等)。手動k UI/永続(_activeVehicleK/calibrateVehicleK)は
+      //   dormant(距離に非作用)。過大ゼロは pipeline の Doppler下側分位天井(min(vEff·dt·k_now, k_p25·dt))が構造保証。
+      const _kForDelta = 1.0;
       const cal = delta * _kForDelta;
       // 課金距離 (running gate・絶対不可侵経路)
       if (state.running) {
