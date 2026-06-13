@@ -311,6 +311,9 @@ function _confirmedRoadDelta(msg, outSnap) {
       // ★OBD メインモード: 速度源が OBD 車輪速度なら ∫v(OBD) で距離駆動する印 (gps.js が speedSrc 付与)。
       //   未設定/'dop'/'hav' は従来の道路 map-matching (byte 不変)。
       obd: msg.speedSrc === 'obd',
+      // ★STEP0 (2026-06-13): 生Doppler速度(m/s・-1=無効)を貫通★ = OBDティアの過大ゼロ天井
+      //   (pipeline: obdDelta=min(∫v, dopP25·dt))の独立基準。OBD上書き前に gps.js が温存した搬送波速度。
+      dopMps: typeof msg.dopMps === 'number' ? msg.dopMps : -1,
       // ★合成タイマー連続前進: GPS stale 中の coast 穴埋め点 (gps.js _gapTick・位置据え置き+速度既知)。
       //   平滑バッファをバイパスして即 _core で speed×dt 前進させる印 (トンネル一括ドン根治)。
       synthetic: msg.isSynthetic === true,

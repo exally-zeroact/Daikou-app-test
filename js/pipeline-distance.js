@@ -186,6 +186,19 @@ const DEFAULTS = {
   //   二重補正回避でquant非適用(applyDelta時は足さない)。never-over: floor過少≥補正なので真値超えない。
   //   0 で完全OFF(rollback・1行)。bd.obdRawM(監査raw∫v)は補正前のまま。
   obdQuantCorrectMps: 0.139, // +0.5km/h 量子化floor補正 (既定ON・全車普遍・rollback=0)
+  // ★★OBDティア 過大ゼロ天井 (2026-06-13・赤チーム致命穴是正)★★:
+  //   OBD∫v は摩耗で過大読みのECU(PID010D)だと真速度を超え、min天井ゼロで焼くと過大ゼロ(認定 over=0・法的)を破る。
+  //   車輪非経由の独立速度=GNSS Doppler(cur.dopMps=coords.speed・搬送波由来=タイヤ器差ゼロ)の窓内★下側分位(p25)★を
+  //   保守的な真速度推定とし、obdDelta = min(vEff·dt, dopP25·dt) で毎点クランプ。p25は上向きマルチパススパイクを
+  //   構造的に無視。Doppler無し区間(トンネル)は天井退避(従来∫v・後続STEPで保持k/never-over)。0 で完全OFF(rollback)。
+  obdDopplerCeiling: true, // OBD∫v に Doppler下側分位天井を適用 (過大ゼロ・既定ON)
+  obdDopWinSec: 30, // Doppler下側分位の窓長(s)
+  obdDopMinN: 5, // この点数貯まるまで Doppler下側分位は非適用→cold-start k0 が保護
+  obdDopQuantile: 0.25, // 下側分位(p25)=保守的真速度・上向きスパイク棄却
+  // ★cold-start k0★: Doppler窓が貯まる前(dopMsは来てるが点数不足)の保守スケール。摩耗で過大読みのECUを
+  //   真距離以下に抑える物理上限=1/(1+δ_max)。δ_max≈3%(タイヤサイズ既知での摩耗+空気圧)→k0≈0.97。
+  //   ★dopMs を一度も観測してない区間(旧fixture/GPS皆無)では非適用=既存挙動byte不変(過大ゼロは別経路)★。
+  obdColdStartK: 0.97, // cold-start 保守スケール (1/(1+δ_max))
   calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)
   calMaxChordRatio: 1.5, // GPS弦 > spd×dt×これ = ジッタ汚染窓 → δ母集団から除外
   calMaxAccM: 30, // 両端 accuracy これ超 = 位置不確か → δ母集団から除外 (良GPS窓のみ学習)
@@ -1699,6 +1712,20 @@ function stepDistance(
 // reason 値: 'first' | 'stationary' | 'sameRoad' | 'routed' | 'straight' | 'doppler'
 //   | 'skip' (無効点) | 'out_of_order' (t 逆転で破棄)
 //   (区間の分類。課金境界差込時のデバッグ/監査用。calcFare は一切呼ばない。)
+
+// ★下側分位 (p25等)★: 配列の q 分位を線形補間で返す (空=-1)。OBDティア過大ゼロ天井で
+//   Doppler窓の保守的真速度推定に使用。p25は上向きマルチパススパイク(上位75%)を構造的に無視する。
+function _lowerQuantile(arr, q) {
+  if (!arr || arr.length === 0) return -1;
+  const s = arr.slice().sort((a, b) => a - b);
+  if (s.length === 1) return s[0];
+  const idx = q * (s.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return s[lo];
+  return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+}
+
 function createDistanceTracker(decoder, opts) {
   opts = opts || {};
   const cfg = {};
@@ -1730,6 +1757,8 @@ function createDistanceTracker(decoder, opts) {
   let calTimeS = 0; // 同窓の移動時間 累積 (s)
   let obdDeltaMps = 0; // 学習済 δ (m/s)
   let obdDeltaInit = false; // δ を1回でも確定したか
+  // ★OBDティア過大ゼロ天井 状態★: 直近 obdDopWinSec の Doppler(dopMps≥0) を貯め下側分位(p25)を天井に。
+  let dopWin = []; // [{t, dop(m/s)}] リングバッファ (窓長 obdDopWinSec)
   // breakdown/stats を区間分類のため保持 (stepDistance が要求する構造)
   let bd, stats;
   function freshAccum() {
@@ -1895,6 +1924,31 @@ function createDistanceTracker(decoder, opts) {
             : 0;
         const vEff = (applyDelta ? spd + obdDeltaMps : spd) + _quantMps;
         obdDelta = (vEff > 0 ? vEff : 0) * dtObd;
+        // ★★過大ゼロ天井 (Doppler下側分位・2026-06-13)★★: 車輪非経由の独立速度 Doppler を貯め、
+        //   窓内 p25(保守的真速度・上向きスパイク棄却) × dt を天井に obdDelta を min クランプ。
+        //   摩耗で過大読みのECUでも真距離スケールを超えて焼けない=認定 over=0 を構造保証。
+        //   Doppler無し(トンネル等)は天井退避(従来∫v・後続で保持k/never-over)。N点未満も非適用(cold-start)。
+        if (cfg.obdDopplerCeiling !== false) {
+          const _dop = typeof cur.dopMps === 'number' ? cur.dopMps : -1;
+          if (_dop >= 0) {
+            dopWin.push({ t: cur.t || 0, dop: _dop });
+            const _winMs = cfg.obdDopWinSec * 1000;
+            while (dopWin.length && (cur.t || 0) - dopWin[0].t > _winMs) dopWin.shift();
+          }
+          if (dopWin.length >= cfg.obdDopMinN) {
+            // 窓充足: Doppler下側分位(p25)を天井に。摩耗過大読み車を真距離以下へ毎点クランプ。
+            const _p25 = _lowerQuantile(
+              dopWin.map((x) => x.dop),
+              cfg.obdDopQuantile
+            );
+            const _ceil = _p25 >= 0 ? _p25 * dtObd : -1;
+            if (_ceil >= 0 && _ceil < obdDelta) obdDelta = _ceil;
+          } else if (dopWin.length > 0 && cfg.obdColdStartK > 0) {
+            // cold-start (Doppler観測済だが窓未充足): 保守スケール k0 で過大読み車を構造的に抑える。
+            const _k0ceil = (vEff > 0 ? vEff : 0) * dtObd * cfg.obdColdStartK;
+            if (_k0ceil < obdDelta) obdDelta = _k0ceil;
+          }
+        }
         // ★raw ∫v(OBD)(k=1・δ未適用) 並行記録 (司さん要望)★: distance_m には一切影響させず、
         //   「今の OBD の素の精度」を真距離と突合する監査ベースラインとして bd.obdRawM に別積算する。
         //   k 補正/δ補正を入れる ★前★ の生車輪積分なので、これと真距離の差が補正係数の根拠になる。
@@ -2207,6 +2261,7 @@ function createDistanceTracker(decoder, opts) {
       calTimeS = 0;
       obdDeltaMps = 0;
       obdDeltaInit = false;
+      dopWin = [];
       smoothBuf = [];
       smoothNext = 0;
       freshAccum();
