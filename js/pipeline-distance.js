@@ -2029,10 +2029,29 @@ function createDistanceTracker(decoder, opts) {
         //   「今の OBD の素の精度」を真距離と突合する監査ベースラインとして bd.obdRawM に別積算する。
         //   k 補正/δ補正を入れる ★前★ の生車輪積分なので、これと真距離の差が補正係数の根拠になる。
         bd.obdRawM = (bd.obdRawM || 0) + (spd > 0 ? spd : 0) * dtObd;
+        // ★診断(距離に焼かない・distance_m不変=過大ゼロ不変)★:
+        //   ① 独立過大ゼロ監視: spike-clamp Doppler を独立基準に積算(≈真値の-2%下)。
+        //   ② ドリフト監視: 走行中 Doppler/OBD 比(=器差スケール)の累積平均→較正Kと乖離=タイヤ変化検知。
+        const _dopD = typeof cur.dopMps === 'number' && cur.dopMps >= 0 ? cur.dopMps : -1;
+        if (_dopD >= 0 && vEff > 0) {
+          bd.dopRefM = (bd.dopRefM || 0) + Math.min(_dopD, vEff * cfg.obdRatioMax) * dtObd;
+          if (vEff >= cfg.obdRatioMinSpd) {
+            bd.liveScaleSum = (bd.liveScaleSum || 0) + Math.min(_dopD / vEff, cfg.obdRatioMax);
+            bd.liveScaleN = (bd.liveScaleN || 0) + 1;
+          }
+        }
       }
       total += obdDelta;
       stats.obdSegs = (stats.obdSegs || 0) + 1;
       bd.obdM = (bd.obdM || 0) + obdDelta;
+      // ★診断警報(距離不変)★: ①OBD駆動距離 が Doppler独立基準×1.02(≈真値上限) を超えたら累積過大mを記録。
+      if (bd.dopRefM > 0 && bd.obdM > bd.dopRefM * 1.02)
+        bd.overcountWarnM = bd.obdM - bd.dopRefM * 1.02;
+      //   ②較正K と liveScale(器差観測) が >3% 乖離(=タイヤ変化/摩耗)→ 再較正促しフラグ。
+      if (cfg.obdVehicleK > 0 && bd.liveScaleN >= 30) {
+        const _live = bd.liveScaleSum / bd.liveScaleN;
+        if (_live > 0 && Math.abs(cfg.obdVehicleK / _live - 1) > 0.03) bd.kDriftWarn = true;
+      }
       coastSpdMps = spd; // 連続性: 次区間のフォールバック用に実速度を保持
       prev = cur;
       prevSnap = snap;
