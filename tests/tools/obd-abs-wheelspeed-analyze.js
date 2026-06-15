@@ -22,29 +22,55 @@ async function jget(u) {
   return (await fetch(u)).json();
 }
 
-// 捕捉群を取得: ローカルファイル or Firebase debug_traces/<key>/samples の console_log から [OBD-WHEELSPEED] 抽出
+// ★実際の保存形式に整合(2026-06-15・debug-log-uploader.js 実コードで検証)★:
+//   console.log は kind='console_log' の別キーに samples[{t,lvl,m}] で上がる(本文はフィールド ★m★・切詰なし)。
+//   GPS trace(kind='GPS')とは別キー。∴ console_log キーを自動走査し m から [OBD-WHEELSPEED] を抽出する。
+//   使い方: node obd-abs-wheelspeed-analyze.js [afterKey] / --file caps.json(ローカル) 。afterKey省略=直近200キー。
 async function loadCaptures() {
   const a2 = process.argv[2];
   if (a2 === '--file') {
     const arr = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-    return Array.isArray(arr) ? arr : [arr];
+    return { caps: Array.isArray(arr) ? arr : [arr], identified: [] };
   }
-  if (!a2) throw new Error('traceKey か --file <path> を指定してください');
-  const ss = await jget(`${BASE}/debug_traces/${a2}/samples.json`);
-  const arr = Array.isArray(ss) ? ss : Object.values(ss || {});
+  const afterKey = a2 || null;
+  const keysObj = await jget(`${BASE}/debug_traces.json?shallow=true`);
+  let keys = Object.keys(keysObj || {}).sort();
+  keys = afterKey ? keys.filter((k) => k >= afterKey) : keys.slice(-200);
   const caps = [];
-  for (const s of arr) {
-    if (!s) continue;
-    const msg = s.msg || s.message || s.text || '';
-    if (typeof msg === 'string' && msg.indexOf('[OBD-WHEELSPEED]') >= 0) {
-      try {
-        caps.push(JSON.parse(msg.slice(msg.indexOf('{'))));
-      } catch (_) {
-        /* skip bad line */
+  const identified = [];
+  for (const k of keys) {
+    let meta;
+    try {
+      meta = await jget(`${BASE}/debug_traces/${k}/meta.json`);
+    } catch {
+      continue;
+    }
+    if (!meta || meta.kind !== 'console_log') continue; // ★console_log キーだけ★
+    let ss;
+    try {
+      ss = await jget(`${BASE}/debug_traces/${k}/samples.json`);
+    } catch {
+      continue;
+    }
+    const arr = Array.isArray(ss) ? ss : Object.values(ss || {});
+    for (const s of arr) {
+      const line = s && typeof s.m === 'string' ? s.m : ''; // ★本文フィールド=m★
+      if (line.indexOf('[OBD-WHEELSPEED-ID]') >= 0) {
+        try {
+          identified.push(JSON.parse(line.slice(line.indexOf('{'))));
+        } catch (_) {
+          /* skip */
+        }
+      } else if (line.indexOf('[OBD-WHEELSPEED]') >= 0) {
+        try {
+          caps.push(JSON.parse(line.slice(line.indexOf('{'))));
+        } catch (_) {
+          /* skip */
+        }
       }
     }
   }
-  return caps;
+  return { caps, identified };
 }
 
 // ID別・バイト位置別の平均値を1捕捉ぶん計算(16bit BE/LE と 8bit 単独を候補化)
@@ -92,12 +118,24 @@ function linfit(xs, ys) {
 }
 
 async function main() {
-  const caps = (await loadCaptures()).filter(
+  const loaded = await loadCaptures();
+  const caps = (loaded.caps || []).filter(
     (c) => c && typeof c.obd010d_kmh === 'number' && c.rawSample
   );
-  console.log(`=== ABS輪速 ID 特定解析 ===  捕捉数=${caps.length}`);
+  // ★端末が"その場で"確定したマッピング([OBD-WHEELSPEED-ID])を先に表示(オフライン識別の答え合わせ)★
+  if (loaded.identified && loaded.identified.length) {
+    const last = loaded.identified[loaded.identified.length - 1];
+    console.log('=== 端末内識別の結果(on-device) ===');
+    console.log(
+      `  ✓確定 ID=${last.id} @${last.key} ・${Number(last.kmhPerLSB).toFixed(4)}km/h刻み ・R²=${Number(last.r2).toFixed(4)} ・${last.seedMatch ? last.seedMatch.join('/') : '未収録車(自動発見)'}`
+    );
+  }
+  console.log(`=== ABS輪速 ID 特定解析(オフライン再確認) ===  捕捉数=${caps.length}`);
   if (caps.length === 0) {
-    console.log('捕捉が0件。probeWheelSpeed() を実車で撃ってからtrace送信してください。');
+    console.log(
+      '捕捉0件。確認: (1)Android+OBD接続で1業務走ったか (2)8km/h以上を含む走行か(停車のみは撃たない) ' +
+        '(3)?debuglog=on でログ送信が有効か (4)走行後にアプリを30秒以上開いたままにしたか(flush)。'
+    );
     return;
   }
   caps.sort((a, b) => a.obd010d_kmh - b.obd010d_kmh);
