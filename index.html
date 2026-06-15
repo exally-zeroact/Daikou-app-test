@@ -107,10 +107,17 @@
       .appbar {
         background: #007aff;
         padding: 6px 12px;
+        /* ★横画面ノッチ対策: 左右も safe-area を確保 (OBDチップ/ナビが切れない) */
+        padding-left: max(12px, env(safe-area-inset-left));
+        padding-right: max(12px, env(safe-area-inset-right));
         padding-top: max(6px, env(safe-area-inset-top));
         display: flex;
         align-items: center;
         justify-content: space-between;
+        /* ★どんな画面でも重ならない (2026-06-15)★: 最小10px間隔を保証し、狭くて入らなければ
+           ナビを次行へ折り返す (= OBDチップとホームが重なるのを構造的に防止)。広い画面では space-between。 */
+        flex-wrap: wrap;
+        gap: 6px 10px;
         flex-shrink: 0;
         position: sticky;
         top: 0;
@@ -123,6 +130,7 @@
         align-items: center;
         gap: 8px;
         min-width: 0;
+        flex-shrink: 1; /* 狭い時は左グループが先に縮む(ナビは flex-shrink:0 で死守) */
       }
       .appbar-title {
         font-size: 14px;
