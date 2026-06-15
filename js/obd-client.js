@@ -67,6 +67,21 @@
   //   次走行traceに rpm を残し、オフラインでギア比学習法を実データ検証可能にする。010C は1996年以降ほぼ全車対応の標準PID。
   const RPM_PID = '010C'; // Mode 01 PID 0C = Engine RPM ((256A+B)/4 rpm・2 byte)
   const RPM_POLL_EVERY = 10; // 速度ポーリング10回に1回 010C を混ぜる(速度主ポーリングをほぼ邪魔しない)
+  // ★ABS各輪速モニタ (2026-06-15・測定前精度の本命レバー)★:
+  //   標準010Dは1km/h整数floorで∫vが系統-2〜-2.5%過小。ABSコントローラはECM/メータ向けに
+  //   各輪速を専用CANメッセージで常時同報しており、その分解能は010Dの30〜100倍細かい(opendbc実車値:
+  //   Toyota 0.01km/h / Hyundai-Kia 0.031 / GM 0.033)。floor量子化を「発生源から」消せる=過大ゼロのまま
+  //   -1.3% → -0.2〜-0.4% へ(会議2026-06-15で唯一「画期的」と名指し)。本コミットは ★read-only プローブのみ★:
+  //   ATH1(ヘッダON)+ATMA(受動モニタ)で生CANフレームを時間制限つきで傍受→生記録→オフライン解析で
+  //   「どのCAN IDに・どの分解能で輪速が流れるか」を車種別に特定する。★距離計算には未配線(=既存OBD経路不変)★。
+  const WHEELSPEED_PROBE_MS = 4000; // 手動プローブ(debug API)の捕捉窓
+  // ★自動discovery(2026-06-15・ユーザー操作ゼロ)★: 普段の業務走行の裏で、速度ポーリングの合間に
+  //   短い輪速捕捉を自動で数回挟む。ドライバーは普通に運転するだけで色々な速度を通る→IDを後で特定できる。
+  //   運転中にユーザーにタップさせる旧設計は撤回。捕捉は短く(gap最小化)・間隔を空け・十分集めたら自動終了。
+  const WS_AUTO_DUR_MS = 1500; // 自動捕捉1回の長さ(走行中の010D欠落を最小化。gapはpipelineが保守fill)
+  const WS_AUTO_MIN_GAP_MS = 45000; // 自動捕捉の最小間隔(45秒に1回まで)
+  const WS_AUTO_MAX_CAPS = 8; // これだけ集めたら自動discovery終了
+  const WS_AUTO_MIN_SPEED_BINS = 4; // 異なる速度帯(20km/h刻み)をこれだけ集めたら十分=終了
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
@@ -92,6 +107,13 @@
   let _consecFail = 0; // 速度ポーリングの連続失敗数(mid-drive 回復トリガー)
   let _recovering = false; // _warmup 再確立中フラグ(多重起動防止)
   let _rxBuffer = '';
+  let _capturing = false; // ★ABS輪速モニタ捕捉中(ATMA)★: true の間 notify は _captureBuf へ流す(_send応答経路と分離)
+  let _captureBuf = ''; // ATMA 生フレーム蓄積バッファ
+  // ★ABS輪速 自動discovery 状態(ユーザー操作ゼロ)★
+  let _wsAuto = false; // 自動輪速discovery 有効(接続でON・十分集めたらOFF)
+  let _wsCaps = 0; // これまでの自動捕捉回数
+  let _wsLastCapTs = 0; // 直近の自動捕捉時刻
+  const _wsBins = {}; // 捕捉済み速度帯(20km/h刻み)→1
   let _pendingResolve = null; // 現コマンドの応答待ち resolver
   let _pendingTimer = null;
   let _polling = false;
@@ -277,6 +299,13 @@
         return undefined;
       })
       .then(function () {
+        // ★自動輪速discovery を有効化(ユーザー操作ゼロ)★: 普段の走行中にloopが合間で数回捕捉→十分でOFF。
+        _wsAuto = true;
+        _wsCaps = 0;
+        _wsLastCapTs = 0;
+        Object.keys(_wsBins).forEach(function (k) {
+          delete _wsBins[k];
+        });
         _startPolling();
         return true;
       })
@@ -318,6 +347,15 @@
 
   // ─── 受信 (BLE は ~20byte 分割で来るため '>' プロンプトまでバッファ) ──────
   function _onNotify(event) {
+    // ★ABS輪速モニタ捕捉中(ATMA)★: '>' プロンプトが来ない連続ストリームなので、捕捉窓の間は
+    //   通常の _send 応答経路でなく専用バッファに溜める(read-only・距離経路に一切干渉しない)。
+    if (_capturing) {
+      const v = event.target.value;
+      let c = '';
+      for (let i = 0; i < v.byteLength; i++) c += String.fromCharCode(v.getUint8(i));
+      _captureBuf += c;
+      return;
+    }
     // ★M-1 監査修正: 待機中の _send が無い時に来た通知 = タイムアウト済みコマンドの ★遅延応答★。
     //   これを溜めると次コマンドの応答に混ざり stale 車速を誤注入する(クロストーク) → 破棄する。
     if (!_pendingResolve) {
@@ -541,7 +579,212 @@
     return out;
   }
 
-  // ─── 速度ポーリングループ (010D を連続 query) ───
+  // ─── 純関数: ATMA モニタ出力 → CANフレーム配列 (単体テスト対象) ──────────────
+  //   ATH1+ATS1 のモニタ出力は 1行 = "<ID> <byte> <byte> ..."(例 "1C4 00 50 00 50 00 50 00 50")。
+  //   ATS0(空白なし)個体向けに「空白なし長hex行」も 11bit(先頭3)/29bit(先頭8) で分解する fallback 付き。
+  //   返り値: [{ id:'1C4', bytes:[0,80,...] }, ...]。雑音行(BUFFER FULL/STOPPED/ATMA/>等)は除外。
+  function _parseMonitorFrames(str) {
+    if (typeof str !== 'string' || str.length === 0) return [];
+    const out = [];
+    const lines = str.split(/[\r\n]+/);
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li].trim();
+      if (!line) continue;
+      const compact = line.replace(/\s+/g, '').toUpperCase();
+      if (
+        compact.length === 0 ||
+        /^(>|ATMA|BUFFERFULL|STOPPED|SEARCHING|NODATA|ERROR|UNABLE|CANERROR|\?)/.test(compact)
+      )
+        continue;
+      let id = null;
+      let byteToks = null;
+      const toks = line.split(/\s+/).filter(Boolean);
+      if (toks.length >= 2 && /^[0-9A-Fa-f]{3}$|^[0-9A-Fa-f]{8}$/.test(toks[0])) {
+        // 空白あり(ATS1): 先頭=ID, 残り=データバイト
+        id = toks[0].toUpperCase();
+        byteToks = toks.slice(1);
+      } else if (toks.length === 1 && /^[0-9A-Fa-f]+$/.test(compact) && compact.length >= 5) {
+        // 空白なし(ATS0) fallback: 先頭3(11bit)を ID、残りを2hexずつ。8桁先頭はオフライン側で判定。
+        id = compact.substr(0, 3);
+        byteToks = [];
+        for (let i = 3; i + 2 <= compact.length; i += 2) byteToks.push(compact.substr(i, 2));
+      } else {
+        continue;
+      }
+      const bytes = [];
+      let ok = true;
+      for (let i = 0; i < byteToks.length; i++) {
+        const b = String(byteToks[i]).toUpperCase();
+        if (!/^[0-9A-F]{2}$/.test(b)) {
+          ok = false;
+          break;
+        }
+        bytes.push(parseInt(b, 16));
+      }
+      if (!ok || bytes.length === 0) continue;
+      out.push({ id: id, bytes: bytes });
+    }
+    return out;
+  }
+
+  // ─── 純関数: フレーム配列 → ID別サマリ (単体テスト対象) ──────────────
+  //   各 CAN ID について 出現数 と バイト位置ごとの「変化したか(distinct数)」を要約。
+  //   走行中に値が動くバイト位置＝速度/回転系の候補(オフライン解析で 010D と相関を取る前のあたり付け)。
+  function _summarizeFrames(frames) {
+    const by = {};
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      if (!by[f.id]) by[f.id] = { id: f.id, count: 0, len: f.bytes.length, distinct: [] };
+      const e = by[f.id];
+      e.count++;
+      for (let b = 0; b < f.bytes.length; b++) {
+        if (!e.distinct[b]) e.distinct[b] = {};
+        e.distinct[b][f.bytes[b]] = 1;
+      }
+    }
+    return Object.keys(by)
+      .map(function (id) {
+        const e = by[id];
+        return {
+          id: id,
+          count: e.count,
+          len: e.len,
+          changingBytes: (e.distinct || []).map(function (d) {
+            return d ? Object.keys(d).length : 0;
+          }),
+        };
+      })
+      .sort(function (a, b) {
+        return b.count - a.count;
+      });
+  }
+
+  // ─── 純関数: 速度帯(20km/h刻み) ──────────────
+  function _speedBin(kmh) {
+    return kmh >= 0 ? Math.floor(kmh / 20) : -1; // 0,20,40,60.. を 0,1,2,3 bin に
+  }
+
+  // ─── 純関数: いま自動輪速捕捉すべきか (単体テスト対象) ──────────────
+  //   s = { enabled, caps, bins, lastTs, now, speedKmh, minGapMs, maxCaps, minBins }
+  function _wsCaptureDecision(s) {
+    if (!s || !s.enabled) return false;
+    if (s.caps >= s.maxCaps) return false; // 十分集めた
+    if (s.bins >= s.minBins) return false; // 速度帯が十分散った
+    if (!(s.speedKmh >= 0)) return false; // 速度不明(010D未取得)では撃たない
+    if (s.lastTs > 0 && s.now - s.lastTs < s.minGapMs) return false; // 間隔を空ける
+    return true;
+  }
+  // モジュール状態から判定用stateを組む
+  function _wsState(now) {
+    return {
+      enabled: _wsAuto,
+      caps: _wsCaps,
+      bins: Object.keys(_wsBins).length,
+      lastTs: _wsLastCapTs,
+      now: now,
+      speedKmh: _latest.kmh,
+      minGapMs: WS_AUTO_MIN_GAP_MS,
+      maxCaps: WS_AUTO_MAX_CAPS,
+      minBins: WS_AUTO_MIN_SPEED_BINS,
+    };
+  }
+
+  // ─── ★ABS各輪速 捕捉コア (read-only・距離未配線・ATH0/ATS0必ず復元)★ ───
+  //   ATH1+ATS1→ATMA durationMs 受動モニタ→生フレーム捕捉→ATH0/ATS0 復元。捕捉時010D速度を同梱記録し
+  //   [OBD-WHEELSPEED] でログ→オフラインで「ID×バイト×係数」を010Dに線形回帰し輪速IDを確定。
+  //   ★ポーリング状態(_stopRequested/_startPolling)には触らない★= 呼び出し側(手動API or 自動loop)の責務。
+  //   ★読むだけ・車に書き込まない・距離計算に一切影響しない★。
+  function _captureWheelSpeed(durMs, obd010d) {
+    function _restore(passthru, isErr) {
+      _capturing = false;
+      return _send('ATS0')
+        .catch(function () {})
+        .then(function () {
+          return _send('ATH0').catch(function () {});
+        })
+        .then(function () {
+          if (isErr) throw passthru;
+          return passthru;
+        });
+    }
+    return _send('ATH1')
+      .catch(function () {})
+      .then(function () {
+        return _send('ATS1').catch(function () {});
+      })
+      .then(function () {
+        _captureBuf = '';
+        _capturing = true; // この瞬間から notify は _captureBuf へ
+        return _writeCharSafe(_str2buf('ATMA\r')).catch(function () {});
+      })
+      .then(function () {
+        return _sleep(durMs);
+      })
+      .then(function () {
+        return _writeCharSafe(_str2buf('\r')).catch(function () {}); // ATMA停止(任意1文字)
+      })
+      .then(function () {
+        return _sleep(350);
+      })
+      .then(function () {
+        _capturing = false;
+        const raw = _captureBuf;
+        _captureBuf = '';
+        const frames = _parseMonitorFrames(raw);
+        const result = {
+          v: 1,
+          ts: _now(),
+          durationMs: durMs,
+          obd010d_kmh: obd010d, // 捕捉時の010D速度(オフライン回帰の独立変数)
+          frameCount: frames.length,
+          ids: _summarizeFrames(frames),
+          rawSample: raw.slice(0, 6000),
+        };
+        global.OBD_WHEELSPEED_PROBE = result;
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[OBD-WHEELSPEED] ' + JSON.stringify(result));
+        } catch (_) {
+          /* ignore */
+        }
+        _emit('probe', { wheelspeed: result });
+        return _restore(result, false);
+      })
+      .catch(function (e) {
+        return _restore(e, true);
+      });
+  }
+
+  // ─── 手動プローブ API (debug/Eruda用・ポーリングを一時停止して撃つ) ───
+  //   ★通常運用は自動discovery(loop内)。これはデバッグで明示的に撃ちたい時用★。
+  function probeWheelSpeed(durationMs) {
+    const dur = durationMs && durationMs > 0 ? durationMs : WHEELSPEED_PROBE_MS;
+    if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
+    if (_capturing) return Promise.reject(new Error('既に輪速捕捉中'));
+    const obd010d = getSpeed().kmh;
+    const wasStop = _stopRequested;
+    _stopRequested = true; // ポーリングを一旦止める(ATMAとBLE帯域競合回避)
+    function _resume() {
+      _stopRequested = wasStop;
+      if (!_stopRequested && isConnected()) _startPolling();
+    }
+    return _sleep(150)
+      .then(function () {
+        return _captureWheelSpeed(dur, obd010d);
+      })
+      .then(
+        function (res) {
+          _resume();
+          return res;
+        },
+        function (e) {
+          _resume();
+          throw e;
+        }
+      );
+  }
+
+  // ─── 速度ポーリングループ (010D を連続 query・自動輪速discovery を合間に挟む) ───
   function _startPolling() {
     if (_polling) return;
     _polling = true;
@@ -551,8 +794,58 @@
         return;
       }
       const t0 = _now();
-      // ★速度を主・odo/rpmは定期混入★: odo対応かつ ODO_POLL_EVERY ごとに 01A6、RPM_POLL_EVERY ごとに 010C を1回叩く。
       _pollCount++;
+      // 1tick分の処理が終わったら次をスケジュール(両経路=通常ポーリング/自動輪速捕捉 で共有)
+      function _schedNext() {
+        if (_stopRequested || !isConnected()) {
+          _polling = false;
+          return;
+        }
+        // ★mid-drive 回復 (監査指摘)★: STOPPED 連発を _warmup(長timeout)で確立し直す。
+        if (_consecFail >= RECOVER_AFTER && !_recovering) {
+          _recovering = true;
+          _consecFail = 0;
+          _warmup()
+            .catch(function () {
+              return false;
+            })
+            .then(function () {
+              _recovering = false;
+              if (!_stopRequested && isConnected()) setTimeout(loop, POLL_MIN_INTERVAL_MS);
+              else _polling = false;
+            });
+          return;
+        }
+        const elapsed = _now() - t0;
+        const wait = Math.max(0, POLL_MIN_INTERVAL_MS - elapsed);
+        setTimeout(loop, wait);
+      }
+
+      // ★自動輪速discovery: 条件を満たせばこのtickは輪速捕捉に充てる(010Dポーリングの代わり・ユーザー操作ゼロ)★
+      //   捕捉中(~2s)は010Dが欠落するが、走行中gapはpipelineが保守fill(過大ゼロ維持)。十分集めたら自動終了。
+      if (_wsCaptureDecision(_wsState(_now()))) {
+        const spd = _latest.kmh;
+        _captureWheelSpeed(WS_AUTO_DUR_MS, spd)
+          .then(function () {
+            _wsCaps++;
+            _wsLastCapTs = _now();
+            const b = _speedBin(spd);
+            if (b >= 0) _wsBins[b] = 1;
+            if (
+              _wsCaps >= WS_AUTO_MAX_CAPS ||
+              Object.keys(_wsBins).length >= WS_AUTO_MIN_SPEED_BINS
+            ) {
+              _wsAuto = false; // 十分集めた → 以降は通常ポーリングに専念
+            }
+          })
+          .catch(function () {
+            /* 捕捉失敗は致命でない・次tickで通常ポーリングに戻る */
+          })
+          .then(_schedNext);
+        return;
+      }
+
+      // ★速度を主・odo/rpmは定期混入★: ODO_POLL_EVERY ごとに 01A6、RPM_POLL_EVERY ごとに 010C を1回。
       const _isOdoPoll = _odoSupported && _pollCount % ODO_POLL_EVERY === 0;
       const _isRpmPoll = !_isOdoPoll && _pollCount % RPM_POLL_EVERY === 0; // odoと衝突時はodo優先
       const _cmd = _isOdoPoll ? ODO_PID : _isRpmPoll ? RPM_PID : SPEED_PID;
@@ -584,31 +877,7 @@
         .catch(function () {
           _consecFail++; // timeout = 通信不全
         })
-        .then(function () {
-          if (_stopRequested || !isConnected()) {
-            _polling = false;
-            return;
-          }
-          // ★mid-drive 回復 (監査指摘)★: 走行中にプロトコルが落ちて STOPPED 連発したら、
-          //   1.5s 010D を撃ち続けて検出を毎回中断する thrash を止め、_warmup(長timeout)で確立し直す。
-          if (_consecFail >= RECOVER_AFTER && !_recovering) {
-            _recovering = true;
-            _consecFail = 0;
-            _warmup()
-              .catch(function () {
-                return false;
-              })
-              .then(function () {
-                _recovering = false;
-                if (!_stopRequested && isConnected()) setTimeout(loop, POLL_MIN_INTERVAL_MS);
-                else _polling = false;
-              });
-            return;
-          }
-          const elapsed = _now() - t0;
-          const wait = Math.max(0, POLL_MIN_INTERVAL_MS - elapsed);
-          setTimeout(loop, wait);
-        });
+        .then(_schedNext);
     }
     loop();
   }
@@ -623,6 +892,8 @@
     _pollCount = 0;
     _consecFail = 0;
     _recovering = false;
+    _capturing = false; // 切断時に捕捉中フラグを残さない(次接続のnotify誤ルーティング防止)
+    _wsAuto = false; // 自動discovery停止(次接続で再有効化)
     // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
     //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
     if (_pendingTimer) {
@@ -680,11 +951,16 @@
     getRpm: getRpm,
     speedProvider: speedProvider,
     getStatus: getStatus,
+    probeWheelSpeed: probeWheelSpeed, // ★ABS各輪速 read-only プローブ(距離未配線)★
     on: on,
     // 単体テスト/デバッグ用 (純関数)
     _parseSpeedKmh: _parseSpeedKmh,
     _parseOdometerKm: _parseOdometerKm,
     _parseRpm: _parseRpm,
+    _parseMonitorFrames: _parseMonitorFrames,
+    _summarizeFrames: _summarizeFrames,
+    _wsCaptureDecision: _wsCaptureDecision, // ★自動輪速discovery判定(純関数・単体テスト用)★
+    _speedBin: _speedBin,
     _decodeProbe: _decodeProbe,
     _PROBE_QUERIES: PROBE_QUERIES,
     _PROFILES: PROFILES,

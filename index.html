@@ -5079,6 +5079,7 @@
          gps.js が window.OBDClient.getSpeed() を実行時参照するため gps.js より前に load。
          既定 OFF (window.OBD_DRIVE_DISTANCE 未設定)・未接続なら GPS 経路は完全不変。 -->
     <script src="js/obd-client.js"></script>
+    <script src="js/obd-wheelspeed-map.js"></script>
 
     <script src="js/gps.js"></script>
 
@@ -12491,6 +12492,24 @@
               style="text-align: center; font-size: 11px; color: #8e8e93; padding: 4px 0 0"
             ></div>
 
+            <!-- ★ABS輪速 自動検出ステータス(read-only・ユーザー操作なし・距離未配線)★ -->
+            <div
+              style="
+                border-top: 1px solid #e5e5ea;
+                margin-top: 10px;
+                padding-top: 8px;
+                font-size: 12px;
+                color: #8e8e93;
+              "
+            >
+              <b style="color: #1c1c1e">高精度モード (ABS輪速)</b><br />
+              普段の走行中にアプリが<b>自動で</b>この車のABS輪速(010Dより18〜200倍細かい)を検出し、floor量子化(-2%)を測定ゼロで消します。<b>ユーザー操作は不要</b>です。
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">輪速検出</span>
+              <span id="wheelSpeedStatus" style="font-weight: 700">—</span>
+            </div>
+
             <div class="row" style="justify-content: center; padding-top: 10px">
               <button
                 id="btnVehSave"
@@ -13332,6 +13351,50 @@
                   vehCalibrateNoteEl.textContent = '較正失敗: ' + ((e && e.message) || e);
               }
             });
+          }
+          // ★ABS輪速 自動検出ステータス(read-only・ユーザー操作なし・距離未配線)★:
+          //   普段の走行中に obd-client が自動でABS輪速を傍受(_wsAuto)。検出結果(probeイベント)を
+          //   ここで表示するだけ。ユーザーは何もしない。実ID/分解能の確定はログ送信後のオフライン解析。
+          var wheelSpeedStatusEl = document.getElementById('wheelSpeedStatus');
+          if (wheelSpeedStatusEl) {
+            wheelSpeedStatusEl.textContent =
+              window.OBDClient && window.OBDClient.isConnected && window.OBDClient.isConnected()
+                ? '自動検出中…'
+                : '—(OBD接続で開始)';
+            try {
+              if (window.OBDClient && window.OBDClient.on) {
+                window.OBDClient.on('probe', function (p) {
+                  var res = p && p.wheelspeed;
+                  if (!res) return;
+                  var ids = res.ids || [];
+                  var seedHit = null;
+                  try {
+                    var M = window.OBDWheelSpeedMap;
+                    if (M && M.lookupById) {
+                      for (var i = 0; i < ids.length; i++) {
+                        var s = M.lookupById(ids[i].id);
+                        if (s) {
+                          seedHit = { id: ids[i].id, makers: s.makers };
+                          break;
+                        }
+                      }
+                    }
+                  } catch (_) {
+                    /* ignore */
+                  }
+                  if (seedHit) {
+                    wheelSpeedStatusEl.textContent =
+                      '✓検出 ' + seedHit.makers.join('/') + '(' + seedHit.id + ')';
+                  } else if ((res.frameCount || 0) > 0) {
+                    wheelSpeedStatusEl.textContent = '検出中(候補ID解析待ち)';
+                  } else {
+                    wheelSpeedStatusEl.textContent = '標準(010D)・輪速なし';
+                  }
+                });
+              }
+            } catch (_) {
+              /* ignore */
+            }
           }
           _renderVehK();
           // ★起動時: 登録済の現役随伴車を復元 → フィールド表示 + trace に焼く★
