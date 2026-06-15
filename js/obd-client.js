@@ -82,6 +82,7 @@
   const WS_AUTO_MIN_GAP_MS = 45000; // 自動捕捉の最小間隔(45秒に1回まで)
   const WS_AUTO_MAX_CAPS = 8; // これだけ集めたら自動discovery終了
   const WS_AUTO_MIN_SPEED_BINS = 4; // 異なる速度帯(20km/h刻み)をこれだけ集めたら十分=終了
+  const WS_AUTO_MIN_CAPTURE_KMH = 8; // ★S5: 停車/極低速では撃たない(信号待ち/客待ちで退化点が積もり回帰汚染+空振りするのを回避)★
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
@@ -114,6 +115,8 @@
   let _wsCaps = 0; // これまでの自動捕捉回数
   let _wsLastCapTs = 0; // 直近の自動捕捉時刻
   const _wsBins = {}; // 捕捉済み速度帯(20km/h刻み)→1
+  let _wsCapturesData = []; // 端末内識別用の捕捉蓄積 [{obd010d, means}]
+  let _wsMapping = null; // ★確定した輪速マッピング {id,key,slope,intercept,r2,...}★(距離未配線・診断/将来用)
   let _pendingResolve = null; // 現コマンドの応答待ち resolver
   let _pendingTimer = null;
   let _polling = false;
@@ -300,9 +303,12 @@
       })
       .then(function () {
         // ★自動輪速discovery を有効化(ユーザー操作ゼロ)★: 普段の走行中にloopが合間で数回捕捉→十分でOFF。
+        //   保存済みマッピングがある車は、UIが applyWheelSpeedMapping を呼ぶと discovery は止まる。
         _wsAuto = true;
         _wsCaps = 0;
         _wsLastCapTs = 0;
+        _wsCapturesData = [];
+        _wsMapping = null;
         Object.keys(_wsBins).forEach(function (k) {
           delete _wsBins[k];
         });
@@ -659,6 +665,28 @@
       });
   }
 
+  // ─── 純関数: フレーム配列 → ID別バイト平均 (端末内識別の入力) ──────────────
+  function _frameMeans(frames) {
+    const sum = {};
+    const cnt = {};
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      if (!sum[f.id]) {
+        sum[f.id] = [];
+        cnt[f.id] = 0;
+      }
+      cnt[f.id]++;
+      for (let b = 0; b < f.bytes.length; b++) sum[f.id][b] = (sum[f.id][b] || 0) + f.bytes[b];
+    }
+    const out = {};
+    Object.keys(sum).forEach(function (id) {
+      out[id] = sum[id].map(function (v) {
+        return v / cnt[id];
+      });
+    });
+    return out;
+  }
+
   // ─── 純関数: 速度帯(20km/h刻み) ──────────────
   function _speedBin(kmh) {
     return kmh >= 0 ? Math.floor(kmh / 20) : -1; // 0,20,40,60.. を 0,1,2,3 bin に
@@ -670,7 +698,8 @@
     if (!s || !s.enabled) return false;
     if (s.caps >= s.maxCaps) return false; // 十分集めた
     if (s.bins >= s.minBins) return false; // 速度帯が十分散った
-    if (!(s.speedKmh >= 0)) return false; // 速度不明(010D未取得)では撃たない
+    // ★S5: 速度不明(010D未取得)or 停車/極低速 では撃たない(退化点で回帰汚染+捕捉浪費)★
+    if (!(s.speedKmh >= (s.minSpeed != null ? s.minSpeed : 0))) return false;
     if (s.lastTs > 0 && s.now - s.lastTs < s.minGapMs) return false; // 間隔を空ける
     return true;
   }
@@ -686,6 +715,7 @@
       minGapMs: WS_AUTO_MIN_GAP_MS,
       maxCaps: WS_AUTO_MAX_CAPS,
       minBins: WS_AUTO_MIN_SPEED_BINS,
+      minSpeed: WS_AUTO_MIN_CAPTURE_KMH,
     };
   }
 
@@ -735,9 +765,10 @@
           v: 1,
           ts: _now(),
           durationMs: durMs,
-          obd010d_kmh: obd010d, // 捕捉時の010D速度(オフライン回帰の独立変数)
+          obd010d_kmh: obd010d, // 捕捉時の010D速度(回帰の独立変数)
           frameCount: frames.length,
           ids: _summarizeFrames(frames),
+          means: _frameMeans(frames), // ★端末内識別の入力(ID別バイト平均)★
           rawSample: raw.slice(0, 6000),
         };
         global.OBD_WHEELSPEED_PROBE = result;
@@ -784,6 +815,44 @@
       );
   }
 
+  // ─── ★端末内識別②③(オフライン・サーバー不要)★: 蓄積した捕捉から輪速IDを特定し確定したら保持+emit ───
+  //   js/obd-wheelspeed-identify.js が未ロードでも安全(何もしない)。★距離計算には流さない(④は別途・司さんOK後)★。
+  function _tryIdentifyWheelSpeed() {
+    if (_wsMapping) return; // 既に確定済
+    const ID = global.OBDWheelSpeedIdentify;
+    if (!ID || !ID.identifyWheelSpeed) return; // モジュール未ロード=スキップ(既存挙動不変)
+    let r;
+    try {
+      r = ID.identifyWheelSpeed(_wsCapturesData, { seed: global.OBDWheelSpeedMap || null });
+    } catch (_) {
+      return;
+    }
+    if (r && r.confirmed) {
+      _wsMapping = r;
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[OBD-WHEELSPEED-ID] ' + JSON.stringify(r));
+      } catch (_) {
+        /* ignore */
+      }
+      _emit('probe', { wheelspeedIdentified: r });
+    }
+  }
+
+  // 確定した輪速マッピングを返す(未確定は null)
+  function getWheelSpeedMapping() {
+    return _wsMapping;
+  }
+  // ★VIN別に保存済みのマッピングを外部(UI)から流し込む→次回は再discovery不要★(距離未配線)。
+  function applyWheelSpeedMapping(m) {
+    if (m && m.confirmed && m.id && m.key && typeof m.slope === 'number') {
+      _wsMapping = m;
+      _wsAuto = false; // 既に判明=discovery不要
+      return true;
+    }
+    return false;
+  }
+
   // ─── 速度ポーリングループ (010D を連続 query・自動輪速discovery を合間に挟む) ───
   function _startPolling() {
     if (_polling) return;
@@ -826,16 +895,19 @@
       if (_wsCaptureDecision(_wsState(_now()))) {
         const spd = _latest.kmh;
         _captureWheelSpeed(WS_AUTO_DUR_MS, spd)
-          .then(function () {
+          .then(function (res) {
             _wsCaps++;
             _wsLastCapTs = _now();
             const b = _speedBin(spd);
             if (b >= 0) _wsBins[b] = 1;
+            if (res && res.means) _wsCapturesData.push({ obd010d: spd, means: res.means });
+            _tryIdentifyWheelSpeed(); // ★端末内で識別を試行(確定したら _wsMapping + emit)★
             if (
+              _wsMapping ||
               _wsCaps >= WS_AUTO_MAX_CAPS ||
               Object.keys(_wsBins).length >= WS_AUTO_MIN_SPEED_BINS
             ) {
-              _wsAuto = false; // 十分集めた → 以降は通常ポーリングに専念
+              _wsAuto = false; // 確定 or 十分集めた → 以降は通常ポーリングに専念
             }
           })
           .catch(function () {
@@ -894,6 +966,8 @@
     _recovering = false;
     _capturing = false; // 切断時に捕捉中フラグを残さない(次接続のnotify誤ルーティング防止)
     _wsAuto = false; // 自動discovery停止(次接続で再有効化)
+    _wsCapturesData = [];
+    _wsMapping = null;
     // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
     //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
     if (_pendingTimer) {
@@ -952,6 +1026,8 @@
     speedProvider: speedProvider,
     getStatus: getStatus,
     probeWheelSpeed: probeWheelSpeed, // ★ABS各輪速 read-only プローブ(距離未配線)★
+    getWheelSpeedMapping: getWheelSpeedMapping, // 端末内で確定した輪速マッピング(未確定null)
+    applyWheelSpeedMapping: applyWheelSpeedMapping, // VIN別保存マッピングを流し込む(再discovery不要)
     on: on,
     // 単体テスト/デバッグ用 (純関数)
     _parseSpeedKmh: _parseSpeedKmh,

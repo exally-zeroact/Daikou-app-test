@@ -5080,6 +5080,7 @@
          既定 OFF (window.OBD_DRIVE_DISTANCE 未設定)・未接続なら GPS 経路は完全不変。 -->
     <script src="js/obd-client.js"></script>
     <script src="js/obd-wheelspeed-map.js"></script>
+    <script src="js/obd-wheelspeed-identify.js"></script>
 
     <script src="js/gps.js"></script>
 
@@ -13364,6 +13365,34 @@
             try {
               if (window.OBDClient && window.OBDClient.on) {
                 window.OBDClient.on('probe', function (p) {
+                  // ★②③確定: 端末内識別が確定 → VIN別にlocalStorage保存(⑤)+状態表示★(距離未配線)
+                  if (p && p.wheelspeedIdentified && p.wheelspeedIdentified.confirmed) {
+                    var m = p.wheelspeedIdentified;
+                    // ★S1/S3: VIN が取れた車だけ保存(active共有フォールバック廃止=別車誤適用を断つ)。
+                    //   マッピングに vin を焼き、復元時に照合する。VIN無し(クローンELM等)はセッション内のみ★
+                    if (_curVin) {
+                      try {
+                        m.vin = _curVin;
+                        localStorage.setItem('dk_wsmap_' + _curVin, JSON.stringify(m));
+                      } catch (_) {
+                        /* ignore */
+                      }
+                    }
+                    var who =
+                      m.seedMatch && m.seedMatch.length ? m.seedMatch.join('/') : '未収録車';
+                    wheelSpeedStatusEl.textContent =
+                      '✓確定 ' +
+                      who +
+                      '(' +
+                      m.id +
+                      ' ' +
+                      Number(m.kmhPerLSB).toFixed(3) +
+                      'km/h刻み R²' +
+                      Number(m.r2).toFixed(3) +
+                      ')';
+                    return;
+                  }
+                  // 捕捉サマリ(途中経過の表示のみ)
                   var res = p && p.wheelspeed;
                   if (!res) return;
                   var ids = res.ids || [];
@@ -13384,11 +13413,18 @@
                   }
                   if (seedHit) {
                     wheelSpeedStatusEl.textContent =
-                      '✓検出 ' + seedHit.makers.join('/') + '(' + seedHit.id + ')';
+                      '検出中 ' + seedHit.makers.join('/') + '(' + seedHit.id + ')…';
                   } else if ((res.frameCount || 0) > 0) {
-                    wheelSpeedStatusEl.textContent = '検出中(候補ID解析待ち)';
+                    wheelSpeedStatusEl.textContent = '検出中(候補ID解析中)';
                   } else {
                     wheelSpeedStatusEl.textContent = '標準(010D)・輪速なし';
+                  }
+                });
+                // ★S2: 切断/idle/error で _curVin をリセット(別車誤bind=前車VINキーへ次車を上書き を断つ)★
+                window.OBDClient.on('status', function (st) {
+                  if (st === 'disconnected' || st === 'idle' || st === 'error') {
+                    _curVin = '';
+                    if (wheelSpeedStatusEl) wheelSpeedStatusEl.textContent = '—(OBD接続で開始)';
                   }
                 });
               }
@@ -13496,6 +13532,34 @@
               var vin = q.vin_0902 ? _parseVin(q.vin_0902.raw) : '';
               _curVin = vin;
               if (vehVinEl) vehVinEl.textContent = vin || '(VIN取得できず)';
+              // ★⑤ 保存済み輪速マッピングを復元 → applyして再discovery不要(オフライン)★(距離未配線)
+              //   S1/S3: ★VINがある車だけ★(active共有フォールバック廃止)・保存vinと現VIN一致時のみapply(別車誤適用封じ)。
+              try {
+                if (vin && window.OBDClient && window.OBDClient.applyWheelSpeedMapping) {
+                  var savedWs = localStorage.getItem('dk_wsmap_' + vin);
+                  if (savedWs) {
+                    var wsM = JSON.parse(savedWs);
+                    if (
+                      wsM &&
+                      (!wsM.vin || wsM.vin === vin) &&
+                      window.OBDClient.applyWheelSpeedMapping(wsM)
+                    ) {
+                      var wsStatusEl = document.getElementById('wheelSpeedStatus');
+                      if (wsStatusEl)
+                        wsStatusEl.textContent =
+                          '✓登録済 ' +
+                          (wsM.seedMatch && wsM.seedMatch.length
+                            ? wsM.seedMatch.join('/')
+                            : '未収録車') +
+                          '(' +
+                          wsM.id +
+                          ')';
+                    }
+                  }
+                }
+              } catch (_) {
+                /* ignore */
+              }
               if (vin) {
                 var info = _vinInfo(vin);
                 if (vehMakerEl)

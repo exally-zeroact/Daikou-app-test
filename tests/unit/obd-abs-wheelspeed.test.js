@@ -89,6 +89,7 @@ describe('ABS輪速 自動discovery 判定 (_wsCaptureDecision・ユーザー操
     minGapMs: 45000,
     maxCaps: 8,
     minBins: 4,
+    minSpeed: 8, // ★S5: 停車/極低速は撃たない閾値★
   };
   it('★条件OK(有効・未収集・速度あり・初回)→ 撃つ', () => {
     expect(OBD._wsCaptureDecision({ ...base })).toBe(true);
@@ -109,8 +110,10 @@ describe('ABS輪速 自動discovery 判定 (_wsCaptureDecision・ユーザー操
     expect(OBD._wsCaptureDecision({ ...base, lastTs: 100000 - 10000 })).toBe(false); // 10s前=早い
     expect(OBD._wsCaptureDecision({ ...base, lastTs: 100000 - 50000 })).toBe(true); // 50s前=OK
   });
-  it('★停車(0km/h)でも撃つ(bin0=切片アンカーに有用)', () => {
-    expect(OBD._wsCaptureDecision({ ...base, speedKmh: 0 })).toBe(true);
+  it('★S5: 停車/極低速(<minSpeed)では撃たない(退化点で回帰汚染+捕捉浪費を回避)', () => {
+    expect(OBD._wsCaptureDecision({ ...base, speedKmh: 0 })).toBe(false); // 停車
+    expect(OBD._wsCaptureDecision({ ...base, speedKmh: 5 })).toBe(false); // 徐行(8未満)
+    expect(OBD._wsCaptureDecision({ ...base, speedKmh: 8 })).toBe(true); // 閾値以上=撃つ
   });
   it('★_speedBin: 20km/h刻みで 0/20/40/60 → 0/1/2/3・負は-1', () => {
     expect(OBD._speedBin(0)).toBe(0);
@@ -118,5 +121,25 @@ describe('ABS輪速 自動discovery 判定 (_wsCaptureDecision・ユーザー操
     expect(OBD._speedBin(45)).toBe(2);
     expect(OBD._speedBin(60)).toBe(3);
     expect(OBD._speedBin(-1)).toBe(-1);
+  });
+});
+
+describe('obd-client 輪速マッピングAPI (端末内識別の保持・距離未配線)', () => {
+  it('★applyWheelSpeedMapping: 確定マッピングを受理し getWheelSpeedMapping で返る', () => {
+    const m = {
+      confirmed: true,
+      id: '0AA',
+      key: '0:BE16',
+      slope: 0.01,
+      intercept: -67.67,
+      r2: 0.999,
+    };
+    expect(OBD.applyWheelSpeedMapping(m)).toBe(true);
+    expect(OBD.getWheelSpeedMapping()).toEqual(m);
+  });
+  it('★applyWheelSpeedMapping: 不正(未確定/null/必須欠損)は拒否', () => {
+    expect(OBD.applyWheelSpeedMapping({ confirmed: false })).toBe(false);
+    expect(OBD.applyWheelSpeedMapping(null)).toBe(false);
+    expect(OBD.applyWheelSpeedMapping({ confirmed: true, id: '0AA' })).toBe(false); // key/slope欠損
   });
 });
