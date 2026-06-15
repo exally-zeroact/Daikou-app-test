@@ -289,4 +289,57 @@ describe('随伴車別 k 校正 (meter 層器差定数)', () => {
       expect(Meter.getState().business_distance_m).toBeCloseTo(500, 2);
     });
   });
+
+  // ★Factory較正(既存実測データ由来・型式別)★: 未較正でも 196号RTK採点済型式は工場較正Kを適用
+  //   = 既存データを実機で再採取させない。個体較正があればそちら優先。
+  describe('factory較正 (既存データ由来・型式別)', () => {
+    function recordingWorker() {
+      const posts = [];
+      const handlers = [];
+      return {
+        posts,
+        addEventListener(t, h) {
+          if (t === 'message') handlers.push(h);
+        },
+        removeEventListener(t, h) {
+          const i = handlers.indexOf(h);
+          if (i >= 0) handlers.splice(i, 1);
+        },
+        postMessage(m) {
+          posts.push(m);
+        },
+        _dispatch(data) {
+          for (const h of handlers) h({ data });
+        },
+      };
+    }
+    it('★未較正のMG33S(モコ)→ factory K=1.018 を post (既存196号RTKデータ由来・再走行不要)', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      globalThis.window = globalThis;
+      globalThis.DK_VEHICLE_PROFILE = { katashiki: 'MG33S', model: 'モコ', k: 1, k_samples: 0 };
+      startBusiness(Meter);
+      const cv = rw.posts.filter((p) => p && p.type === 'configVehicle');
+      expect(cv.length).toBeGreaterThan(0);
+      expect(cv[cv.length - 1].vehicleK).toBeCloseTo(1.018, 4); // factory K(モコ)
+    });
+    it('★個体較正(k_samples>0)があれば factory より優先 (個体実測 > model prior)', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      globalThis.window = globalThis;
+      globalThis.DK_VEHICLE_PROFILE = { katashiki: 'MG33S', k: 1.01, k_samples: 2 };
+      startBusiness(Meter);
+      const cv = rw.posts.filter((p) => p && p.type === 'configVehicle');
+      expect(cv[cv.length - 1].vehicleK).toBeCloseTo(1.01, 4); // 個体較正優先(factory 1.018でない)
+    });
+    it('★未知型式の未較正 → 0 (factory無し=従来自動・byte不変)', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      globalThis.window = globalThis;
+      globalThis.DK_VEHICLE_PROFILE = { katashiki: 'UNKNOWN99', k: 1, k_samples: 0 };
+      startBusiness(Meter);
+      const cv = rw.posts.filter((p) => p && p.type === 'configVehicle');
+      expect(cv[cv.length - 1].vehicleK).toBe(0);
+    });
+  });
 });

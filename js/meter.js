@@ -62,15 +62,34 @@ const Meter = (() => {
   function _clampVK(k) {
     return typeof k === 'number' && isFinite(k) ? Math.min(VK_MAX, Math.max(VK_MIN, k)) : 1.0;
   }
+  // ★Factory較正(既存実測データ由来・型式別)★: 据付検定前でも、既に真距離(196号KP RTK)で採点済の
+  //   型式は その測定Kを工場出荷較正として未較正でも適用し精度を出す(=既存データを実機で再採取させない)。
+  //   tire器差は個体差ありで model prior だが、cross-profileマージン込みで過大ゼロ側に倒した保守値。
+  //   ・MG33S(モコ・145/80R13): 196号KP RTK実測 OBD∫v -2.11%/-2.38% → K=1.018(=1.0216×0.997・≤真値両窓)。
+  //   ★ユーザー個体較正(k_samples>0)が有れば そちら優先(個体実測 > model prior)。検定時に上書きされる前提★。
+  const FACTORY_K = { MG33S: 1.018 };
+  function _factoryK(prof) {
+    if (!prof) return 0;
+    const key = prof.katashiki || prof.model || '';
+    const fk = FACTORY_K[key];
+    return typeof fk === 'number' && fk > 0 ? fk : 0;
+  }
   // ★認定据付測定K を worker(pipeline)へ通知 (2026-06-15・認定前提)★:
-  //   ★較正済(k_samples>0)の随伴車のみ★ obdVehicleK を焼く。未較正は 0 = 従来自動(ラチェット/天井・-1.2%圏)。
+  //   個体較正(k_samples>0)優先 → 無ければ factory較正(既存データ由来・型式別) → 無ければ 0(従来自動)。
   //   meter は距離に k を乗じない(_kForDelta=1.0・source-aware)→ pipeline obdVehicleK で OBD駆動のみ適用=二重なし。
-  //   過大ゼロは「K=真距離/OBD実測 を≤真値基準で較正・VK_MAXクランプ」で測定保証。
   function _postVehicleK() {
     try {
       if (!mmWorker || typeof mmWorker.postMessage !== 'function') return;
       const prof = (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null;
-      const vk = prof && prof.k_samples > 0 && typeof prof.k === 'number' ? _clampVK(prof.k) : 0;
+      let vk = 0;
+      if (prof) {
+        if (prof.k_samples > 0 && typeof prof.k === 'number')
+          vk = _clampVK(prof.k); // 個体実測較正(検定/巻尺/KP)優先
+        else {
+          const fk = _factoryK(prof);
+          if (fk > 0) vk = _clampVK(fk); // factory(既存実測データ由来・型式別)
+        }
+      }
       mmWorker.postMessage({ type: 'configVehicle', vehicleK: vk });
     } catch (_) {
       /* best-effort・課金距離は pipeline 側の健全域クランプで保護 */
@@ -78,11 +97,13 @@ const Meter = (() => {
   }
   function _resolveVK() {
     try {
-      return typeof window !== 'undefined' &&
-        window.DK_VEHICLE_PROFILE &&
-        typeof window.DK_VEHICLE_PROFILE.k === 'number'
-        ? window.DK_VEHICLE_PROFILE.k
-        : 1.0;
+      const prof = (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null;
+      if (prof) {
+        if (prof.k_samples > 0 && typeof prof.k === 'number') return prof.k; // 個体較正優先
+        const fk = _factoryK(prof);
+        if (fk > 0) return fk; // factory較正
+      }
+      return 1.0;
     } catch (_) {
       return 1.0;
     }
