@@ -200,7 +200,8 @@ describe('随伴車別 k 校正 (meter 層器差定数)', () => {
       // cert=10400 → sample=1.04 (許容内) → k=0.3*1.04+0.7*1.0=1.012 (VK_MAX=1.02 未クランプ)
       const r = Meter.calibrateVehicleK(10400);
       expect(r.ok).toBe(true);
-      expect(globalThis.DK_VEHICLE_PROFILE.k).toBeCloseTo(1.012, 4); // EWMA 1.012 < VK_MAX 1.02
+      // sample=1.04×0.997(cross-profileマージン)=1.0369 → EWMA 0.3*1.0369+0.7*1.0=1.0111 < VK_MAX
+      expect(globalThis.DK_VEHICLE_PROFILE.k).toBeCloseTo(1.0111, 3);
     });
 
     it('(h) never-over: cert(真値以下) を学習基準 → 次業務の k 適用後距離 ≤ cert', () => {
@@ -213,6 +214,79 @@ describe('随伴車別 k 校正 (meter 層器差定数)', () => {
       // 次業務 (同じ raw=10000) の校正後距離
       const nextCalibrated = 10000 * k;
       expect(nextCalibrated).toBeLessThanOrEqual(cert + 1e-6); // ≤ cert (過大ゼロ側)
+    });
+  });
+
+  // ★認定据付測定K → pipeline 配線 (2026-06-15・認定前提)★:
+  //   meter距離は依然 ×1.0(dormant・上記契約不変)。cert-K は pipeline(obdVehicleK)で OBD駆動のみ適用。
+  //   meter の役割 = ★較正済(k_samples>0)の車だけ configVehicle{vehicleK} を worker へ通知★。
+  //   未較正(k_samples=0/profile無)は vehicleK=0 → pipeline 従来自動(byte不変)。
+  describe('cert-K → worker 配線 (configVehicle 通知)', () => {
+    function recordingWorker() {
+      const posts = [];
+      const handlers = [];
+      return {
+        posts,
+        addEventListener(type, h) {
+          if (type === 'message') handlers.push(h);
+        },
+        removeEventListener(type, h) {
+          const i = handlers.indexOf(h);
+          if (i >= 0) handlers.splice(i, 1);
+        },
+        postMessage(m) {
+          posts.push(m);
+        },
+        _dispatch(data) {
+          for (const h of handlers) h({ data });
+        },
+      };
+    }
+
+    it('★較正済(k_samples>0)の業務開始 → configVehicle{vehicleK=clampedK} を post', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      globalThis.window = globalThis;
+      globalThis.DK_VEHICLE_PROFILE = { maker: 'X', model: 'Y', k: 1.02, k_samples: 1 };
+      startBusiness(Meter);
+      const cv = rw.posts.filter((p) => p && p.type === 'configVehicle');
+      expect(cv.length).toBeGreaterThan(0);
+      expect(cv[cv.length - 1].vehicleK).toBeCloseTo(1.02, 6); // 測定K(VK_MAX内)を通知
+    });
+
+    it('★未較正(k_samples無) → configVehicle{vehicleK=0} (pipeline 従来自動・byte不変)', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      globalThis.window = globalThis;
+      globalThis.DK_VEHICLE_PROFILE = { maker: 'X', model: 'Y' }; // k_samples 無
+      startBusiness(Meter);
+      const cv = rw.posts.filter((p) => p && p.type === 'configVehicle');
+      expect(cv.length).toBeGreaterThan(0);
+      expect(cv[cv.length - 1].vehicleK).toBe(0); // 焼かない=自動
+    });
+
+    it('★calibrateVehicleK 確定 → configVehicle を post (次業務から測定K反映)', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      setProfile(1.0);
+      startBusiness(Meter);
+      for (let i = 0; i < 100; i++) rw._dispatch(deltaResult(100)); // raw=10000 (meter は rw を listen)
+      const before = rw.posts.filter((p) => p && p.type === 'configVehicle').length;
+      const r = Meter.calibrateVehicleK(10200);
+      expect(r.ok).toBe(true);
+      const after = rw.posts.filter((p) => p && p.type === 'configVehicle').length;
+      expect(after).toBeGreaterThan(before); // 較正確定で post 発火
+    });
+
+    it('★meter距離は依然 ×1.0(cert-K配線後も二重適用ゼロ・契約不変)', () => {
+      const rw = recordingWorker();
+      Meter.setMapMatcher(rw);
+      globalThis.window = globalThis;
+      globalThis.DK_VEHICLE_PROFILE = { maker: 'X', model: 'Y', k: 1.02, k_samples: 1 };
+      startBusiness(Meter);
+      for (let i = 0; i < 5; i++) rw._dispatch(deltaResult(100));
+      // meter は k を距離に乗じない(×1.0)=raw合計 500 のまま(cert-K は pipeline 側で別途)
+      expect(Meter.getState().business_distance_m).toBeCloseTo(500, 2);
     });
   });
 });
