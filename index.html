@@ -13430,9 +13430,23 @@
                 if (vehMakerEl)
                   vehMakerEl.textContent =
                     (info.maker || '?') + (info.year ? ' / ' + info.year : '');
-                // ★登録済(手動の車種/型式/タイヤ)を保持したまま VIN/メーカー/OBD能力を ★マージ★ する。
-                //   (clobber しない=ユーザーが入れた登録を消さない)。VIN無しでも登録は trace に乗る。
-                var base = window.DK_VEHICLE_PROFILE || {};
+                // ★VINゲート (監査①是正・本番阻止級)★: base起点は ★接続中VINに対応するprofile★。
+                //   同一VIN=既存(手動登録/k)を継続。★別VIN=その車のVINキーprofileを復元(無ければ新規=k無し)★。
+                //   こうしないと前車の器差k/k_samplesを新車に継承し、別車の器差Kで距離を焼く=過大ゼロ前提崩壊。
+                var prev = window.DK_VEHICLE_PROFILE || {};
+                var base;
+                if (prev.vin && prev.vin === vin) {
+                  base = prev; // 同一随伴車=登録/較正kを継続
+                } else {
+                  // 別車 or 初回: その車のVINキーprofileを復元(=その車のk)。無ければ新規(k無し=未較正=自動)。
+                  base = {};
+                  try {
+                    var savedVeh = localStorage.getItem('dk_veh_' + vin);
+                    if (savedVeh) base = JSON.parse(savedVeh) || {};
+                  } catch (_) {
+                    base = {};
+                  }
+                }
                 base.vin = vin;
                 base.maker = info.maker || base.maker;
                 base.year = info.year || base.year;

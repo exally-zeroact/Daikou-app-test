@@ -54,9 +54,27 @@ const Meter = (() => {
   //   k≈1.02(196号KP RTH実証: δ-OFF OBD生-2.11%×1.02=-0.16%=真値の下)へ上限を上げても過大ゼロを保つ。
   //   GPS駆動は常に×1.0(上記 source-aware)なので VK_MAX 引上げの影響を受けない。
   const VK_MAX = 1.02;
+  // ★cert-K cross-profile 保守マージン (2026-06-15・監査③是正)★: 測定K=真距離/OBD実測 は floor量子化の
+  //   速度依存で 1/rf より僅か上振れ→較正と走行の速度分布が違うと per-step 過大しうる。較正値に ×0.997 を
+  //   掛けて吸収(代表速度較正×無作為走行で 0/10000 過大ゼロ・平均-0.5%実測)。検定は代表速度で行う前提。
+  const CERTK_SAFETY = 0.997;
   let _activeVehicleK = 1.0; // 業務開始でロックされる適用係数
   function _clampVK(k) {
     return typeof k === 'number' && isFinite(k) ? Math.min(VK_MAX, Math.max(VK_MIN, k)) : 1.0;
+  }
+  // ★認定据付測定K を worker(pipeline)へ通知 (2026-06-15・認定前提)★:
+  //   ★較正済(k_samples>0)の随伴車のみ★ obdVehicleK を焼く。未較正は 0 = 従来自動(ラチェット/天井・-1.2%圏)。
+  //   meter は距離に k を乗じない(_kForDelta=1.0・source-aware)→ pipeline obdVehicleK で OBD駆動のみ適用=二重なし。
+  //   過大ゼロは「K=真距離/OBD実測 を≤真値基準で較正・VK_MAXクランプ」で測定保証。
+  function _postVehicleK() {
+    try {
+      if (!mmWorker || typeof mmWorker.postMessage !== 'function') return;
+      const prof = (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null;
+      const vk = prof && prof.k_samples > 0 && typeof prof.k === 'number' ? _clampVK(prof.k) : 0;
+      mmWorker.postMessage({ type: 'configVehicle', vehicleK: vk });
+    } catch (_) {
+      /* best-effort・課金距離は pipeline 側の健全域クランプで保護 */
+    }
   }
   function _resolveVK() {
     try {
@@ -341,6 +359,7 @@ const Meter = (() => {
     //   業務中 (business_active=true) は ★ロック維持★ (start/resume で再解決しない=業務別不変)。
     if (!state.business_active) {
       _activeVehicleK = _clampVK(_resolveVK());
+      _postVehicleK(); // 業務開始ロック時に較正済測定K を pipeline へ(未較正は0=従来自動)
     }
     const WARMUP_MAX_AGE_MS = 5000;
     const warmupValid =
@@ -1090,7 +1109,8 @@ const Meter = (() => {
       return { ok: false, reason: 'business_too_short', k: _resolveVK() };
     }
     const kActive = _activeVehicleK > 0 ? _activeVehicleK : 1.0;
-    const sample = kActive * (certMeterMeters / D); // = cert / raw (複利安全)
+    // ★cert-K cross-profile マージン適用★: sample(=cert/raw) に ×0.997 で速度分布差の過大を吸収。
+    const sample = kActive * (certMeterMeters / D) * CERTK_SAFETY; // = cert / raw × 保守マージン
     if (Math.abs(sample / kActive - 1) > 0.05) {
       return { ok: false, reason: 'outlier_jump', k: _resolveVK() };
     }
@@ -1115,6 +1135,7 @@ const Meter = (() => {
     } catch (_) {
       /* persistence best-effort・課金距離には影響しない */
     }
+    _postVehicleK(); // 較正確定 → pipeline へ測定K反映(次業務から距離に焼く)
     return {
       ok: true,
       k: kNew,
@@ -1136,6 +1157,7 @@ const Meter = (() => {
     //     かつ常に _clampVK で ≤VK_MAX のため never-over は再ロックでも不変 (監査確認済 2026-06-09)。
     if (!!active && !state.business_active) {
       _activeVehicleK = _clampVK(_resolveVK());
+      _postVehicleK(); // 業務開始ロック時に較正済測定K を pipeline へ(未較正は0=従来自動)
     }
     state.business_active = !!active;
   }

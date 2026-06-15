@@ -206,6 +206,12 @@ function _setDecoderLRU(pref, dec) {
 //   - reset (業務リセット) で全トラッカ reset。
 //   - pipeline-distance 未ロード / decoder 未ロード時は no-op (= deltaM=0・既存挙動完全不変)。
 const _pipelineTrackers = new Map(); // pref → tracker
+// ★契約タイヤ由来 cold-start k0 (2026-06-15)★: main から configVehicle で受領し、tracker生成 opts へ注入。
+//   未設定(null)= 既定(0.97・applyNoDop=false)で byte不変。過大ゼロの砦(per-step天井)は不変。
+let _vehicleColdStartK = null; // number | null
+// ★認定据付 測定K (2026-06-15・認定前提)★: calibrateVehicleK が真距離で確定したKを main から受領し、
+//   OBD駆動距離に焼く(Doppler天井バイパス・過大ゼロは測定で保証)。未設定(null)= 従来自動(-1.2%圏)。
+let _vehicleK = null; // number | null (cert-calibrated obdVehicleK)
 
 // ★smoothedRawMode 判定 (2026-06-07)★: tracker は opts {} で生成 = DEFAULTS が支配する。
 //   worker 側の「実質停止で pipelineDeltaM 0 化」二重保険は平滑モードでは時間軸がズレる
@@ -232,7 +238,19 @@ function _getPipelineTracker(pref) {
   let tk = _pipelineTrackers.get(pref);
   if (!tk) {
     try {
-      tk = self.PipelineDistance.createDistanceTracker(dec, {});
+      const _tkOpts = {};
+      if (
+        typeof _vehicleColdStartK === 'number' &&
+        _vehicleColdStartK >= 0.97 &&
+        _vehicleColdStartK <= 1.0
+      ) {
+        _tkOpts.obdColdStartK = _vehicleColdStartK;
+        _tkOpts.obdColdStartApplyNoDop = true;
+      }
+      // ★認定据付測定K★: 健全域(0.85〜1.08)のみ採用。OBD駆動距離に焼く(過大ゼロは測定で保証)。
+      if (typeof _vehicleK === 'number' && _vehicleK >= 0.85 && _vehicleK <= 1.08)
+        _tkOpts.obdVehicleK = _vehicleK;
+      tk = self.PipelineDistance.createDistanceTracker(dec, _tkOpts);
       _pipelineTrackers.set(pref, tk);
     } catch (_) {
       return null; // 生成失敗は no-op (= 既存距離パスに影響させない)
@@ -2567,6 +2585,29 @@ self.onmessage = function (e) {
   if (msg.type === 'configDebug') {
     _mmDebug = !!msg.enabled;
     self.postMessage({ type: 'debugConfigured', enabled: _mmDebug });
+    return;
+  }
+
+  // ★契約タイヤ由来 cold-start k0 受領 (2026-06-15)★: main が tireSpecToK0(=[0.97,1.0]) を計算して送る。
+  //   Doppler皆無区間の過大ゼロ穴を塞ぐ床。受領後は trackers を作り直して反映。砦(per-step天井)は不変。
+  if (msg.type === 'configVehicle') {
+    // ★各フィールドは「存在する時だけ」更新★ (監査②是正): {vehicleK}単独postで coldStartK を、
+    //   {coldStartK}単独postで vehicleK を ★打ち消さない★。後勝ちclobber防止。健全域外/非数値は null(=OFF)。
+    if ('coldStartK' in msg) {
+      const k0 = typeof msg.coldStartK === 'number' ? msg.coldStartK : null;
+      _vehicleColdStartK = k0 != null && k0 >= 0.97 && k0 <= 1.0 ? k0 : null;
+    }
+    if ('vehicleK' in msg) {
+      const vk = typeof msg.vehicleK === 'number' ? msg.vehicleK : null;
+      _vehicleK = vk != null && vk >= 0.85 && vk <= 1.08 ? vk : null; // 認定据付測定K(健全域のみ)
+    }
+    _resetPipelineTrackers();
+    _pipelineTrackers.clear(); // 新 opts で lazy 再生成させる
+    self.postMessage({
+      type: 'vehicleConfigured',
+      coldStartK: _vehicleColdStartK,
+      vehicleK: _vehicleK,
+    });
     return;
   }
 
