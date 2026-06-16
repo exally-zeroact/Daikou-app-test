@@ -83,6 +83,12 @@
   const WS_AUTO_MAX_CAPS = 8; // これだけ集めたら自動discovery終了
   const WS_AUTO_MIN_SPEED_BINS = 4; // 異なる速度帯(20km/h刻み)をこれだけ集めたら十分=終了
   const WS_AUTO_MIN_CAPTURE_KMH = 8; // ★S5: 停車/極低速では撃たない(信号待ち/客待ちで退化点が積もり回帰汚染+空振りするのを回避)★
+  // ★★2026-06-16 実機回帰の根治: auto-discovery 既定OFF★★
+  //   ATMA捕捉(~2s)が走行中にOBD 010Dを中断→停止/減速と重なると距離がGPS/coastへフォールバック→
+  //   creep(停止中の距離増)+過大(市街地GPS過大)を作る実機回帰が発生(モコ実走 creep59m/過大~+18%)。
+  //   距離コア(distance_m)は不変だが「OBD連続供給の中断」が距離を汚す=「read-only」は誤りだった。
+  //   ∴ 課金中(業務走行)にATMA捕捉を走らせない。ABS discoveryは将来「非課金の専用較正モード」で行う。
+  const WS_AUTO_DISCOVERY_DEFAULT = false; // ★既定OFF(距離整合性を最優先)。再有効化は専用モード設計後★
   const SPEED_STALE_MS = 2000; // これより古い OBD 速度は「鮮度切れ」= 距離に使わない
   const POLL_MIN_INTERVAL_MS = 100; // ポーリング下限間隔 (ELM327 のレイテンシ保護)
   const CMD_TIMEOUT_MS = 1500; // 1 コマンドの応答待ち上限
@@ -302,9 +308,9 @@
         return undefined;
       })
       .then(function () {
-        // ★自動輪速discovery を有効化(ユーザー操作ゼロ)★: 普段の走行中にloopが合間で数回捕捉→十分でOFF。
-        //   保存済みマッピングがある車は、UIが applyWheelSpeedMapping を呼ぶと discovery は止まる。
-        _wsAuto = true;
+        // ★自動輪速discovery: 既定OFF(WS_AUTO_DISCOVERY_DEFAULT=false)★。
+        //   ATMA捕捉が走行中OBDを中断し距離を汚す実機回帰の根治(上記定数コメント)。OBDは中断せず連続供給=距離整合。
+        _wsAuto = WS_AUTO_DISCOVERY_DEFAULT;
         _wsCaps = 0;
         _wsLastCapTs = 0;
         _wsCapturesData = [];
