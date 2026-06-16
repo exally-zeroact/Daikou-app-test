@@ -5120,6 +5120,9 @@
 
     <!-- ★page-lifecycle.js：Phase A-1（2026-05-20追加）iOS PWA freeze/kill 時の distance_m 永続化補完 -->
 
+    <!-- ★trace-outbox.js: trace/log のオフライン永続送信キュー(IndexedDB)。両uploaderより前にload。
+         オフライン走行→閉じても消えず・オンライン/次回起動で自動送信(取りこぼしゼロ)。距離コア非関与 (2026-06-16) -->
+    <script src="js/trace-outbox.js"></script>
     <script src="js/debug-trace.js"></script>
     <!-- ★debug-log-uploader.js: Eruda console を Firebase RTDB 自動 push (2026-05-29 追加・解析側 Claude 並行参照用)
          feature flag・既定 ON (テストビルド) / OFF (本番)・?debuglog=on/off で切替・debug-trace.js と device_id 共有 -->
