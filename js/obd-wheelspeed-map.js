@@ -240,7 +240,7 @@
       makers: ['Suzuki', 'Daihatsu', 'Mitsubishi', 'Infiniti'],
       seedable: false,
       variants: [],
-      note: 'opendbc未収録。Daihatsuはトヨタ過半数出資/多くがトヨタOEM→0xAA(Toyota)を最初に試す価値(推測)。Suzukiは一部トヨタ/ダイハツOEM個体のみ0xAA推測(モコ=スズキMG33S系=自社車なので根拠なし)。Mitsubishi/Infinitiは推測根拠ほぼゼロ=純プローブ発見。全社フォールバック=標準OBD2 010D。',
+      note: 'opendbc未収録=要プローブ発見。★OEMリバッジ注意: 車はバッジでなく"製造元"のCANに従う★。Daihatsu=トヨタ100%子会社・多くがトヨタOEM→0xAA(Toyota)を最初に試す価値(推論・未検証)。Suzuki自社車は輪速ID不明=discovery。★日産モコ(型式MG33S)はバッジ日産だが中身スズキMRワゴンOEM=スズキ製CAN=opendbc未収録=discovery(=スズキとして扱う)★。Mitsubishi/Infinitiも要プローブ。全社フォールバック=標準OBD2 010D。日本市場のバッジ→実製造元 網羅は別途リサーチ(2026-06-16)。',
     },
   };
 
