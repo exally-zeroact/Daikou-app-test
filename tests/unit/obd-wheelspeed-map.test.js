@@ -1,41 +1,64 @@
 // tests/unit/obd-wheelspeed-map.test.js
-// ★ABS輪速 CANシード表 検証 (2026-06-15・opendbc由来・出典付き)★
+// ★ABS輪速 CANシード表 検証 (2026-06-16・opendbc網羅抽出・出典付き)★
 //   js/obd-wheelspeed-map.js は撃った生CAN IDを既知の輪速ID(opendbc verbatim)に照合する参照データ。
-//   ★read-only・距離コアには触れない★。値の正しさ(出典どおり)と逆引きを固定する。
+//   ★read-only・距離コアには触れない★。値の正しさ(出典どおり)と逆引き・バリアントを固定する。
 const SEED = require('../../js/obd-wheelspeed-map.js');
 
-describe('ABS輪速 CANシード表', () => {
-  it('★5メーカー群が事前シード可能(verbatim確認)', () => {
+describe('ABS輪速 CANシード表 (網羅・バリアント)', () => {
+  it('★事前シード可能メーカー(verbatim確認・Hyundai/Kia追加)', () => {
     const makers = SEED.listSeedableMakers();
-    ['Toyota', 'Lexus', 'Honda', 'Acura', 'Nissan', 'Subaru', 'Mazda'].forEach((m) =>
-      expect(makers).toContain(m)
+    ['Toyota', 'Lexus', 'Honda', 'Acura', 'Nissan', 'Subaru', 'Mazda', 'Hyundai', 'Kia'].forEach(
+      (m) => expect(makers).toContain(m)
     );
   });
 
-  it('★Toyota 0xAA → factor 0.01・BE・分解能0.01(010Dの100倍)', () => {
+  it('★Toyota 0xAA → factor 0.01・BE・★15bit非整列(bitStarts)★(2026-06-16訂正)', () => {
     const s = SEED.lookupById('0AA');
     expect(s).toBeTruthy();
     expect(s.makers).toContain('Toyota');
     expect(s.factor).toBe(0.01);
     expect(s.endian).toBe('BE');
+    expect(s.lenBits).toBe(15); // ★旧16bitは誤り→15bitに訂正★
     expect(s.resolutionKmhPerLsb).toBe(0.01);
   });
 
-  it('★Nissan 0x285(REAR共通) → factor 0.005(最も細かい・010Dの200倍)', () => {
-    const s = SEED.lookupById('285');
-    expect(s.makers).toContain('Nissan');
-    expect(s.factor).toBe(0.005);
+  it('★Honda 0x1D0 → 0.01・BE・15bit', () => {
+    const s = SEED.lookupById('1D0');
+    expect(s.makers).toContain('Honda');
+    expect(s.factor).toBe(0.01);
+    expect(s.lenBits).toBe(15);
   });
 
-  it('★Subaru 0x13A → LE・factor 0.057', () => {
-    const s = SEED.lookupById('13A');
-    expect(s.endian).toBe('LE');
-    expect(s.factor).toBe(0.057);
+  it('★Nissan: FRONT車種別(0x284 Leaf/0x29A X-Trail)+REAR共通0x285・全て0.005(最も細かい)', () => {
+    expect(SEED.lookupById('284').factor).toBe(0.005);
+    expect(SEED.lookupById('29A').factor).toBe(0.005);
+    expect(SEED.lookupById('285').factor).toBe(0.005);
+    expect(SEED.lookupById('285').makers).toContain('Nissan');
   });
 
-  it('★Mazda は車種別2ID(0x215 / 0x1C)とも引ける', () => {
+  it('★Subaru: Global 0x13A(LE 0.057) と pre-global 0x0D4(LE 0.0592) の2バリアント', () => {
+    expect(SEED.lookupById('13A').endian).toBe('LE');
+    expect(SEED.lookupById('13A').factor).toBe(0.057);
+    expect(SEED.lookupById('0D4').factor).toBe(0.0592); // ★新規・verbatim確定★
+    expect(SEED.lookupById('0D4').makers).toContain('Subaru');
+  });
+
+  it('★Mazda は車種別2ID(0x215 / 0x1C)とも引ける(BE 0.01 offset-100)', () => {
     expect(SEED.lookupById('215').makers).toContain('Mazda');
     expect(SEED.lookupById('01C').makers).toContain('Mazda'); // 0x1C は3桁正規化で 01C
+    expect(SEED.lookupById('215').offsetK).toBe(-100);
+  });
+
+  it('★Hyundai/Kia classic 0x386 → 0.03125 LE(新規・輸入車補足)', () => {
+    const s = SEED.lookupById('386');
+    expect(s.makers).toContain('Hyundai');
+    expect(s.makers).toContain('Kia');
+    expect(s.factor).toBe(0.03125);
+    expect(s.endian).toBe('LE');
+  });
+
+  it('★Hyundai CAN-FD 0x0A0 は ELM327非対応→シード照合から除外(null)', () => {
+    expect(SEED.lookupById('0A0')).toBeNull();
   });
 
   it('★ID正規化: 0x接頭辞/小文字/桁不足を3桁hexへ揃えて逆引き', () => {
@@ -43,16 +66,23 @@ describe('ABS輪速 CANシード表', () => {
     expect(SEED.lookupById('1d0').makers).toContain('Honda');
   });
 
-  it('★未収録(Suzuki/Daihatsu/Mitsubishi系の架空ID)は null = 010Dフォールバック', () => {
+  it('★未収録(架空ID)は null = 010Dフォールバック', () => {
     expect(SEED.lookupById('7FF')).toBeNull();
     expect(SEED.lookupById('000')).toBeNull();
     expect(SEED.lookupById('zzz')).toBeNull();
   });
 
-  it('★PROBE_ONLY群(Suzuki/Daihatsu/Mitsubishi/Infiniti)は seedable=false で列挙される', () => {
+  it('★PROBE_ONLY群(Suzuki/Daihatsu/Mitsubishi/Infiniti)は seedable=false', () => {
     expect(SEED.WHEELSPEED_SEED.PROBE_ONLY.seedable).toBe(false);
     ['Suzuki', 'Daihatsu', 'Mitsubishi', 'Infiniti'].forEach((m) =>
       expect(SEED.WHEELSPEED_SEED.PROBE_ONLY.makers).toContain(m)
     );
+  });
+
+  it('★seededIds: 読めるIDのみ列挙(CAN-FD 0A0 は含まない)', () => {
+    const ids = SEED.seededIds();
+    expect(ids).toContain('0AA');
+    expect(ids).toContain('386');
+    expect(ids).not.toContain('0A0'); // ELM327非対応は除外
   });
 });
