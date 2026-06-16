@@ -86,3 +86,68 @@ describe('ABS輪速 CANシード表 (網羅・バリアント)', () => {
     expect(ids).not.toContain('0A0'); // ELM327非対応は除外
   });
 });
+
+describe('OEMリバッジ解決 resolveBuilder (バッジ≠製造元)', () => {
+  it('★日産モコ(型式MG33S)→ 実製造元スズキ・discovery(seed無し)・バッジに騙されない', () => {
+    const r = SEED.resolveBuilder('日産', 'モコ', 'MG33S');
+    expect(r.builder).toBe('SUZUKI');
+    expect(r.layer).toBe('discovery');
+    expect(r.seedGroup).toBeNull(); // ★日産シードを当てない(中身スズキ)★
+  });
+
+  it('★トヨタ ルーミー → 実製造元ダイハツ・discovery・★0xAA第一候補(未検証)★', () => {
+    const r = SEED.resolveBuilder('トヨタ', 'ルーミー', '');
+    expect(r.builder).toBe('DAIHATSU');
+    expect(r.layer).toBe('discovery');
+    expect(r.seedGroup).toBeNull(); // 自動採用しない
+    expect(r.probeFirst).toBe('0AA'); // 最初に試す候補だけ
+  });
+
+  it('★日産デイズ → 実体は三菱(NMKV)・discovery(日産シードを当てない)', () => {
+    const r = SEED.resolveBuilder('Nissan', 'Dayz', 'B44W');
+    expect(r.builder).toBe('MITSUBISHI');
+    expect(r.layer).toBe('discovery');
+    expect(r.seedGroup).toBeNull();
+  });
+
+  it('★トヨタ GR86 → 実製造元スバル・hypothesis・スバル0x13Aで読める見込み(要プローブ)', () => {
+    const r = SEED.resolveBuilder('Toyota', 'GR86', 'ZN8');
+    expect(r.builder).toBe('SUBARU');
+    expect(r.layer).toBe('hypothesis');
+    expect(r.seedGroup).toBe('SUBARU');
+    expect(r.probeFirst).toBe('13A');
+  });
+
+  it('★純正トヨタ(リバッジ表に無い)→ 自社製=verified・トヨタseed', () => {
+    const r = SEED.resolveBuilder('トヨタ', 'カローラ', '');
+    expect(r.builder).toBe('TOYOTA');
+    expect(r.layer).toBe('verified');
+    expect(r.seedGroup).toBe('TOYOTA');
+    expect(r.probeFirst).toBe('0AA');
+  });
+
+  it('★純正ホンダ軽(N-BOX)→ 自社製=verified・ホンダseed(軽で唯一verified)', () => {
+    const r = SEED.resolveBuilder('Honda', 'N-BOX', '');
+    expect(r.builder).toBe('HONDA');
+    expect(r.layer).toBe('verified');
+    expect(r.seedGroup).toBe('HONDA');
+  });
+
+  it('★非seedメーカー自社車(スズキ ワゴンR)→ discovery・seed無し', () => {
+    const r = SEED.resolveBuilder('スズキ', 'ワゴンR', '');
+    expect(r.builder).toBe('SUZUKI');
+    expect(r.layer).toBe('discovery');
+    expect(r.seedGroup).toBeNull();
+  });
+
+  it('★型式優先: モデル名が空でも型式MG33Sでスズキ解決', () => {
+    const r = SEED.resolveBuilder('日産', '', 'MG33S');
+    expect(r.builder).toBe('SUZUKI');
+  });
+
+  it('★ヌル安全: 全部空でもクラッシュしない', () => {
+    const r = SEED.resolveBuilder('', '', '');
+    expect(r).toBeTruthy();
+    expect(typeof r.layer).toBe('string');
+  });
+});

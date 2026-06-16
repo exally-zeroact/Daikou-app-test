@@ -268,6 +268,307 @@
     });
   });
 
+  // ============================================================
+  // ★OEMリバッジ解決(2026-06-16・バッジ≠製造元)★
+  //   車のCAN/ECUは「バッジ」でなく「実製造元」に従う(例: 日産モコ=スズキMRワゴンOEM=スズキCAN)。
+  //   バッジから実製造元を解決し、正しいシード/discovery戦略を返す。出典=2026-06-16 OEMリバッジ網羅調査
+  //   (Wikipedia/メーカー公式・各リバッジ関係を裏取り)。★read-only・距離コア非関与★。
+  // ============================================================
+  // 製造元(builder)が seed メーカーなら その seed group(輪速IDを持つ)
+  const SEEDED_BUILDERS = {
+    TOYOTA: 'TOYOTA',
+    LEXUS: 'TOYOTA',
+    HONDA: 'HONDA',
+    ACURA: 'HONDA',
+    NISSAN: 'NISSAN',
+    SUBARU: 'SUBARU',
+    MAZDA: 'MAZDA',
+    HYUNDAI: 'HYUNDAI',
+    KIA: 'HYUNDAI',
+    GENESIS: 'HYUNDAI',
+  };
+  // seed group → 第一候補ID(discoveryで最初に試す/hypothesisの当て先)
+  const SEED_PRIMARY_ID = {
+    TOYOTA: '0AA',
+    HONDA: '1D0',
+    NISSAN: '285',
+    SUBARU: '13A',
+    MAZDA: '215',
+    HYUNDAI: '386',
+  };
+
+  // バッジ→実製造元 リバッジ表(★型式優先・無ければモデル名★)。バッジが実製造元と違う車だけ載せる。
+  const REBADGE_MAP = [
+    // ── スズキ製(opendbc未収録=discovery) ──
+    {
+      badge: 'NISSAN',
+      modelsJa: ['モコ'],
+      modelsEn: ['moco'],
+      katashiki: ['MG21S', 'MG22S', 'MG33S'],
+      builder: 'SUZUKI',
+      base: 'スズキMRワゴンOEM',
+    },
+    {
+      badge: 'NISSAN',
+      modelsJa: ['ピノ'],
+      modelsEn: ['pino'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: 'スズキアルトOEM',
+    },
+    {
+      badge: 'NISSAN',
+      modelsJa: ['クリッパー', 'NV100'],
+      modelsEn: ['clipper', 'nv100'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: '現行=スズキエブリイOEM(旧は三菱)・要型式確認',
+    },
+    {
+      badge: 'MAZDA',
+      modelsJa: ['フレア'],
+      modelsEn: ['flair'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: 'スズキワゴンR/ハスラーOEM',
+    },
+    {
+      badge: 'MAZDA',
+      modelsJa: ['キャロル'],
+      modelsEn: ['carol'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: 'スズキアルトOEM',
+    },
+    {
+      badge: 'MAZDA',
+      modelsJa: ['スクラム'],
+      modelsEn: ['scrum'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: 'スズキエブリイOEM',
+    },
+    {
+      badge: 'MAZDA',
+      modelsJa: ['AZワゴン', 'AZ-ワゴン'],
+      modelsEn: ['az-wagon', 'azwagon'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: 'スズキワゴンROEM',
+    },
+    {
+      badge: 'MITSUBISHI',
+      modelsJa: ['デリカD:2', 'デリカd2'],
+      modelsEn: ['delica d:2', 'delicad2'],
+      katashiki: [],
+      builder: 'SUZUKI',
+      base: 'スズキソリオOEM',
+    },
+    // ── ダイハツ製(opendbc未収録=discovery・0xAA第一候補) ──
+    {
+      badge: 'TOYOTA',
+      modelsJa: ['ルーミー', 'タンク'],
+      modelsEn: ['roomy', 'tank'],
+      katashiki: ['M900A', 'M910A'],
+      builder: 'DAIHATSU',
+      base: 'ダイハツトールOEM',
+    },
+    {
+      badge: 'TOYOTA',
+      modelsJa: ['ライズ'],
+      modelsEn: ['raize'],
+      katashiki: ['A200A', 'A210A'],
+      builder: 'DAIHATSU',
+      base: 'ダイハツロッキーOEM',
+    },
+    {
+      badge: 'TOYOTA',
+      modelsJa: ['ピクシス'],
+      modelsEn: ['pixis'],
+      katashiki: [],
+      builder: 'DAIHATSU',
+      base: 'ダイハツ各車OEM(ムーヴ/タント/ハイゼット等)',
+    },
+    {
+      badge: 'SUBARU',
+      modelsJa: ['ジャスティ'],
+      modelsEn: ['justy'],
+      katashiki: [],
+      builder: 'DAIHATSU',
+      base: 'ダイハツトールOEM',
+    },
+    {
+      badge: 'SUBARU',
+      modelsJa: ['シフォン'],
+      modelsEn: ['chiffon'],
+      katashiki: [],
+      builder: 'DAIHATSU',
+      base: 'ダイハツタントOEM',
+    },
+    {
+      badge: 'SUBARU',
+      modelsJa: ['ステラ'],
+      modelsEn: ['stella'],
+      katashiki: [],
+      builder: 'DAIHATSU',
+      base: 'ダイハツムーヴOEM',
+    },
+    {
+      badge: 'SUBARU',
+      modelsJa: ['プレオ'],
+      modelsEn: ['pleo'],
+      katashiki: [],
+      builder: 'DAIHATSU',
+      base: 'ダイハツミラOEM',
+    },
+    {
+      badge: 'SUBARU',
+      modelsJa: ['サンバー'],
+      modelsEn: ['sambar'],
+      katashiki: [],
+      builder: 'DAIHATSU',
+      base: 'ダイハツハイゼットOEM',
+    },
+    // ── 三菱製/NMKV(opendbc未収録=discovery)・★日産バッジ軽の実体は三菱★ ──
+    {
+      badge: 'NISSAN',
+      modelsJa: ['デイズ'],
+      modelsEn: ['dayz'],
+      katashiki: ['B21W', 'B44W', 'B45W'],
+      builder: 'MITSUBISHI',
+      base: 'NMKV(三菱水島製)・三菱eK同体',
+    },
+    {
+      badge: 'NISSAN',
+      modelsJa: ['ルークス'],
+      modelsEn: ['roox'],
+      katashiki: ['B44A', 'B45A', 'B47A', 'B48A'],
+      builder: 'MITSUBISHI',
+      base: '2代目=NMKV(三菱製)・初代はスズキ製(要型式)',
+    },
+    {
+      badge: 'NISSAN',
+      modelsJa: ['サクラ'],
+      modelsEn: ['sakura'],
+      katashiki: ['B6AW'],
+      builder: 'MITSUBISHI',
+      base: 'NMKV(三菱製)・三菱eKクロスEV同体',
+    },
+    // ── 製造元がseedメーカーのリバッジ(hypothesis=そのseedで読める見込み・要プローブ) ──
+    {
+      badge: 'TOYOTA',
+      modelsJa: ['86', 'GR86'],
+      modelsEn: ['86', 'gr86'],
+      katashiki: ['ZN6', 'ZN8'],
+      builder: 'SUBARU',
+      base: 'スバルBRZ同体=スバルCAN',
+    },
+    {
+      badge: 'SUBARU',
+      modelsJa: ['ソルテラ'],
+      modelsEn: ['solterra'],
+      katashiki: [],
+      builder: 'TOYOTA',
+      base: 'トヨタbZ4X同体=トヨタCAN',
+    },
+  ];
+
+  function _norm(s) {
+    return String(s == null ? '' : s)
+      .toLowerCase()
+      .replace(/[\s:]/g, ''); // \s は全角スペースも含む(U+3000)
+  }
+  // メーカー名(日本語/英語/表記揺れ)→ 正規の製造元キー(英語大文字)
+  const MAKER_ALIAS = {
+    トヨタ: 'TOYOTA',
+    レクサス: 'LEXUS',
+    ホンダ: 'HONDA',
+    日産: 'NISSAN',
+    ニッサン: 'NISSAN',
+    マツダ: 'MAZDA',
+    スバル: 'SUBARU',
+    スズキ: 'SUZUKI',
+    ダイハツ: 'DAIHATSU',
+    三菱: 'MITSUBISHI',
+    ミツビシ: 'MITSUBISHI',
+    ヒュンダイ: 'HYUNDAI',
+    ヒョンデ: 'HYUNDAI',
+    起亜: 'KIA',
+    キア: 'KIA',
+    インフィニティ: 'INFINITI',
+    toyota: 'TOYOTA',
+    lexus: 'LEXUS',
+    honda: 'HONDA',
+    acura: 'ACURA',
+    nissan: 'NISSAN',
+    infiniti: 'INFINITI',
+    mazda: 'MAZDA',
+    subaru: 'SUBARU',
+    suzuki: 'SUZUKI',
+    daihatsu: 'DAIHATSU',
+    mitsubishi: 'MITSUBISHI',
+    hyundai: 'HYUNDAI',
+    kia: 'KIA',
+    genesis: 'GENESIS',
+  };
+  function _canonMaker(maker) {
+    const n = _norm(maker);
+    if (!n) return '';
+    if (MAKER_ALIAS[n]) return MAKER_ALIAS[n];
+    const keys = Object.keys(MAKER_ALIAS);
+    for (let i = 0; i < keys.length; i++) {
+      if (n.indexOf(_norm(keys[i])) >= 0) return MAKER_ALIAS[keys[i]]; // 「トヨタ自動車」等の部分一致
+    }
+    return n.toUpperCase();
+  }
+
+  // バッジ(maker)/モデル/型式 から ★実製造元と読み取り戦略★ を解決(read-only・距離非関与)。
+  //   返り値: { builder, layer('verified'|'hypothesis'|'discovery'), seedGroup|null, probeFirst|null, base }
+  function resolveBuilder(maker, model, katashiki) {
+    const canonMk = _canonMaker(maker), // 製造元キー(英語大文字・日本語名も解決)
+      md = _norm(model),
+      kt = _norm(katashiki);
+    function result(builder, base, selfBuilt) {
+      const B = String(builder || '').toUpperCase();
+      const seedGroup = SEEDED_BUILDERS[B] || null;
+      let layer;
+      if (selfBuilt && seedGroup)
+        layer = 'verified'; // バッジ=製造元=seedメーカーの自社車
+      else if (seedGroup)
+        layer = 'hypothesis'; // 製造元はseedメーカーだがリバッジ→要プローブ
+      else layer = 'discovery'; // 非seed製造元(スズキ/ダイハツ/三菱)
+      // 第一候補ID: seedメーカー製はそのseed primary / ダイハツはトヨタ0xAA(推論) / それ以外なし
+      let probeFirst = seedGroup ? SEED_PRIMARY_ID[seedGroup] : null;
+      if (!probeFirst && B === 'DAIHATSU') probeFirst = '0AA'; // ★ダイハツ=トヨタ子会社→0xAA第一候補(未検証)★
+      return {
+        builder: B,
+        layer: layer,
+        seedGroup: seedGroup,
+        probeFirst: probeFirst,
+        base: base || null,
+      };
+    }
+    // 1) リバッジ表を 型式(前方一致) → モデル名(部分一致+バッジ整合) の順で照合
+    for (let i = 0; i < REBADGE_MAP.length; i++) {
+      const r = REBADGE_MAP[i];
+      if (kt && r.katashiki && r.katashiki.some((k) => k && kt.indexOf(_norm(k)) === 0)) {
+        return result(r.builder, r.base, false);
+      }
+    }
+    for (let i = 0; i < REBADGE_MAP.length; i++) {
+      const r = REBADGE_MAP[i];
+      const nameHit =
+        (r.modelsJa || []).some((m) => m && md.indexOf(_norm(m)) >= 0) ||
+        (r.modelsEn || []).some((m) => m && md.indexOf(_norm(m)) >= 0);
+      if (!nameHit) continue;
+      // 同名異車の誤判定防止: バッジ(製造元キー)も整合する時だけ採用
+      const badgeOk = !r.badge || canonMk === String(r.badge).toUpperCase();
+      if (md && badgeOk) return result(r.builder, r.base, false);
+    }
+    // 2) リバッジ表に無い = 自社製と仮定。バッジが seed メーカーなら そのseed(verified)。
+    return result(canonMk, null, true);
+  }
+
   // 撃った生CAN IDが既知シードのどれかに一致するか(3桁hex正規化して照合)
   function lookupById(idHex) {
     if (typeof idHex !== 'string') return null;
@@ -292,7 +593,9 @@
   const api = {
     WHEELSPEED_SEED: WHEELSPEED_SEED,
     SEED_BY_ID: SEED_BY_ID,
+    REBADGE_MAP: REBADGE_MAP,
     lookupById: lookupById,
+    resolveBuilder: resolveBuilder, // ★バッジ→実製造元→読み取り戦略(OEMリバッジ解決)★
     listSeedableMakers: listSeedableMakers,
     seededIds: seededIds,
   };
