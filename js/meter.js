@@ -82,15 +82,27 @@ const Meter = (() => {
       if (!mmWorker || typeof mmWorker.postMessage !== 'function') return;
       const prof = (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null;
       let vk = 0;
+      let vkMeasured = false; // ★実測K(k_samples>0=そのタイヤで真距離測定済)か factory prior か★
       if (prof) {
-        if (prof.k_samples > 0 && typeof prof.k === 'number')
+        if (prof.k_samples > 0 && typeof prof.k === 'number') {
           vk = _clampVK(prof.k); // 個体実測較正(検定/巻尺/KP)優先
-        else {
+          vkMeasured = true; // 実測K=タイヤ込み較正 → pipeline でタイヤ比を抑制(二重回避)
+        } else {
           const fk = _factoryK(prof);
-          if (fk > 0) vk = _clampVK(fk); // factory(既存実測データ由来・型式別)
+          if (fk > 0) vk = _clampVK(fk); // factory(型式別prior=タイヤ非依存)→ vkMeasured=false でタイヤ比併用
         }
       }
-      mmWorker.postMessage({ type: 'configVehicle', vehicleK: vk });
+      // ★タイヤ円周比(今÷工場・物理サイズ変更補正)は vk(器差)とは独立フィールド★。
+      //   k無しプロファイルでもタイヤ比は送る(audit②是正: vk分岐の外=サイドバイサイド)。値は index.html ヘルパが確定。
+      let tireRatio = 1.0;
+      if (prof && typeof prof.tireRatio === 'number' && prof.tireRatio > 0)
+        tireRatio = prof.tireRatio;
+      mmWorker.postMessage({
+        type: 'configVehicle',
+        vehicleK: vk,
+        vehicleKMeasured: vkMeasured,
+        tireRatio,
+      });
     } catch (_) {
       /* best-effort・課金距離は pipeline 側の健全域クランプで保護 */
     }
@@ -190,6 +202,11 @@ const Meter = (() => {
     vehicles: [],
     vehiclesEnabled: false,
     wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
+    // ★代行仕上げ係数 (2026-06-17・司さん裁定 DM Light−0.2%=真距離+1.1%≈distance×1.011)★:
+    //   課金距離(calcFare の距離入力)にのみ ×daikouFareFactor を掛ける。state.distance_m / business_distance_m
+    //   は1byteも変えない=cert-3env/gnss-degraded/property は distance_m を採点するので緑維持。
+    //   1.0=現行byte不変。★タクシー認定運用は必ず 1.0(過大ゼロ法要件側)★。代行のみ 1.011 等を入れる。
+    daikouFareFactor: 1.0,
   };
 
   // 業務画面で ON/OFF された手動 surcharge の id Set
@@ -749,6 +766,10 @@ const Meter = (() => {
   //   Step 2 vehicle 倍率 + addon / Step 3 手動 surcharges 乗算
   //   Step 4 autoSurcharges 乗算 / Step 5 wait 料金 / Step 6 clamp / Step 7 丸め
   function calcFare(distanceM) {
+    // ★代行仕上げ係数 (2026-06-17)★: 課金距離にのみ局所スケール。呼出側 state.distance_m は数値=値渡しで不変。
+    //   両 calcFare(display)/calcFare(distance_m) に同率で掛かるので display≤distance_m 単調も保存。1.0=byte不変。
+    const _daikouFF = fareConfig.daikouFareFactor > 0 ? fareConfig.daikouFareFactor : 1.0;
+    if (_daikouFF !== 1.0) distanceM = distanceM * _daikouFF;
     let fare = 0;
 
     // Step 1: 距離料金

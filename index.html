@@ -12407,7 +12407,7 @@
               class="row"
               style="justify-content: space-between; padding: 3px 0; align-items: center"
             >
-              <span style="color: #8e8e93">タイヤ(側面/ドア)</span>
+              <span style="color: #8e8e93">工場タイヤ(ドアのステッカー)</span>
               <input
                 id="vehTire"
                 type="text"
@@ -12418,11 +12418,41 @@
                   border: 1px solid #d1d1d6;
                   border-radius: 6px;
                   font-size: 13px;
+                  height: 30px;
+                  box-sizing: border-box;
+                  -webkit-appearance: none;
+                  appearance: none;
                 "
               />
             </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">今のタイヤ(交換した場合のみ)</span>
+              <input
+                id="vehTireCurrent"
+                type="text"
+                placeholder="未交換なら空欄"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  height: 30px;
+                  box-sizing: border-box;
+                  -webkit-appearance: none;
+                  appearance: none;
+                "
+              />
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">タイヤ距離補正</span>
+              <span id="vehTireRatioDisp" style="font-weight: 700; color: #34c759">×1.000</span>
+            </div>
             <div style="font-size: 11px; color: #ff9500; margin: 4px 0 8px">
-              ※タイヤは認定の管理項目。交換したら「保存」し直す(摩耗で過大化を防ぐ較正対象)。
+              ※工場タイヤ＝ドア内側のステッカー(初回1回・以後ロック)。タイヤを替えたら「今のタイヤ」に実サイズを入れて保存。円周比で距離を自動補正(過大ゼロ維持)。
             </div>
             <div class="row" style="justify-content: space-between; padding: 3px 0">
               <span style="color: #8e8e93">OBD距離能力</span>
@@ -13181,8 +13211,82 @@
           var vehModelEl = document.getElementById('vehModel');
           var vehKatashikiEl = document.getElementById('vehKatashiki');
           var vehTireEl = document.getElementById('vehTire');
+          var vehTireCurrentEl = document.getElementById('vehTireCurrent');
+          var vehTireRatioDispEl = document.getElementById('vehTireRatioDisp');
           var vehObdCapEl = document.getElementById('vehObdCap');
           var btnVehSave = document.getElementById('btnVehSave');
+          // ★タイヤ円周比ヘルパ (2026-06-17)★: OBD車速はECUが工場タイヤ円周で換算済み=
+          //   真距離 = OBD × (今の円周 ÷ 工場円周)。比 = 今÷工場(タイヤ大→実距離増→比>1で上げる)。
+          //   規格表記 例 195/65R15 → 直径mm = リム×25.4 + 2×幅×(扁平/100)、円周 = 直径×π。
+          function _parseTireSize(s) {
+            if (!s || typeof s !== 'string') return null;
+            var m = s.match(/(\d{2,3})\s*\/\s*(\d{2,3})\s*[Rr]\s*(\d{1,2})/);
+            if (!m) return null;
+            var w = parseInt(m[1], 10),
+              ar = parseInt(m[2], 10),
+              rim = parseInt(m[3], 10);
+            if (!(w > 0) || !(ar > 0) || !(rim > 0)) return null;
+            return { width: w, aspect: ar, rim: rim };
+          }
+          function _tireCircMm(spec) {
+            if (!spec) return 0;
+            var diaMm = spec.rim * 25.4 + 2 * spec.width * (spec.aspect / 100);
+            return diaMm * Math.PI;
+          }
+          // factory/current 両方有効なら 今÷工場、current空なら 1.0。健全域[0.80,1.25]外は 1.0(+警告)。
+          function _computeTireRatio(factoryStr, currentStr) {
+            var fc = _parseTireSize(factoryStr);
+            var cu = _parseTireSize(currentStr);
+            if (!fc) return 1.0; // 工場サイズ未入力=補正なし
+            if (!cu) return 1.0; // 今のサイズ空=未交換=恒等
+            var cf = _tireCircMm(fc),
+              cc = _tireCircMm(cu);
+            if (!(cf > 0) || !(cc > 0)) return 1.0;
+            var r = cc / cf; // ★今÷工場★
+            if (!(r >= 0.8 && r <= 1.25)) {
+              try {
+                // eslint-disable-next-line no-console
+                console.log('[OBD-TIRE] ratio out of band, clamped to 1.0: ' + r);
+              } catch (_) {
+                /* ignore */
+              }
+              return 1.0;
+            }
+            return r;
+          }
+          function _refreshTireRatioDisp() {
+            try {
+              var r = _computeTireRatio(
+                vehTireEl ? vehTireEl.value : '',
+                vehTireCurrentEl ? vehTireCurrentEl.value : ''
+              );
+              if (vehTireRatioDispEl) vehTireRatioDispEl.textContent = '×' + r.toFixed(3);
+            } catch (_) {
+              /* ignore */
+            }
+          }
+          if (vehTireEl) vehTireEl.addEventListener('input', _refreshTireRatioDisp);
+          if (vehTireCurrentEl) vehTireCurrentEl.addEventListener('input', _refreshTireRatioDisp);
+          // ★工場サイズ初回ロック反映 + 今サイズ復元 + 比表示更新★(保存/起動/VIN切替で共通呼出)。
+          function _applyTireProfileToUI(prof) {
+            try {
+              prof = prof || {};
+              if (vehTireEl) {
+                if (prof.tire) {
+                  vehTireEl.value = prof.tire;
+                  vehTireEl.readOnly = true; // 初回確定後ロック(摩耗/誤入力での過大化防止)
+                  vehTireEl.style.background = '#f2f2f7';
+                } else {
+                  vehTireEl.readOnly = false;
+                  vehTireEl.style.background = '';
+                }
+              }
+              if (vehTireCurrentEl) vehTireCurrentEl.value = prof.tireCurrent || '';
+              _refreshTireRatioDisp();
+            } catch (_) {
+              /* ignore */
+            }
+          }
           var vehSaveNoteEl = document.getElementById('vehSaveNote');
           // ★随伴車別 k(メーター定数)校正UI (2026-06-09)★
           var vehKValueEl = document.getElementById('vehKValue');
@@ -13285,11 +13389,17 @@
                   year: info.year,
                   model: vehModelEl ? vehModelEl.value.trim() : '',
                   katashiki: vehKatashikiEl ? vehKatashikiEl.value.trim() : '',
-                  tire: vehTireEl ? vehTireEl.value.trim() : '',
+                  // ★工場タイヤ(=距離補正の基準)は初回1回で確定しロック★(既存k継承と同手法)。
+                  //   _prev.tire があれば継承(上書き禁止)・無ければ今の入力で初回確定。
+                  tire: _prev && _prev.tire ? _prev.tire : vehTireEl ? vehTireEl.value.trim() : '',
+                  // 今のタイヤ(交換した場合のみ・毎回上書き可・空=未交換)
+                  tireCurrent: vehTireCurrentEl ? vehTireCurrentEl.value.trim() : '',
                   k: _prev && typeof _prev.k === 'number' ? _prev.k : 1.0,
                   k_samples: _prev && _prev.k_samples ? _prev.k_samples : 0,
                   savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
                 };
+                // ★タイヤ円周比(今÷工場)を確定して保存★。pipeline vEff段で乗算され距離を物理補正。
+                prof.tireRatio = _computeTireRatio(prof.tire, prof.tireCurrent);
                 if (!prof.model && !prof.katashiki) {
                   if (vehSaveNoteEl)
                     vehSaveNoteEl.textContent = '車種か型式を入力してから保存してください';
@@ -13300,6 +13410,7 @@
                 if (_curVin) localStorage.setItem('dk_veh_' + _curVin, JSON.stringify(prof));
                 // ★trace に焼く + ログ出力 (型式別解析用・VIN無くても効く)★
                 window.DK_VEHICLE_PROFILE = prof;
+                _applyTireProfileToUI(prof); // 工場サイズロック + 比表示更新(worker反映は次の業務開始で)
                 try {
                   // eslint-disable-next-line no-console
                   console.log('[OBD-VEHICLE] ' + JSON.stringify(prof));
@@ -13447,6 +13558,7 @@
                   vehKatashikiEl.value = p.katashiki || '';
                 if (vehTireEl && !vehTireEl.value) vehTireEl.value = p.tire || '';
                 window.DK_VEHICLE_PROFILE = p;
+                _applyTireProfileToUI(p); // 工場サイズロック表示 + 今サイズ + 比表示を復元
                 if (vehSaveNoteEl)
                   vehSaveNoteEl.textContent =
                     '登録済の随伴車を読込 (' + (p.model || p.katashiki || '') + ')';
@@ -13591,6 +13703,7 @@
                 base.obdOdoSupported = d.odometer_supported === true;
                 base.obdOdoKm = d.odometer_km != null ? d.odometer_km : null;
                 window.DK_VEHICLE_PROFILE = base;
+                _applyTireProfileToUI(base); // ★VIN別の工場タイヤ/比に切替(各車のロック独立)★
                 // VINが取れたら VINキーにも保存(将来の自動復元用)。active も最新化。
                 try {
                   localStorage.setItem('dk_veh_active', JSON.stringify(base));

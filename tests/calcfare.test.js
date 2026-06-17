@@ -255,3 +255,62 @@ describe('Meter.calcFare 最低/最高料金 clamp (minFare / maxFare)', () => {
     expect(Meter.calcFare(5000)).toBe(1500);
   });
 });
+
+// ─── 代行仕上げ係数 daikouFareFactor (2026-06-17) ───────────────────────
+//   ★課金距離にのみ局所スケール=state.distance_m 不可侵★。1.0=byte不変。1.011=DM Light−0.2%(真距離+1.1%)。
+describe('Meter.calcFare 代行仕上げ係数 daikouFareFactor', () => {
+  let Meter;
+  const CFG = {
+    base_fare: 1300,
+    base_distance_m: 1000,
+    add_fare: 100,
+    add_distance_m: 420,
+    rounding: 10,
+    tiers: [],
+    surcharges: [],
+    vehicles: [],
+    vehiclesEnabled: false,
+    wait: { enabled: false, freeMins: 5, ratePerMin: 100 },
+    autoSurcharges: {
+      night: { enabled: false },
+      weekend: { enabled: false },
+      winter: { enabled: false },
+    },
+    minFare: null,
+    maxFare: null,
+  };
+  beforeEach(() => {
+    Meter = loadMeter();
+  });
+
+  it('★既定(係数なし=1.0)は従来と完全一致 (byte不変)', () => {
+    Meter.setFareConfig(CFG);
+    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5000, CFG));
+  });
+
+  it('★daikouFareFactor=1.0 を明示しても従来と一致', () => {
+    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.0 });
+    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5000, CFG));
+  });
+
+  it('★daikouFareFactor=1.011 → 距離入力を×1.011してから課金 (距離料金が+方向)', () => {
+    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.011 });
+    // 課金距離 = 5000×1.011 = 5055m として旧式計算。
+    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5055, CFG));
+  });
+
+  it('★係数で料金は単調増 (fare(1.011) ≥ fare(1.0)) = 代行は損しない側', () => {
+    for (const d of [800, 1200, 3000, 9000, 30000]) {
+      Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.0 });
+      const base = Meter.calcFare(d);
+      Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.011 });
+      expect(Meter.calcFare(d)).toBeGreaterThanOrEqual(base);
+    }
+  });
+
+  it('★display≤distance_m 単調保存 (同率係数なので fare(display) ≤ fare(distance_m))', () => {
+    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.011 });
+    // display(=4800) ≤ distance_m(=5000) → 料金も単調。
+    expect(Meter.calcFare(4800)).toBeLessThanOrEqual(Meter.calcFare(5000));
+  });
+});

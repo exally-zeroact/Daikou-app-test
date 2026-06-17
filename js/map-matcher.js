@@ -212,6 +212,8 @@ let _vehicleColdStartK = null; // number | null
 // ★認定据付 測定K (2026-06-15・認定前提)★: calibrateVehicleK が真距離で確定したKを main から受領し、
 //   OBD駆動距離に焼く(Doppler天井バイパス・過大ゼロは測定で保証)。未設定(null)= 従来自動(-1.2%圏)。
 let _vehicleK = null; // number | null (cert-calibrated obdVehicleK)
+let _vehicleKMeasured = false; // true=実測K(タイヤ込み・タイヤ比抑制) / false=factory prior(タイヤ比併用)
+let _vehicleTireRatio = null; // number | null (タイヤ円周比=今÷工場・物理真距離補正・1.0=恒等)
 
 // ★smoothedRawMode 判定 (2026-06-07)★: tracker は opts {} で生成 = DEFAULTS が支配する。
 //   worker 側の「実質停止で pipelineDeltaM 0 化」二重保険は平滑モードでは時間軸がズレる
@@ -248,8 +250,17 @@ function _getPipelineTracker(pref) {
         _tkOpts.obdColdStartApplyNoDop = true;
       }
       // ★認定据付測定K★: 健全域(0.85〜1.08)のみ採用。OBD駆動距離に焼く(過大ゼロは測定で保証)。
-      if (typeof _vehicleK === 'number' && _vehicleK >= 0.85 && _vehicleK <= 1.08)
+      if (typeof _vehicleK === 'number' && _vehicleK >= 0.85 && _vehicleK <= 1.08) {
         _tkOpts.obdVehicleK = _vehicleK;
+        _tkOpts.obdVehicleKMeasured = _vehicleKMeasured === true; // 実測Kならタイヤ比抑制
+      }
+      // ★タイヤ円周比(物理真距離補正・今÷工場)★: 健全域[0.80,1.25]のみ。pipeline vEff段で乗算。
+      if (
+        typeof _vehicleTireRatio === 'number' &&
+        _vehicleTireRatio >= 0.8 &&
+        _vehicleTireRatio <= 1.25
+      )
+        _tkOpts.obdTireRatio = _vehicleTireRatio;
       tk = self.PipelineDistance.createDistanceTracker(dec, _tkOpts);
       _pipelineTrackers.set(pref, tk);
     } catch (_) {
@@ -2601,12 +2612,20 @@ self.onmessage = function (e) {
       const vk = typeof msg.vehicleK === 'number' ? msg.vehicleK : null;
       _vehicleK = vk != null && vk >= 0.85 && vk <= 1.08 ? vk : null; // 認定据付測定K(健全域のみ)
     }
+    if ('vehicleKMeasured' in msg) _vehicleKMeasured = msg.vehicleKMeasured === true;
+    // ★タイヤ円周比(今÷工場)★: 健全域[0.80,1.25]外/非数値は null(=恒等1.0)。物理サイズ変更補正。
+    if ('tireRatio' in msg) {
+      const tr = typeof msg.tireRatio === 'number' ? msg.tireRatio : null;
+      _vehicleTireRatio = tr != null && tr >= 0.8 && tr <= 1.25 ? tr : null;
+    }
     _resetPipelineTrackers();
     _pipelineTrackers.clear(); // 新 opts で lazy 再生成させる
     self.postMessage({
       type: 'vehicleConfigured',
       coldStartK: _vehicleColdStartK,
       vehicleK: _vehicleK,
+      vehicleKMeasured: _vehicleKMeasured,
+      tireRatio: _vehicleTireRatio,
     });
     return;
   }

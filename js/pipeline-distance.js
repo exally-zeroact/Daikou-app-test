@@ -224,6 +224,16 @@ const DEFAULTS = {
   //   実測根拠: OBD生∫v -2.11%/-2.38%(196号KP RTK) × K≈1.02 = -0.16%/-0.42%(-1%以内)。
   //   ★0 で完全OFF(byte不変・rollback)。未較正車は0=従来ラチェット/天井(自動推定・-1.2%圏)。★
   obdVehicleK: 0, // 認定据付測定K (0=OFF/未較正=従来自動・>0=測定Kを焼く)
+  // ★obdVehicleK が「実測K(k_samples>0=そのタイヤで真距離測定済)」か「factory prior(型式器差推定=タイヤ非依存)」か★
+  //   true=実測K → そのタイヤ込みの較正なのでタイヤ比は二重回避で 1.0 に落とす(タイヤ交換時はK再較正が必要)。
+  //   false=factory prior(既定) → タイヤ非依存の器差priorなので obdTireRatio と★併用OK★(物理サイズ変換は直交)。
+  obdVehicleKMeasured: false,
+  // ★タイヤ円周比(物理的真距離補正・2026-06-17)★: OBD車速はECUが工場タイヤ円周で換算済み=
+  //   真距離 = OBD × (今の円周 ÷ 工場円周)。★比 = 今÷工場★(タイヤが大きい=実距離増→比>1で上げる)。
+  //   1.0=恒等(byte不変・タイヤ未変更/未申告)。★vEff段(Doppler天井の手前)で乗算★するので、
+  //   非K経路では天井が「タイヤ補正後vEff」を独立Doppler速度で再検証=過大方向の誤補正を自動で刈る安全網。
+  //   実測K(obdVehicleKMeasured=true)経路ではタイヤ込み較正のため非適用(=1.0扱い)。
+  obdTireRatio: 1.0,
   calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)
   calMaxChordRatio: 1.5, // GPS弦 > spd×dt×これ = ジッタ汚染窓 → δ母集団から除外
   calMaxAccM: 30, // 両端 accuracy これ超 = 位置不確か → δ母集団から除外 (良GPS窓のみ学習)
@@ -1976,7 +1986,17 @@ function createDistanceTracker(decoder, opts) {
             : !applyDelta && spd >= cfg.stationarySpdMps && cfg.obdQuantCorrectMps > 0
               ? cfg.obdQuantCorrectMps
               : 0;
-        const vEff = (applyDelta ? spd + obdDeltaMps : spd) + _quantMps;
+        // ★タイヤ円周比を vEff 段(=Doppler天井の手前)で乗算 (2026-06-17・blocker①修正)★:
+        //   後段(_kApply の後)で掛けると min(k_now,k_p25) 天井を突き抜け過大ゼロを破る。vEff 段に入れると
+        //   下流の Doppler 天井が「タイヤ補正後の vEff」を独立速度で再検証=過大方向の誤補正を自動で刈る。
+        //   ★実測K(obdVehicleKMeasured)経路はタイヤ込み較正=二重回避で 1.0。factory prior/非K経路は適用★。
+        const _tireR =
+          cfg.obdVehicleK > 0 && cfg.obdVehicleKMeasured === true
+            ? 1.0
+            : cfg.obdTireRatio > 0
+              ? cfg.obdTireRatio
+              : 1.0;
+        const vEff = ((applyDelta ? spd + obdDeltaMps : spd) + _quantMps) * _tireR;
         // ★★OBDティア 過大ゼロ天井 + 精度ラチェット (比方式・2026-06-13)★★:
         //   車輪非経由の独立速度 Doppler(cur.dopMps=搬送波由来=タイヤ非経由)と vEff の ★比 r=dop/vEff
         //   (=タイヤ器差スケール・~一定)★ を窓に貯め、下側分位 p25 = 保守的真スケール k_p25 を得る。
