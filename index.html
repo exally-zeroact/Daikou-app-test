@@ -7011,7 +7011,14 @@
         //   latch し display = distance_m に一致。課金は calcFare(display) だが display ≤ 実距離
         //   ゆえ過大請求は起きず、latch により支払時 メーター=実距離=料金 が一致する。
         // ここでの fallback (|| s.distance_m) は getState が display を未算出の極初期のみ。
-        const displayDistM = s.display_distance_m || s.distance_m || 0;
+        // ★代行billed (2026-06-17)★: 客に見せる距離=課金距離=billed_display(=display×daikouFareFactor)。
+        //   distKm も calcFare 入力も同じ billed を使う=画面の距離と請求が常に一致。係数1.0なら生値=byte不変。
+        const displayDistM =
+          s.billed_display_distance_m ||
+          s.billed_distance_m ||
+          s.display_distance_m ||
+          s.distance_m ||
+          0;
 
         // driveDist
         const distKm = (displayDistM / 1000).toFixed(2);
@@ -7144,7 +7151,14 @@
           //   _renderMeterReadout 一本化時に fare/extraTotal/total の算出ブロックが消え、
           //   下記 6947/6948/6953/6969/6981 の参照だけが残り走行中 ReferenceError。算出を復元。
           //   ★課金経路不変: calcFare(display) は表示・FB送信・localStorage 用で従来同一式★。
-          let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
+          // ★代行billed: 課金距離=billed(distance_m不可侵)★
+          let fare = Meter.calcFare(
+            s.billed_display_distance_m ||
+              s.billed_distance_m ||
+              s.display_distance_m ||
+              s.distance_m ||
+              0
+          );
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           const extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           const total = fare + extraTotal;
@@ -8184,7 +8198,13 @@
         //     ・onSend 側の fare 引数も同じ式 (Step2 で統一済)
         //     ・「課金確定値」は state.distance_m ベースで Meter 内に保持されたまま
         // ★ Phase 3: display_distance_m (= Reconciliation 同期値) を採用
-        const distance_for_calc = s.display_distance_m || s.distance_m || 0;
+        // ★代行billed (2026-06-17): 精算画面も客に見せる距離=課金距離=billed(distance_m不可侵・係数1.0で生値)★
+        const distance_for_calc =
+          s.billed_display_distance_m ||
+          s.billed_distance_m ||
+          s.display_distance_m ||
+          s.distance_m ||
+          0;
         const rawFareForDisplay = Meter.calcFare(distance_for_calc);
         let html = '';
         // 2026/05/01 仕様変更：走行情報を内訳の上に表示（分かりやすさ向上）
@@ -8237,7 +8257,7 @@
               now.getHours().toString().padStart(2, '0') +
               ':' +
               now.getMinutes().toString().padStart(2, '0'),
-            distance_m: Math.round(s.distance_m),
+            distance_m: Math.round(s.billed_distance_m || s.distance_m), // ★代行billed=履歴の距離も請求と一致★
             fare: total,
             surcharge: surchargeOn,
             extras: [...extras],
@@ -8257,7 +8277,7 @@
             hist,
             newEntry,
             { dist: todayDist, count: todayCount, fareYen: todayFareYen },
-            s.distance_m,
+            s.billed_distance_m || s.distance_m, // ★代行billed=今日集計の距離も請求と一致★
             total
           );
           todayDist = r.today.dist;
@@ -8348,12 +8368,14 @@
         let tripStartTime = null;
         if (appState === 'fare') {
           const s = Meter.getState();
-          correctionDistanceM = s.distance_m;
+          // ★代行billed (2026-06-17): 客に見せる/記録する距離=課金距離=billed(distance_m不可侵)★。
+          //   s.fare_yen は meter 側で既に billed(calcFare(billed distance_m))=料金と距離が一致。
+          correctionDistanceM = s.billed_distance_m || s.distance_m;
           let fare = s.fare_yen;
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           correctionTotal = fare + extras.reduce((a, b) => a + b.amount, 0);
-          // 業務管理連携用に保持（reset前に）
-          tripDistanceM = s.distance_m;
+          // 業務管理連携用に保持（reset前に）= billed(実車距離 actual_total_m も billed で揃う)
+          tripDistanceM = s.billed_distance_m || s.distance_m;
           tripFareYen = correctionTotal;
           // 仕事開始時刻を取得
           const lastStart = parseInt(localStorage.getItem('daikou_last_start') || '0');
@@ -8520,7 +8542,14 @@
           //     ・本変更は確定画面の「表示金額」だけ統一する
           //     ・FB.endSession へ送る total は本表示値ベース (= 客に見える金額 = サーバー送信値)
           // ★ Phase 3: display_distance_m を採用
-          let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
+          // ★代行billed (2026-06-17): 確定料金も billed距離から算出(画面距離=請求一致・distance_m不可侵)★
+          let fare = Meter.calcFare(
+            s.billed_display_distance_m ||
+              s.billed_distance_m ||
+              s.display_distance_m ||
+              s.distance_m ||
+              0
+          );
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
           let total = fare + extraTotal;

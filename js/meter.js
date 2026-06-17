@@ -337,7 +337,7 @@ const Meter = (() => {
       // 課金距離 (running gate・絶対不可侵経路)
       if (state.running) {
         state.distance_m += cal;
-        state.fare_yen = calcFare(state.distance_m);
+        state.fare_yen = calcFare(_billed(state.distance_m)); // ★代行billed=客に見せる課金距離★(distance_m不可侵)
         state.distanceSource = 'pipeline';
       }
       // 業務単位累積 (business_active gate・空車中も加算・後付メーター対等)
@@ -649,7 +649,7 @@ const Meter = (() => {
           //   gap_fill_total_m (stat) は RAW 維持。
           const gapCal = gapM * 1.0;
           state.distance_m += gapCal;
-          state.fare_yen = calcFare(state.distance_m);
+          state.fare_yen = calcFare(_billed(state.distance_m)); // ★代行billed=客に見せる課金距離★(distance_m不可侵)
           state.distanceSource = roadsLoading ? 'loadfill' : 'gap';
           state.gap_fill_count = (state.gap_fill_count || 0) + 1;
           state.gap_fill_total_m = (state.gap_fill_total_m || 0) + gapM;
@@ -761,15 +761,21 @@ const Meter = (() => {
     // Worker B 不在時は何もしない (= GPS 直線課金は絶対不可・距離据え置き)。
   }
 
+  // ★代行 billed 距離 (2026-06-17・司さん裁定)★: 客に見せる距離=課金する距離=distance_m × daikouFareFactor。
+  //   distance_m(認定エンジン距離)は不可侵で温存し、★客向けの表示・課金は必ずこの billed を通す★
+  //   (=画面の距離と請求が常に一致)。1.0=byte不変(タクシー認定運用)。1.011〜=代行(真距離+1.1%=DM−0.2%)。
+  function _daikouFF() {
+    return fareConfig.daikouFareFactor > 0 ? fareConfig.daikouFareFactor : 1.0;
+  }
+  function _billed(d) {
+    return (typeof d === 'number' ? d : 0) * _daikouFF();
+  }
+
   // ─── calcFare (★1 byte もじらず移植★・v2 多段階パイプライン) ───
   //   Step 1 距離料金 (tiers 優先・旧 base+add fallback)
   //   Step 2 vehicle 倍率 + addon / Step 3 手動 surcharges 乗算
   //   Step 4 autoSurcharges 乗算 / Step 5 wait 料金 / Step 6 clamp / Step 7 丸め
   function calcFare(distanceM) {
-    // ★代行仕上げ係数 (2026-06-17)★: 課金距離にのみ局所スケール。呼出側 state.distance_m は数値=値渡しで不変。
-    //   両 calcFare(display)/calcFare(distance_m) に同率で掛かるので display≤distance_m 単調も保存。1.0=byte不変。
-    const _daikouFF = fareConfig.daikouFareFactor > 0 ? fareConfig.daikouFareFactor : 1.0;
-    if (_daikouFF !== 1.0) distanceM = distanceM * _daikouFF;
     let fare = 0;
 
     // Step 1: 距離料金
@@ -900,13 +906,13 @@ const Meter = (() => {
     if (!id) return;
     if (active) _activeSurchargeIds.add(id);
     else _activeSurchargeIds.delete(id);
-    state.fare_yen = calcFare(state.distance_m);
+    state.fare_yen = calcFare(_billed(state.distance_m)); // ★代行billed★(distance_m不可侵)
   }
   function toggleSurcharge(id) {
     if (!id) return;
     if (_activeSurchargeIds.has(id)) _activeSurchargeIds.delete(id);
     else _activeSurchargeIds.add(id);
-    state.fare_yen = calcFare(state.distance_m);
+    state.fare_yen = calcFare(_billed(state.distance_m)); // ★代行billed★(distance_m不可侵)
   }
   function getActiveSurcharges() {
     return Array.from(_activeSurchargeIds);
@@ -924,7 +930,7 @@ const Meter = (() => {
   }
   function setVehicleType(vehicleId) {
     _activeVehicleId = vehicleId || null;
-    state.fare_yen = calcFare(state.distance_m);
+    state.fare_yen = calcFare(_billed(state.distance_m)); // ★代行billed★(distance_m不可侵)
   }
   function getVehicleType() {
     return _activeVehicleId;
@@ -1076,7 +1082,19 @@ const Meter = (() => {
     state.business_display_distance_m = bdisplay;
     state.last_business_display_update_time = now;
 
-    return { ...state, elapsed_sec: elapsedSec };
+    // ★代行 billed 距離 (客に見せる距離=課金する距離=distance × daikouFareFactor)★:
+    //   distance_m/display_distance_m 等(認定エンジン距離)は不可侵で温存。客向けUI/レポートは billed_* を使う。
+    //   1.0(既定/タクシー)なら billed_*===生値=byte不変。
+    const _ff = _daikouFF();
+    return {
+      ...state,
+      elapsed_sec: elapsedSec,
+      daikou_fare_factor: _ff,
+      billed_distance_m: (state.distance_m || 0) * _ff,
+      billed_display_distance_m: (state.display_distance_m || 0) * _ff,
+      billed_business_distance_m: (state.business_distance_m || 0) * _ff,
+      billed_business_display_distance_m: (state.business_display_distance_m || 0) * _ff,
+    };
   }
 
   // ─── getMMStats ───
@@ -1106,7 +1124,7 @@ const Meter = (() => {
   function setDistance(distanceM) {
     const v = Number.isFinite(distanceM) && distanceM >= 0 ? distanceM : 0;
     state.distance_m = v;
-    state.fare_yen = calcFare(v);
+    state.fare_yen = calcFare(_billed(v)); // ★代行billed★(distance_m不可侵・復元時も課金は billed)
     // ★overshoot ゼロ★: display は target(v) を超えない (= min clamp)。target が上がっても
     //   display は getState の catch-up で「下から」追いつく (= 先取りしない)。
     //   復元 (= 確定済み実距離) で即一致させたい場合は呼出側で Meter.latchDisplay() を使う。

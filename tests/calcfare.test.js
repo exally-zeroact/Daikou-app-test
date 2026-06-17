@@ -256,9 +256,11 @@ describe('Meter.calcFare 最低/最高料金 clamp (minFare / maxFare)', () => {
   });
 });
 
-// ─── 代行仕上げ係数 daikouFareFactor (2026-06-17) ───────────────────────
-//   ★課金距離にのみ局所スケール=state.distance_m 不可侵★。1.0=byte不変。1.011=DM Light−0.2%(真距離+1.1%)。
-describe('Meter.calcFare 代行仕上げ係数 daikouFareFactor', () => {
+// ─── 代行 billed 距離 daikouFareFactor (2026-06-17・distance_m不可侵) ─────────
+//   ★客に見せる距離=課金する距離=billed=distance_m × daikouFareFactor★。
+//   distance_m(認定エンジン距離)は不可侵で温存。係数は calcFare 内でなく billed距離側に適用(二重掛け防止)。
+//   1.0=byte不変(タクシー認定運用)。1.011〜=代行(真距離+1.1%=DM Light−0.2%)。
+describe('Meter 代行billed距離 daikouFareFactor', () => {
   let Meter;
   const CFG = {
     base_fare: 1300,
@@ -283,34 +285,44 @@ describe('Meter.calcFare 代行仕上げ係数 daikouFareFactor', () => {
     Meter = loadMeter();
   });
 
-  it('★既定(係数なし=1.0)は従来と完全一致 (byte不変)', () => {
-    Meter.setFareConfig(CFG);
-    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5000, CFG));
-  });
-
-  it('★daikouFareFactor=1.0 を明示しても従来と一致', () => {
-    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.0 });
-    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5000, CFG));
-  });
-
-  it('★daikouFareFactor=1.011 → 距離入力を×1.011してから課金 (距離料金が+方向)', () => {
+  it('★calcFare 自体は係数非依存 (係数は calcFare でなく billed距離側=二重掛け防止)', () => {
     Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.011 });
-    // 課金距離 = 5000×1.011 = 5055m として旧式計算。
-    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5055, CFG));
+    expect(Meter.calcFare(5000)).toBe(expectedFareLegacy(5000, CFG)); // 距離そのまま
   });
 
-  it('★係数で料金は単調増 (fare(1.011) ≥ fare(1.0)) = 代行は損しない側', () => {
-    for (const d of [800, 1200, 3000, 9000, 30000]) {
+  it('★getState.billed_distance_m = distance_m × 係数 / distance_m は不可侵(生値)', () => {
+    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.02 });
+    Meter.setDistance(10000);
+    const s = Meter.getState();
+    expect(s.distance_m).toBe(10000); // ★不可侵=生値★
+    expect(s.billed_distance_m).toBeCloseTo(10200, 6); // 10000×1.02
+    expect(s.daikou_fare_factor).toBeCloseTo(1.02, 6);
+  });
+
+  it('★係数1.0/未設定は billed===生値 (byte不変)', () => {
+    Meter.setFareConfig(CFG); // daikouFareFactor 未指定=既定1.0
+    Meter.setDistance(8000);
+    const s = Meter.getState();
+    expect(s.billed_distance_m).toBe(8000);
+    expect(s.daikou_fare_factor).toBe(1.0);
+  });
+
+  it('★公式 fare_yen は billed距離で算出 (画面のbilled距離と請求が一致)', () => {
+    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.02 });
+    Meter.setDistance(10000);
+    const s = Meter.getState();
+    expect(s.fare_yen).toBe(expectedFareLegacy(10200, CFG)); // calcFare(10000×1.02)
+    expect(s.fare_yen).toBe(Meter.calcFare(s.billed_distance_m)); // billed距離の料金=請求
+  });
+
+  it('★係数で課金は単調増 (billed料金 ≥ 生料金) = 代行は損しない側', () => {
+    for (const d of [800, 3000, 30000]) {
       Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.0 });
-      const base = Meter.calcFare(d);
-      Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.011 });
-      expect(Meter.calcFare(d)).toBeGreaterThanOrEqual(base);
+      Meter.setDistance(d);
+      const base = Meter.getState().fare_yen;
+      Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.02 });
+      Meter.setDistance(d);
+      expect(Meter.getState().fare_yen).toBeGreaterThanOrEqual(base);
     }
-  });
-
-  it('★display≤distance_m 単調保存 (同率係数なので fare(display) ≤ fare(distance_m))', () => {
-    Meter.setFareConfig({ ...CFG, daikouFareFactor: 1.011 });
-    // display(=4800) ≤ distance_m(=5000) → 料金も単調。
-    expect(Meter.calcFare(4800)).toBeLessThanOrEqual(Meter.calcFare(5000));
   });
 });
