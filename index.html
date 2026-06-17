@@ -6599,6 +6599,14 @@
             });
           }
         }
+        // ★代行料金補正(DM Light−0.2%≈真距離+1.1%)をシステムが自動適用 (2026-06-18・実機実測≈1.017)★:
+        //   billed距離 = distance_m × daikouFareFactor で「客に見せる距離も課金も」同率に過大化。
+        //   ★操作者は一切触らない=固定のシステム値★(料金補正係数をユーザーに設定させない・自動適用)。
+        //   値=1.015(2026-06-17実走 run1 -1.31%/run2 -1.92% → 平均でDM−0.2%に乗る係数を逆算)。
+        //   ★2本の実測からの暫定値。走行データが増えたら精度を上げる(操作者は触らない・コードで更新)★。
+        //   タクシー認定運用に切替える時だけ DAIKOU_FARE_FACTOR=1.0(過大ゼロ法要件)へ=コード/管理者変更で行う。
+        const DAIKOU_FARE_FACTOR = 1.015;
+        Meter.setFareConfig({ daikouFareFactor: DAIKOU_FARE_FACTOR });
         const td = localStorage.getItem('daikou_today');
         if (td) {
           const obj = JSON.parse(td);
