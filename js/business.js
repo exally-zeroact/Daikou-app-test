@@ -855,13 +855,6 @@ const Business = (function () {
         //   ★ Meter 未提供時 / 0 時は・既存 totalM (= 素の合算) fallback ★
         if (
           _ms &&
-          typeof _ms.billed_business_display_distance_m === 'number' &&
-          _ms.billed_business_display_distance_m > 0
-        ) {
-          // ★代行billed=客に見せる総走行距離(distance不可侵・係数1.0なら生値と同値)★
-          totalM = _ms.billed_business_display_distance_m;
-        } else if (
-          _ms &&
           typeof _ms.business_display_distance_m === 'number' &&
           _ms.business_display_distance_m > 0
         ) {
