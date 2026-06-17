@@ -13754,6 +13754,14 @@
               else doConnect();
             });
           }
+          // ★起動時 自動接続 (2026-06-18・司さん要望「1回繋いだら自動で繋がる」)★:
+          //   前回ペアリング済みデバイスへ navigator.bluetooth.getDevices() で選択ダイアログ無しに自動接続。
+          //   切れても自動再接続(obd-client内 _scheduleReconnect)。Android Chromeのみ・失敗は静かにidle(手動connect可)。
+          if (O.isSupported() && typeof O.tryAutoConnect === 'function') {
+            O.tryAutoConnect().catch(function () {
+              /* 自動接続不可は手動 connect で */
+            });
+          }
           // 速度表示 + 距離源インジケータを 500ms 毎に更新 (鮮度切れは GPS 扱い)
           setInterval(function () {
             var sp = O.getSpeed();

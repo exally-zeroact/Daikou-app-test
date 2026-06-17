@@ -127,6 +127,24 @@
   let _pendingTimer = null;
   let _polling = false;
   let _stopRequested = false;
+  // ★自動再接続/起動時自動接続 (2026-06-18・司さん要望「1回繋いだら自動で繋がる」)★:
+  //   ①切断(gattserverdisconnected)で同一デバイスへ自動リトライ(バックオフ)。
+  //   ②起動時 navigator.bluetooth.getDevices() で前回許可済みデバイスへ選択ダイアログ無しで自動接続。
+  //   Android Chrome のみ(iOSはWeb Bluetooth非対応)。接続管理のみ=距離計算には非干渉。
+  let _autoReconnect = true;
+  let _reconnecting = false;
+  let _reconnectDelayMs = 2000; // テストで短縮可
+  const OBD_RECONNECT_MAX = 5;
+  const _last = (k, v) => {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      if (v === undefined) return localStorage.getItem(k);
+      localStorage.setItem(k, v);
+      return v;
+    } catch (_) {
+      return null;
+    }
+  };
   const _listeners = { status: [], speed: [], error: [], probe: [] };
 
   function _emit(event, payload) {
@@ -281,10 +299,28 @@
         optionalServices: ALL_SERVICES,
       })
       .then(function (device) {
-        _device = device;
-        device.addEventListener('gattserverdisconnected', _onDisconnected);
-        return device.gatt.connect();
+        return _establishWith(device);
       })
+      .catch(function (e) {
+        _setStatus('error');
+        _emit('error', (e && e.message) || String(e));
+        _cleanup();
+        throw e;
+      });
+  }
+
+  // ★接続確立を connect()/起動時自動接続/自動再接続 で共有 (2026-06-18)★:
+  //   device(requestDevice or getDevices)に対し gatt接続→profile→ELM初期化→warmup→probe→polling。
+  function _establishWith(device) {
+    _device = device;
+    try {
+      device.removeEventListener('gattserverdisconnected', _onDisconnected);
+    } catch (_) {
+      /* ignore */
+    }
+    device.addEventListener('gattserverdisconnected', _onDisconnected);
+    return device.gatt
+      .connect()
       .then(function (server) {
         _server = server;
         return _findProfile(server);
@@ -294,6 +330,7 @@
       })
       .then(function () {
         _setStatus('connected');
+        _last('dk_obd_device_id', device && device.id ? device.id : ''); // 次回 getDevices で照合
         // ★プロトコル確立ウォームアップ (probe/速度の前に必ず)★: ECU通信を 0100×長timeout で確立。
         return _warmup();
       })
@@ -320,12 +357,44 @@
         });
         _startPolling();
         return true;
+      });
+  }
+
+  // ★起動時 自動接続 (2026-06-18・ユーザー操作なし・選択ダイアログ無し)★:
+  //   navigator.bluetooth.getDevices() で前回許可済みデバイスを取得し、保存IDに一致(or 唯一)のものへ自動接続。
+  //   getDevices 非対応/許可デバイス無し/既接続 は no-op。失敗は idle に戻すだけ(手動connectは従来通り可能)。
+  function tryAutoConnect() {
+    if (!isSupported() || typeof navigator.bluetooth.getDevices !== 'function') {
+      return Promise.resolve(false);
+    }
+    if (isConnected()) return Promise.resolve(true);
+    _stopRequested = false;
+    return navigator.bluetooth
+      .getDevices()
+      .then(function (devices) {
+        if (!devices || !devices.length) return false;
+        const wantId = _last('dk_obd_device_id');
+        let dev = null;
+        if (wantId) {
+          dev = devices.filter(function (d) {
+            return d && d.id === wantId;
+          })[0];
+        }
+        if (!dev) dev = devices[0];
+        if (!dev) return false;
+        _setStatus('connecting');
+        return _establishWith(dev)
+          .then(function () {
+            return true;
+          })
+          .catch(function () {
+            _setStatus('idle');
+            _cleanup();
+            return false;
+          });
       })
-      .catch(function (e) {
-        _setStatus('error');
-        _emit('error', (e && e.message) || String(e));
-        _cleanup();
-        throw e;
+      .catch(function () {
+        return false;
       });
   }
 
@@ -986,7 +1055,34 @@
       r(''); // 空応答で解放 → 呼び出し側は parse 失敗で無視(次ループは isConnected=false で停止)
     }
     _rxBuffer = '';
-    // 自動再接続は呼び出し側(UI)の判断に委ねる (勝手に再接続して電池/混乱を招かない)
+    // ★自動再接続 (2026-06-18)★: 明示 disconnect() 以外の切断(走行中の瞬断/圏外/スリープ復帰)は
+    //   同一デバイスへバックオフ再接続。明示切断(_stopRequested)は再接続しない(電池/混乱防止)。
+    if (!_stopRequested && _autoReconnect && _device) _scheduleReconnect();
+  }
+
+  function _scheduleReconnect() {
+    if (_reconnecting) return;
+    _reconnecting = true;
+    let attempt = 0;
+    const tryOnce = function () {
+      if (_stopRequested || isConnected()) {
+        _reconnecting = false;
+        return;
+      }
+      attempt++;
+      _establishWith(_device)
+        .then(function () {
+          _reconnecting = false; // 復帰成功
+        })
+        .catch(function () {
+          if (!_stopRequested && attempt < OBD_RECONNECT_MAX) {
+            setTimeout(tryOnce, Math.min(8000, _reconnectDelayMs * attempt));
+          } else {
+            _reconnecting = false;
+          }
+        });
+    };
+    setTimeout(tryOnce, _reconnectDelayMs);
   }
 
   function disconnect() {
@@ -1024,7 +1120,14 @@
   global.OBDClient = {
     isSupported: isSupported,
     connect: connect,
+    tryAutoConnect: tryAutoConnect, // ★起動時 自動接続(前回ペアリング済みデバイス・選択ダイアログ無し)★
     disconnect: disconnect,
+    setAutoReconnect: function (v) {
+      _autoReconnect = v !== false;
+    },
+    _setReconnectDelayForTest: function (ms) {
+      if (typeof ms === 'number' && ms >= 0) _reconnectDelayMs = ms;
+    },
     isConnected: isConnected,
     getSpeed: getSpeed,
     getOdometer: getOdometer,
