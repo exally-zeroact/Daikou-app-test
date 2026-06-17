@@ -383,3 +383,40 @@ describe('Business.getReport()', () => {
     expect(r.total_distance_m).toBe(0);
   });
 });
+
+// ─── 代行billed 総走行距離 (2026-06-17・別枠の業務回路にも課金式を適用) ───────
+//   ★総走行距離(業務回路)も「客に見せる距離=billed=business × daikouFareFactor」で出す★。
+//   業務回路は課金(実車)回路とは別枠だが、同じ billed 計算式を通す(画面の総走行=請求基準と整合)。
+describe('Business.getReport 代行billed総走行距離', () => {
+  function meterWithBilled(state) {
+    return { getState: () => state, setDistance() {}, setBusinessDistance() {}, _setRunning() {} };
+  }
+
+  it('★getReport.total_distance_m は billed_business_display_distance_m を優先 (別枠で課金式適用)', () => {
+    const meter = meterWithBilled({
+      distance_m: 5000,
+      business_distance_m: 8000,
+      business_display_distance_m: 8000,
+      billed_business_display_distance_m: 8160, // 8000 × 1.02
+      daikou_fare_factor: 1.02,
+      running: true,
+    });
+    const { Business } = loadBusiness({ meter });
+    Business.start();
+    expect(Business.getReport().total_distance_m).toBe(8160); // billed=客に見せる総走行
+  });
+
+  it('★係数1.0/billed未提供は生の business_display にフォールバック (byte不変)', () => {
+    const meter = meterWithBilled({
+      distance_m: 5000,
+      business_distance_m: 8000,
+      business_display_distance_m: 8000,
+      billed_business_display_distance_m: 8000, // 8000 × 1.0
+      daikou_fare_factor: 1.0,
+      running: true,
+    });
+    const { Business } = loadBusiness({ meter });
+    Business.start();
+    expect(Business.getReport().total_distance_m).toBe(8000);
+  });
+});
