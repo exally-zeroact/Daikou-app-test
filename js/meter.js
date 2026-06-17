@@ -59,6 +59,15 @@ const Meter = (() => {
   //   掛けて吸収(代表速度較正×無作為走行で 0/10000 過大ゼロ・平均-0.5%実測)。検定は代表速度で行う前提。
   const CERTK_SAFETY = 0.997;
   let _activeVehicleK = 1.0; // 業務開始でロックされる適用係数
+  // ★代行距離係数 (2026-06-18・司さん確定「DM−0.2%は"距離計算式"に入れる」)★:
+  //   距離増分(cal/gapCal)に乗算し distance_m / business_distance_m を DM−0.2% に着地させる。
+  //   料金=calcFare(distance_m) / display / 総走行 は distance_m に従う(料金に係数は掛けない)。
+  //   ★1.0=byte不変(タクシー認定/テスト/cert-gate)。代行は loadSettings がシステム固定値(≈1.011)を自動適用★。
+  //   操作者は触らない。タクシー認定運用は 1.0(過大ゼロ法要件・distance_m≤真距離)。
+  let _daikouDistFactor = 1.0;
+  function setDaikouDistanceFactor(f) {
+    _daikouDistFactor = typeof f === 'number' && f >= 1.0 && f <= 1.05 ? f : 1.0;
+  }
   function _clampVK(k) {
     return typeof k === 'number' && isFinite(k) ? Math.min(VK_MAX, Math.max(VK_MIN, k)) : 1.0;
   }
@@ -328,7 +337,9 @@ const Meter = (() => {
       //   よって meter は OBD/GPS とも ×1.0(恒等)。手動k UI/永続(_activeVehicleK/calibrateVehicleK)は
       //   dormant(距離に非作用)。過大ゼロは pipeline の Doppler下側分位天井(min(vEff·dt·k_now, k_p25·dt))が構造保証。
       const _kForDelta = 1.0;
-      const cal = delta * _kForDelta;
+      // ★代行距離係数を距離計算式に乗算 → distance_m が DM−0.2% に着地 (料金/表示/総走行は追従)★。
+      //   既定1.0=byte不変。mm_distance_m(L323)は RAW(係数なし)=cert/監査ベースライン温存。
+      const cal = delta * _kForDelta * _daikouDistFactor;
       // 課金距離 (running gate・絶対不可侵経路)
       if (state.running) {
         state.distance_m += cal;
@@ -642,7 +653,7 @@ const Meter = (() => {
           // ★source-aware (2026-06-12)★: gap-fill は GPS速度×時間(loadfill/E2E)= ★OBD∫v駆動でない★
           //   → 随伴車k 非適用(×1.0)。VK_MAX=1.02 でも GPS由来のgapが過大化しない(過大ゼロ)。
           //   gap_fill_total_m (stat) は RAW 維持。
-          const gapCal = gapM * 1.0;
+          const gapCal = gapM * _daikouDistFactor; // ★代行距離係数(DM−0.2%着地)。gap_fill_total_m(stat)は RAW★
           state.distance_m += gapCal;
           state.fare_yen = calcFare(state.distance_m);
           state.distanceSource = roadsLoading ? 'loadfill' : 'gap';
@@ -1466,6 +1477,7 @@ const Meter = (() => {
     getSurchargeMultiplier,
     setVehicleType,
     getVehicleType,
+    setDaikouDistanceFactor, // ★代行距離係数(DM−0.2%着地)。システムが固定値を loadSettings で適用★
     latchDisplay: _latchDisplay,
     // ★テスト用 escape hatch (prod からは呼ばない)
     _setDrainMmUntil: function (t) {

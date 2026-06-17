@@ -70,17 +70,14 @@ describe('drift-static: meter.js 距離駆動は pipeline delta 単一経路 (�
           matchedLines[2].content
       );
     }
-    // ★単一源不変の強化 (source-aware・2026-06-12)★: cal は pipeline delta × _kForDelta(OBD駆動のみk)、
-    //   gapCal は gapM × 1.0 (GPS gap-fill は k非適用)。別距離源(haversine等)でない事を検証。
-    if (!/const\s+cal\s*=\s*delta\s*\*\s*_kForDelta\b/.test(source)) {
-      throw new Error(
-        '述語 C 違反: cal は `delta * _kForDelta` (source-aware: OBD駆動のみ随伴車k) のはず'
-      );
+    // ★単一源不変の強化 (source-aware・2026-06-12)★: cal は pipeline delta × _kForDelta(OBD駆動のみk)
+    //   × _daikouDistFactor、gapCal は gapM × _daikouDistFactor。別距離源(haversine等)でない事を検証。
+    //   ★_daikouDistFactor (2026-06-18・司さん確定): 代行DM−0.2%着地を距離計算式に入れるスカラー(既定1.0=byte不変)★。
+    if (!/const\s+cal\s*=\s*delta\s*\*\s*_kForDelta\s*\*\s*_daikouDistFactor\b/.test(source)) {
+      throw new Error('述語 C 違反: cal は `delta * _kForDelta * _daikouDistFactor` のはず');
     }
-    if (!/const\s+gapCal\s*=\s*gapM\s*\*\s*1\.0\b/.test(source)) {
-      throw new Error(
-        '述語 C 違反: gapCal は `gapM * 1.0` (GPS gap-fill は k非適用・source-aware) のはず'
-      );
+    if (!/const\s+gapCal\s*=\s*gapM\s*\*\s*_daikouDistFactor\b/.test(source)) {
+      throw new Error('述語 C 違反: gapCal は `gapM * _daikouDistFactor` のはず');
     }
   });
 

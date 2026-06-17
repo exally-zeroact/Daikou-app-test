@@ -6599,6 +6599,14 @@
             });
           }
         }
+        // ★代行距離係数(DM Light−0.2%着地)をシステム固定値で自動適用 (2026-06-18)★:
+        //   距離計算式に乗算し distance_m を DM−0.2% に着地→料金/表示/総走行が追従。料金には係数を掛けない。
+        //   値=1.011: 2026-06-17実走 実車1(画面11.28/DM11.43)がDM−0.2%ピタリ・実車2(6.64/6.77)もDM以下。
+        //   テストツール tests/tools/daiko-dm-target-gate.js で実画面値較正(PASS)。操作者は触らない。
+        //   ★タクシー認定運用は 1.0(過大ゼロ法要件)へ=この行を1.0に=コード/管理者変更★。
+        if (typeof Meter !== 'undefined' && typeof Meter.setDaikouDistanceFactor === 'function') {
+          Meter.setDaikouDistanceFactor(1.011);
+        }
         const td = localStorage.getItem('daikou_today');
         if (td) {
           const obj = JSON.parse(td);
