@@ -1834,9 +1834,34 @@ function _chDijkstra(g, srcNode, dstNode, maxDistM, deadline) {
 }
 
 // ─── Phase B runtime: route 距離計算
+// ★テスト専用: 自前ルーティング強化(B)の利得検出フック (2026-06-18)★
+//   既定1=OFF=byte不変。>1 のとき cross-road(非polyline)の routeDistance を chord×係数 に
+//   強制(=道なり化を模擬)し、transition score 経由で Viterbi snap選定/距離が変わるかを実測する。
+//   ★距離計算の本番経路には載らない: 既定1で wrapper は素通り。setForceRouteFactor で gate のみ発火★。
+let _forceRouteFactor = 1;
+let _forceRouteFireCount = 0; // ★テスト計測: forced 分岐が発火した回数(false-zero 検出用)★
+let _routeCallCount = 0; // ★テスト計測: _routeDistance 総呼び出し回数★
+const _routeViaCount = Object.create(null); // ★テスト計測: _via 別の内訳★
 // 優先順序: 同road=polyline → tile Dijkstra → 既存 graph → backbone → haversine
 // すべて失敗時は haversine 弦距離を返す（業務継続性担保）
 function _routeDistance(a, b) {
+  const r = _routeDistanceCore(a, b);
+  if (_forceRouteFactor !== 1) {
+    _routeCallCount++;
+    const via = r && r._via ? r._via : 'null';
+    _routeViaCount[via] = (_routeViaCount[via] || 0) + 1;
+  }
+  // 利得検出(テスト専用): cross-road を chord×係数 に強制し routing 距離摂動を模擬。polyline(同road)は正確なので不変。
+  if (_forceRouteFactor !== 1 && a && b && r && r._via && r._via !== 'polyline') {
+    const chord = _haversine(a.snapLat, a.snapLng, b.snapLat, b.snapLng);
+    if (chord > 0) {
+      _forceRouteFireCount++;
+      return { distanceM: chord * _forceRouteFactor, onSameRoad: false, _via: 'forced' };
+    }
+  }
+  return r;
+}
+function _routeDistanceCore(a, b) {
   if (!a || !b) return null;
   // 同 road → polyline 沿い距離（既存・最も正確）
   if (a.prefecture === b.prefecture && a.roadIndex === b.roadIndex) {
@@ -2596,6 +2621,31 @@ self.onmessage = function (e) {
   if (msg.type === 'configDebug') {
     _mmDebug = !!msg.enabled;
     self.postMessage({ type: 'debugConfigured', enabled: _mmDebug });
+    return;
+  }
+
+  // ★テスト専用: B(自前ルーティング強化)利得検出フック (2026-06-18)★
+  //   _forceRouteFactor>1 で「道なり化が起きた時にスナップ/距離が変わるか」を計測する。
+  //   既定1=完全byte不変(本番では一切発火しない)。gate-route-gain.js 専用。
+  if (msg.type === 'setForceRouteFactor') {
+    const f = Number(msg.factor);
+    _forceRouteFactor = isFinite(f) && f >= 0.5 && f <= 2 ? f : 1;
+    _forceRouteFireCount = 0;
+    _routeCallCount = 0;
+    for (const k in _routeViaCount) delete _routeViaCount[k];
+    self.postMessage({ type: 'forceRouteFactorSet', factor: _forceRouteFactor });
+    return;
+  }
+
+  // ★テスト計測: forced 分岐の発火統計を取得(gate の false-zero 検出用)★
+  if (msg.type === 'getForceRouteStats') {
+    self.postMessage({
+      type: 'forceRouteStats',
+      factor: _forceRouteFactor,
+      fireCount: _forceRouteFireCount,
+      routeCallCount: _routeCallCount,
+      viaCount: Object.assign({}, _routeViaCount),
+    });
     return;
   }
 
