@@ -888,7 +888,13 @@ const OSRM_TEACHER_TTL_MS = 60000; // 教師信号の有効期限 60 秒
 const OSRM_BLEND_WEIGHT = 0.7; // 教師信号 0.7 + 自前 routing 0.3 で重み付き融合
 let _lastOsrmBatchAt = 0;
 let _osrmInflight = false; // 並列実行防止
-let _osrmEnabled = true; // false で機能無効化（main から configOsrm で制御）
+// ★2026-06-18 既定OFF (商用化 privacy/ToS 止血)★: 顧客の生GPS trace を第三者
+//   router.project-osrm.org へ送らない (公開OSRMは商用ToS懸念+顧客位置の第三者送信)。
+//   OSRM教師は _transitionScore の routeM 0.7 blend にしか触れず、全 offline 検証で
+//   hits:0 = 寄与ゼロ (cert/replay/3台収束は元々OSRM無しの数字)。live online の唯一の
+//   作用=routeM 0.7 blend も gain計測で snap変化≤4/1267・距離0m。∴既定OFFで精度不変。
+//   configOsrm({enabled:true}) で従来動作に復帰可 (機構は温存・削除はSTEP7商用化直前)。
+let _osrmEnabled = false; // ★既定OFF★ (main から configOsrm で true 復帰可)
 
 // 直近の教師信号: trace[i] と trace[i+1] 間の OSRM 計算距離 = legs[i]
 const _osrmTeacher = {
