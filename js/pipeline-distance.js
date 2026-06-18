@@ -323,6 +323,14 @@ const DEFAULTS = {
   accBadM: 15, // accuracy がこれ超 = GPS劣化(ビル街) → ②速度充填へ
   adaptiveCapRatio: 1.5, // ①の never-over: 3D弦 ≤ spd×dt×これ。走行ジッタ過大を物理上限で叩く
   maxClimbMps: 8, // 3D高度ゲート: |Δalt|/dt がこれ超 = GPS altノイズ → Δalt=0(正ラチェット過大を遮断)
+  // ★★1ステップ物理サニティ クランプ (2026-06-19・実機しまなみ +14,725m/1s 幻デルタ根治)★★:
+  //   GPS飛び(reason=jump)直後に snap が遠い道へ飛ぶと、主経路(snap/routing/straightFallback)が
+  //   1ステップで物理的にあり得ない弦(実機 14,725m を 0.99s で)を無 cap で返し distance_m に焼く。
+  //   OBD∫v(obdMaxDtS=10s)/coast(coastHoleMaxM=600m)には物理上限があるが本主経路だけ欠落していた。
+  //   対策: 共有 stepDistance ラッパーで deltaM ≤ ★physMaxStepAbsMps × dt★ に常時クランプ(過大ゼロ方向)。
+  //   絶対上限のみ=車で不可能な速度。正当な穴埋め(速度×dt 相当)は潰さない。batch/tracker 双方に等しく効き parity 保持。
+  physMaxStepAbsMps: 60, // ★絶対物理上限 60m/s(=216km/h・車であり得ない)★。参照速度が無い(始動直後/穴中)時も
+  //   必ず deltaM ≤ これ×dt で叩く=spd不明+遠snapの焼き付き弦(実機18.5km/1s)を構造的に封じる。
 };
 
 // ─── 幾何ヘルパ ───────────────────────────────────────────────
@@ -1360,7 +1368,53 @@ function _recoverArc(arc, straight, prev, cur, spd, cfg, bd, stats) {
   return recovered;
 }
 
+// ★1ステップ物理サニティ クランプ ラッパー (2026-06-19・しまなみ +14,725m/1s 幻デルタ根治)★:
+//   GPS飛び(reason=jump)直後に snap が遠road へ飛ぶと、stepDistanceCore(主経路/routing/straightFallback)が
+//   1ステップで物理的にあり得ない焼き付き弦(実機 18.5km を 0.99s で)を ★無 cap★ で返し distance_m に焼く。
+//   OBD∫v(obdMaxDtS=10s)/coast(coastHoleMaxM=600m)には物理上限があるが本経路だけ欠落していた。
+//   ★batch(computeDistance)/tracker(createDistanceTracker) 双方が ★この共有 stepDistance★ を通るので、
+//   ここで包めば parity を壊さず両経路に等しく効く★。絶対上限のみ(=車で不可能な速度×dt)で正当な穴埋め
+//   (速度×dt 相当)は潰さない。過大ゼロ方向(距離を増やさない側)・0/false で OFF=従来 byte 不変。
 function stepDistance(
+  decoder,
+  router,
+  prev,
+  cur,
+  prevSnap,
+  snap,
+  spd,
+  cfg,
+  bd,
+  stats,
+  coastSpdMps
+) {
+  const d = stepDistanceCore(
+    decoder,
+    router,
+    prev,
+    cur,
+    prevSnap,
+    snap,
+    spd,
+    cfg,
+    bd,
+    stats,
+    coastSpdMps
+  );
+  if (d > 0 && cfg && cfg.physMaxStepAbsMps > 0) {
+    const _dt = ((cur && cur.t) || 0) - ((prev && prev.t) || 0);
+    if (_dt > 0) {
+      const _cap = cfg.physMaxStepAbsMps * (_dt / 1000); // m/s × s
+      if (d > _cap) {
+        if (stats) stats.physClampedM = (stats.physClampedM || 0) + (d - _cap);
+        return _cap;
+      }
+    }
+  }
+  return d;
+}
+
+function stepDistanceCore(
   decoder,
   router,
   prev,
