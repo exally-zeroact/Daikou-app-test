@@ -1403,12 +1403,17 @@ function stepDistance(
   );
   if (d > 0 && cfg && cfg.physMaxStepAbsMps > 0) {
     const _dt = ((cur && cur.t) || 0) - ((prev && prev.t) || 0);
-    if (_dt > 0) {
-      const _cap = cfg.physMaxStepAbsMps * (_dt / 1000); // m/s × s
-      if (d > _cap) {
-        if (stats) stats.physClampedM = (stats.physClampedM || 0) + (d - _cap);
-        return _cap;
-      }
+    if (_dt <= 0) {
+      // ★負dt/ゼロdt + 正delta = 時間が進んでないのに前進=非物理(焼き付き弦)★。距離化しない(過大ゼロ方向)。
+      //   2026-06-19監査指摘: 旧クランプは if(_dt>0) で負dtを素通り→OBDバイパス非ドレイン由来の負dt幻が
+      //   抜けてた。ドレイン修正(本丸)で発生源は断つが、ここも二重保険として負dtを0化する。
+      if (stats) stats.physClampedM = (stats.physClampedM || 0) + d;
+      return 0;
+    }
+    const _cap = cfg.physMaxStepAbsMps * (_dt / 1000); // m/s × s
+    if (d > _cap) {
+      if (stats) stats.physClampedM = (stats.physClampedM || 0) + (d - _cap);
+      return _cap;
     }
   }
   return d;
@@ -2320,6 +2325,27 @@ function createDistanceTracker(decoder, opts) {
       //   ★adaptiveMode では OBD 全駆動しない(平滑土台+穴埋め)ため、OBD点もバイパスせず平滑経路へ流す
       //     (= 生位置の愛媛ジッタ過大を防ぐ・OBD速度は spd 経由で①cap/②穴埋めに使う)。★
       if (sample.obd === true && cfg.adaptiveMode !== true) {
+        // ★smoothBuf 完全ドレイン (2026-06-19・実機しまなみ+14,725m/trip2+2,320m 幻デルタ根治)★:
+        //   dop→obd 速度源遷移時、平滑バッファに dop 区間の生点が残ったまま OBD バイパスが prev を
+        //   前進させると、後でそれらが ★負dt★ で「prev(前進済)→遠い buffered点」の巨大弦に焼かれる
+        //   (実機 +14,725m / +2,320m)。★synthetic 枝(下記)と同型のドレイン★ で非対称を解消=OBD点で
+        //   prev を進める前にバッファを片側窓で全確定し、buffered点を正しい順序(正dt)で計上する。
+        //   all-OBD 全行程なら smoothBuf は空 → while 不発・byte不変。混在遷移のみ作用(=過大ゼロ方向)。
+        if (cfg.smoothedRawMode === true) {
+          while (smoothNext <= smoothBuf.length - 1) {
+            const smPre = _smoothOnePoint(
+              smoothBuf,
+              smoothNext,
+              smParams.h,
+              smParams.gapMs,
+              smParams.badAcc
+            );
+            _core(smPre);
+            smoothNext++;
+          }
+          smoothBuf = [];
+          smoothNext = 0;
+        }
         if (prev && Number.isFinite(sample.t) && Number.isFinite(prev.t) && sample.t < prev.t) {
           return { deltaM: 0, totalM: total, reason: 'out_of_order' };
         }
