@@ -6755,7 +6755,14 @@
           console.error('[Dashboard] update error:', e);
         }
       }
-      setInterval(updateBusinessDashboard, 1000);
+      // ★件1 (2026-06-20) 総走行距離の "20m飛び" 解消 = 表示更新だけ 1Hz→5Hz★
+      //   値そのものは getReport().total_distance_m = business_display_distance_m (平滑済・
+      //   課金距離 display_distance_m と同じ平滑系) を読んでおり滑らか。荒れの正体は
+      //   refresh 周期が 1Hz で、走行 20m/s 時に毎tick 約20m ずつ飛んで見えること。
+      //   課金距離メーターは rAF(60Hz) 再描画で滑らかに見える。本ダッシュボードを 200ms
+      //   (5Hz) に上げると増分≈4m となり課金距離より細かく滑らかに表示される。
+      //   ★距離/課金/過大ゼロ は不可侵 — 本変更は表示の再描画頻度のみ (値計算は無改変)★
+      setInterval(updateBusinessDashboard, 200);
       updateBusinessDashboard();
 
       // ─── GPS（代行開始時に初めて起動） ───
