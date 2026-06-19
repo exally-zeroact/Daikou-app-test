@@ -5694,18 +5694,34 @@
         //   Business 側に・1 行 通知。Business._safeGetNearestAddress が・PIP 入力に・優先使用。
         //   業務は・読むだけ・Worker B / meter.js / map-matcher.js 本体は 1 byte 不変。
         //   distance_m / 課金 / Meter.reset には・完全無関係 (= 表示専用)。
-        if (
-          m.type === 'mmResult' &&
-          m.snap &&
-          typeof m.snap.snapLat === 'number' &&
-          typeof m.snap.snapLng === 'number'
-        ) {
-          try {
-            if (typeof Business !== 'undefined' && typeof Business.notifyMMSnap === 'function') {
-              Business.notifyMMSnap(m.snap.snapLat, m.snap.snapLng);
+        if (m.type === 'mmResult') {
+          var _snapOk =
+            m.snap && typeof m.snap.snapLat === 'number' && typeof m.snap.snapLng === 'number';
+          if (_snapOk) {
+            try {
+              if (typeof Business !== 'undefined' && typeof Business.notifyMMSnap === 'function') {
+                Business.notifyMMSnap(m.snap.snapLat, m.snap.snapLng);
+              }
+            } catch (_) {
+              // Business 未 load・notifyMMSnap 未実装 等 → graceful skip
             }
-          } catch (_) {
-            // Business 未 load・notifyMMSnap 未実装 等 → graceful skip
+            // ★診断 (2026-06-20): snap復帰ログ — 住所②フリーズ(snap停止)の真因を次走traceで特定する用。
+            if (window._mmSnapMissN > 0) {
+              if (typeof dlog === 'function')
+                dlog('[MMSNAP] 復帰 (snap停止 ' + window._mmSnapMissN + '点ぶり)');
+              window._mmSnapMissN = 0;
+            }
+          } else {
+            // ★診断 (2026-06-20): snap欠落=候補ゼロ(GPSが読込済み道路から遠い/橋・島でroad未カバー)。
+            //   notifyMMSnap が呼ばれず _lastMMSnap が凍結→住所②が張り付く真因。★距離/課金には完全無関与(ログのみ)★。
+            window._mmSnapMissN = (window._mmSnapMissN || 0) + 1;
+            if (
+              typeof dlog === 'function' &&
+              (window._mmSnapMissN === 1 || window._mmSnapMissN % 10 === 0)
+            )
+              dlog(
+                '[MMSNAP] miss×' + window._mmSnapMissN + ' (snap停止中=候補ゼロ・住所凍結リスク)'
+              );
           }
         }
         if (typeof dlog !== 'function') return;
