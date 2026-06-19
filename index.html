@@ -5797,14 +5797,6 @@
                 }
               });
           }
-        } else if (m.type === 'osrmConfigured') {
-          // MM-6: OSRM 設定確認ログ
-          dlog(
-            '[MM] OSRM ' +
-              (m.ok
-                ? 'configured: ' + (m.endpoint || '(none)') + ' enabled=' + m.enabled
-                : 'config fail: ' + m.error)
-          );
         } else if (m.type === 'mcmShrink') {
           // MM-7: MCM 窓自動縮小通知
           dlog(
@@ -5848,30 +5840,6 @@
               '県/' +
               (m.loaded_roads_total != null ? m.loaded_roads_total : '?') +
               '本'
-          );
-        } else if (m.type === 'osrmStats') {
-          // MM-6: OSRM 統計（debug 用 probe で取得）
-          dlog(
-            '[MM] OSRM stats: enabled=' +
-              m.enabled +
-              ' endpoint=' +
-              m.endpoint +
-              ' buf=' +
-              m.bufferSize +
-              ' teacher=' +
-              (m.teacherActive ? '✓' : '✗') +
-              ' legs=' +
-              m.teacherLegs +
-              ' hits=' +
-              m.hits +
-              ' miss=' +
-              m.misses +
-              ' batches=' +
-              m.batches +
-              ' fails=' +
-              m.batchFails +
-              ' onLine=' +
-              m.onLine
           );
         }
       }
@@ -6310,7 +6278,6 @@
         // RAM パネル更新（5 秒ごと + 開閉時に即更新）
         const _ramSnapshot = {
           workerMm7: null,
-          workerOsrm: null,
           workerTile: null,
           mainHeap: null,
         };
@@ -6318,9 +6285,6 @@
           if (!_mmWorker) return;
           try {
             _mmWorker.postMessage({ type: 'getMm7Stats' });
-          } catch (e) {}
-          try {
-            _mmWorker.postMessage({ type: 'getOsrmStats' });
           } catch (e) {}
           try {
             _mmWorker.postMessage({ type: 'getTileStats' });
@@ -6351,19 +6315,6 @@
             lines.push('grid bias : ' + m.grid_cells_count + ' / ' + m.grid_cells_max + ' cells');
             lines.push('worker p99: ' + m.worker_p99_ms.toFixed(2) + ' ms');
           }
-          if (_ramSnapshot.workerOsrm) {
-            const m = _ramSnapshot.workerOsrm;
-            lines.push(
-              'OSRM      : ' +
-                (m.enabled ? 'ON' : 'OFF') +
-                ' batches=' +
-                m.batches +
-                ' fails=' +
-                m.batchFails +
-                ' onLine=' +
-                m.onLine
-            );
-          }
           if (_ramSnapshot.workerTile) {
             const m = _ramSnapshot.workerTile;
             lines.push(
@@ -6375,13 +6326,12 @@
           ramPanel.textContent = lines.join('\n');
         }
 
-        // mmStats / osrmStats / tileStats 受信時に snapshot 更新
+        // mmStats / tileStats 受信時に snapshot 更新
         _mmWorker &&
           _mmWorker.addEventListener('message', function (e) {
             const m = e.data;
             if (!m) return;
             if (m.type === 'mm7Stats') _ramSnapshot.workerMm7 = m;
-            else if (m.type === 'osrmStats') _ramSnapshot.workerOsrm = m;
             else if (m.type === 'tileStats') _ramSnapshot.workerTile = m;
           });
 
