@@ -114,10 +114,10 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        /* ★どんな画面でも重ならない (2026-06-15)★: 最小10px間隔を保証し、狭くて入らなければ
-           ナビを次行へ折り返す (= OBDチップとホームが重なるのを構造的に防止)。広い画面では space-between。 */
+        /* ★1段死守 (2026-06-20)★: 主要実機幅(360〜430)で 状態/GPS/OBD + ナビ が必ず1行に収まるよう
+           gap/font/padding を最小化。320px 未満の極小端末のみ安全弁として折り返す(重なり防止)。 */
         flex-wrap: wrap;
-        gap: 6px 10px;
+        gap: 4px 6px;
         flex-shrink: 0;
         position: sticky;
         top: 0;
@@ -128,25 +128,25 @@
       .appbar-left {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 5px;
         min-width: 0;
         flex-shrink: 1; /* 狭い時は左グループが先に縮む(ナビは flex-shrink:0 で死守) */
       }
       .appbar-title {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 700;
         color: #fff;
-        letter-spacing: 1px;
+        letter-spacing: 0.2px;
         background: rgba(255, 255, 255, 0.22);
         border-radius: 13px;
-        padding: 4px 12px;
+        padding: 3px 9px;
         white-space: nowrap;
       }
       /* ★右グループ: 業務/使い方/設定 ナビ (青バー内・ラベルのみ・active は白+下線) */
       .appbar-nav {
         display: flex;
         align-items: center;
-        gap: 14px;
+        gap: 8px;
         flex-shrink: 0;
       }
       .appbar-nav .nav-item {
@@ -154,7 +154,7 @@
         border: none;
         cursor: pointer;
         font-family: 'Noto Sans JP', sans-serif;
-        padding: 4px 2px;
+        padding: 4px 1px;
         position: relative;
         -webkit-tap-highlight-color: transparent;
       }
@@ -162,10 +162,10 @@
         display: none; /* 青バーはラベルのみでスリムに */
       }
       .appbar-nav .nav-label {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 700;
         color: rgba(255, 255, 255, 0.72);
-        letter-spacing: 0.5px;
+        letter-spacing: 0.2px;
       }
       .appbar-nav .nav-item.active .nav-label {
         color: #fff;
@@ -193,13 +193,64 @@
         align-items: center;
         gap: 8px;
       }
+      /* ★極小端末(<360px・iPhoneSE1/旧Android)も1段死守 (2026-06-20)★:
+         主要実機(360〜430)は上の既定でフォント13px維持。ここはさらに狭い端末のみ
+         追加で gap/font を詰めて折り返しを防ぐ(青バー2段化の最後の保険)。 */
+      @media (max-width: 359px) {
+        .appbar {
+          gap: 3px 4px;
+        }
+        .appbar-left {
+          gap: 4px;
+        }
+        .appbar-title {
+          font-size: 12px;
+          padding: 3px 7px;
+        }
+        .appbar-nav {
+          gap: 6px;
+        }
+        .appbar-nav .nav-label {
+          font-size: 12px;
+        }
+        /* ★specificity を .appbar .gps-pill に上げる: 基底 .gps-pill が source-order で後にあり
+           等specificityだと負けるため (監査指摘・2026-06-20)。 */
+        .appbar .gps-pill {
+          padding: 3px 6px;
+        }
+        .appbar-left .surcharge-badge {
+          padding: 2px 6px;
+        }
+      }
+      /* ★割増バッジが青バーに出ている時だけ追加で詰める (= 1段死守・2026-06-20)★:
+         バッジ非表示の通常時は font 13px の読みやすいまま。バッジ(約38px)が左群に
+         加わる時のみ font/gap を一段詰めて nav の折り返しを防ぐ。 */
+      .appbar.appbar--surcharge {
+        gap: 4px 5px;
+      }
+      .appbar.appbar--surcharge .appbar-left {
+        gap: 4px;
+      }
+      .appbar.appbar--surcharge .appbar-title {
+        font-size: 12px;
+        padding: 3px 7px;
+      }
+      .appbar.appbar--surcharge .appbar-nav {
+        gap: 6px;
+      }
+      .appbar.appbar--surcharge .appbar-nav .nav-label {
+        font-size: 12px;
+      }
+      .appbar.appbar--surcharge .gps-pill {
+        padding: 3px 6px;
+      }
       .gps-pill {
         display: flex;
         align-items: center;
-        gap: 5px;
+        gap: 4px;
         background: rgba(255, 255, 255, 0.2);
         border-radius: 20px;
-        padding: 4px 10px;
+        padding: 3px 8px;
       }
       .gps-dot {
         width: 7px;
@@ -682,8 +733,9 @@
       .surcharge-badge {
         background: #ff3b30;
         border-radius: 8px;
-        padding: 4px 10px;
+        padding: 3px 8px;
         cursor: pointer;
+        white-space: nowrap;
       }
       /* fareConfig v2 (2026-05-10): 動的 surcharge ボタン群 */
       .surcharge-group {
@@ -1214,14 +1266,43 @@
         font-size: 12px;
         color: #aaa;
       }
-      #overlayHistory .ride-time {
-        font-size: 15px;
+      /* ★履歴の時刻行 (2026-06-20): 開始/経由/清算終了 を1行に・ラベル付き・折返し可 */
+      #overlayHistory .ride-times {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px 5px;
+        font-size: 14px;
         font-weight: 700;
         color: #111;
+        margin: 1px 0;
       }
-      #overlayHistory .ride-dist {
-        font-size: 12px;
+      #overlayHistory .ride-times .t-seg {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 3px;
+      }
+      #overlayHistory .ride-times .t-lbl {
+        font-size: 10px;
+        font-weight: 700;
         color: #8e8e93;
+      }
+      #overlayHistory .ride-times .t-wp .t-lbl {
+        color: #1d4ed8;
+      }
+      #overlayHistory .ride-times .t-arrow {
+        color: #c7c7cc;
+        font-weight: 700;
+      }
+      /* ★距離を見やすく (2026-06-20): 12px灰→13px濃色・数値は16px太字の青で強調 */
+      #overlayHistory .ride-dist {
+        font-size: 13px;
+        color: #333;
+      }
+      #overlayHistory .ride-dist b {
+        font-size: 16px;
+        font-weight: 800;
+        color: #007aff;
       }
       #overlayHistory .ride-right {
         text-align: right;
@@ -4063,7 +4144,7 @@
           style="display: none"
           onclick="toggleSurcharge()"
         >
-          <span id="surchargeLabel">割増 ON</span>
+          <span id="surchargeLabel">割増</span>
         </div>
       </div>
       <nav class="appbar-nav" id="appbarNav">
@@ -6586,7 +6667,7 @@
         FB.setVehicleId(vehicleId);
         document.getElementById('todayDist').textContent = (todayDist / 1000).toFixed(2);
         document.getElementById('todayCount').textContent = todayCount;
-        if (surchargeEnabled) document.getElementById('surchargeBadge').style.display = 'flex';
+        updateSurchargeBadge(); // ★割増バッジの表示/非表示 + 青バー1段クラスを一括同期★
 
         // ★設計変更宣言 (2026-05-14): autoResetCheck 撤去・代行開始ボタン押下時リセットに統一
         // リロード復元チェック
@@ -8219,6 +8300,12 @@
               now.getHours().toString().padStart(2, '0') +
               ':' +
               now.getMinutes().toString().padStart(2, '0'),
+            // ★設計変更宣言 (2026-06-20・履歴に時刻表示): 開始/経由/清算終了 の時刻を保存。
+            //   start_time = 代行開始ボタン押下時刻 (onTripStart)・end_time = 清算確定時刻 (=now)。
+            //   waypoints[].timestamp = 経由地点ボタン押下時刻。旧 entry に無ければ render 側で
+            //   ride.time (HH:MM) に fallback (後方互換)。距離/課金は不可侵 (表示専用)。
+            start_time: _trip && _trip.start_time ? _trip.start_time : null,
+            end_time: now.getTime(),
             distance_m: Math.round(s.distance_m),
             fare: total,
             surcharge: surchargeOn,
@@ -8228,7 +8315,10 @@
             waypoints:
               _trip && Array.isArray(_trip.waypoints)
                 ? _trip.waypoints.map(function (w) {
-                    return { address: (w && w.address) || null };
+                    return {
+                      address: (w && w.address) || null,
+                      timestamp: w && w.timestamp ? w.timestamp : null,
+                    };
                   })
                 : [],
             // ★ trip_key: current_trip.start_time (= 1 trip の・unique id)
@@ -8628,16 +8718,19 @@
       }
       function updateSurchargeBadge() {
         const badge = document.getElementById('surchargeBadge');
+        const appbar = document.getElementById('appbar');
         if (!surchargeEnabled) {
           badge.style.display = 'none';
+          // ★青バー1段: 割増バッジ非表示時は通常(読みやすい)サイズへ戻す★
+          if (appbar) appbar.classList.remove('appbar--surcharge');
           return;
         }
         badge.style.display = 'flex';
-        // デフォルトOFF：グレー、押してON：赤
+        // ★割増バッジが青バーに加わる分・バーを少し詰めて1段を死守(2026-06-20)★
+        if (appbar) appbar.classList.add('appbar--surcharge');
+        // デフォルトOFF：グレー、押してON：赤。★ON/OFFは色で示し文字は「割増」のみ(青バー1段死守・2026-06-20)★
         badge.style.background = surchargeOn ? '#FF3B30' : '#8E8E93';
-        document.getElementById('surchargeLabel').textContent = surchargeOn
-          ? '割増 ON'
-          : '割増 OFF';
+        document.getElementById('surchargeLabel').textContent = '割増';
       }
 
       // ─── fareConfig v2 (2026-05-10): 動的 surcharge ボタン群 ───
@@ -10805,6 +10898,54 @@
               '</div>'
             );
           }
+          // ★設計変更宣言 (2026-06-20・履歴に時刻表示): 開始/経由/清算終了 の時刻行を作る。
+          //   ms → "HH:MM"。旧 entry (start_time/end_time/waypoint.timestamp 無し) は
+          //   ride.time(HH:MM・清算時刻) 1個に fallback して後方互換を保つ。
+          function _fmtClock(ms) {
+            if (!ms || !Number.isFinite(ms)) return null;
+            const d = new Date(ms);
+            return (
+              String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+            );
+          }
+          function _buildTimesHtml(ride) {
+            const start = _fmtClock(ride.start_time);
+            const end = _fmtClock(ride.end_time);
+            const wpTimes = Array.isArray(ride.waypoints)
+              ? ride.waypoints.map(function (w) {
+                  return _fmtClock(w && w.timestamp);
+                })
+              : [];
+            const hasWp = wpTimes.some(Boolean);
+            if (!start && !end && !hasWp) {
+              // 旧 entry: 清算時刻 (ride.time) のみ表示
+              return ride.time
+                ? '<div class="ride-times">🕐 <span class="t-seg"><span class="t-lbl">終了</span>' +
+                    _histEscape(ride.time) +
+                    '</span></div>'
+                : '';
+            }
+            const seg = function (lbl, val, cls) {
+              return (
+                '<span class="t-seg ' +
+                (cls || '') +
+                '"><span class="t-lbl">' +
+                lbl +
+                '</span>' +
+                val +
+                '</span>'
+              );
+            };
+            const segs = [];
+            if (start) segs.push(seg('開始', start, ''));
+            wpTimes.forEach(function (t) {
+              if (t) segs.push(seg('経由', t, 't-wp'));
+            });
+            if (end) segs.push(seg('終了', end, ''));
+            return (
+              '<div class="ride-times">🕐 ' + segs.join('<span class="t-arrow">→</span>') + '</div>'
+            );
+          }
           buckets.forEach(function (bucket) {
             const dateHeader = document.createElement('div');
             dateHeader.className = 'date-header';
@@ -10825,17 +10966,16 @@
               }
               if (ride.surcharge) extrasText = (extrasText ? extrasText + '　' : '') + '割増あり';
               const routeHtml = _buildRouteHtml(ride);
+              const timesHtml = _buildTimesHtml(ride);
               item.innerHTML =
                 '<div class="ride-left">' +
                 '<div class="ride-num">' +
                 (i + 1) +
                 '回目</div>' +
-                '<div class="ride-time">' +
-                (ride.time || '') +
-                '</div>' +
-                '<div class="ride-dist">' +
+                timesHtml +
+                '<div class="ride-dist">走行 <b>' +
                 ((ride.distance_m || 0) / 1000).toFixed(2) +
-                'km</div>' +
+                '</b> km</div>' +
                 (extrasText ? '<div class="ride-extras">' + extrasText + '</div>' : '') +
                 routeHtml +
                 '</div>' +
