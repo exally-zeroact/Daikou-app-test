@@ -972,8 +972,20 @@ const Business = (function () {
       //   Meter.business_distance_m に逆流させて連続性を確保する。
       //   Meter は新規 load で business_distance_m=0 で起動するため、prime しないと
       //   復元直後の getReport().total_distance_m が 0 にリセットされてしまう。
+      // ★バグ修正 (2026-06-20・「業務終了→(再読込)→再開で総走行距離が 0 に戻る」根治):
+      //   旧: state.active 限定で復元 → 業務終了 (active=false・limbo 状態) の後に
+      //       アプリが再読込/タスクキルされると、再起動時の load() がこの prime を skip し
+      //       Meter.business_distance_m=0 のまま起動する。続く「業務再開」(onBusinessResume /
+      //       onResumeFromStart → Business.resume()) は active を true に戻すだけで距離を
+      //       復元しないため、getReport().total_distance_m=0 → 総走行距離が 0.00 に落ちる事象。
+      //   新: active だけでなく resumable limbo (start_time あり) も復元対象に含める。
+      //       ・「業務再開」すれば前業務の総走行が正しく継続する。
+      //       ・「代行開始」(新規業務) を選んだ場合は start() が setBusinessDistance(0) で
+      //         0 化するため二重化や残留はなく無害。
+      //   ★ business_distance_m は永続化ミラー (state.total_distance_m) からの復元のみで、
+      //     distance_m / 課金 / 過大ゼロ は 1 byte 不変 (= 表示用 業務総走行の連続性復元) ★
       if (
-        state.active &&
+        (state.active || state.start_time) &&
         state.total_distance_m > 0 &&
         typeof Meter !== 'undefined' &&
         typeof Meter.setBusinessDistance === 'function'
