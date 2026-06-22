@@ -12586,7 +12586,7 @@
               <span id="vehTireRatioDisp" style="font-weight: 700; color: #34c759">×1.000</span>
             </div>
             <div style="font-size: 11px; color: #ff9500; margin: 4px 0 8px">
-              ※工場タイヤ＝ドア内側のステッカー(初回1回・以後ロック)。タイヤを替えたら「今のタイヤ」に実サイズを入れて保存。円周比で距離を自動補正(過大ゼロ維持)。
+              ※工場タイヤ＝ドア内側のステッカー(いつでも変更可)。タイヤを替えたら「今のタイヤ」に実サイズを入れて保存。円周比で距離を自動補正(過大ゼロ維持)。
             </div>
             <div class="row" style="justify-content: space-between; padding: 3px 0">
               <span style="color: #8e8e93">OBD距離能力</span>
@@ -13406,14 +13406,12 @@
             try {
               prof = prof || {};
               if (vehTireEl) {
-                if (prof.tire) {
-                  vehTireEl.value = prof.tire;
-                  vehTireEl.readOnly = true; // 初回確定後ロック(摩耗/誤入力での過大化防止)
-                  vehTireEl.style.background = '#f2f2f7';
-                } else {
-                  vehTireEl.readOnly = false;
-                  vehTireEl.style.background = '';
-                }
+                // ★工場タイヤは常に変更可能(司さん要望2026-06-23): 以前は初回確定後ロックしてたが、
+                //   車を替える/誤入力を直す/未知車テストのため、いつでも編集できるようにした。
+                //   保存時は「入力が空でない時だけ上書き・空なら前の値を維持」で誤クリアを防ぐ。
+                vehTireEl.value = prof.tire || '';
+                vehTireEl.readOnly = false;
+                vehTireEl.style.background = '';
               }
               if (vehTireCurrentEl) vehTireCurrentEl.value = prof.tireCurrent || '';
               _refreshTireRatioDisp();
@@ -13523,9 +13521,14 @@
                   year: info.year,
                   model: vehModelEl ? vehModelEl.value.trim() : '',
                   katashiki: vehKatashikiEl ? vehKatashikiEl.value.trim() : '',
-                  // ★工場タイヤ(=距離補正の基準)は初回1回で確定しロック★(既存k継承と同手法)。
-                  //   _prev.tire があれば継承(上書き禁止)・無ければ今の入力で初回確定。
-                  tire: _prev && _prev.tire ? _prev.tire : vehTireEl ? vehTireEl.value.trim() : '',
+                  // ★工場タイヤ=変更可能(司さん要望2026-06-23)★: 入力が空でなければ今の値で上書き、
+                  //   空なら前の値を維持(誤クリア防止)。以前の「初回ロック・上書き禁止」を廃止。
+                  tire:
+                    vehTireEl && vehTireEl.value.trim()
+                      ? vehTireEl.value.trim()
+                      : _prev && _prev.tire
+                        ? _prev.tire
+                        : '',
                   // 今のタイヤ(交換した場合のみ・毎回上書き可・空=未交換)
                   tireCurrent: vehTireCurrentEl ? vehTireCurrentEl.value.trim() : '',
                   k: _prev && typeof _prev.k === 'number' ? _prev.k : 1.0,
