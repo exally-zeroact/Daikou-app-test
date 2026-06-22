@@ -197,6 +197,8 @@ const DEFAULTS = {
   obdDopWinSec: 30, // 比(スケール)窓長(s)
   obdDopMinN: 5, // この比点数貯まるまで下側分位非適用→cold-start k0 が保護
   obdDopQuantile: 0.25, // 比の下側分位(p25)=保守的真スケール・上向きスパイク棄却
+  obdDaikouMode: false, // ★代行=true で OBD天井分位を p25→p50(中央値=真スケール)に切替=K無し代行車を全車一致させる。
+  //   タクシー/モコ(factory K)は非到達=既定false で byte不変。★DEFAULTS登録必須(L1873汎用ループ依存・未登録でundefined黙死)★
   obdRatioMinSpd: 2.8, // 比を取る最低速度(m/s=10km/h・低速の比ノイズ除外)
   obdRatioMax: 1.1, // 比の上側クランプ(マルチパス上向きスパイクの比爆発を構造遮断)
   // ★cold-start k0★: Doppler窓が貯まる前(dopMsは来てるが点数不足)の保守スケール。摩耗で過大読みのECUを
@@ -2040,8 +2042,9 @@ function createDistanceTracker(decoder, opts) {
         // ★量子化補正 (+半量子・1km/h floor回収・全車普遍・2026-06-13)★: δ非適用かつ移動中(spd≥stationary)
         //   のみ +0.5km/h。停車(OBD≈0)は creep製造防止で非適用。δ-ON時はδが量子化込み補正=二重回避で非適用。
         const _quantMps =
-          cfg.obdVehicleK > 0 // 認定据付測定K採用時は量子化と択一(K=真/OBD実測がfloor内包・二重補正回避)→ quant OFF
-            ? 0
+          cfg.obdVehicleK > 0 && cfg.obdDaikouMode !== true // 測定K採用時は量子化と択一(二重補正回避)→ quant OFF。
+            ? // ★但し代行(obdDaikouMode)はKを使わず p50 経路=全車共通=quant も全車適用(universal)★
+              0
             : !applyDelta && spd >= cfg.stationarySpdMps && cfg.obdQuantCorrectMps > 0
               ? cfg.obdQuantCorrectMps
               : 0;
@@ -2074,9 +2077,14 @@ function createDistanceTracker(decoder, opts) {
             while (kWin.length && (cur.t || 0) - kWin[0].t > _winMs) kWin.shift();
           }
           if (kWin.length >= cfg.obdDopMinN) {
+            // ★p50モードゲート (2026-06-22): 代行(obdDaikouMode)は分位 p25→p50(中央値=真スケール)。
+            //   p25は保守的に真より約1%低い(タクシー過大ゼロ用)=代行ではK無し車を約1%過小にし
+            //   factory K車と不一致にする犯人。代行は過大ゼロ非拘束(DM Light基準)ゆえ p50 で全車を
+            //   同じ真スケールへ揃える。タクシー(obdDaikouMode=false)は p25 維持=過大ゼロ法要件。
+            const _q = cfg.obdDaikouMode === true ? 0.5 : cfg.obdDopQuantile;
             _kP25 = _lowerQuantile(
               kWin.map((x) => x.r),
-              cfg.obdDopQuantile
+              _q
             );
           }
         }
@@ -2092,9 +2100,12 @@ function createDistanceTracker(decoder, opts) {
         //   Doppler有り: min(k_now, k_p25)で安全クランプ / Doppler無しだが k_now確定: 保持k_now(≤保守スケール) /
         //   cold-start(Doppler観測済・窓未充足): k0 / dopMs皆無: 1.0(byte不変)。
         let _kApply;
-        if (cfg.obdVehicleK > 0) {
+        if (cfg.obdVehicleK > 0 && cfg.obdDaikouMode !== true) {
           // ★認定据付測定K★: Doppler per-step天井/ラチェットをバイパスし生spd×測定K。
           //   過大ゼロは「Kが≤真値の基準で較正済」で保証(過少読みK>1/過大読みK<1)。
+          //   ★但し代行(obdDaikouMode)では使わない (2026-06-22): 代行は車種別K表に頼らず
+          //   全車を同じ Doppler自己較正(p50)に乗せて universal に一致させる。モコ等factory K車も
+          //   代行では下の p50 経路を通る=「Kなし対応」。タクシー(過大ゼロ法要件)のみ測定Kを使う。★
           _kApply = cfg.obdVehicleK;
         } else if (_kP25 >= 0) _kApply = kNow > 0 ? Math.min(kNow, _kP25) : _kP25;
         else if (kNow > 0) _kApply = kNow;

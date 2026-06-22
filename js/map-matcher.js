@@ -213,6 +213,7 @@ let _vehicleColdStartK = null; // number | null
 let _vehicleK = null; // number | null (cert-calibrated obdVehicleK)
 let _vehicleKMeasured = false; // true=実測K(タイヤ込み・タイヤ比抑制) / false=factory prior(タイヤ比併用)
 let _vehicleTireRatio = null; // number | null (タイヤ円周比=今÷工場・物理真距離補正・1.0=恒等)
+let _vehicleDaikouMode = false; // ★p50モード (2026-06-22): 代行(係数>1.0)で OBD天井分位 p25→p50=全車一致。タクシー/モコは false。
 
 // ★smoothedRawMode 判定 (2026-06-07)★: tracker は opts {} で生成 = DEFAULTS が支配する。
 //   worker 側の「実質停止で pipelineDeltaM 0 化」二重保険は平滑モードでは時間軸がズレる
@@ -260,6 +261,8 @@ function _getPipelineTracker(pref) {
         _vehicleTireRatio <= 1.25
       )
         _tkOpts.obdTireRatio = _vehicleTireRatio;
+      // ★p50モード注入 (2026-06-22): 代行のみ obdDaikouMode=true → pipeline で天井分位 p25→p50。
+      if (_vehicleDaikouMode === true) _tkOpts.obdDaikouMode = true;
       tk = self.PipelineDistance.createDistanceTracker(dec, _tkOpts);
       _pipelineTrackers.set(pref, tk);
     } catch (_) {
@@ -2553,6 +2556,8 @@ self.onmessage = function (e) {
       _vehicleK = vk != null && vk >= 0.85 && vk <= 1.08 ? vk : null; // 認定据付測定K(健全域のみ)
     }
     if ('vehicleKMeasured' in msg) _vehicleKMeasured = msg.vehicleKMeasured === true;
+    // ★p50モード受信 (2026-06-22): 代行(係数>1.0)で天井分位 p25→p50。存在時のみ更新(後勝ちclobber防止)。
+    if ('daikouMode' in msg) _vehicleDaikouMode = msg.daikouMode === true;
     // ★タイヤ円周比(今÷工場)★: 健全域[0.80,1.25]外/非数値は null(=恒等1.0)。物理サイズ変更補正。
     if ('tireRatio' in msg) {
       const tr = typeof msg.tireRatio === 'number' ? msg.tireRatio : null;
@@ -2566,6 +2571,7 @@ self.onmessage = function (e) {
       vehicleK: _vehicleK,
       vehicleKMeasured: _vehicleKMeasured,
       tireRatio: _vehicleTireRatio,
+      daikouMode: _vehicleDaikouMode,
     });
     return;
   }

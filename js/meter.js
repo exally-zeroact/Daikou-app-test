@@ -111,6 +111,9 @@ const Meter = (() => {
         vehicleK: vk,
         vehicleKMeasured: vkMeasured,
         tireRatio,
+        // ★p50モードフラグ (2026-06-22): 代行(係数>1.0)を worker に伝え、K無しOBD車の天井分位を
+        //   p25→p50(真スケール)に切替え全車一致させる。タクシー(係数1.0)は false=p25維持(過大ゼロ)。
+        daikouMode: _daikouDistFactor > 1.0,
       });
     } catch (_) {
       /* best-effort・課金距離は pipeline 側の健全域クランプで保護 */
