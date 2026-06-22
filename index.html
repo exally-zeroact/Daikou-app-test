@@ -7686,7 +7686,16 @@
               'daikou_today',
               JSON.stringify({ date: _today, dist: 0, count: 0, fare: 0 })
             );
-            localStorage.removeItem('daikou_history_' + _today);
+            // ★監査MAJOR修正 (2026-06-20・深夜営業で当日履歴が消える根治):
+            //   旧: ここで removeItem('daikou_history_'+_today) し、同日2業務目の「代行開始」で
+            //       当日の全乗車履歴(午後分など)を永久削除していた。daikou_history_<date> は
+            //       履歴オーバーレイ(_hist_render)が読む唯一の乗車単位ストアで、退避先(業務単位
+            //       レポート daikou_business_history)は表示経路が dead。∴ 2026-06-06 要件
+            //       「履歴は全業務記録(20回でも30回でも)」と矛盾し、深夜跨ぎ営業でデータ消失。
+            //   新: removeItem を撤去。新業務の集計表示リセットは globals(todayDist/Count/FareYen)
+            //       + daikou_today + DOM の 0 化で完結し、乗車履歴は cleanOldHistoryKeys(30日
+            //       retention)に保持を委ねる。履歴オーバーレイは時刻順に全乗車を並べる設計のため
+            //       業務跨ぎでも乗車単位で正しく表示される。distance_m/課金は不可侵(表示リセットのみ)。
             const _elTotal = document.getElementById('totalDist');
             if (_elTotal) _elTotal.textContent = '0.00';
             const _elActual = document.getElementById('todayDist');
@@ -13699,6 +13708,16 @@
           }
           var O = window.OBDClient;
           var _obdConnected = false; // 接続状態 (ホームピルのトグル判定用)
+          // ★OBD切断警告 状態 (2026-06-19・OBD真メイン化・監査 weh3uqdjj)★:
+          //   OBDが距離メインで走っていた最中に「本当の切断(GATTリンク断)or 応答途絶(6s超)」を
+          //   検知したら走行バッジを赤の警告にする。瞬断(数百ms〜数s・リンク生存)は gps.js 3ティアが
+          //   OBD保持するので警告しない=ここの判定境界も同じ。点灯即時/消灯はOBD健全2s継続後(ヒステ
+          //   リシス=再接続チカチカ防止)。OBD_DRIVE_DISTANCE は切断で false 化するため警告のゲートに
+          //   使えない → 「直近にOBDで駆動していた時刻」_obdLastGoodT を基準にする(手動切断/業務終了でnull)。
+          var OBD_HOLD_MS_UI = 6000; // gps.js OBD_COAST_HOLD_MS と同値(応答途絶=本当の切断とみなす猶予)
+          var _obdLastGoodT = null; // OBDが距離メインで健全だった直近時刻 (null=OBD非駆動/手動切断/業務外)
+          var _obdWarnOn = false; // 警告表示中フラグ
+          var _obdClearSince = null; // 警告解除ヒステリシスの安定開始時刻
           var JA = {
             idle: '未接続',
             connecting: '接続中…',
@@ -13859,6 +13878,7 @@
           }
           if (btnD) {
             btnD.addEventListener('click', function () {
+              _obdLastGoodT = null; // 手動切断 = 警告対象外 (ユーザー意図のOFF)
               O.disconnect();
             });
           }
@@ -13866,8 +13886,10 @@
           //   user gesture 起点必須 → チップ click から requestDevice が走る。
           if (obdChip && O.isSupported()) {
             obdChip.addEventListener('click', function () {
-              if (_obdConnected) O.disconnect();
-              else doConnect();
+              if (_obdConnected) {
+                _obdLastGoodT = null; // 手動切断 = 警告対象外
+                O.disconnect();
+              } else doConnect();
             });
           }
           // ★起動時 自動接続 (2026-06-18・司さん要望「1回繋いだら自動で繋がる」)★:
@@ -13892,10 +13914,58 @@
             //   ラベルは常に「OBD」固定 (速度はメーター本体に表示・ここでは重複させない)。
             var obdDot = document.getElementById('obdDot');
             if (obdDot) obdDot.className = _obdConnected ? 'gps-dot ok' : 'gps-dot';
-            // ★走行中バッジ: 計測源を一目で★
+
+            // ── ★OBD切断警告 判定 (3ティアの ティアC と同じ境界)★ ──
+            var drivingScreen = (function () {
+              var s = document.getElementById('screenDriving');
+              return !!(s && s.style.display !== 'none');
+            })();
+            if (!drivingScreen) {
+              // 業務(走行画面)外 = 警告も「直近健全」記録もリセット (トリップ跨ぎで持ち越さない)。
+              _obdLastGoodT = null;
+              _obdWarnOn = false;
+              _obdClearSince = null;
+            } else {
+              if (obdDriving) _obdLastGoodT = Date.now(); // OBDで正常駆動中=直近健全時刻を更新
+              var linkUp =
+                typeof O.isConnected === 'function' ? O.isConnected() === true : sp.valid;
+              // OBDが「メインで走っていた(=_obdLastGoodT有り)」のに今駆動できていない:
+              //   本当の切断(リンク断)は1.5s猶予(GATTイベント遅延吸収)、応答途絶(リンク生存)は6s猶予。
+              var lostMs = _obdLastGoodT != null ? Date.now() - _obdLastGoodT : -1;
+              var obdLost =
+                _obdLastGoodT != null &&
+                ((!linkUp && lostMs > 1500) || (linkUp && sp.ageMs > OBD_HOLD_MS_UI));
+              if (obdLost) {
+                if (!_obdWarnOn) {
+                  _obdWarnOn = true; // 立ち上がりで1回だけバイブ(オフライン動作・復帰では鳴らさない)
+                  try {
+                    if (navigator.vibrate) navigator.vibrate(200);
+                  } catch (_) {}
+                }
+                _obdClearSince = null;
+              } else if (_obdWarnOn) {
+                // 健全に戻った → 2s 連続安定でのみ解除(再接続チカチカ防止)。
+                if (sp.valid && linkUp) {
+                  if (_obdClearSince == null) _obdClearSince = Date.now();
+                  if (Date.now() - _obdClearSince >= 2000) {
+                    _obdWarnOn = false;
+                    _obdClearSince = null;
+                  }
+                } else {
+                  _obdClearSince = null; // まだ不安定 → 解除タイマーリセット
+                }
+              }
+            }
+
+            // ★走行中バッジ: 計測源を一目で。警告中は赤で最優先表示★
             if (driveBadge) {
-              driveBadge.textContent = obdDriving ? '🟢 OBD(車輪速度)' : '📡 GPS';
-              driveBadge.style.color = obdDriving ? '#34c759' : '#007aff';
+              if (_obdWarnOn) {
+                driveBadge.textContent = '⚠️ OBD切断→GPS(再接続中…)';
+                driveBadge.style.color = '#e11d48';
+              } else {
+                driveBadge.textContent = obdDriving ? '🟢 OBD(車輪速度)' : '📡 GPS';
+                driveBadge.style.color = obdDriving ? '#34c759' : '#007aff';
+              }
             }
           }, 500);
         }

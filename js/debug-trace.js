@@ -230,6 +230,35 @@
       return -1;
     }
   }
+  // ★0131 ECU距離(1km粗・記録専用・距離未配線)★: 業務開始/終了の差=ECUが車速パルスを積算した距離
+  //   =メーター機と同じ物=B(真距離)の基準。01A6非対応の古い車/軽でも多くが0131を出す。
+  function _obd0131Snapshot() {
+    try {
+      if (
+        typeof window === 'undefined' ||
+        !window.OBDClient ||
+        !window.OBDClient.getDistanceSinceClear
+      ) {
+        return -1;
+      }
+      const d = window.OBDClient.getDistanceSinceClear();
+      return d && d.km >= 0 ? d.km : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+  // ★生OBD∫v(m・faithful・記録専用・距離未配線)★: ポーリングレートで積分した本値=K較正の忠実な分母
+  function _obdIntvSnapshot() {
+    try {
+      if (typeof window === 'undefined' || !window.OBDClient || !window.OBDClient.getObdIntegral) {
+        return -1;
+      }
+      const v = window.OBDClient.getObdIntegral();
+      return v && v.m >= 0 ? v.m : -1;
+    } catch (_) {
+      return -1;
+    }
+  }
 
   // ★エンジンRPM スナップショット (2026-06-11・RPMギア比学習データ収集)★: passive=OBDClient.getRpm()読むだけ。
   //   RPM(010C・高解像度)+ギア比でOBD車速1km/h floor過小をde-quantする将来法の ★実データ★ を次走行traceに残す。
@@ -330,6 +359,8 @@
       biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
       obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用
       obd_odo: _obdOdoSnapshot(), // ★OBDオドメーター(01A6・km・-1=未対応/未取得)。業務開始/終了の差=タイヤ回転距離(メーター級)照合用
+      obd_0131: _obd0131Snapshot(), // ★0131 ECU距離(km・1km粗・-1=未対応/未取得)。業務開始/終了の差=ECU積算距離=B(真距離)基準。01A6非対応の軽/古い車向け
+      obd_intv: _obdIntvSnapshot(), // ★生OBD∫v(m・faithful・ポーリングレート積分・-1=未取得)。1Hz GPS同期の再積分過小を回避しK較正の分母を忠実化
       rpm: _obdRpmSnapshot(), // ★エンジンRPM(010C・-1=未取得)。RPM+ギア比でfloor過小de-quantする法の実データ収集(記録専用・距離未配線)
       // ★OBD-main 発火診断 (2026-06-10・追加のみ・既存 field 不変・passive)★:
       spdsrc: _speedSrcSnapshot(c), // 速度源 'obd'/'dop'/'hav' (gps.js L629 と同条件で評価・null=評価不能)。OBD-main が実際に発火したか

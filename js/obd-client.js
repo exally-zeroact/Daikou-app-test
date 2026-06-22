@@ -61,6 +61,12 @@
   const SPEED_PID = '010D'; // Mode 01 PID 0D = Vehicle Speed (km/h・1 byte)
   const ODO_PID = '01A6'; // Mode 01 PID A6 = Odometer (0.1km・4 byte・新しめの車)
   const ODO_POLL_EVERY = 30; // この回数の速度ポーリングごとに1回 01A6 を混ぜる(odoは0.1km刻みで遅い)
+  // ★ECU距離カウンタ (2026-06-23・診断記録): Mode01 PID 31 = Distance since codes cleared (1km・2 byte)。
+  //   ECU自身が車速パルスを積算した距離=メーター機(随伴車)と同じ物=真距離の参照。01A6非対応の
+  //   軽/古い車でも 0131 は読めることが多い。走行中ポーリングして trace 記録 → オフラインで
+  //   K=ECU距離÷OBD∫v を導出する材料にする。★記録専用・距離計算には未配線(既存OBD経路不変)★。
+  const DIST_PID = '0131'; // Mode 01 PID 31 = Distance traveled since codes cleared (km・1km刻み)
+  const DIST_POLL_EVERY = 23; // 速度ポーリング23回に1回 0131 を混ぜる(ODO=30/RPM=10 と素な間隔で衝突を最小化)
   // ★RPM 記録 (2026-06-11)★: Mode01 PID 0C = Engine RPM(0.25rpm刻み=速度の1km/h floorより遥かに高解像度)。
   //   OBD車速は1km/h整数floorで∫vが系統過小(-2.9%)。RPM(高解像度)+ギア比学習で細かい速度を復元すれば
   //   floor過小を ★根から★ 消せる(US9679422 等の公知手法)。本コミットでは ★記録のみ★(距離計算には未配線)。
@@ -109,6 +115,13 @@
   //   差＝この車のタイヤ回転距離(メーター級)をトリップ値と照合できる。_odoSupported はプローブで確定。
   let _latestOdo = { km: -1, ts: 0 };
   let _odoSupported = false;
+  // ★ECU距離カウンタ(0131・1km)★: 走行中ポーリングして trace 記録 → メーター機=真距離の参照。
+  //   _dist0131Supported はプローブで確定。記録専用・距離計算には未配線。
+  let _latest0131 = { km: -1, ts: 0 };
+  // ★生OBD∫v(faithful・ポーリングレート積分)★: Σ speed×dt。記録専用・距離未配線。
+  let _obdIntegralM = 0;
+  let _obdIntegralLastTs = 0;
+  let _dist0131Supported = false;
   let _latestRpm = { rpm: -1, ts: 0 }; // ★最新エンジンRPM(010C・-1=未取得)。記録専用・距離計算には未配線★
   let _pollCount = 0;
   let _consecFail = 0; // 速度ポーリングの連続失敗数(mid-drive 回復トリガー)
@@ -118,6 +131,18 @@
   let _captureBuf = ''; // ATMA 生フレーム蓄積バッファ
   // ★ABS輪速 自動discovery 状態(ユーザー操作ゼロ)★
   let _wsAuto = false; // 自動輪速discovery 有効(接続でON・十分集めたらOFF)
+  // ★輪速診断モード(司さん手動ON・診断走行専用・2026-06-23)★: ONで接続時に _wsAuto をONにし ABS輪速CAN捕捉を
+  //   走らせ生フレームを [OBD-WHEELSPEED] ログ→traceに残す。既定OFF(走行中ATMA捕捉は010Dを中断し距離を汚すため=
+  //   課金走行では使わない)。localStorage 'dk_obd_ws_discovery'='1' で永続。
+  let _wsDiscoveryForced = (function () {
+    try {
+      return (
+        typeof localStorage !== 'undefined' && localStorage.getItem('dk_obd_ws_discovery') === '1'
+      );
+    } catch (_) {
+      return false;
+    }
+  })();
   let _wsCaps = 0; // これまでの自動捕捉回数
   let _wsLastCapTs = 0; // 直近の自動捕捉時刻
   const _wsBins = {}; // 捕捉済み速度帯(20km/h刻み)→1
@@ -215,6 +240,21 @@
     return rpm;
   }
 
+  // ─── 純関数: ELM327 応答 → ECU距離 km (0131・1km×2byte・単体テスト対象) ──────
+  //   応答例: "41 31 00 7B" / "4131007B"。"41 31" の直後 2 byte を km (1km/bit) として返す。
+  function _parseDistKm(str) {
+    if (typeof str !== 'string' || str.length === 0) return null;
+    const cleaned = str.replace(/[\s>\r\n]/g, '').toUpperCase();
+    if (/NODATA|ERROR|UNABLE/.test(cleaned) && !/4131/.test(cleaned)) return null;
+    const idx = cleaned.indexOf('4131');
+    if (idx < 0 || idx + 8 > cleaned.length) return null;
+    const hex = cleaned.substr(idx + 4, 4);
+    if (!/^[0-9A-F]{4}$/.test(hex)) return null;
+    const km = parseInt(hex, 16);
+    if (!Number.isFinite(km) || km < 0 || km > 65535) return null;
+    return km; // 1 km/bit
+  }
+
   // ─── Web Bluetooth サポート判定 ───
   function isSupported() {
     return !!(
@@ -249,6 +289,54 @@
       supported: _odoSupported,
       ageMs: _latestOdo.ts > 0 ? _now() - _latestOdo.ts : Infinity,
     };
+  }
+
+  // ★ECU距離カウンタ(0131・km)★。未対応/未取得は km:-1。trace が定期記録 → 業務開始/終了の差=
+  //   ECUが車速パルスを積算した距離(=メーター機=真距離)を OBD∫v と照合し K を導出する材料。
+  //   記録専用: 距離計算には未配線。
+  function getDistanceSinceClear() {
+    return {
+      km: _latest0131.km,
+      ts: _latest0131.ts,
+      supported: _dist0131Supported,
+      ageMs: _latest0131.ts > 0 ? _now() - _latest0131.ts : Infinity,
+    };
+  }
+
+  // ★生OBD∫v(faithful・ポーリングレート積分)★: Σ speed×dt をポーリング毎に積算。
+  //   trace は GPS 1Hz 同期で OBD速度を記録するため、オフライン再積分は速度変動を取りこぼし過小化する
+  //   (前回モコ解析で 16.99 vs 実機18.18 にズレた原因)。ポーリングレート(速度更新毎)で積分した本値を
+  //   記録し、K較正の分母を忠実にする。★記録専用・距離計算には未配線(distance_m 不可侵)★。
+  function getObdIntegral() {
+    return { m: _obdIntegralM, ts: _obdIntegralLastTs };
+  }
+
+  // ★輪速診断モードの手動ON/OFF(診断走行専用)★: ON=接続時にABS輪速CAN捕捉を走らせ生フレームをtrace記録。
+  //   既定OFF。距離コアには触らない(捕捉は[OBD-WHEELSPEED]ログ→trace。距離は従来の010D一本)。
+  function setWheelSpeedDiscovery(on) {
+    const v = on === true;
+    _wsDiscoveryForced = v;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        if (v) localStorage.setItem('dk_obd_ws_discovery', '1');
+        else localStorage.removeItem('dk_obd_ws_discovery');
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    if (v && isConnected()) {
+      _wsAuto = true; // 接続中なら即discovery開始(次接続でも _wsDiscoveryForced で復元)
+      // ★stale bin/捕捉蓄積をクリア(監査推奨2026-06-23): 古い速度帯が残ると新規捕捉が早期終了し under-capture★
+      _wsCaps = 0;
+      _wsLastCapTs = 0;
+      _wsCapturesData = [];
+      Object.keys(_wsBins).forEach(function (k) {
+        delete _wsBins[k];
+      });
+    } else if (!v) {
+      _wsAuto = false;
+    }
+    return v;
   }
 
   // ★エンジンRPM(010C)★。未取得は rpm:-1。trace が定期記録 → 次走行でギア比学習(floor過小de-quant)の実検証用。
@@ -345,9 +433,9 @@
         return undefined;
       })
       .then(function () {
-        // ★自動輪速discovery: 既定OFF(WS_AUTO_DISCOVERY_DEFAULT=false)★。
+        // ★自動輪速discovery: 既定OFF(WS_AUTO_DISCOVERY_DEFAULT=false)★。診断モード(_wsDiscoveryForced)時のみON。
         //   ATMA捕捉が走行中OBDを中断し距離を汚す実機回帰の根治(上記定数コメント)。OBDは中断せず連続供給=距離整合。
-        _wsAuto = WS_AUTO_DISCOVERY_DEFAULT;
+        _wsAuto = _wsDiscoveryForced || WS_AUTO_DISCOVERY_DEFAULT;
         _wsCaps = 0;
         _wsLastCapTs = 0;
         _wsCapturesData = [];
@@ -617,6 +705,11 @@
         if (results.decoded && results.decoded.odometer_km != null) {
           _latestOdo = { km: results.decoded.odometer_km, ts: _now() };
         }
+        // ★0131(ECU距離)対応を確定 → 走行中ポーリングに混ぜ trace 記録★
+        _dist0131Supported = !!(results.decoded && results.decoded.dist_since_clear_supported);
+        if (results.decoded && results.decoded.dist_since_clear_km != null) {
+          _latest0131 = { km: results.decoded.dist_since_clear_km, ts: _now() };
+        }
       } catch (_) {
         /* decode 失敗は無視 (raw があれば解析可能) */
       }
@@ -654,8 +747,12 @@
     // 0131 距離: 41 31 + 2byte km
     if (q.dist_since_clear_0131 && q.dist_since_clear_0131.raw) {
       const h = hexAfter(q.dist_since_clear_0131.raw, '4131');
-      if (h && h.length >= 4 && /^[0-9A-F]{4}/.test(h))
+      if (h && h.length >= 4 && /^[0-9A-F]{4}/.test(h)) {
         out.dist_since_clear_km = parseInt(h.substr(0, 4), 16);
+        out.dist_since_clear_supported = true;
+      } else {
+        out.dist_since_clear_supported = false;
+      }
     }
     return out;
   }
@@ -994,14 +1091,22 @@
 
       // ★速度を主・odo/rpmは定期混入★: ODO_POLL_EVERY ごとに 01A6、RPM_POLL_EVERY ごとに 010C を1回。
       const _isOdoPoll = _odoSupported && _pollCount % ODO_POLL_EVERY === 0;
-      const _isRpmPoll = !_isOdoPoll && _pollCount % RPM_POLL_EVERY === 0; // odoと衝突時はodo優先
-      const _cmd = _isOdoPoll ? ODO_PID : _isRpmPoll ? RPM_PID : SPEED_PID;
+      // ★0131(ECU距離)診断ポーリング★: odoと衝突時はodo優先。記録専用・距離未配線。
+      const _isDistPoll = !_isOdoPoll && _dist0131Supported && _pollCount % DIST_POLL_EVERY === 0;
+      const _isRpmPoll = !_isOdoPoll && !_isDistPoll && _pollCount % RPM_POLL_EVERY === 0; // odo/distと衝突時は優先
+      const _cmd = _isOdoPoll ? ODO_PID : _isDistPoll ? DIST_PID : _isRpmPoll ? RPM_PID : SPEED_PID;
       _send(_cmd)
         .then(function (resp) {
           if (_isOdoPoll) {
             const km = _parseOdometerKm(resp);
             if (km != null) {
               _latestOdo = { km: km, ts: _now() };
+              _consecFail = 0;
+            }
+          } else if (_isDistPoll) {
+            const dkm = _parseDistKm(resp);
+            if (dkm != null) {
+              _latest0131 = { km: dkm, ts: _now() }; // 記録専用(距離計算には未配線)
               _consecFail = 0;
             }
           } else if (_isRpmPoll) {
@@ -1013,7 +1118,16 @@
           } else {
             const kmh = _parseSpeedKmh(resp);
             if (kmh != null) {
-              _latest = { kmh: kmh, mps: kmh / 3.6, ts: _now() };
+              const _spdTs = _now();
+              const _mps = kmh / 3.6;
+              // ★生OBD∫v(faithful)積算★: Σ speed×dt をポーリングレートで。gap(dt>5s)は除外し過大化を防ぐ。
+              //   記録専用・距離計算には未配線。
+              if (_obdIntegralLastTs > 0) {
+                const _dt = (_spdTs - _obdIntegralLastTs) / 1000;
+                if (_dt > 0 && _dt < 5) _obdIntegralM += _mps * _dt;
+              }
+              _obdIntegralLastTs = _spdTs;
+              _latest = { kmh: kmh, mps: _mps, ts: _spdTs };
               _emit('speed', getSpeed());
               _consecFail = 0; // 正常応答 → 失敗カウンタ reset
             } else {
@@ -1035,6 +1149,10 @@
     _latest = { kmh: -1, mps: -1, ts: 0 };
     _latestOdo = { km: -1, ts: 0 };
     _odoSupported = false;
+    _latest0131 = { km: -1, ts: 0 };
+    _dist0131Supported = false;
+    _obdIntegralM = 0;
+    _obdIntegralLastTs = 0;
     _latestRpm = { rpm: -1, ts: 0 };
     _pollCount = 0;
     _consecFail = 0;
@@ -1131,16 +1249,20 @@
     isConnected: isConnected,
     getSpeed: getSpeed,
     getOdometer: getOdometer,
+    getDistanceSinceClear: getDistanceSinceClear, // ★0131 ECU距離(1km粗・記録専用・距離未配線)★
+    getObdIntegral: getObdIntegral, // ★生OBD∫v(faithful・ポーリングレート積分・記録専用・距離未配線)★
     getRpm: getRpm,
     speedProvider: speedProvider,
     getStatus: getStatus,
     probeWheelSpeed: probeWheelSpeed, // ★ABS各輪速 read-only プローブ(距離未配線)★
+    setWheelSpeedDiscovery: setWheelSpeedDiscovery, // ★輪速診断モード手動ON/OFF(診断走行専用・既定OFF)★
     getWheelSpeedMapping: getWheelSpeedMapping, // 端末内で確定した輪速マッピング(未確定null)
     applyWheelSpeedMapping: applyWheelSpeedMapping, // VIN別保存マッピングを流し込む(再discovery不要)
     on: on,
     // 単体テスト/デバッグ用 (純関数)
     _parseSpeedKmh: _parseSpeedKmh,
     _parseOdometerKm: _parseOdometerKm,
+    _parseDistKm: _parseDistKm, // ★0131 ECU距離パース(単体テスト用)★
     _parseRpm: _parseRpm,
     _parseMonitorFrames: _parseMonitorFrames,
     _summarizeFrames: _summarizeFrames,
