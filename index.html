@@ -10673,6 +10673,69 @@
         }
         window._st_onCheckUpdate = _onCheckUpdate;
 
+        // ★OBD CANチェック(2026-06-23・司さん「テストできるようにしろ」)★
+        //   停車・エンジンON・OBD接続で ATMA を数秒流し、車輪速CANが見えるか即判定。
+        //   read-only(canBusProbe)。距離計算/課金に一切影響しない。結果は画面表示+traceへ。
+        window._st_onCanCheck = function () {
+          var btn = document.getElementById('_st_canCheckBtn');
+          var out = document.getElementById('_st_canCheckResult');
+          var O = window.OBDClient;
+          if (!O || typeof O.canBusProbe !== 'function') {
+            if (out) out.textContent = '❌ OBD機能が読み込まれていません。';
+            return;
+          }
+          if (!O.isConnected || !O.isConnected()) {
+            if (out)
+              out.innerHTML =
+                '❌ OBD未接続です。先に上部の青バー「OBD」から接続してください(停車・エンジンON)。';
+            return;
+          }
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = '計測中…(約5秒)';
+          }
+          if (out) out.innerHTML = '⏳ ATMAでCANを傍受中… 約5秒お待ちください(車は停めたまま)。';
+          O.canBusProbe(4000)
+            .then(function (r) {
+              var head = r.ok ? '✅ 見えました' : '⚠️ 見えません';
+              var color = r.ok ? '#1f9d55' : '#c0392b';
+              var detail =
+                'CAN ID ' +
+                (r.distinctIdCount || 0) +
+                '種(自発 ' +
+                (r.broadcastIdCount || 0) +
+                '種)/ フレーム ' +
+                (r.frameCount || 0) +
+                (r.bufferFull ? ' / BUFFER FULL' : '') +
+                ' / proto ' +
+                (r.protocol || '不明');
+              if (out)
+                out.innerHTML =
+                  '<span style="color:' +
+                  color +
+                  ';font-weight:700">' +
+                  head +
+                  '</span><br>' +
+                  (r.reason || '') +
+                  '<br><span style="color:#8e8e93;font-size:12px">' +
+                  detail +
+                  '</span>';
+            })
+            .catch(function (e) {
+              if (out)
+                out.innerHTML =
+                  '❌ 失敗: ' +
+                  ((e && e.message) || e) +
+                  '<br><span style="color:#8e8e93;font-size:12px">OBD接続/車両状態を確認して再実行してください。</span>';
+            })
+            .then(function () {
+              if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'CAN見えるかチェック';
+              }
+            });
+        };
+
         window._st_toggleTrainingEnabled = function () {
           const next = !_trainingIsEnabled();
           try {
@@ -12199,6 +12262,31 @@
             <div class="row-label" style="color: #8e8e93">アプリ バージョン</div>
             <div id="_st_appVersionLine" style="color: #1c1c1e; font-size: 14px; font-weight: 600">
               確認中...
+            </div>
+          </div>
+        </div>
+
+        <!-- ★OBD CANチェック(診断・2026-06-23・司さん「テストできるようにしろ」)★
+             停車・エンジンON・OBD接続で ATMA を数秒流し、車輪速のCANが見えるか即判定。
+             read-only・距離計算/課金に一切影響しない。 -->
+        <div class="section" id="_st_canCheckSection">
+          <div class="row" style="justify-content: space-between; align-items: center">
+            <div class="row-label" style="color: #8e8e93">OBD CANチェック</div>
+            <button
+              class="dl-update-btn"
+              id="_st_canCheckBtn"
+              type="button"
+              onclick="_st_onCanCheck()"
+            >
+              CAN見えるかチェック
+            </button>
+          </div>
+          <div class="row" style="padding-top: 4px">
+            <div
+              id="_st_canCheckResult"
+              style="color: #8e8e93; font-size: 13px; line-height: 1.6; word-break: break-word"
+            >
+              停車・エンジンON・OBD接続してから実行してください。輪速のCANが見えるか判定します。
             </div>
           </div>
         </div>

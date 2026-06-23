@@ -891,6 +891,75 @@
     };
   }
 
+  // ─── 純関数: ATMA生出力 → CAN可視性の判定 (単体テスト対象) ──────────────
+  //   司さんの「CAN見えるかチェック」の核。停車ATMAの生テキストから、ブロードキャストが
+  //   流れてるか(=ゲート無し=輪速探索へ進める)を分類する。診断応答ID(7DF/7E0-7EF)は
+  //   除外して「自発ブロードキャストID」を数える。BUFFER FULL は「溢れるほど流れてる」=見える側。
+  function _classifyCanProbe(raw, protocol, durMs) {
+    const text = typeof raw === 'string' ? raw : '';
+    const bufferFull = /BUFFER\s*FULL/i.test(text);
+    const frames = _parseMonitorFrames(text);
+    const idCount = {};
+    for (let i = 0; i < frames.length; i++)
+      idCount[frames[i].id] = (idCount[frames[i].id] || 0) + 1;
+    const distinctIds = Object.keys(idCount);
+    const isDiag = function (id) {
+      return /^7DF$/.test(id) || /^7E[0-9A-F]$/.test(id); // 診断要求/応答ID(自発でない)
+    };
+    const broadcastIds = distinctIds.filter(function (id) {
+      return !isDiag(id);
+    });
+    const protoStr = (protocol || '').toUpperCase();
+    const isCan = /CAN|15765/.test(protoStr) || frames.length > 0 || bufferFull;
+    let verdict, reason, ok;
+    if (!isCan && frames.length === 0 && !bufferFull) {
+      verdict = 'no_can';
+      ok = false;
+      reason = 'CAN応答なし(K-Line/非対応の可能性)。OBD経由のこの道は不可→GPS+0.5へ。';
+    } else if (broadcastIds.length >= 3) {
+      verdict = 'broadcast_visible';
+      ok = true;
+      reason =
+        '自発ブロードキャストID ' +
+        broadcastIds.length +
+        '種=ゲート無し。走行+左右旋回で4輪連動IDを探せる。';
+    } else if (bufferFull) {
+      verdict = 'broadcast_likely';
+      ok = true;
+      reason =
+        'BUFFER FULL=大量トラフィック有り(ゲート無し濃厚)。クローンが溢れた=STN系アダプタ/ATCRA絞りで確定可。';
+    } else if (broadcastIds.length >= 1) {
+      verdict = 'broadcast_weak';
+      ok = true;
+      reason = '自発ID少数。流れてはいる。捕捉時間を延ばすか旋回して再確認。';
+    } else if (distinctIds.length > 0) {
+      verdict = 'gated';
+      ok = false;
+      reason = '診断応答ID(7Ex)のみ=自発ブロードキャスト無し=ゲート済。OBD経由では輪速不可。';
+    } else {
+      verdict = 'quiet_or_gated';
+      ok = false;
+      reason = 'フレーム0=ゲート済 or アダプタ取りこぼし。STN系アダプタで再試行推奨。';
+    }
+    return {
+      v: 1,
+      ts: _now(),
+      durationMs: durMs || 0,
+      protocol: protocol || '',
+      bufferFull: bufferFull,
+      frameCount: frames.length,
+      distinctIdCount: distinctIds.length,
+      broadcastIdCount: broadcastIds.length,
+      distinctIds: distinctIds.slice(0, 40),
+      broadcastIds: broadcastIds.slice(0, 40),
+      topIds: _summarizeFrames(frames).slice(0, 10),
+      verdict: verdict,
+      ok: ok,
+      reason: reason,
+      rawSample: text.slice(0, 4000),
+    };
+  }
+
   // ─── ★ABS各輪速 捕捉コア (read-only・距離未配線・ATH0/ATS0必ず復元)★ ───
   //   ATH1+ATS1→ATMA durationMs 受動モニタ→生フレーム捕捉→ATH0/ATS0 復元。捕捉時010D速度を同梱記録し
   //   [OBD-WHEELSPEED] でログ→オフラインで「ID×バイト×係数」を010Dに線形回帰し輪速IDを確定。
@@ -983,6 +1052,98 @@
         function (e) {
           _resume();
           throw e;
+        }
+      );
+  }
+
+  // ─── ★CAN見えるかチェック(停車・エンジンON・read-only・距離不可侵)★ ───
+  //   司さん「テストできるようにしろ」。ATSP6→ATDP→0100→ATH1→ATS0→ATAL→ATMA を数秒流し、
+  //   生フレームを _classifyCanProbe で「見える/ゲート済/詰み」に即判定。[OBD-CANPROBE]でtrace記録。
+  //   ★距離計算/課金/ポーリング骨格に一切影響しない。停車中に撃つ前提。ATS1/ATH0で必ず復元。★
+  //   クローンELM327(Zappa等)のBUFFER FULLは「溢れるほど流れてる」=見える側として扱う。
+  function canBusProbe(durationMs) {
+    const dur = durationMs && durationMs > 0 ? durationMs : 4000;
+    if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
+    if (_capturing) return Promise.reject(new Error('既に捕捉中'));
+    const wasStop = _stopRequested;
+    const obd010d = getSpeed().kmh; // 押下時の010D速度(走行中に数回押せば速度別CANで輪速ID特定可)
+    _stopRequested = true; // ポーリング停止(ATMAとBLE帯域競合回避)
+    let protocol = '';
+    function _restore(passthru, isErr) {
+      _capturing = false;
+      return _send('ATS1')
+        .catch(function () {})
+        .then(function () {
+          return _send('ATH0').catch(function () {});
+        })
+        .then(function () {
+          _stopRequested = wasStop;
+          if (!_stopRequested && isConnected()) _startPolling();
+          if (isErr) throw passthru;
+          return passthru;
+        });
+    }
+    return _sleep(150)
+      .then(function () {
+        return _send('ATSP6', 2500).catch(function () {
+          return '';
+        });
+      }) // CAN 11bit/500k に pin
+      .then(function () {
+        return _send('ATDP', 2000).catch(function () {
+          return '';
+        });
+      })
+      .then(function (r) {
+        protocol = (r || '').replace(/[\s>]/g, '');
+      })
+      .then(function () {
+        return _send('0100', 5000).catch(function () {
+          return '';
+        });
+      }) // バス起こし
+      .then(function () {
+        return _send('ATH1').catch(function () {});
+      }) // ヘッダ(CAN ID)ON
+      .then(function () {
+        return _send('ATS0').catch(function () {});
+      }) // 空白省略(BUFFER FULL緩和)
+      .then(function () {
+        return _send('ATAL').catch(function () {});
+      }) // ロング許可
+      .then(function () {
+        _captureBuf = '';
+        _capturing = true; // この瞬間から notify は _captureBuf へ
+        return _writeCharSafe(_str2buf('ATMA\r')).catch(function () {});
+      })
+      .then(function () {
+        return _sleep(dur);
+      })
+      .then(function () {
+        return _writeCharSafe(_str2buf('\r')).catch(function () {}); // ATMA停止
+      })
+      .then(function () {
+        return _sleep(350);
+      })
+      .then(
+        function () {
+          _capturing = false;
+          const raw = _captureBuf;
+          _captureBuf = '';
+          const verdict = _classifyCanProbe(raw, protocol, dur);
+          verdict.obd010d_kmh = obd010d; // 押下時速度(走行中押下=速度別CANのID特定に使う)
+          global.OBD_CANPROBE = verdict;
+          try {
+            // eslint-disable-next-line no-console
+            console.log('[OBD-CANPROBE] ' + JSON.stringify(verdict));
+          } catch (_) {
+            /* ignore */
+          }
+          _emit('canprobe', verdict);
+          return _restore(verdict, false);
+        },
+        function (e) {
+          return _restore(e, true);
         }
       );
   }
@@ -1255,6 +1416,7 @@
     speedProvider: speedProvider,
     getStatus: getStatus,
     probeWheelSpeed: probeWheelSpeed, // ★ABS各輪速 read-only プローブ(距離未配線)★
+    canBusProbe: canBusProbe, // ★CAN見えるかチェック(停車・read-only・距離不可侵)★
     setWheelSpeedDiscovery: setWheelSpeedDiscovery, // ★輪速診断モード手動ON/OFF(診断走行専用・既定OFF)★
     getWheelSpeedMapping: getWheelSpeedMapping, // 端末内で確定した輪速マッピング(未確定null)
     applyWheelSpeedMapping: applyWheelSpeedMapping, // VIN別保存マッピングを流し込む(再discovery不要)
@@ -1266,6 +1428,7 @@
     _parseRpm: _parseRpm,
     _parseMonitorFrames: _parseMonitorFrames,
     _summarizeFrames: _summarizeFrames,
+    _classifyCanProbe: _classifyCanProbe, // ★CAN可視性判定(純関数・単体テスト用)★
     _wsCaptureDecision: _wsCaptureDecision, // ★自動輪速discovery判定(純関数・単体テスト用)★
     _speedBin: _speedBin,
     _decodeProbe: _decodeProbe,
