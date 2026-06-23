@@ -99,6 +99,52 @@ describe('_cwIntegrateStep — dt積分(断絶保護)', () => {
   });
 });
 
+describe('_cwWindowSpeed — バースト窓の中央値速度(ストール判定つき)', () => {
+  const O = loadOBD();
+  const cfg = { id: '1B8', off: 0, endian: 'BE', scale: 40 };
+  function f(id, hi, lo) {
+    return { id: id, bytes: [hi, lo, 0, 0] };
+  }
+
+  it('対象IDの複数フレーム→中央値km/h・n返す(先頭2破棄)', () => {
+    // 1440=0x05A0=36km/h を5フレーム(先頭2破棄でも残3)
+    const frames = [
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+    ];
+    const w = O._cwWindowSpeed(frames, cfg);
+    expect(w.kmh).toBeCloseTo(36, 1);
+    expect(w.n).toBe(3); // 先頭2破棄
+  });
+
+  it('スパイク1個は中央値で無視される', () => {
+    // 36,36,36,36,9999(スパイク) → 中央値36付近
+    const frames = [
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0x05, 0xa0),
+      f('1B8', 0xff, 0xff),
+    ];
+    const w = O._cwWindowSpeed(frames, cfg);
+    expect(w.kmh).toBeCloseTo(36, 0);
+  });
+
+  it('対象ID以外は無視', () => {
+    const frames = [f('120', 0x05, 0xa0), f('136', 0x01, 0x00), f('1D0', 0x02, 0x00)];
+    const w = O._cwWindowSpeed(frames, cfg);
+    expect(w.kmh).toBe(-1);
+    expect(w.n).toBe(0);
+  });
+
+  it('空フレームは -1', () => {
+    expect(O._cwWindowSpeed([], cfg).kmh).toBe(-1);
+  });
+});
+
 describe('CAN輪速メーター 公開API・初期状態', () => {
   const O = loadOBD();
   it('start/stop/get/config が公開されている', () => {

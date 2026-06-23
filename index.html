@@ -10832,6 +10832,9 @@
             if (disp) disp.textContent = '⚠️ 業務走行中は使えません(非課金の診断走行で)';
             return;
           }
+          // ★監査M-A防御: 起動中はボタンを無効化(連打で二重startプリアンブルに入れない)★
+          var cwBtn = document.getElementById('btnCanWheel');
+          if (cwBtn) cwBtn.disabled = true;
           O.startCanWheelMeter()
             .then(function () {
               _st_renderCanWheel();
@@ -10840,6 +10843,9 @@
             })
             .catch(function (e) {
               if (disp) disp.textContent = '開始失敗: ' + ((e && e.message) || e);
+            })
+            .then(function () {
+              if (cwBtn) cwBtn.disabled = false;
             });
         };
         _st_renderCanWheel();

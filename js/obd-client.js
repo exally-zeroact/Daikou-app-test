@@ -148,12 +148,20 @@
   const _wsBins = {}; // 捕捉済み速度帯(20km/h刻み)→1
   let _wsCapturesData = []; // 端末内識別用の捕捉蓄積 [{obd010d, means}]
   let _wsMapping = null; // ★確定した輪速マッピング {id,key,slope,intercept,r2,...}★(距離未配線・診断/将来用)
-  // ★CAN輪速メーター(2026-06-23・1B8の生車輪速を連続積分してDM Lightと突合)★:
-  //   ATCRA<id>で対象IDだけに絞る(=BUFFER FULL解消)→ATMAで連続受信→1行ごとにBE16bit速度をデコード→積分。
-  //   ★read-only・距離計算(distance_m)/課金/ポーリング骨格に一切非干渉。検証専用の並行距離。★
-  //   モコMG33S実測=ID1B8 バイト0-1 BE が車輪速(r=0.997・約40カウント/km/h)。スケールは最終的にDM Lightで較正。
-  const CW_DEFAULT = { id: '1B8', off: 0, endian: 'BE', scale: 40 }; // モコ既定(配線検証用・他車は将来discovery)
-  const CW_MAX_DT_S = 2.0; // フレーム間dtの上限(これ超は積分しない=断絶/停止の暴走防止)
+  // ★CAN輪速メーター ★バースト積分方式★(2026-06-24・方式検証会議で確定)★:
+  //   ★連続ATMAは禁止★(クローンZappaはBLE吐き出しが律速で約130秒で内部バッファ飽和→30秒凍結→−38%欠損)。
+  //   代わりに「短ATMA(~0.7s撃つ)→停止して吐き切る→次」を実効周期~1.5sで反復し、各バーストの1B8中央値速度を
+  //   その区間にHOLD積分(窓平均が既に区間積分=台形は二重平滑で不要)。バーストは毎回バッファを空にするので永遠に詰まらない。
+  //   ★目標=DM Light(随伴車メーター)に合わせる(代行は過大ゼロ拘束でない)。停止中に距離を足さないのはDM Lightと揃えるため★。
+  //   ★read-only・distance_m/課金/ポーリング骨格に一切非干渉。検証専用の並行距離。★
+  //   モコMG33S実測=ID1B8 バイト0-1 BE が車輪速(r=0.997・約40カウント/km/h・1km/h丸め無し)。
+  const CW_DEFAULT = { id: '1B8', off: 0, endian: 'BE', scale: 40 }; // モコ既定(他車は将来discovery)
+  const CW_BURST_MS = 700; // 1バーストのATMA受信時間(短くして毎回吐き切る=飽和回避)
+  const CW_DRAIN_MS = 200; // ATMA停止後のバッファ吐き切り待ち
+  const CW_CYCLE_MS = 1500; // 実効サンプリング周期(バースト+ドレイン+ギャップ)
+  const CW_MIN_FRAMES = 5; // バースト内の対象フレーム数がこれ未満=ストール扱いで非加算
+  const CW_MAX_DT_S = 3.5; // 区間dtの上限(これ超=長断絶/停止gapは積分しない=幻距離防止。周期1.5sの遅延1回は許容)
+  const CW_ZUPT_KMH = 1.5; // これ未満は停止扱いで0(DM Lightと同様・creep防止)
   const CW_LOG_INTERVAL_MS = 10000; // [OBD-CANWHEEL]ログ間隔
   const _cwCfg = (function () {
     try {
@@ -171,14 +179,18 @@
     }
     return Object.assign({}, CW_DEFAULT);
   })();
-  let _cwStreaming = false; // ストリーミング中
-  let _cwBuf = ''; // 行バッファ
+  let _cwOn = false; // メーター稼働中(バーストループ実行中)
+  let _cwStarting = false; // ★監査M-A: 起動プリアンブル中(同期フラグ・二重start防止)★
+  let _cwBurstGen = 0; // ★監査M-B: バースト世代トークン(完了クリアの所有権ガード)★
+  let _cwBurstInflight = false; // ★監査M-B: バースト捕捉が in-flight(probe排他を広げる)★
   let _cwDistM = 0; // 積分距離(m)
-  let _cwFrames = 0; // 取り込んだ対象フレーム数
-  let _cwLastT = 0; // 直近フレーム時刻(ms)
+  let _cwFrames = 0; // 取り込んだ対象フレーム総数
+  let _cwLastMidT = 0; // 直近"有効"バーストの中央時刻(ms・区間dtの基準)
   let _cwStartT = 0; // 開始時刻(ms)
-  let _cwLastKmh = 0; // 直近速度(km/h・表示用)
-  let _cwLogTimer = null;
+  let _cwLastKmh = 0; // 直近窓速度(km/h・表示用)
+  let _cwStallN = 0; // 連続ストール数(フレーム不足)
+  let _cwBurstTimer = null; // バーストループの次回スケジュール
+  let _cwLastLogT = 0; // 直近ログ時刻
   let _cwWasStop = false; // start前の _stopRequested を退避(stopで復元)
   let _pendingResolve = null; // 現コマンドの応答待ち resolver
   let _pendingTimer = null;
@@ -548,21 +560,7 @@
 
   // ─── 受信 (BLE は ~20byte 分割で来るため '>' プロンプトまでバッファ) ──────
   function _onNotify(event) {
-    // ★CAN輪速メーター ストリーミング中★: ATCRA<id>+ATMA で対象ID(例1B8)だけを連続受信し、
-    //   1行ごとに車輪速をデコード→積分。read-only・距離計算(distance_m)/課金に一切干渉しない。
-    if (_cwStreaming && isConnected()) {
-      const vv = event.target.value;
-      let cc = '';
-      for (let i = 0; i < vv.byteLength; i++) cc += String.fromCharCode(vv.getUint8(i));
-      _cwBuf += cc;
-      let nl;
-      while ((nl = _cwBuf.search(/[\r\n]/)) >= 0) {
-        const line = _cwBuf.slice(0, nl);
-        _cwBuf = _cwBuf.slice(nl + 1);
-        _cwOnLine(line);
-      }
-      return;
-    }
+    // ★CAN輪速メーターのバースト捕捉も下の _capturing 経路を流用する(専用ストリーミング分岐は廃止)。
     // ★ABS輪速モニタ捕捉中(ATMA)★: '>' プロンプトが来ない連続ストリームなので、捕捉窓の間は
     //   通常の _send 応答経路でなく専用バッファに溜める(read-only・距離経路に一切干渉しない)。
     if (_capturing) {
@@ -1080,7 +1078,7 @@
     const dur = durationMs && durationMs > 0 ? durationMs : WHEELSPEED_PROBE_MS;
     if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
     if (_capturing) return Promise.reject(new Error('既に輪速捕捉中'));
-    if (_cwStreaming) return Promise.reject(new Error('CAN輪速メーター動作中')); // ★監査M5: 双方向排他★
+    if (_cwOn || _cwBurstInflight) return Promise.reject(new Error('CAN輪速メーター動作中')); // ★監査M5/M-B: 双方向排他(in-flight中も)★
     const obd010d = getSpeed().kmh;
     const wasStop = _stopRequested;
     _stopRequested = true; // ポーリングを一旦止める(ATMAとBLE帯域競合回避)
@@ -1113,7 +1111,7 @@
     const dur = durationMs && durationMs > 0 ? durationMs : 4000;
     if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
     if (_capturing) return Promise.reject(new Error('既に捕捉中'));
-    if (_cwStreaming) return Promise.reject(new Error('CAN輪速メーター動作中')); // ★監査M5: 双方向排他★
+    if (_cwOn || _cwBurstInflight) return Promise.reject(new Error('CAN輪速メーター動作中')); // ★監査M5/M-B: 双方向排他(in-flight中も)★
     const wasStop = _stopRequested;
     const obd010d = getSpeed().kmh; // 押下時の010D速度(走行中に数回押せば速度別CANで輪速ID特定可)
     _stopRequested = true; // ポーリング停止(ATMAとBLE帯域競合回避)
@@ -1224,20 +1222,108 @@
     }
     return { distM: distM, lastT: nowMs };
   }
-  // ストリーミング1行処理: 対象IDのフレームなら速度デコード→積分。
-  function _cwOnLine(line) {
-    const frames = _parseMonitorFrames(line);
-    for (let i = 0; i < frames.length; i++) {
-      if (frames[i].id !== _cwCfg.id) continue;
-      const kmh = _decodeCanWheelKmh(frames[i].bytes, _cwCfg);
-      if (kmh < 0) continue;
-      const now = _now();
-      const ns = _cwIntegrateStep({ distM: _cwDistM, lastT: _cwLastT }, kmh, now, CW_MAX_DT_S);
-      _cwDistM = ns.distM;
-      _cwLastT = ns.lastT;
-      _cwLastKmh = kmh;
-      _cwFrames++;
+  // ─── 純関数: 1バーストの生フレーム群 → 対象IDの窓速度km/h(単体テスト対象)──────────────
+  //   対象IDの全フレームをデコードし★中央値★(外れ値に頑健)。先頭2フレームは前バースト残渣の可能性で破棄。
+  //   有効値が無ければ -1。窓平均でなく中央値=スパイク耐性。frameCount も返す(ストール判定用)。
+  function _cwWindowSpeed(frames, cfg) {
+    const tgt = [];
+    for (let i = 0; i < frames.length; i++) if (frames[i].id === cfg.id) tgt.push(frames[i]);
+    const use = tgt.length > 2 ? tgt.slice(2) : tgt; // 先頭2破棄(残渣)
+    const vs = [];
+    for (let i = 0; i < use.length; i++) {
+      const v = _decodeCanWheelKmh(use[i].bytes, cfg);
+      if (v >= 0) vs.push(v);
     }
+    if (!vs.length) return { kmh: -1, n: 0 };
+    vs.sort(function (a, b) {
+      return a - b;
+    });
+    return { kmh: vs[Math.floor(vs.length / 2)], n: vs.length };
+  }
+  // 1バースト捕捉: ATMAを CW_BURST_MS だけ撃つ→停止→吐き切り。生バッファを返す(_capturing経路を流用)。
+  //   ★監査M-B: 世代トークンで「自分が所有してる間だけ _capturing/_captureBuf を下ろす」=stop後に
+  //   probe等が再取得した捕捉窓を踏み潰さない。_cwBurstInflight で probe排他を in-flight中も効かせる。★
+  function _cwBurstCapture() {
+    const gen = ++_cwBurstGen;
+    _cwBurstInflight = true;
+    _captureBuf = '';
+    _capturing = true;
+    function _release(raw) {
+      // 自世代かつメーター稼働中の時だけ捕捉所有権を返す(他者が取得済みなら触らない)
+      if (gen === _cwBurstGen && _cwOn) {
+        _capturing = false;
+        _captureBuf = '';
+      }
+      _cwBurstInflight = false;
+      return raw;
+    }
+    return _writeCharSafe(_str2buf('ATMA\r'))
+      .catch(function () {})
+      .then(function () {
+        return _sleep(CW_BURST_MS);
+      })
+      .then(function () {
+        return _writeCharSafe(_str2buf('\r')).catch(function () {}); // ATMA停止(任意1文字)
+      })
+      .then(function () {
+        return _sleep(CW_DRAIN_MS);
+      })
+      .then(
+        function () {
+          return _release(_captureBuf);
+        },
+        function (e) {
+          _release('');
+          throw e;
+        }
+      );
+  }
+  // バーストループ本体: 1周期 = 捕捉→窓速度→HOLD積分→次周期スケジュール。連続ATMAを張りっぱなしにしない。
+  function _cwBurstLoop() {
+    if (!_cwOn || !isConnected()) {
+      _cwOn = false;
+      return;
+    }
+    const cycleStart = _now();
+    _cwBurstCapture().then(
+      function (raw) {
+        if (!_cwOn) return;
+        const frames = _parseMonitorFrames(raw);
+        const w = _cwWindowSpeed(frames, _cwCfg);
+        const now = _now();
+        // ★監査MINOR(位相): 速度サンプルはバースト窓の中央時刻に当てる(積分基準を窓中央同士に揃え加減速の位相遅れを除去)★
+        const midT = cycleStart + CW_BURST_MS / 2;
+        if (w.n >= CW_MIN_FRAMES && w.kmh >= 0) {
+          _cwStallN = 0;
+          const v = w.kmh < CW_ZUPT_KMH ? 0 : w.kmh; // 停止はDM Light同様0(creep防止)
+          const ns = _cwIntegrateStep(
+            { distM: _cwDistM, lastT: _cwLastMidT },
+            v,
+            midT,
+            CW_MAX_DT_S
+          );
+          _cwDistM = ns.distM;
+          _cwLastMidT = ns.lastT;
+          _cwLastKmh = v;
+          _cwFrames += w.n;
+        } else {
+          // ★ストール(フレーム不足)=この窓は捨て、基準時刻を進める(長gapを橋渡しせず幻距離を作らない)★
+          _cwStallN++;
+          _cwLastMidT = midT;
+        }
+        if (now - _cwLastLogT >= CW_LOG_INTERVAL_MS) {
+          _cwLog();
+          _cwLastLogT = now;
+        }
+        if (_cwOn) {
+          const wait = Math.max(50, CW_CYCLE_MS - (_now() - cycleStart));
+          _cwBurstTimer = setTimeout(_cwBurstLoop, wait);
+        }
+      },
+      function () {
+        if (_cwOn) _cwBurstTimer = setTimeout(_cwBurstLoop, CW_CYCLE_MS);
+      }
+    );
   }
   function _cwLog() {
     const durS = _cwStartT ? (_now() - _cwStartT) / 1000 : 0;
@@ -1258,66 +1344,75 @@
     }
     return rec;
   }
-  // ─── ★CAN輪速メーター 開始/停止/取得(read-only・距離不可侵・検証専用)★ ───
-  //   ATCRA<id>で対象IDのみ受信(BUFFER FULL解消)→ATMA連続→積分。停止でATAR/ATS1/ATH0復元+ポーリング再開。
+  // ─── ★CAN輪速メーター 開始/停止/取得(★バースト方式★・read-only・距離不可侵・検証専用)★ ───
+  //   start: ヘッダ/フィルタを一度だけ設定(ATSP6/ATH1/ATS0/ATAL/ATCRA<id>)→バーストループ開始。
+  //   ★連続ATMAは張らない★(クローンが詰まる)。各バーストで撃って止めて吐き切る。停止でATAR/ATS1/ATH0復元+ポーリング再開。
   function startCanWheelMeter(opts) {
     if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
-    if (_cwStreaming) return Promise.resolve(getCanWheelMeter());
+    // ★監査M-A: _cwOn は非同期プリアンブル後にしか立たない。同期フラグ _cwStarting で連打/二重発火の
+    //   プリアンブル窓を即座に塞ぐ(2本のバーストループ並走を防止)。★
+    if (_cwOn || _cwStarting) return Promise.resolve(getCanWheelMeter());
     if (_capturing) return Promise.reject(new Error('輪速捕捉中'));
-    // ★監査M6: 業務走行(課金)中は起動禁止★。ATMA連続受信は010Dポーリングを止め、課金距離源
-    //   (OBD速度)をGPS級へ劣化させるため。検証は非課金走行で。feedback_daikome_running_gate 整合。
+    // ★監査M6: 業務走行(課金)中は起動禁止★。バーストATMAも010Dポーリングを止めるため、課金距離源
+    //   (OBD速度)をGPS級へ劣化させる。検証は非課金走行で。feedback_daikome_running_gate 整合。
     //   ★距離コア非依存★: Meterを直接参照しない(独立性テスト)。index.html が業務開始/終了で
     //   window.OBD_BUSINESS_RUNNING を立てる汎用フラグで判定。
     if (global.OBD_BUSINESS_RUNNING === true)
       return Promise.reject(new Error('業務走行中は使用不可(検証は非課金走行で)'));
     if (opts && opts.id) configCanWheel(opts);
+    _cwStarting = true; // ★同期で起動中をマーク(以後の連打は上の _cwStarting ガードで即return)★
     _cwWasStop = _stopRequested;
     _stopRequested = true; // ポーリング停止(ATMAと帯域競合回避)
-    _cwBuf = '';
     _cwDistM = 0;
     _cwFrames = 0;
-    _cwLastT = 0;
+    _cwLastMidT = 0;
     _cwLastKmh = 0;
+    _cwStallN = 0;
+    _cwLastLogT = 0;
     return _sleep(120)
       .then(function () {
         return _send('ATSP6', 2500).catch(function () {});
       })
       .then(function () {
-        return _send('ATH1').catch(function () {});
+        return _send('ATH1').catch(function () {}); // CAN ID表示
       })
       .then(function () {
-        return _send('ATS0').catch(function () {});
+        return _send('ATS0').catch(function () {}); // 空白省略
       })
       .then(function () {
-        return _send('ATAL').catch(function () {});
+        return _send('ATAL').catch(function () {}); // ロング許可
       })
       .then(function () {
-        return _send('ATCRA ' + _cwCfg.id).catch(function () {}); // 対象IDだけに絞る=BUFFER FULL解消
+        return _send('ATCRA ' + _cwCfg.id).catch(function () {}); // 対象IDだけに絞る(BUFFER FULL緩和)
       })
       .then(function () {
         _cwStartT = _now();
-        _cwStreaming = true; // この瞬間から notify は _cwOnLine へ
-        return _writeCharSafe(_str2buf('ATMA\r')).catch(function () {});
-      })
-      .then(function () {
-        if (_cwLogTimer) clearInterval(_cwLogTimer);
-        _cwLogTimer = setInterval(_cwLog, CW_LOG_INTERVAL_MS);
+        _cwLastLogT = _now();
+        _cwOn = true;
+        _cwStarting = false;
+        _cwBurstLoop(); // バーストループ開始(連続ATMAは張らない)
         _emit('canwheel', getCanWheelMeter());
         return getCanWheelMeter();
+      })
+      .catch(function (e) {
+        _cwStarting = false; // プリアンブル失敗でもフラグを残さない
+        throw e;
       });
   }
   function stopCanWheelMeter() {
-    if (!_cwStreaming) return Promise.resolve(getCanWheelMeter());
-    _cwStreaming = false;
-    if (_cwLogTimer) {
-      clearInterval(_cwLogTimer);
-      _cwLogTimer = null;
+    if (!_cwOn) return Promise.resolve(getCanWheelMeter());
+    _cwOn = false; // ループ停止(次tickで抜ける)
+    _cwBurstGen++; // ★監査M-B: in-flight捕捉の完了クリアを無効化(世代不一致)★
+    if (_cwBurstTimer) {
+      clearTimeout(_cwBurstTimer);
+      _cwBurstTimer = null;
     }
+    _capturing = false; // 捕捉途中なら解除
     const result = _cwLog(); // 最終ログ
     return _writeCharSafe(_str2buf('\r'))
-      .catch(function () {}) // ATMA停止
+      .catch(function () {}) // 念のためATMA停止
       .then(function () {
-        return _sleep(300);
+        return _sleep(250);
       })
       .then(function () {
         return _send('ATAR').catch(function () {}); // 受信フィルタ解除
@@ -1341,11 +1436,12 @@
   }
   function getCanWheelMeter() {
     return {
-      on: _cwStreaming,
+      on: _cwOn,
       id: _cwCfg.id,
       distM: Math.round(_cwDistM * 10) / 10,
       frames: _cwFrames,
       lastKmh: Math.round(_cwLastKmh * 100) / 100,
+      stalls: _cwStallN,
       durationS: _cwStartT ? Math.round((_now() - _cwStartT) / 1000) : 0,
     };
   }
@@ -1538,18 +1634,23 @@
     _wsAuto = false; // 自動discovery停止(次接続で再有効化)
     _wsCapturesData = [];
     _wsMapping = null;
-    // ★監査M1/M2: CAN輪速メーターの畳み込み(_capturingと対称化)★。これが無いと切断後も
-    //   _cwLogTimerが永久発火し、_cwStreaming=true残存で再接続後の _onNotify が本番ポーリング
-    //   (distance_m速度源)を横取りする。_stopRequested は ★再接続ガード(下記)評価より前★ に戻す。
-    if (_cwLogTimer) {
-      clearInterval(_cwLogTimer);
-      _cwLogTimer = null;
+    // ★監査M1/M2: CAN輪速メーター(バースト)の畳み込み(_capturingと対称化)★。これが無いと切断後も
+    //   バーストtimerが残り、_cwOn=true残存で再接続後のループ/捕捉が本番ポーリング(distance_m速度源)を
+    //   横取りする。_stopRequested は ★再接続ガード(下記)評価より前★ に戻す。
+    if (_cwBurstTimer) {
+      clearTimeout(_cwBurstTimer);
+      _cwBurstTimer = null;
     }
-    if (_cwStreaming) {
-      _cwStreaming = false;
+    _cwBurstGen++; // in-flight捕捉の完了クリアを無効化
+    _cwBurstInflight = false;
+    if (_cwStarting) {
+      _cwStarting = false; // プリアンブル中の切断でフラグを残さない
+      _stopRequested = _cwWasStop;
+    }
+    if (_cwOn) {
+      _cwOn = false;
       _stopRequested = _cwWasStop; // start が立てた抑止を解除=自動再接続を殺さない
     }
-    _cwBuf = '';
     // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
     //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
     if (_pendingTimer) {
@@ -1618,13 +1719,16 @@
       _pendingTimer = null;
     }
     _pendingResolve = null;
-    // ★監査M1: 明示disconnect経路でもCAN輪速を畳む(状態leak/timer leak防止)★
-    if (_cwLogTimer) {
-      clearInterval(_cwLogTimer);
-      _cwLogTimer = null;
+    // ★監査M1: 明示disconnect経路でもCAN輪速(バースト)を畳む(状態leak/timer leak防止)★
+    if (_cwBurstTimer) {
+      clearTimeout(_cwBurstTimer);
+      _cwBurstTimer = null;
     }
-    _cwStreaming = false;
-    _cwBuf = '';
+    _cwOn = false;
+    _cwStarting = false;
+    _cwBurstGen++;
+    _cwBurstInflight = false;
+    _capturing = false; // ★監査MINOR: _onDisconnected と対称化★
   }
 
   function on(event, cb) {
@@ -1670,6 +1774,7 @@
     _classifyCanProbe: _classifyCanProbe, // ★CAN可視性判定(純関数・単体テスト用)★
     _decodeCanWheelKmh: _decodeCanWheelKmh, // ★CAN輪速デコード(純関数・単体テスト用)★
     _cwIntegrateStep: _cwIntegrateStep, // ★CAN輪速積分1ステップ(純関数・単体テスト用)★
+    _cwWindowSpeed: _cwWindowSpeed, // ★バースト窓速度=中央値(純関数・単体テスト用)★
     _wsCaptureDecision: _wsCaptureDecision, // ★自動輪速discovery判定(純関数・単体テスト用)★
     _speedBin: _speedBin,
     _decodeProbe: _decodeProbe,
