@@ -10736,6 +10736,42 @@
             });
         };
 
+        // ★走行中CAN記録(輪速discovery)トグル(2026-06-23・輪速ID特定用)★
+        //   ONで走行中にアプリが速度帯ごとATMA自動捕捉→[OBD-WHEELSPEED]ログ(Firebase)。
+        //   read-only・距離計算には未配線(setWheelSpeedDiscovery)。特定後はOFF推奨(010D瞬断回避)。
+        function _st_wsDiscoveryOn() {
+          try {
+            return localStorage.getItem('dk_obd_ws_discovery') === '1';
+          } catch (_) {
+            return false;
+          }
+        }
+        function _st_renderWsDiscoveryBtn() {
+          var btn = document.getElementById('btnWsDiscovery');
+          if (!btn) return;
+          var on = _st_wsDiscoveryOn();
+          btn.textContent = on ? 'ON(記録中)' : 'OFF';
+          btn.style.background = on ? '#007aff' : '#fff';
+          btn.style.color = on ? '#fff' : '#007aff';
+        }
+        window._st_renderWsDiscoveryBtn = _st_renderWsDiscoveryBtn;
+        window._st_onToggleWsDiscovery = function () {
+          var O = window.OBDClient;
+          var next = !_st_wsDiscoveryOn();
+          if (O && typeof O.setWheelSpeedDiscovery === 'function') {
+            O.setWheelSpeedDiscovery(next);
+          } else {
+            try {
+              if (next) localStorage.setItem('dk_obd_ws_discovery', '1');
+              else localStorage.removeItem('dk_obd_ws_discovery');
+            } catch (_) {
+              /* ignore */
+            }
+          }
+          _st_renderWsDiscoveryBtn();
+        };
+        _st_renderWsDiscoveryBtn();
+
         window._st_toggleTrainingEnabled = function () {
           const next = !_trainingIsEnabled();
           try {
@@ -12764,6 +12800,37 @@
             <div class="row" style="justify-content: space-between; padding: 3px 0">
               <span style="color: #8e8e93">輪速検出</span>
               <span id="wheelSpeedStatus" style="font-weight: 700">—</span>
+            </div>
+            <!-- ★走行中CAN記録トグル(2026-06-23・輪速ID特定用・診断走行専用)★
+                 ONで走行中に速度帯ごとATMA自動捕捉→[OBD-WHEELSPEED]ログ(Firebase)。
+                 これで「速度と連動するID=車輪速」を特定する。read-only・距離計算には未配線。 -->
+            <div
+              class="row"
+              style="justify-content: space-between; align-items: center; padding: 6px 0"
+            >
+              <span style="color: #8e8e93; flex: 1"
+                >走行中CAN記録<br /><span style="font-size: 11px"
+                  >(輪速ID特定用・特定後はOFF推奨)</span
+                ></span
+              >
+              <button
+                id="btnWsDiscovery"
+                type="button"
+                onclick="_st_onToggleWsDiscovery()"
+                style="
+                  padding: 7px 18px;
+                  background: #fff;
+                  color: #007aff;
+                  border: 1px solid #007aff;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  font-weight: 700;
+                  cursor: pointer;
+                  white-space: nowrap;
+                "
+              >
+                OFF
+              </button>
             </div>
 
             <div class="row" style="justify-content: center; gap: 10px; padding-top: 10px">
