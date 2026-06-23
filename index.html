@@ -12766,11 +12766,11 @@
               <span id="wheelSpeedStatus" style="font-weight: 700">—</span>
             </div>
 
-            <div class="row" style="justify-content: center; padding-top: 10px">
+            <div class="row" style="justify-content: center; gap: 10px; padding-top: 10px">
               <button
                 id="btnVehSave"
                 style="
-                  padding: 8px 24px;
+                  padding: 8px 20px;
                   background: #007aff;
                   color: #fff;
                   border: none;
@@ -12779,7 +12779,22 @@
                   cursor: pointer;
                 "
               >
-                💾 この随伴車を保存(VIN紐付け)
+                💾 この随伴車を保存
+              </button>
+              <button
+                id="btnVehDelete"
+                type="button"
+                style="
+                  padding: 8px 18px;
+                  background: #fff;
+                  color: #ff3b30;
+                  border: 1px solid #ff3b30;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  cursor: pointer;
+                "
+              >
+                🗑 削除
               </button>
             </div>
             <div
@@ -13650,6 +13665,48 @@
               } catch (e) {
                 if (vehSaveNoteEl)
                   vehSaveNoteEl.textContent = '保存失敗: ' + ((e && e.message) || e);
+              }
+            });
+          }
+          // ★随伴車を削除(司さん要望2026-06-23・「消してもタスクキルで復活」根治)★
+          //   真因: 起動時 _loadActiveVehicle() が localStorage の dk_veh_active を復元するため、
+          //   フィールドを空にしただけでは localStorage に残り、タスクキルで前の車(アルト等)が復活した。
+          //   この削除は localStorage(dk_veh_active + dk_veh_<VIN>)を実消去し恒久的に消す。
+          var btnVehDelete = document.getElementById('btnVehDelete');
+          if (btnVehDelete) {
+            btnVehDelete.addEventListener('click', function () {
+              if (
+                typeof window.confirm === 'function' &&
+                !window.confirm('登録した随伴車(車種/型式/タイヤ)を削除します。よろしいですか？')
+              )
+                return;
+              try {
+                var _prev = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
+                localStorage.removeItem('dk_veh_active');
+                if (_curVin) localStorage.removeItem('dk_veh_' + _curVin);
+                if (_prev && _prev.vin) localStorage.removeItem('dk_veh_' + _prev.vin);
+                window.DK_VEHICLE_PROFILE = null;
+                if (vehModelEl) vehModelEl.value = '';
+                if (vehKatashikiEl) vehKatashikiEl.value = '';
+                if (vehTireEl) {
+                  vehTireEl.value = '';
+                  vehTireEl.readOnly = false;
+                  vehTireEl.style.background = '';
+                }
+                if (vehTireCurrentEl) vehTireCurrentEl.value = '';
+                if (vehTireRatioDispEl) vehTireRatioDispEl.textContent = '×1.000';
+                if (typeof _refreshTireRatioDisp === 'function') _refreshTireRatioDisp();
+                try {
+                  // eslint-disable-next-line no-console
+                  console.log('[OBD-VEHICLE-DELETE] ' + JSON.stringify(_prev || {}));
+                } catch (_) {
+                  /* ignore */
+                }
+                if (vehSaveNoteEl)
+                  vehSaveNoteEl.textContent = '✓ 削除しました(タスクキルしても復活しません)';
+              } catch (e) {
+                if (vehSaveNoteEl)
+                  vehSaveNoteEl.textContent = '削除失敗: ' + ((e && e.message) || e);
               }
             });
           }
