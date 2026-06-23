@@ -7143,6 +7143,9 @@
               ? Meter.getState()
               : null;
           const isRunning = !!(st && st.running);
+          // ★監査M6: 業務(課金)走行中フラグを汎用globalへミラー。obd-client(距離コア非依存・Meter非参照)が
+          //   これを見てCAN輪速メーター/プローブの業務中起動を弾く=課金距離源(OBD速度)をATMAで止めない。
+          window.OBD_BUSINESS_RUNNING = isRunning;
           // 直近 ★描画 frame★ の表示距離から proxy 速度 (km/h) を算出し、その変化で間引き判定。
           const dtH = sinceMs / 3600000;
           // _renderMeterReadout が更新する _lastDriveDistKm (= 文字列 km) を数値化して使う。
@@ -10772,6 +10775,75 @@
         };
         _st_renderWsDiscoveryBtn();
 
+        // ★CAN輪速メーター(距離テスト・2026-06-23)★: 1B8連続積分の並行距離をDM Lightと突合する。
+        //   read-only(startCanWheelMeter)・課金distance_mに不影響。走行中はライブ更新(1秒)。
+        var _cwLiveTimer = null;
+        function _st_renderCanWheel() {
+          var O = window.OBDClient;
+          var btn = document.getElementById('btnCanWheel');
+          var disp = document.getElementById('canWheelDist');
+          if (!O || typeof O.getCanWheelMeter !== 'function') return;
+          var m = O.getCanWheelMeter();
+          if (btn) {
+            btn.textContent = m.on ? '■ 停止' : '▶ 開始';
+            btn.style.background = m.on ? '#34c759' : '#fff';
+            btn.style.color = m.on ? '#fff' : '#34c759';
+          }
+          if (disp)
+            disp.textContent =
+              (m.distM / 1000).toFixed(3) +
+              ' km / ' +
+              Math.round(m.distM) +
+              ' m' +
+              (m.on ? ' (記録中 ' + (m.frames || 0) + 'f)' : '');
+        }
+        window._st_renderCanWheel = _st_renderCanWheel;
+        function _st_cwClearLive() {
+          if (_cwLiveTimer) {
+            clearInterval(_cwLiveTimer);
+            _cwLiveTimer = null;
+          }
+        }
+        window._st_cwClearLive = _st_cwClearLive;
+        window._st_onToggleCanWheel = function () {
+          var O = window.OBDClient;
+          var disp = document.getElementById('canWheelDist');
+          if (!O || typeof O.startCanWheelMeter !== 'function') {
+            if (disp) disp.textContent = 'OBD機能未ロード';
+            return;
+          }
+          var m = O.getCanWheelMeter();
+          // ★監査M4: 停止は接続ガードより前(=OBD瞬断中でも停止でき、_cwLiveTimerをleakさせない)★
+          if (m.on) {
+            _st_cwClearLive();
+            O.stopCanWheelMeter()
+              .catch(function () {})
+              .then(function () {
+                _st_renderCanWheel();
+              });
+            return;
+          }
+          // 開始: 接続必須 + ★監査M6: 業務(課金)走行中は禁止★
+          if (!O.isConnected || !O.isConnected()) {
+            if (disp) disp.textContent = '❌ OBD未接続';
+            return;
+          }
+          if (typeof Meter !== 'undefined' && Meter.getState && Meter.getState().running) {
+            if (disp) disp.textContent = '⚠️ 業務走行中は使えません(非課金の診断走行で)';
+            return;
+          }
+          O.startCanWheelMeter()
+            .then(function () {
+              _st_renderCanWheel();
+              _st_cwClearLive();
+              _cwLiveTimer = setInterval(_st_renderCanWheel, 1000);
+            })
+            .catch(function (e) {
+              if (disp) disp.textContent = '開始失敗: ' + ((e && e.message) || e);
+            });
+        };
+        _st_renderCanWheel();
+
         window._st_toggleTrainingEnabled = function () {
           const next = !_trainingIsEnabled();
           try {
@@ -12832,6 +12904,41 @@
                 OFF
               </button>
             </div>
+            <!-- ★CAN輪速メーター(距離テスト・2026-06-23・DM Light基準0%検証)★
+                 1B8の生車輪速を連続積分して並行距離を出す。read-only・課金distance_mに不影響。
+                 走行後この値とDM Light実測を突き合わせ、0%に当たるかを検証する。 -->
+            <div
+              class="row"
+              style="justify-content: space-between; align-items: center; padding: 6px 0"
+            >
+              <span style="color: #8e8e93; flex: 1"
+                >CAN輪速メーター<br /><span style="font-size: 11px"
+                  >(距離テスト・DM Lightと突合用)</span
+                ></span
+              >
+              <button
+                id="btnCanWheel"
+                type="button"
+                onclick="_st_onToggleCanWheel()"
+                style="
+                  padding: 7px 16px;
+                  background: #fff;
+                  color: #34c759;
+                  border: 1px solid #34c759;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  font-weight: 700;
+                  cursor: pointer;
+                  white-space: nowrap;
+                "
+              >
+                ▶ 開始
+              </button>
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 2px 0">
+              <span style="color: #8e8e93">CAN輪速距離</span>
+              <span id="canWheelDist" style="font-weight: 700">— m</span>
+            </div>
 
             <div class="row" style="justify-content: center; gap: 10px; padding-top: 10px">
               <button
@@ -13888,6 +13995,23 @@
                   if (st === 'disconnected' || st === 'idle' || st === 'error') {
                     _curVin = '';
                     if (wheelSpeedStatusEl) wheelSpeedStatusEl.textContent = '—(OBD接続で開始)';
+                    // ★監査M3/M4: 切断でCAN輪速メーターのUIライブタイマーをclear+ボタン同期★。
+                    //   obd-client側は _onDisconnected で _cwStreaming を畳む。UIはここでleak解消。
+                    if (typeof window._st_cwClearLive === 'function') window._st_cwClearLive();
+                    if (typeof window._st_renderCanWheel === 'function')
+                      window._st_renderCanWheel();
+                  }
+                });
+                // ★監査M3: canwheel emit を購読しUIを単一真実源(getCanWheelMeter().on)へ同期★。
+                window.OBDClient.on('canwheel', function () {
+                  try {
+                    var mm = window.OBDClient.getCanWheelMeter();
+                    if (!mm.on && typeof window._st_cwClearLive === 'function')
+                      window._st_cwClearLive();
+                    if (typeof window._st_renderCanWheel === 'function')
+                      window._st_renderCanWheel();
+                  } catch (_) {
+                    /* ignore */
                   }
                 });
               }

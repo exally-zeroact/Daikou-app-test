@@ -148,6 +148,38 @@
   const _wsBins = {}; // 捕捉済み速度帯(20km/h刻み)→1
   let _wsCapturesData = []; // 端末内識別用の捕捉蓄積 [{obd010d, means}]
   let _wsMapping = null; // ★確定した輪速マッピング {id,key,slope,intercept,r2,...}★(距離未配線・診断/将来用)
+  // ★CAN輪速メーター(2026-06-23・1B8の生車輪速を連続積分してDM Lightと突合)★:
+  //   ATCRA<id>で対象IDだけに絞る(=BUFFER FULL解消)→ATMAで連続受信→1行ごとにBE16bit速度をデコード→積分。
+  //   ★read-only・距離計算(distance_m)/課金/ポーリング骨格に一切非干渉。検証専用の並行距離。★
+  //   モコMG33S実測=ID1B8 バイト0-1 BE が車輪速(r=0.997・約40カウント/km/h)。スケールは最終的にDM Lightで較正。
+  const CW_DEFAULT = { id: '1B8', off: 0, endian: 'BE', scale: 40 }; // モコ既定(配線検証用・他車は将来discovery)
+  const CW_MAX_DT_S = 2.0; // フレーム間dtの上限(これ超は積分しない=断絶/停止の暴走防止)
+  const CW_LOG_INTERVAL_MS = 10000; // [OBD-CANWHEEL]ログ間隔
+  const _cwCfg = (function () {
+    try {
+      const s = typeof localStorage !== 'undefined' && localStorage.getItem('dk_can_wheel_map');
+      const p = s ? JSON.parse(s) : null;
+      if (p && p.id)
+        return {
+          id: p.id,
+          off: p.off | 0,
+          endian: p.endian || 'BE',
+          scale: p.scale > 0 ? p.scale : 40,
+        };
+    } catch (_) {
+      /* ignore */
+    }
+    return Object.assign({}, CW_DEFAULT);
+  })();
+  let _cwStreaming = false; // ストリーミング中
+  let _cwBuf = ''; // 行バッファ
+  let _cwDistM = 0; // 積分距離(m)
+  let _cwFrames = 0; // 取り込んだ対象フレーム数
+  let _cwLastT = 0; // 直近フレーム時刻(ms)
+  let _cwStartT = 0; // 開始時刻(ms)
+  let _cwLastKmh = 0; // 直近速度(km/h・表示用)
+  let _cwLogTimer = null;
+  let _cwWasStop = false; // start前の _stopRequested を退避(stopで復元)
   let _pendingResolve = null; // 現コマンドの応答待ち resolver
   let _pendingTimer = null;
   let _polling = false;
@@ -170,7 +202,7 @@
       return null;
     }
   };
-  const _listeners = { status: [], speed: [], error: [], probe: [] };
+  const _listeners = { status: [], speed: [], error: [], probe: [], canwheel: [] };
 
   function _emit(event, payload) {
     const arr = _listeners[event];
@@ -516,6 +548,21 @@
 
   // ─── 受信 (BLE は ~20byte 分割で来るため '>' プロンプトまでバッファ) ──────
   function _onNotify(event) {
+    // ★CAN輪速メーター ストリーミング中★: ATCRA<id>+ATMA で対象ID(例1B8)だけを連続受信し、
+    //   1行ごとに車輪速をデコード→積分。read-only・距離計算(distance_m)/課金に一切干渉しない。
+    if (_cwStreaming && isConnected()) {
+      const vv = event.target.value;
+      let cc = '';
+      for (let i = 0; i < vv.byteLength; i++) cc += String.fromCharCode(vv.getUint8(i));
+      _cwBuf += cc;
+      let nl;
+      while ((nl = _cwBuf.search(/[\r\n]/)) >= 0) {
+        const line = _cwBuf.slice(0, nl);
+        _cwBuf = _cwBuf.slice(nl + 1);
+        _cwOnLine(line);
+      }
+      return;
+    }
     // ★ABS輪速モニタ捕捉中(ATMA)★: '>' プロンプトが来ない連続ストリームなので、捕捉窓の間は
     //   通常の _send 応答経路でなく専用バッファに溜める(read-only・距離経路に一切干渉しない)。
     if (_capturing) {
@@ -1033,6 +1080,7 @@
     const dur = durationMs && durationMs > 0 ? durationMs : WHEELSPEED_PROBE_MS;
     if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
     if (_capturing) return Promise.reject(new Error('既に輪速捕捉中'));
+    if (_cwStreaming) return Promise.reject(new Error('CAN輪速メーター動作中')); // ★監査M5: 双方向排他★
     const obd010d = getSpeed().kmh;
     const wasStop = _stopRequested;
     _stopRequested = true; // ポーリングを一旦止める(ATMAとBLE帯域競合回避)
@@ -1065,6 +1113,7 @@
     const dur = durationMs && durationMs > 0 ? durationMs : 4000;
     if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
     if (_capturing) return Promise.reject(new Error('既に捕捉中'));
+    if (_cwStreaming) return Promise.reject(new Error('CAN輪速メーター動作中')); // ★監査M5: 双方向排他★
     const wasStop = _stopRequested;
     const obd010d = getSpeed().kmh; // 押下時の010D速度(走行中に数回押せば速度別CANで輪速ID特定可)
     _stopRequested = true; // ポーリング停止(ATMAとBLE帯域競合回避)
@@ -1146,6 +1195,173 @@
           return _restore(e, true);
         }
       );
+  }
+
+  // ─── 純関数: CANフレーム bytes → 車輪速 km/h (単体テスト対象) ──────────────
+  //   cfg={id,off,endian,scale}。BE: bytes[off]*256+bytes[off+1]、LE: 逆。/scale で km/h。
+  function _decodeCanWheelKmh(bytes, cfg) {
+    if (!Array.isArray(bytes)) return -1;
+    const off = cfg.off | 0;
+    if (off + 1 >= bytes.length) return -1;
+    const hi = bytes[off],
+      lo = bytes[off + 1];
+    if (typeof hi !== 'number' || typeof lo !== 'number') return -1;
+    const raw = cfg.endian === 'LE' ? lo * 256 + hi : hi * 256 + lo;
+    const sc = cfg.scale > 0 ? cfg.scale : 1;
+    return raw / sc;
+  }
+  // ─── 純関数: 積分1ステップ (単体テスト対象) ──────────────
+  //   speedKmh と nowMs から、前回フレームとの dt で距離を積む。dt>CW_MAX_DT_S は加算しない(断絶保護)。
+  //   返り値: { distM, lastT } の新状態(純粋・副作用なし)。
+  function _cwIntegrateStep(state, speedKmh, nowMs, maxDtS) {
+    const lastT = state.lastT || 0;
+    let distM = state.distM || 0;
+    if (lastT > 0 && nowMs > lastT) {
+      const dt = (nowMs - lastT) / 1000;
+      if (dt > 0 && dt <= (maxDtS || CW_MAX_DT_S) && speedKmh >= 0) {
+        distM += (speedKmh / 3.6) * dt; // km/h→m/s × s = m
+      }
+    }
+    return { distM: distM, lastT: nowMs };
+  }
+  // ストリーミング1行処理: 対象IDのフレームなら速度デコード→積分。
+  function _cwOnLine(line) {
+    const frames = _parseMonitorFrames(line);
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].id !== _cwCfg.id) continue;
+      const kmh = _decodeCanWheelKmh(frames[i].bytes, _cwCfg);
+      if (kmh < 0) continue;
+      const now = _now();
+      const ns = _cwIntegrateStep({ distM: _cwDistM, lastT: _cwLastT }, kmh, now, CW_MAX_DT_S);
+      _cwDistM = ns.distM;
+      _cwLastT = ns.lastT;
+      _cwLastKmh = kmh;
+      _cwFrames++;
+    }
+  }
+  function _cwLog() {
+    const durS = _cwStartT ? (_now() - _cwStartT) / 1000 : 0;
+    const rec = {
+      v: 1,
+      ts: _now(),
+      id: _cwCfg.id,
+      distM: Math.round(_cwDistM * 10) / 10,
+      frames: _cwFrames,
+      lastKmh: Math.round(_cwLastKmh * 100) / 100,
+      durationS: Math.round(durS),
+    };
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[OBD-CANWHEEL] ' + JSON.stringify(rec));
+    } catch (_) {
+      /* ignore */
+    }
+    return rec;
+  }
+  // ─── ★CAN輪速メーター 開始/停止/取得(read-only・距離不可侵・検証専用)★ ───
+  //   ATCRA<id>で対象IDのみ受信(BUFFER FULL解消)→ATMA連続→積分。停止でATAR/ATS1/ATH0復元+ポーリング再開。
+  function startCanWheelMeter(opts) {
+    if (!isConnected()) return Promise.reject(new Error('OBD未接続'));
+    if (_cwStreaming) return Promise.resolve(getCanWheelMeter());
+    if (_capturing) return Promise.reject(new Error('輪速捕捉中'));
+    // ★監査M6: 業務走行(課金)中は起動禁止★。ATMA連続受信は010Dポーリングを止め、課金距離源
+    //   (OBD速度)をGPS級へ劣化させるため。検証は非課金走行で。feedback_daikome_running_gate 整合。
+    //   ★距離コア非依存★: Meterを直接参照しない(独立性テスト)。index.html が業務開始/終了で
+    //   window.OBD_BUSINESS_RUNNING を立てる汎用フラグで判定。
+    if (global.OBD_BUSINESS_RUNNING === true)
+      return Promise.reject(new Error('業務走行中は使用不可(検証は非課金走行で)'));
+    if (opts && opts.id) configCanWheel(opts);
+    _cwWasStop = _stopRequested;
+    _stopRequested = true; // ポーリング停止(ATMAと帯域競合回避)
+    _cwBuf = '';
+    _cwDistM = 0;
+    _cwFrames = 0;
+    _cwLastT = 0;
+    _cwLastKmh = 0;
+    return _sleep(120)
+      .then(function () {
+        return _send('ATSP6', 2500).catch(function () {});
+      })
+      .then(function () {
+        return _send('ATH1').catch(function () {});
+      })
+      .then(function () {
+        return _send('ATS0').catch(function () {});
+      })
+      .then(function () {
+        return _send('ATAL').catch(function () {});
+      })
+      .then(function () {
+        return _send('ATCRA ' + _cwCfg.id).catch(function () {}); // 対象IDだけに絞る=BUFFER FULL解消
+      })
+      .then(function () {
+        _cwStartT = _now();
+        _cwStreaming = true; // この瞬間から notify は _cwOnLine へ
+        return _writeCharSafe(_str2buf('ATMA\r')).catch(function () {});
+      })
+      .then(function () {
+        if (_cwLogTimer) clearInterval(_cwLogTimer);
+        _cwLogTimer = setInterval(_cwLog, CW_LOG_INTERVAL_MS);
+        _emit('canwheel', getCanWheelMeter());
+        return getCanWheelMeter();
+      });
+  }
+  function stopCanWheelMeter() {
+    if (!_cwStreaming) return Promise.resolve(getCanWheelMeter());
+    _cwStreaming = false;
+    if (_cwLogTimer) {
+      clearInterval(_cwLogTimer);
+      _cwLogTimer = null;
+    }
+    const result = _cwLog(); // 最終ログ
+    return _writeCharSafe(_str2buf('\r'))
+      .catch(function () {}) // ATMA停止
+      .then(function () {
+        return _sleep(300);
+      })
+      .then(function () {
+        return _send('ATAR').catch(function () {}); // 受信フィルタ解除
+      })
+      .then(function () {
+        return _send('ATS1').catch(function () {});
+      })
+      .then(function () {
+        return _send('ATH0').catch(function () {});
+      })
+      .then(function () {
+        // ★監査m1: start で ATSP6/ATAL を撃った往復の片道を是正=プロトコル再pin(自己治癒)。
+        return isConnected() ? _warmup().catch(function () {}) : null;
+      })
+      .then(function () {
+        _stopRequested = _cwWasStop;
+        if (!_stopRequested && isConnected()) _startPolling();
+        _emit('canwheel', getCanWheelMeter());
+        return result;
+      });
+  }
+  function getCanWheelMeter() {
+    return {
+      on: _cwStreaming,
+      id: _cwCfg.id,
+      distM: Math.round(_cwDistM * 10) / 10,
+      frames: _cwFrames,
+      lastKmh: Math.round(_cwLastKmh * 100) / 100,
+      durationS: _cwStartT ? Math.round((_now() - _cwStartT) / 1000) : 0,
+    };
+  }
+  function configCanWheel(opts) {
+    if (!opts) return _cwCfg;
+    if (opts.id) _cwCfg.id = String(opts.id).toUpperCase();
+    if (typeof opts.off === 'number') _cwCfg.off = opts.off | 0;
+    if (opts.endian) _cwCfg.endian = opts.endian === 'LE' ? 'LE' : 'BE';
+    if (opts.scale > 0) _cwCfg.scale = opts.scale;
+    try {
+      if (typeof localStorage !== 'undefined')
+        localStorage.setItem('dk_can_wheel_map', JSON.stringify(_cwCfg));
+    } catch (_) {
+      /* ignore */
+    }
+    return _cwCfg;
   }
 
   // ─── ★端末内識別②③(オフライン・サーバー不要)★: 蓄積した捕捉から輪速IDを特定し確定したら保持+emit ───
@@ -1322,6 +1538,18 @@
     _wsAuto = false; // 自動discovery停止(次接続で再有効化)
     _wsCapturesData = [];
     _wsMapping = null;
+    // ★監査M1/M2: CAN輪速メーターの畳み込み(_capturingと対称化)★。これが無いと切断後も
+    //   _cwLogTimerが永久発火し、_cwStreaming=true残存で再接続後の _onNotify が本番ポーリング
+    //   (distance_m速度源)を横取りする。_stopRequested は ★再接続ガード(下記)評価より前★ に戻す。
+    if (_cwLogTimer) {
+      clearInterval(_cwLogTimer);
+      _cwLogTimer = null;
+    }
+    if (_cwStreaming) {
+      _cwStreaming = false;
+      _stopRequested = _cwWasStop; // start が立てた抑止を解除=自動再接続を殺さない
+    }
+    _cwBuf = '';
     // ★M-2 監査修正: 予期せぬ切断で in-flight の _send が宙吊りになるのを防ぐ。
     //   pending timer/resolver/バッファを明示解放(明示 disconnect() の _cleanup と同等)。
     if (_pendingTimer) {
@@ -1390,6 +1618,13 @@
       _pendingTimer = null;
     }
     _pendingResolve = null;
+    // ★監査M1: 明示disconnect経路でもCAN輪速を畳む(状態leak/timer leak防止)★
+    if (_cwLogTimer) {
+      clearInterval(_cwLogTimer);
+      _cwLogTimer = null;
+    }
+    _cwStreaming = false;
+    _cwBuf = '';
   }
 
   function on(event, cb) {
@@ -1417,6 +1652,10 @@
     getStatus: getStatus,
     probeWheelSpeed: probeWheelSpeed, // ★ABS各輪速 read-only プローブ(距離未配線)★
     canBusProbe: canBusProbe, // ★CAN見えるかチェック(停車・read-only・距離不可侵)★
+    startCanWheelMeter: startCanWheelMeter, // ★CAN輪速メーター開始(1B8連続積分・read-only・距離不可侵)★
+    stopCanWheelMeter: stopCanWheelMeter,
+    getCanWheelMeter: getCanWheelMeter,
+    configCanWheel: configCanWheel, // 輪速ID/バイト/スケール設定(VIN別localStorage)
     setWheelSpeedDiscovery: setWheelSpeedDiscovery, // ★輪速診断モード手動ON/OFF(診断走行専用・既定OFF)★
     getWheelSpeedMapping: getWheelSpeedMapping, // 端末内で確定した輪速マッピング(未確定null)
     applyWheelSpeedMapping: applyWheelSpeedMapping, // VIN別保存マッピングを流し込む(再discovery不要)
@@ -1429,6 +1668,8 @@
     _parseMonitorFrames: _parseMonitorFrames,
     _summarizeFrames: _summarizeFrames,
     _classifyCanProbe: _classifyCanProbe, // ★CAN可視性判定(純関数・単体テスト用)★
+    _decodeCanWheelKmh: _decodeCanWheelKmh, // ★CAN輪速デコード(純関数・単体テスト用)★
+    _cwIntegrateStep: _cwIntegrateStep, // ★CAN輪速積分1ステップ(純関数・単体テスト用)★
     _wsCaptureDecision: _wsCaptureDecision, // ★自動輪速discovery判定(純関数・単体テスト用)★
     _speedBin: _speedBin,
     _decodeProbe: _decodeProbe,
