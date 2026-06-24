@@ -10850,6 +10850,81 @@
         };
         _st_renderCanWheel();
 
+        // ★OBD距離モード(テスト・2026-06-24・司さん「本線をOBD駆動でどこまで上げれるか」)★:
+        //   ONで本線の総走行距離を CAN輪速メーター(1B8/OBD)駆動にする。GPSは保険(OBD断時)。
+        //   ★課金fare(distance_m)には触らない=総走行(business_distance_m・空車込み表示)のみOBD化★。
+        //   仕組み: モード開始時の総走行とCAN輪速距離を基点に記録し、毎秒 setBusinessDistance(基点+CAN輪速増分)。
+        //   = GPSパイプラインの加算を上書きしOBD駆動に。OFFで更新停止→GPSに戻る。
+        var _obdDistTimer = null;
+        var _obdDistBaseBiz = null;
+        var _obdDistBaseCw = null;
+        function _st_obdDistOn() {
+          try {
+            return localStorage.getItem('dk_obd_dist_mode') === '1';
+          } catch (_) {
+            return false;
+          }
+        }
+        function _st_renderObdDistBtn() {
+          var btn = document.getElementById('btnObdDistMode');
+          if (!btn) return;
+          var on = _st_obdDistOn();
+          btn.textContent = on ? 'ON(OBD駆動)' : 'OFF';
+          btn.style.background = on ? '#ff9500' : '#fff';
+          btn.style.color = on ? '#fff' : '#ff9500';
+        }
+        function _st_obdDistTick() {
+          if (!_st_obdDistOn()) return;
+          var O = window.OBDClient;
+          if (!O || typeof O.getCanWheelMeter !== 'function' || typeof Meter === 'undefined')
+            return;
+          var m = O.getCanWheelMeter();
+          if (!m || !m.on) return; // CAN輪速メーター非稼働=保険(GPS)に任せる
+          var st = Meter.getState ? Meter.getState() : null;
+          if (_obdDistBaseBiz === null) {
+            _obdDistBaseBiz = (st && st.business_distance_m) || 0; // モード開始時の総走行を基点に
+            _obdDistBaseCw = m.distM;
+          }
+          if (typeof Meter.setBusinessDistance === 'function') {
+            Meter.setBusinessDistance(_obdDistBaseBiz + (m.distM - _obdDistBaseCw)); // 基点+CAN輪速増分
+          }
+        }
+        window._st_renderObdDistBtn = _st_renderObdDistBtn;
+        window._st_onToggleObdDistMode = function () {
+          var O = window.OBDClient;
+          var next = !_st_obdDistOn();
+          try {
+            if (next) localStorage.setItem('dk_obd_dist_mode', '1');
+            else localStorage.removeItem('dk_obd_dist_mode');
+          } catch (_) {
+            /* ignore */
+          }
+          if (next) {
+            _obdDistBaseBiz = null; // 基点リセット(次tickで再取得)
+            _obdDistBaseCw = null;
+            // CAN輪速メーターが止まってたら自動起動(OBD距離はこれが源)
+            if (
+              O &&
+              O.getCanWheelMeter &&
+              !O.getCanWheelMeter().on &&
+              typeof window._st_onToggleCanWheel === 'function'
+            ) {
+              window._st_onToggleCanWheel();
+            }
+            if (_obdDistTimer) clearInterval(_obdDistTimer);
+            _obdDistTimer = setInterval(_st_obdDistTick, 1000);
+          } else {
+            if (_obdDistTimer) {
+              clearInterval(_obdDistTimer);
+              _obdDistTimer = null;
+            }
+            _obdDistBaseBiz = null;
+            _obdDistBaseCw = null;
+          }
+          _st_renderObdDistBtn();
+        };
+        _st_renderObdDistBtn();
+
         window._st_toggleTrainingEnabled = function () {
           const next = !_trainingIsEnabled();
           try {
@@ -12944,6 +13019,37 @@
             <div class="row" style="justify-content: space-between; padding: 2px 0">
               <span style="color: #8e8e93">CAN輪速距離</span>
               <span id="canWheelDist" style="font-weight: 700">— m</span>
+            </div>
+            <!-- ★OBD距離モード(テスト・2026-06-24・司さん「本線をOBD駆動でどこまで上げれるか」)★
+                 ONで本線の総走行距離をCAN輪速(1B8/OBD)駆動にする。GPSは保険(OBD断時)。
+                 課金fare(distance_m)には触らない=総走行表示のみOBD化。OFFで即GPSに戻る。 -->
+            <div
+              class="row"
+              style="justify-content: space-between; align-items: center; padding: 6px 0"
+            >
+              <span style="color: #8e8e93; flex: 1"
+                >OBD距離モード<br /><span style="font-size: 11px"
+                  >(総走行をCAN輪速駆動・GPS保険・テスト)</span
+                ></span
+              >
+              <button
+                id="btnObdDistMode"
+                type="button"
+                onclick="_st_onToggleObdDistMode()"
+                style="
+                  padding: 7px 16px;
+                  background: #fff;
+                  color: #ff9500;
+                  border: 1px solid #ff9500;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  font-weight: 700;
+                  cursor: pointer;
+                  white-space: nowrap;
+                "
+              >
+                OFF
+              </button>
             </div>
 
             <div class="row" style="justify-content: center; gap: 10px; padding-top: 10px">
