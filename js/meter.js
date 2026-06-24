@@ -187,10 +187,10 @@ const Meter = (() => {
   //   旧 predict 先取り (display = target + velocity×経過秒) は overshoot を生むため撤去。
   const DISP_CATCHUP_TAU_S = 0.4; // (旧・指数catch-up 時定数。等速ペース化で未使用・互換のため残置)
   const DISP_LATCH_GAP_M = 0.01; // この残差未満なら target に着地 (= 収束扱い)
-  const DISP_RATE_EMA_ALPHA = 0.5; // 等速ペース rate の EMA 平滑係数 (= 直近瞬時レートの寄与・0<α≤1)
+  const DISP_RATE_EMA_ALPHA = 0.6; // 等速ペース rate の EMA 平滑係数 (= 直近瞬時レートの寄与・0<α≤1。0.5→0.6=速度追従を速め走行中の遅れ縮小・2026-06-24)
   const DISP_RATE_MAX_MPS = 55; // 等速ペース rate の物理上限 (= 198km/h・cold-start/glitch の瞬時値 spike を EMA から除外)
   const DISP_MAX_FRAME_DT_S = 0.4; // dtFrame 上限秒 (= タブ復帰/描画間引きの一撃飛び防止・残差は次フレーム連続収束)
-  const DISP_CLOSE_TAU_S = 3.0; // gap 収束 spring の時定数 (= lump/復帰時に gap を τ 秒で詰める)
+  const DISP_CLOSE_TAU_S = 1.0; // gap 収束 spring の時定数 (= lump/復帰時に gap を τ 秒で詰める。3.0→1.0=走行中の遅れを約1/3に・メーターに食らいつく・司さん要望2026-06-24。overshoot/単調/cap不変)
   const DISP_CATCHUP_MAX_MPS = 24; // 追従速度上限 (= 大 lump 復帰の「ドン」抑制・直近走行速度の妥当倍率内)
   void DISP_CATCHUP_TAU_S; // 等速ペース化で未使用 (= 形維持・lint 黙らせ)
 
