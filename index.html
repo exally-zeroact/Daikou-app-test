@@ -12477,6 +12477,233 @@
               min-height: 16px;
             "
           ></div>
+          <!-- ★随伴車情報 + OBD距離能力 (2026-06-09・固定随伴車のVIN紐付け・Tier判定)★
+               VIN/メーカー/距離能力は接続プローブで自動取得。車種/型式/タイヤは車検証/側面から手入力(固定車1回)。
+               VINキーで localStorage 保存。タイヤは認定の管理項目(交換→再較正)。 -->
+          <div
+            id="obdVehicleCard"
+            style="
+              margin-top: 14px;
+              padding: 12px;
+              background: #f2f2f7;
+              border-radius: 10px;
+              font-size: 13px;
+            "
+          >
+            <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
+              🚗 随伴車情報 (固定1台・一度登録すれば恒久)
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">VIN(自動)</span>
+              <span id="vehVin" style="font-family: monospace; font-size: 11px"
+                >接続で自動取得</span
+              >
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">メーカー/年式(自動)</span>
+              <span id="vehMaker">—</span>
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">車種</span>
+              <input
+                id="vehModel"
+                type="text"
+                placeholder="例: プリウス"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">型式(車検証)</span>
+              <input
+                id="vehKatashiki"
+                type="text"
+                placeholder="例: DAA-ZVW50"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">工場タイヤ(ドアのステッカー)</span>
+              <input
+                id="vehTire"
+                type="text"
+                placeholder="例: 195/65R15"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  height: 30px;
+                  box-sizing: border-box;
+                  -webkit-appearance: none;
+                  appearance: none;
+                "
+              />
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">今のタイヤ(交換した場合のみ)</span>
+              <input
+                id="vehTireCurrent"
+                type="text"
+                placeholder="未交換なら空欄"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  height: 30px;
+                  box-sizing: border-box;
+                  -webkit-appearance: none;
+                  appearance: none;
+                "
+              />
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">タイヤ距離補正</span>
+              <span id="vehTireRatioDisp" style="font-weight: 700; color: #34c759">×1.000</span>
+            </div>
+            <div style="font-size: 11px; color: #ff9500; margin: 4px 0 8px">
+              ※工場タイヤ＝ドア内側のステッカー(いつでも変更可)。タイヤを替えたら「今のタイヤ」に実サイズを入れて保存。円周比で距離を自動補正(過大ゼロ維持)。
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">OBD距離能力</span>
+              <span id="vehObdCap" style="font-weight: 700">接続で判定</span>
+            </div>
+
+            <!-- ★随伴車別 k(メーター定数/器差調整)校正★ -->
+            <div
+              style="
+                border-top: 1px solid #e5e5ea;
+                margin-top: 8px;
+                padding-top: 8px;
+                font-size: 12px;
+                color: #8e8e93;
+              "
+            >
+              <b style="color: #1c1c1e">k 校正 (真距離基準)</b><br />
+              業務終了後、その業務の<b>真距離</b>(国道196号KP /
+              基準巻尺など)を入れると、この端末×この車の 器差(タイヤ補正値 k)を学習して −0.5〜−1%
+              帯へ寄せます(過大ゼロは死守)。<br />
+              ※入れるのは「その1業務の<b>真距離</b>」。随伴車メーター(DM
+              Light)は認定でなく長めに出るため
+              非推奨(入れると過大化リスク=随伴車合わせ込みであり認定校正ではない)。過大値・5%超急変は自動で弾く。
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">現在の k</span>
+              <span id="vehKValue" style="font-weight: 700">1.000</span>
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">直近業務のダイコメ距離</span>
+              <span id="vehLastBusinessDistM" style="font-weight: 700">—</span>
+            </div>
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">真距離(km)</span>
+              <input
+                id="vehCertMeterReadM"
+                type="number"
+                step="0.01"
+                inputmode="decimal"
+                placeholder="例: 9.00 (真距離)"
+                style="
+                  width: 45%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                "
+              />
+            </div>
+            <div class="row" style="justify-content: center; padding-top: 6px">
+              <button
+                id="btnVehCalibrate"
+                style="
+                  padding: 7px 20px;
+                  background: #34c759;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 13px;
+                  cursor: pointer;
+                "
+              >
+                🎯 この読みで k を較正
+              </button>
+            </div>
+            <div
+              id="vehCalibrateNote"
+              style="text-align: center; font-size: 11px; color: #8e8e93; padding: 4px 0 0"
+            ></div>
+
+            <div class="row" style="justify-content: center; gap: 10px; padding-top: 10px">
+              <button
+                id="btnVehSave"
+                style="
+                  padding: 8px 20px;
+                  background: #007aff;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  cursor: pointer;
+                "
+              >
+                💾 この随伴車を保存
+              </button>
+              <button
+                id="btnVehDelete"
+                type="button"
+                style="
+                  padding: 8px 18px;
+                  background: #fff;
+                  color: #ff3b30;
+                  border: 1px solid #ff3b30;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  cursor: pointer;
+                "
+              >
+                🗑 削除
+              </button>
+            </div>
+            <div
+              id="vehSaveNote"
+              style="
+                text-align: center;
+                font-size: 11px;
+                color: #8e8e93;
+                margin-top: 6px;
+                min-height: 14px;
+              "
+            ></div>
+          </div>
         </div>
 
         <div
