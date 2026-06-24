@@ -260,6 +260,26 @@
     }
   }
 
+  // ★CAN輪速メーター スナップショット (2026-06-24・1B8バースト距離をtraceに確実記録)★:
+  //   console.log([OBD-CANWHEEL])が上がらず分析不能だった根治=GPSサンプルと同経路で確実アップ。
+  //   {dist:積分距離m, on:稼働中, frames, stalls, kmh:直近速度}。passive=getCanWheelMeter読むだけ・距離未配線。
+  function _cwSnapshot() {
+    try {
+      if (
+        typeof window === 'undefined' ||
+        !window.OBDClient ||
+        !window.OBDClient.getCanWheelMeter
+      ) {
+        return null;
+      }
+      const m = window.OBDClient.getCanWheelMeter();
+      if (!m || !m.on) return null; // 非稼働は記録しない(サンプル肥大化防止)
+      return { d: Math.round(m.distM), f: m.frames, s: m.stalls || 0, k: m.lastKmh };
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ★エンジンRPM スナップショット (2026-06-11・RPMギア比学習データ収集)★: passive=OBDClient.getRpm()読むだけ。
   //   RPM(010C・高解像度)+ギア比でOBD車速1km/h floor過小をde-quantする将来法の ★実データ★ を次走行traceに残す。
   //   -1=未取得/非対応。距離計算には未配線(記録専用)。
@@ -361,6 +381,7 @@
       obd_odo: _obdOdoSnapshot(), // ★OBDオドメーター(01A6・km・-1=未対応/未取得)。業務開始/終了の差=タイヤ回転距離(メーター級)照合用
       obd_0131: _obd0131Snapshot(), // ★0131 ECU距離(km・1km粗・-1=未対応/未取得)。業務開始/終了の差=ECU積算距離=B(真距離)基準。01A6非対応の軽/古い車向け
       obd_intv: _obdIntvSnapshot(), // ★生OBD∫v(m・faithful・ポーリングレート積分・-1=未取得)。1Hz GPS同期の再積分過小を回避しK較正の分母を忠実化
+      cw: _cwSnapshot(), // ★CAN輪速メーター距離(1B8バースト・null=非稼働){d:m,f:frames,s:stalls,k:km/h}。trace直記録で確実アップ(console.log不達根治)
       rpm: _obdRpmSnapshot(), // ★エンジンRPM(010C・-1=未取得)。RPM+ギア比でfloor過小de-quantする法の実データ収集(記録専用・距離未配線)
       // ★OBD-main 発火診断 (2026-06-10・追加のみ・既存 field 不変・passive)★:
       spdsrc: _speedSrcSnapshot(c), // 速度源 'obd'/'dop'/'hav' (gps.js L629 と同条件で評価・null=評価不能)。OBD-main が実際に発火したか

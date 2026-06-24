@@ -162,6 +162,7 @@
   const CW_MIN_FRAMES = 5; // バースト内の対象フレーム数がこれ未満=ストール扱いで非加算
   const CW_MAX_DT_S = 3.5; // 区間dtの上限(これ超=長断絶/停止gapは積分しない=幻距離防止。周期1.5sの遅延1回は許容)
   const CW_ZUPT_KMH = 1.5; // これ未満は停止扱いで0(DM Lightと同様・creep防止)
+  const CW_BRIDGE_MAX_S = 30; // ストール(フレーム欠落)時、直近走行速度でgapを橋渡しする上限秒(トンネル等の欠損回収・代行は過大ゼロ非拘束)
   const CW_LOG_INTERVAL_MS = 10000; // [OBD-CANWHEEL]ログ間隔
   const _cwCfg = (function () {
     try {
@@ -1307,8 +1308,15 @@
           _cwLastKmh = v;
           _cwFrames += w.n;
         } else {
-          // ★ストール(フレーム不足)=この窓は捨て、基準時刻を進める(長gapを橋渡しせず幻距離を作らない)★
+          // ★ストール(フレーム欠落=クローンの一時詰まり/トンネル等)★:
+          //   直近が★走行中(>ZUPT)★なら、その速度でgapを橋渡し=距離を失わない(トンネルの欠損回収)。
+          //   停車中(≤ZUPT)は橋渡しせずcreep防止。橋渡しはCW_BRIDGE_MAX_Sでcap(暴走防止)。
+          //   代行は過大ゼロ非拘束=DM Light基準なので、欠損より僅かな上振れの方が許容。
           _cwStallN++;
+          const gapS = _cwLastMidT > 0 ? (midT - _cwLastMidT) / 1000 : 0;
+          if (_cwLastKmh > CW_ZUPT_KMH && gapS > 0 && gapS <= CW_BRIDGE_MAX_S) {
+            _cwDistM += (_cwLastKmh / 3.6) * gapS; // 直近速度でgapを埋める
+          }
           _cwLastMidT = midT;
         }
         if (now - _cwLastLogT >= CW_LOG_INTERVAL_MS) {
