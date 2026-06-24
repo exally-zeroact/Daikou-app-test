@@ -267,6 +267,10 @@ const DEFAULTS = {
   smoothDopplerCapRatio: 1.5, // ★never-over (監査CRITICAL-3)★: 平滑弦 > spd×dt×これ なら抑制。
   //   微速(停止判定を僅かに外れる0.5〜1m/s)の純ジッタが平滑弦に残り creep 化するのを遮断。通常走行は
   //   平滑弦 ≤ 実路長 ≈ spd×dt なので 1.5 倍までは binding せず無影響 (curve 余裕込み)。
+  // ★cap締め検証(2026-06-25・revert済)★: cap を 1.0(spd×dt) まで締めると gpstrace の +1.88% は
+  //   +0.27% に消えるが、iPhone13/SE fixture(OFFで既に +0.16〜0.58%)は -1.4〜-2.0% へ過小化(never-over違反)。
+  //   過大は走行ごと +0.16〜+1.88% とバラつき、固定cap値では高過大の締めと低過大の非過小化を両立不能。
+  //   ∴ 締めは不採用。現行 1.5 が均衡(fixtureは既に真距離 +0.16〜+0.93% で十分正確)。検証: tests/tools/measure-tighten-cap.js。
 
   // ★★両端速度 台形補間 穴埋め(公知: linear-velocity trapezoid) (2026-06-10・GPS実装班・公知手法)★★:
   //   smoothedRawMode の長dt穴 (dt>smoothGapSec=トンネル/間引き) は従来「入口速度×dt」(片端 Doppler)
