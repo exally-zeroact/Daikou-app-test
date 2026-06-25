@@ -114,6 +114,9 @@ const Meter = (() => {
         // ★p50モードフラグ (2026-06-22): 代行(係数>1.0)を worker に伝え、K無しOBD車の天井分位を
         //   p25→p50(真スケール)に切替え全車一致させる。タクシー(係数1.0)は false=p25維持(過大ゼロ)。
         daikouMode: _daikouDistFactor > 1.0,
+        // ★1km自動較正K (2026-06-26・確定方式)★: window.DK_AUTO_CALIB_K=true で OBD∫v×学習K(GPS長窓比)。
+        //   既定false=従来経路(byte不変)。実機テスト用トグル/URLパラメータで立てる。
+        autoCalibK: typeof self !== 'undefined' && self.DK_AUTO_CALIB_K === true,
       });
     } catch (_) {
       /* best-effort・課金距離は pipeline 側の健全域クランプで保護 */

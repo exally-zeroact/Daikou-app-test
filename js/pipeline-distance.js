@@ -236,6 +236,13 @@ const DEFAULTS = {
   //   非K経路では天井が「タイヤ補正後vEff」を独立Doppler速度で再検証=過大方向の誤補正を自動で刈る安全網。
   //   実測K(obdVehicleKMeasured=true)経路ではタイヤ込み較正のため非適用(=1.0扱い)。
   obdTireRatio: 1.0,
+  // ★1km自動較正K (autoCalibK・確定方式 2026-06-26 / 司さん裁定①=代行はp50を学習Kに置換)★:
+  //   true で OBD∫v×学習K(K=良GPS長窓 GPS距離÷OBD∫v・js/k-calib.js)を距離に焼く。floorもタイヤ器差も
+  //   GPS(車非依存)が長窓比でまとめて補正=どの車でも同経路同距離・タイヤ入力はcoldStart初期値。
+  //   ★3窓(≒3km)未満は学習Kを焼かず obdColdStartK(タイヤ入力由来)で運用(過大請求防止・対立監査P0是正)★。
+  //   autoCalibK時は δ/量子化/タイヤ比を中和(学習Kに全部込み=二重計上防止・監査#3)。
+  //   ★false=完全OFF(byte不変・既存p50/ラチェット/測定K経路は一切不変)★。
+  autoCalibK: false,
   calMinWindowS: 30, // この秒数の良GPS移動を貯めて δ を1回確定 (業界標準の dwell)
   calMaxChordRatio: 1.5, // GPS弦 > spd×dt×これ = ジッタ汚染窓 → δ母集団から除外
   calMaxAccM: 30, // 両端 accuracy これ超 = 位置不確か → δ母集団から除外 (良GPS窓のみ学習)
@@ -1886,6 +1893,26 @@ function createDistanceTracker(decoder, opts) {
   let kNow = -1; // 業務内ラチェットk (-1=未確定→cold-start k0/従来挙動)
   let kEwma = 0; // k_obs の EWMA 平滑値
   let kEwmaInit = false; // kEwma を1回でも確定したか
+  // ★1km自動較正K (autoCalibK・確定方式)★: 良GPS長窓で K=GPS距離÷OBD∫v を学習(js/k-calib.js)。
+  //   OFF(既定)では生成せず byte不変。Node=require / browser=self.KCalib(index.htmlで先読み)。
+  let kCalibrator = null;
+  if (cfg.autoCalibK === true) {
+    let _KC = null;
+    if (typeof self !== 'undefined' && self.KCalib)
+      _KC = self.KCalib; // worker/browser(importScripts)
+    // eslint-disable-next-line no-undef
+    else if (typeof require === 'function') _KC = require('./k-calib.js'); // Node(tests)
+    if (_KC && _KC.createKCalibrator) {
+      kCalibrator = _KC.createKCalibrator({
+        coldStartK: cfg.obdColdStartK > 0 ? cfg.obdColdStartK : undefined,
+        accMax: cfg.calMaxAccM,
+        calibKm: 1.0,
+      });
+    }
+    // ★k-calib未ロード(importScripts失敗等)なら autoCalibK を無効化し従来経路へ安全フォールバック★
+    //   (autoCalibK=true なのに kCalibrator=null で生∫v(K=1.0)に落ちる過少を防ぐ)。
+    if (!kCalibrator) cfg.autoCalibK = false;
+  }
   // breakdown/stats を区間分類のため保持 (stepDistance が要求する構造)
   let bd, stats;
   function freshAccum() {
@@ -2001,6 +2028,16 @@ function createDistanceTracker(decoder, opts) {
     //   ② の穴埋め speed源として spd 経由で使う(下流 stepDistance)。よってここは短絡しない。
     if (cur.obd === true && spd >= 0 && cfg.adaptiveMode !== true) {
       const dtObd = ((cur.t || 0) - (prev.t || 0)) / 1000;
+      // ★autoCalibK: 良GPS長窓で K=GPS距離÷OBD∫v を学習 (生spd=OBD車速・GPS弦は位置から)。
+      //   addPair が acc/dt/飛び/異常速度 を内部gate(無効値は-1で渡せば弾く)。距離には未だ影響しない=学習のみ。
+      if (cfg.autoCalibK === true && kCalibrator && dtObd > 0) {
+        kCalibrator.addPair(
+          haversineM(prev.lat, prev.lng, cur.lat, cur.lng),
+          spd >= 0 ? spd : -1,
+          dtObd,
+          typeof cur.acc === 'number' ? cur.acc : -1
+        );
+      }
       // ★δ 自己キャリブ (obdDeltaCalib・floor過小補正)★: 良GPS区間(精度OK+移動中+ジッタ無し)で
       //   GPS位置距離と ∫OBD を貯め、calMinWindowS 秒ごとに δ=(GPS−∫OBD)/移動時間 を確定。
       //   ★短絡 return 前に学習★(監査HIGH#1: δ計算は OBD return より先)。GPS弦は位置のみ使用。
@@ -2042,26 +2079,33 @@ function createDistanceTracker(decoder, opts) {
         //   であり、停車/微速(OBD≈0)区間に δ を足すと creep を製造して認定要件(<10m/30s)を破る。
         //   学習ゲート(L1744 spd≥stationarySpdMps)と対称に、適用も移動区間に限定=停車で δ 非作用。
         const applyDelta =
-          cfg.obdDeltaCalib === true && obdDeltaInit && spd >= cfg.stationarySpdMps;
+          cfg.autoCalibK !== true && // ★学習Kはfloor込み=δと二重→autoCalibK時はδ非適用(監査#3)★
+          cfg.obdDeltaCalib === true &&
+          obdDeltaInit &&
+          spd >= cfg.stationarySpdMps;
         // ★量子化補正 (+半量子・1km/h floor回収・全車普遍・2026-06-13)★: δ非適用かつ移動中(spd≥stationary)
         //   のみ +0.5km/h。停車(OBD≈0)は creep製造防止で非適用。δ-ON時はδが量子化込み補正=二重回避で非適用。
         const _quantMps =
-          cfg.obdVehicleK > 0 && cfg.obdDaikouMode !== true // 測定K採用時は量子化と択一(二重補正回避)→ quant OFF。
-            ? // ★但し代行(obdDaikouMode)はKを使わず p50 経路=全車共通=quant も全車適用(universal)★
-              0
-            : !applyDelta && spd >= cfg.stationarySpdMps && cfg.obdQuantCorrectMps > 0
-              ? cfg.obdQuantCorrectMps
-              : 0;
+          cfg.autoCalibK === true // ★学習Kはfloor込み=量子化と二重になる→OFF(監査#3二重計上防止)★
+            ? 0
+            : cfg.obdVehicleK > 0 && cfg.obdDaikouMode !== true // 測定K採用時は量子化と択一(二重補正回避)→ quant OFF。
+              ? // ★但し代行(obdDaikouMode)はKを使わず p50 経路=全車共通=quant も全車適用(universal)★
+                0
+              : !applyDelta && spd >= cfg.stationarySpdMps && cfg.obdQuantCorrectMps > 0
+                ? cfg.obdQuantCorrectMps
+                : 0;
         // ★タイヤ円周比を vEff 段(=Doppler天井の手前)で乗算 (2026-06-17・blocker①修正)★:
         //   後段(_kApply の後)で掛けると min(k_now,k_p25) 天井を突き抜け過大ゼロを破る。vEff 段に入れると
         //   下流の Doppler 天井が「タイヤ補正後の vEff」を独立速度で再検証=過大方向の誤補正を自動で刈る。
         //   ★実測K(obdVehicleKMeasured)経路はタイヤ込み較正=二重回避で 1.0。factory prior/非K経路は適用★。
         const _tireR =
-          cfg.obdVehicleK > 0 && cfg.obdVehicleKMeasured === true
+          cfg.autoCalibK === true // ★学習Kはタイヤ器差込み=タイヤ比と二重になる→1.0(監査#3二重計上防止)★
             ? 1.0
-            : cfg.obdTireRatio > 0
-              ? cfg.obdTireRatio
-              : 1.0;
+            : cfg.obdVehicleK > 0 && cfg.obdVehicleKMeasured === true
+              ? 1.0
+              : cfg.obdTireRatio > 0
+                ? cfg.obdTireRatio
+                : 1.0;
         const vEff = ((applyDelta ? spd + obdDeltaMps : spd) + _quantMps) * _tireR;
         // ★★OBDティア 過大ゼロ天井 + 精度ラチェット (比方式・2026-06-13)★★:
         //   車輪非経由の独立速度 Doppler(cur.dopMps=搬送波由来=タイヤ非経由)と vEff の ★比 r=dop/vEff
@@ -2104,7 +2148,13 @@ function createDistanceTracker(decoder, opts) {
         //   Doppler有り: min(k_now, k_p25)で安全クランプ / Doppler無しだが k_now確定: 保持k_now(≤保守スケール) /
         //   cold-start(Doppler観測済・窓未充足): k0 / dopMs皆無: 1.0(byte不変)。
         let _kApply;
-        if (cfg.obdVehicleK > 0 && cfg.obdDaikouMode !== true) {
+        if (cfg.autoCalibK === true) {
+          // ★司さん裁定①(2026-06-26): 代行はp50を学習Kに置換★。
+          //   getK()=3窓以上の窓中央値(確定K) or 未収束はobdColdStartK(タイヤ入力) or null。
+          //   null(coldStartも無)は 1.0(生∫v・byte安全)。★p50には絶対フォールバックしない(失敗方式-5.85%+parity破壊)★。
+          const _lk = kCalibrator ? kCalibrator.getK() : null;
+          _kApply = typeof _lk === 'number' && _lk > 0 ? _lk : 1.0;
+        } else if (cfg.obdVehicleK > 0 && cfg.obdDaikouMode !== true) {
           // ★認定据付測定K★: Doppler per-step天井/ラチェットをバイパスし生spd×測定K。
           //   過大ゼロは「Kが≤真値の基準で較正済」で保証(過少読みK>1/過大読みK<1)。
           //   ★但し代行(obdDaikouMode)では使わない (2026-06-22): 代行は車種別K表に頼らず

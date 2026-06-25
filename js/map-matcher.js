@@ -40,6 +40,13 @@ importScripts('roads-decoder.js');
 //     try/catch で包む。失敗時は self.PipelineDistance 未定義のまま → 並列 tracker は no-op (L157 guard)。
 //     既存 Viterbi mmIncrementM 経路は影響ゼロで生存。
 try {
+  // ★1km自動較正K (autoCalibK)★: pipeline より先に k-calib.js を読み self.KCalib を用意。
+  //   失敗しても pipeline 側が kCalibrator=null → autoCalibK 無効化(従来経路)で安全(課金影響ゼロ)。
+  try {
+    importScripts('k-calib.js');
+  } catch (_kcErr) {
+    /* k-calib ロード失敗 = autoCalibK 無効(従来経路) */
+  }
   importScripts('pipeline-distance.js');
 } catch (_pdErr) {
   // pipeline-distance.js のロード失敗は並列計測の無効化のみ (課金経路に一切伝播させない)
@@ -214,6 +221,7 @@ let _vehicleK = null; // number | null (cert-calibrated obdVehicleK)
 let _vehicleKMeasured = false; // true=実測K(タイヤ込み・タイヤ比抑制) / false=factory prior(タイヤ比併用)
 let _vehicleTireRatio = null; // number | null (タイヤ円周比=今÷工場・物理真距離補正・1.0=恒等)
 let _vehicleDaikouMode = false; // ★p50モード (2026-06-22): 代行(係数>1.0)で OBD天井分位 p25→p50=全車一致。タクシー/モコは false。
+let _vehicleAutoCalibK = false; // ★1km自動較正K (2026-06-26・確定方式)★: true で OBD∫v×学習K(GPS長窓比)。configVehicle で受領。
 
 // ★smoothedRawMode 判定 (2026-06-07)★: tracker は opts {} で生成 = DEFAULTS が支配する。
 //   worker 側の「実質停止で pipelineDeltaM 0 化」二重保険は平滑モードでは時間軸がズレる
@@ -263,6 +271,8 @@ function _getPipelineTracker(pref) {
         _tkOpts.obdTireRatio = _vehicleTireRatio;
       // ★p50モード注入 (2026-06-22): 代行のみ obdDaikouMode=true → pipeline で天井分位 p25→p50。
       if (_vehicleDaikouMode === true) _tkOpts.obdDaikouMode = true;
+      // ★1km自動較正K注入 (2026-06-26・裁定①=代行のp50を学習Kに置換)★: ON時 OBD∫v×学習K。
+      if (_vehicleAutoCalibK === true) _tkOpts.autoCalibK = true;
       tk = self.PipelineDistance.createDistanceTracker(dec, _tkOpts);
       _pipelineTrackers.set(pref, tk);
     } catch (_) {
@@ -2558,6 +2568,8 @@ self.onmessage = function (e) {
     if ('vehicleKMeasured' in msg) _vehicleKMeasured = msg.vehicleKMeasured === true;
     // ★p50モード受信 (2026-06-22): 代行(係数>1.0)で天井分位 p25→p50。存在時のみ更新(後勝ちclobber防止)。
     if ('daikouMode' in msg) _vehicleDaikouMode = msg.daikouMode === true;
+    // ★1km自動較正K 受信 (2026-06-26・確定方式)★: ON で OBD∫v×学習K。存在時のみ更新。
+    if ('autoCalibK' in msg) _vehicleAutoCalibK = msg.autoCalibK === true;
     // ★タイヤ円周比(今÷工場)★: 健全域[0.80,1.25]外/非数値は null(=恒等1.0)。物理サイズ変更補正。
     if ('tireRatio' in msg) {
       const tr = typeof msg.tireRatio === 'number' ? msg.tireRatio : null;
@@ -2572,6 +2584,7 @@ self.onmessage = function (e) {
       vehicleKMeasured: _vehicleKMeasured,
       tireRatio: _vehicleTireRatio,
       daikouMode: _vehicleDaikouMode,
+      autoCalibK: _vehicleAutoCalibK,
     });
     return;
   }
