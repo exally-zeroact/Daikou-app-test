@@ -5878,6 +5878,8 @@
               /* K保存失敗は距離/課金に無関係(次tickで再試行) */
             }
           }
+          // ★較正ゲート: 代行開始ボタンのグレー表示を較正進捗に追従(3窓で解除)★
+          if (typeof window._updateCalibGate === 'function') window._updateCalibGate();
           var _snapOk =
             m.snap && typeof m.snap.snapLat === 'number' && typeof m.snap.snapLng === 'number';
           if (_snapOk) {
@@ -7628,6 +7630,17 @@
           refreshSensorPermission();
         }
         if (appState === 'idle') {
+          // ★較正ゲート(司さん要望2026-06-26): 未較正の車では代行開始(=課金距離)させない=未較正課金ゼロ★
+          //   autoCalibK ON×OBD接続中×未較正(calibKs<3窓)のみブロック。業務開始/客まで走るのは可(その間に較正)。
+          if (typeof window._calibGateBlocked === 'function' && window._calibGateBlocked()) {
+            if (typeof showToastLong === 'function')
+              showToastLong(
+                'OBD較正中 ' +
+                  (window._calibGateProgress ? window._calibGateProgress() : '') +
+                  '\nもう少し走ると代行開始できます\n(較正済みになるまで課金は始めません)'
+              );
+            return;
+          }
           // 代行開始
           appState = 'driving';
           extras = [];
@@ -8960,6 +8973,7 @@
         // ★今日の車 選択ストリップを更新(業務開始画面を出す時)★
         if (name === 'businessStart' && typeof window._updateBizCarSelect === 'function')
           window._updateBizCarSelect();
+        if (typeof window._updateCalibGate === 'function') window._updateCalibGate(); // ★代行開始の較正ゲート表示更新★
 
         // ★設計変更宣言 (2026-05-24・横画面サイドレール + grid・iOS Safari :has() bug 回避):
         //   body.classList で screen 状態を class detection 化。既存 :has() rule は・触らず並記。
@@ -14029,6 +14043,48 @@
               } catch (_) {
                 /* 同期失敗は次業務開始で回復 */
               }
+            }
+          };
+          // ★較正ゲート(司さん要望2026-06-26): 未較正の車では代行開始(=課金距離)させない=未較正課金ゼロ★
+          //   ブロック条件: autoCalibK ON かつ OBD接続中(=新方式作動) かつ active車が未較正(calibKs<3窓)。
+          //   OFF/OBD未接続(=GPSで従来と同一)はブロックしない=従来通り開始可。失敗時もブロックしない(営業止めない側)。
+          window._calibGateBlocked = function () {
+            try {
+              if (!window.DK_AUTO_CALIB_K) return false;
+              if (!window.OBD_DRIVE_DISTANCE) return false;
+              var car =
+                window.VehRegistry && window.VehRegistry.getActive
+                  ? window.VehRegistry.getActive(localStorage)
+                  : null;
+              var ks = car && Array.isArray(car.calibKs) ? car.calibKs : [];
+              return ks.length < 3;
+            } catch (_) {
+              return false;
+            }
+          };
+          // 較正進捗 n/3 (代行開始ブロック中の案内用)。
+          window._calibGateProgress = function () {
+            try {
+              var car =
+                window.VehRegistry && window.VehRegistry.getActive
+                  ? window.VehRegistry.getActive(localStorage)
+                  : null;
+              var ks = car && Array.isArray(car.calibKs) ? car.calibKs : [];
+              return Math.min(ks.length, 3) + '/3';
+            } catch (_) {
+              return '0/3';
+            }
+          };
+          // 代行開始ボタンのグレー表示を較正状態に追従(ブロック中=薄く)。mmResult/画面表示時に呼ぶ。
+          window._updateCalibGate = function () {
+            try {
+              var blocked = window._calibGateBlocked();
+              var b = document.getElementById('btnMain');
+              if (b) b.style.opacity = blocked ? '0.4' : '';
+              var pb = document.querySelector('.btn-main-idle-portrait');
+              if (pb) pb.style.opacity = blocked ? '0.4' : '';
+            } catch (_) {
+              /* 表示のみ・距離/課金に無関係 */
             }
           };
           function _loadCarIntoCard(car) {
