@@ -2879,12 +2879,12 @@
           grid-template-areas:
             'appbar appbar'
             'content btn-area' !important;
-          /* ★横向きの下ボタン見切れ根治 (2026-06-27・司さん実機): viewport-fit=cover では
-             横画面で左=状態バー/ノッチ・右=Androidナビバー(◀●■)が画面端に重なる。
-             固定16pxではナビバー(≈48px)を吸収できず右のbtn-area(代行開始等)が隠れていた。
-             env(safe-area-inset-left/right)で両端のシステムUI分を確保し可視領域内へ収める。 */
-          padding-left: env(safe-area-inset-left) !important;
-          padding-right: calc(16px + env(safe-area-inset-right)) !important;
+          /* ★横画面: 青バー(appbar)を端まで全幅で出す(2026-06-27 司さん実機)。
+             body に padding-right を付けると grid(=appbar含む)ごと内側に寄り、右上に白地が
+             見える(青バー見切れ)。padding を 0 にして appbar を全幅化。btn-area の余白は
+             btn-area 自身の padding(16px)で確保済み。 */
+          padding-left: 0 !important;
+          padding-right: 0 !important;
           padding-bottom: 0 !important;
           height: 100vh !important;
           height: 100dvh !important;
@@ -2937,13 +2937,17 @@
         .btn-area {
           grid-area: btn-area !important;
         }
-        /* ★ 各画面 (screenIdle 等) も縦中央配置で上下バランス揃え */
+        /* ★ 各画面 (screenIdle 等) も縦中央配置で上下バランス揃え
+           ★2026-06-27 司さん実機(横): 横画面は高さが低く、内容(日時/料金/距離/経由地カード)が
+             収まらず上下が見切れていた。safe center=収まる時は中央・溢れる時は上端揃え(上から見える)
+             + overflow-y:auto でスクロール可能にし、下の経由地カード/距離まで到達できるようにする。 */
         #screenIdle,
         #screenBusinessStart,
         #screenBusinessReport,
         #screenDriving,
         #screenFare {
-          justify-content: center !important;
+          justify-content: safe center !important;
+          overflow-y: auto !important;
         }
         /* ★設計変更宣言 (2026-05-19・司さん指示書・空車 horizontal 統一レイアウト):
            代行中 horizontal と同じ構造に: 左 content (= 日付・stats) + 右 btn-area (= 代行開始上・履歴中・業務終了下)。
