@@ -4552,7 +4552,10 @@
           min-height: 0;
           justify-content: center;
           align-items: center;
-          gap: 24px;
+          gap: 16px;
+          overflow-y: auto;
+          padding: 12px 0;
+          box-sizing: border-box;
         "
       >
         <!-- 日時（全画面共通） -->
@@ -8666,7 +8669,9 @@
             _lines.push(
               `センサー: ${window._compassGranted && window._motionGranted ? 'あり' : 'なし'}`
             );
-            showToastLong(_lines.join('\n'));
+            // ★司さん要望2026-06-27: トリップ終了の黒いサマリートーストは不要→非表示★
+            //   (距離/料金は画面と履歴で見える・GPS精度/センサー等のデバッグ表示も邪魔)
+            // showToastLong(_lines.join('\n'));  // 無効化
           } catch (e) {
             /* サマリー表示エラーは無視 */
           }
