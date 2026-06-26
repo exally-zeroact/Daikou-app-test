@@ -2877,8 +2877,12 @@
           grid-template-areas:
             'appbar appbar'
             'content btn-area' !important;
-          padding-left: 0 !important;
-          padding-right: 16px !important;
+          /* ★横向きの下ボタン見切れ根治 (2026-06-27・司さん実機): viewport-fit=cover では
+             横画面で左=状態バー/ノッチ・右=Androidナビバー(◀●■)が画面端に重なる。
+             固定16pxではナビバー(≈48px)を吸収できず右のbtn-area(代行開始等)が隠れていた。
+             env(safe-area-inset-left/right)で両端のシステムUI分を確保し可視領域内へ収める。 */
+          padding-left: env(safe-area-inset-left) !important;
+          padding-right: calc(16px + env(safe-area-inset-right)) !important;
           padding-bottom: 0 !important;
           height: 100vh !important;
           height: 100dvh !important;
