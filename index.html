@@ -5201,20 +5201,20 @@
     <script src="js/k-calib.js"></script>
     <!-- ★車レジストリ (多台＋車別K永続・2026-06-26)★: 設定の車一覧/追加/削除・業務開始の車選択が使う。 -->
     <script src="js/veh-registry.js"></script>
-    <!-- ★1km自動較正K (autoCalibK・確定方式2026-06-26) 実機テスト用フラグ★:
-         ?autocalibk=on でON(localStorage永続) / ?autocalibk=off でOFF。既定OFF=従来経路(byte不変)。
-         meter.js が configVehicle で window.DK_AUTO_CALIB_K を worker に伝え OBD∫v×学習K を有効化。
-         ★見た目UIなし(不可視フラグ)=デザイン変更なし★。設定画面トグル化は別途(見せてから)。 -->
+    <!-- ★1km自動較正K (autoCalibK・確定方式2026-06-26)★:
+         ★TESTアプリは既定ON★=普通に開けば新方式(OBD∫v×学習K)で動く・URLパラメータ不要。
+         ?autocalibk=off で旧方式に戻せる / ?autocalibk=on で再度ON(localStorage永続)。
+         新方式が効くのはOBD接続中のみ(OBD無ければGPSで従来と同一)。本番(Daikou-app)へは実機検証後。 -->
     <script>
       (function () {
         try {
-          var KEY = 'DK_AUTO_CALIB_K';
+          var OFFKEY = 'DK_AUTO_CALIB_K_OFF'; // 既定ON・このキーがある時だけOFF
           var p = new URLSearchParams(location.search).get('autocalibk');
-          if (p === 'on') localStorage.setItem(KEY, '1');
-          else if (p === 'off') localStorage.removeItem(KEY);
-          window.DK_AUTO_CALIB_K = localStorage.getItem(KEY) === '1';
+          if (p === 'off') localStorage.setItem(OFFKEY, '1');
+          else if (p === 'on') localStorage.removeItem(OFFKEY);
+          window.DK_AUTO_CALIB_K = localStorage.getItem(OFFKEY) !== '1'; // OFFキー無ければON
         } catch (_) {
-          window.DK_AUTO_CALIB_K = false;
+          window.DK_AUTO_CALIB_K = true;
         }
       })();
     </script>
