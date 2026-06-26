@@ -4666,7 +4666,7 @@
           id="bizCarSelect"
           onclick="
             event.stopPropagation();
-            window.showOverlay && window.showOverlay('settings');
+            window._toggleBizCarDropdown && window._toggleBizCarDropdown();
           "
           style="
             display: flex;
@@ -4694,6 +4694,24 @@
           </div>
           <div style="color: #007aff; font-weight: 700; font-size: 13px">変更 ▼</div>
         </div>
+        <!-- ★今日の車 ドロップダウン(その場で選択/追加・設定に飛ばない・司さん要望2026-06-27)★ -->
+        <div
+          id="bizCarDropdown"
+          onclick="event.stopPropagation()"
+          style="
+            display: none;
+            width: 80%;
+            max-width: 300px;
+            margin-top: -14px;
+            background: #fff;
+            border: 2px solid #007aff;
+            border-top: none;
+            border-radius: 0 0 12px 12px;
+            box-sizing: border-box;
+            overflow: hidden;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+          "
+        ></div>
         <!-- 業務開始ボタン（中央配置・大ボタン） -->
         <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
         <!-- ★OBD 接続は青バー(全画面常駐 #obdChip)に移設 (2026-06-08)★:
@@ -14229,6 +14247,114 @@
               el.style.display = 'block';
             } catch (_) {
               /* 表示のみ・距離/課金に無関係 */
+            }
+          };
+          // ★今日の車 ドロップダウン(その場で選択/追加・設定に飛ばない・司さん要望2026-06-27)★
+          function _bizSelectCar(id) {
+            try {
+              if (!window.VehRegistry) return;
+              window.VehRegistry.setActive(localStorage, id);
+              var car = window.VehRegistry.get(localStorage, id);
+              if (car) {
+                window.DK_VEHICLE_PROFILE = car;
+                try {
+                  localStorage.setItem('dk_veh_active', JSON.stringify(car));
+                } catch (_e) {
+                  /* ignore */
+                }
+                if (typeof _loadCarIntoCard === 'function') _loadCarIntoCard(car);
+              }
+              if (typeof window._syncWorkerVehicle === 'function') window._syncWorkerVehicle();
+              var dd = document.getElementById('bizCarDropdown');
+              if (dd) dd.style.display = 'none';
+              if (typeof window._updateBizCarSelect === 'function') window._updateBizCarSelect();
+              if (typeof window._renderVehList === 'function') window._renderVehList();
+              if (typeof window._updateCalibGate === 'function') window._updateCalibGate();
+              if (typeof window._updateSetupGuide === 'function') window._updateSetupGuide();
+            } catch (_) {
+              /* 選択失敗は無害 */
+            }
+          }
+          window._renderBizCarDropdown = function () {
+            try {
+              var dd = document.getElementById('bizCarDropdown');
+              if (!dd || !window.VehRegistry) return;
+              var cars = window.VehRegistry.list(localStorage);
+              var activeId = window.VehRegistry.getActiveId(localStorage);
+              var html = '';
+              cars.forEach(function (car) {
+                var st = _carStatusText(car);
+                var sel = car.id === activeId;
+                html +=
+                  '<div class="bizCarOpt" data-carid="' +
+                  _esc(car.id) +
+                  '" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 14px;cursor:pointer;border-top:1px solid #eee;background:' +
+                  (sel ? '#eff6ff' : '#fff') +
+                  ';"><span style="font-weight:700;font-size:14px;">' +
+                  (sel ? '🔵 ' : '⚪ ') +
+                  '🚗 ' +
+                  _esc(car.name || car.model || car.id) +
+                  '</span><span style="font-size:11px;font-weight:600;color:' +
+                  st.c +
+                  ';">' +
+                  _esc(st.t) +
+                  '</span></div>';
+              });
+              html +=
+                '<div id="bizCarAddRow" style="padding:11px 14px;cursor:pointer;border-top:1px solid #eee;color:#007aff;font-weight:700;font-size:14px;text-align:center;">＋ 車を追加</div>' +
+                '<div id="bizCarAddForm" style="display:none;padding:11px 14px;border-top:1px solid #eee;background:#f7f7f9;">' +
+                '<input id="bizAddName" placeholder="車の名前(例:アルト)" style="width:100%;padding:7px 9px;border:1px solid #d1d1d6;border-radius:7px;font-size:13px;margin-bottom:6px;box-sizing:border-box;-webkit-appearance:none;height:34px;"/>' +
+                '<input id="bizAddTire" placeholder="工場タイヤ(例:155/65R14)" style="width:100%;padding:7px 9px;border:1px solid #d1d1d6;border-radius:7px;font-size:13px;margin-bottom:8px;box-sizing:border-box;-webkit-appearance:none;height:34px;"/>' +
+                '<button id="bizAddSave" type="button" style="width:100%;padding:9px;background:#007aff;color:#fff;border:none;border-radius:7px;font-weight:700;font-size:14px;cursor:pointer;">追加して選択</button></div>';
+              dd.innerHTML = html;
+              Array.prototype.forEach.call(dd.querySelectorAll('.bizCarOpt'), function (opt) {
+                opt.onclick = function () {
+                  _bizSelectCar(opt.getAttribute('data-carid'));
+                };
+              });
+              var addRow = document.getElementById('bizCarAddRow');
+              if (addRow)
+                addRow.onclick = function () {
+                  var f = document.getElementById('bizCarAddForm');
+                  if (f) {
+                    f.style.display = f.style.display === 'none' ? 'block' : 'none';
+                    var n = document.getElementById('bizAddName');
+                    if (n && f.style.display === 'block') n.focus();
+                  }
+                };
+              var saveBtn = document.getElementById('bizAddSave');
+              if (saveBtn)
+                saveBtn.onclick = function () {
+                  var nm = ((document.getElementById('bizAddName') || {}).value || '').trim();
+                  var tr = ((document.getElementById('bizAddTire') || {}).value || '').trim();
+                  if (!nm) {
+                    var n = document.getElementById('bizAddName');
+                    if (n) n.focus();
+                    return;
+                  }
+                  var saved = window.VehRegistry.save(localStorage, {
+                    name: nm,
+                    tire: tr,
+                    tireRatio: 1.0,
+                  });
+                  _bizSelectCar(saved.id);
+                };
+            } catch (_) {
+              /* 描画失敗は無害 */
+            }
+          };
+          window._toggleBizCarDropdown = function () {
+            try {
+              var dd = document.getElementById('bizCarDropdown');
+              if (!dd) return;
+              if (!dd.style.display || dd.style.display === 'none') {
+                window._renderBizCarDropdown();
+                dd.style.display = 'block';
+              } else {
+                dd.style.display = 'none';
+              }
+            } catch (_) {
+              /* ignore */
             }
           };
           function _loadCarIntoCard(car) {
