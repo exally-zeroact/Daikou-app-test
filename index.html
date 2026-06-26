@@ -13984,7 +13984,11 @@
               var nameEl = document.getElementById('bizCarName');
               var calibEl = document.getElementById('bizCarCalib');
               if (!nameEl || !calibEl) return;
-              var pv = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
+              // ★監査shouldFix是正: レジストリのactive車から読む(K自動保存後の最新calibKsを反映・旧キー直読の不整合解消)★
+              var pv =
+                window.VehRegistry && window.VehRegistry.getActive
+                  ? window.VehRegistry.getActive(localStorage)
+                  : JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
               nameEl.textContent =
                 pv && pv.name
                   ? pv.name
