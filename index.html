@@ -4492,6 +4492,7 @@
           min-height: 0;
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
+          padding-bottom: calc(14px + env(safe-area-inset-bottom));
         "
       >
         <!-- 日時（1行表示・絵文字なし・2026/05/01仕様） -->
@@ -4552,9 +4553,8 @@
           min-height: 0;
           justify-content: center;
           align-items: center;
-          gap: 16px;
-          overflow-y: auto;
-          padding: 12px 0;
+          gap: 12px;
+          padding: 8px 0 calc(12px + env(safe-area-inset-bottom));
           box-sizing: border-box;
         "
       >
