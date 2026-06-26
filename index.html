@@ -4523,6 +4523,48 @@
             <span class="stat-value">¥<span id="fareTotalYen">0</span></span>
           </div>
         </div>
+        <!-- ★初回オンボーディング誘導 (2026-06-27)★: 車登録→OBD接続→較正→開始 のガイド。
+             設定が全部済めば自動で消える。autoCalibK時のみ。 -->
+        <div
+          id="setupGuide"
+          style="
+            display: none;
+            margin: 8px 16px 0;
+            padding: 13px 15px;
+            background: #fffbe6;
+            border: 1px solid #ffd666;
+            border-radius: 12px;
+            font-size: 13px;
+          "
+        >
+          <div style="font-weight: 700; margin-bottom: 8px; color: #ad6800">
+            🚗 はじめの設定（この車を使えるように）
+          </div>
+          <div id="setupSteps"></div>
+          <button
+            id="setupRegBtn"
+            type="button"
+            onclick="
+              event.stopPropagation();
+              window.showOverlay && window.showOverlay('settings');
+            "
+            style="
+              display: none;
+              margin-top: 8px;
+              width: 100%;
+              padding: 10px;
+              background: #007aff;
+              color: #fff;
+              border: none;
+              border-radius: 9px;
+              font-size: 14px;
+              font-weight: 700;
+              cursor: pointer;
+            "
+          >
+            車を登録する
+          </button>
+        </div>
         <!-- ★設計変更宣言 (2026-05-20・司さん指示・空車画面 ボタン順統一):
              縦横両方とも 履歴 → 業務終了 → 代行開始 (= 最下部) で統一。
              業務終了 と 代行開始 の間に余白 40px (= 押し間違い防止)。
@@ -5882,6 +5924,7 @@
           }
           // ★較正ゲート: 代行開始ボタンのグレー表示を較正進捗に追従(3窓で解除)★
           if (typeof window._updateCalibGate === 'function') window._updateCalibGate();
+          if (typeof window._updateSetupGuide === 'function') window._updateSetupGuide();
           var _snapOk =
             m.snap && typeof m.snap.snapLat === 'number' && typeof m.snap.snapLng === 'number';
           if (_snapOk) {
@@ -8976,6 +9019,7 @@
         if (name === 'businessStart' && typeof window._updateBizCarSelect === 'function')
           window._updateBizCarSelect();
         if (typeof window._updateCalibGate === 'function') window._updateCalibGate(); // ★代行開始の較正ゲート表示更新★
+        if (typeof window._updateSetupGuide === 'function') window._updateSetupGuide(); // ★初回オンボーディング誘導更新★
 
         // ★設計変更宣言 (2026-05-24・横画面サイドレール + grid・iOS Safari :has() bug 回避):
         //   body.classList で screen 状態を class detection 化。既存 :has() rule は・触らず並記。
@@ -14136,6 +14180,57 @@
               /* 表示のみ・距離/課金に無関係 */
             }
           };
+          // ★初回オンボーディング誘導 (2026-06-27)★: ホームに「車登録→OBD接続→較正」のチェックリスト。
+          //   全部済めば自動で消える。autoCalibK時のみ。距離/課金に無関係。
+          window._updateSetupGuide = function () {
+            try {
+              var el = document.getElementById('setupGuide');
+              if (!el) return;
+              if (!window.DK_AUTO_CALIB_K) {
+                el.style.display = 'none';
+                return;
+              }
+              var car =
+                window.VehRegistry && window.VehRegistry.getActive
+                  ? window.VehRegistry.getActive(localStorage)
+                  : null;
+              var hasCar = !!(car && (car.name || car.model || car.katashiki));
+              var obdOn = !!window.OBD_DRIVE_DISTANCE;
+              var ks = car && Array.isArray(car.calibKs) ? car.calibKs : [];
+              var calibrated = ks.length >= 3;
+              if (hasCar && obdOn && calibrated) {
+                el.style.display = 'none'; // 全部済=ガイド不要
+                return;
+              }
+              function row(done, label, hint) {
+                return (
+                  '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">' +
+                  '<span style="font-size:15px;">' +
+                  (done ? '✅' : '⬜') +
+                  '</span><span style="font-weight:600;">' +
+                  label +
+                  '</span><span style="color:#8c8c8c;font-size:12px;">' +
+                  hint +
+                  '</span></div>'
+                );
+              }
+              var stepsEl = document.getElementById('setupSteps');
+              if (stepsEl)
+                stepsEl.innerHTML =
+                  row(
+                    hasCar,
+                    '① 車を登録',
+                    hasCar ? car.name || car.model || '登録済' : '名前＋工場タイヤ'
+                  ) +
+                  row(obdOn, '② OBDを接続', obdOn ? '接続中' : '青バーの「OBD接続」') +
+                  row(calibrated, '③ 較正走行', calibrated ? '較正済' : '見通しの良い道で走るだけ');
+              var regBtn = document.getElementById('setupRegBtn');
+              if (regBtn) regBtn.style.display = hasCar ? 'none' : 'block';
+              el.style.display = 'block';
+            } catch (_) {
+              /* 表示のみ・距離/課金に無関係 */
+            }
+          };
           function _loadCarIntoCard(car) {
             if (!car) return;
             window._editingVehId = car.id || null;
@@ -14543,6 +14638,8 @@
                 driveBadge.style.color = obdDriving ? '#34c759' : '#007aff';
               }
             }
+            // ★初回オンボーディング誘導: OBD接続/未接続を500ms毎に反映(idleで未完了時のみ表示)★
+            if (typeof window._updateSetupGuide === 'function') window._updateSetupGuide();
           }, 500);
         }
         if (document.readyState === 'loading') {
