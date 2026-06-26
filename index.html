@@ -2552,8 +2552,10 @@
            viewport-fit=cover では body が下部システムバー(Android 3ボタン ◀●■ / iOS ホーム
            インジケータ)の下まで広がるため、末尾の追加料金/確定ボタンがバーに隠れて見切れていた。
            下 padding にシステムバー高 env(safe-area-inset-bottom) を加算し可視領域内へ押し上げる
-           (Android=ナビバー高/iOS=ホームインジケータ高・非対応端末は 0 で従来 40px のまま)。 */
-        padding: 10px 16px calc(40px + env(safe-area-inset-bottom));
+           (Android=ナビバー高/iOS=ホームインジケータ高・非対応端末は 0 で従来 40px のまま)。
+           ★2026-06-27 司さん実機: env が 0 を返す Android(3ボタンナビ等)で 40px では
+             ナビバー(≈48px)に負けて見切れ継続→ max() で最低 72px の床を保証(env報告時はそちら優先)。 */
+        padding: 10px 16px max(72px, calc(40px + env(safe-area-inset-bottom)));
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
