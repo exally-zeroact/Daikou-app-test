@@ -222,6 +222,9 @@ let _vehicleKMeasured = false; // true=実測K(タイヤ込み・タイヤ比抑
 let _vehicleTireRatio = null; // number | null (タイヤ円周比=今÷工場・物理真距離補正・1.0=恒等)
 let _vehicleDaikouMode = false; // ★p50モード (2026-06-22): 代行(係数>1.0)で OBD天井分位 p25→p50=全車一致。タクシー/モコは false。
 let _vehicleAutoCalibK = false; // ★1km自動較正K (2026-06-26・確定方式)★: true で OBD∫v×学習K(GPS長窓比)。configVehicle で受領。
+let _sharedKCalib = null; // ★STEP2: 車単位の共有較正器★ 全県trackerが共有=県跨ぎ/業務resetでKが残る(県跨ぎリセット根治)。autoCalibK時のみ生成・OFFで破棄。
+let _vehicleId = null; // ★STEP3: 選択中の車id★ 別車に変わったら _sharedKCalib をリセット(新車のKをロード)・同一車は保持。
+let _vehicleRestoreKs = null; // ★STEP3: 選択中の車の保存Ks★ _sharedKCalib 生成時に注入=接続/業務開始で「一度較正→ずっと正確」。
 
 // ★smoothedRawMode 判定 (2026-06-07)★: tracker は opts {} で生成 = DEFAULTS が支配する。
 //   worker 側の「実質停止で pipelineDeltaM 0 化」二重保険は平滑モードでは時間軸がズレる
@@ -272,7 +275,27 @@ function _getPipelineTracker(pref) {
       // ★p50モード注入 (2026-06-22): 代行のみ obdDaikouMode=true → pipeline で天井分位 p25→p50。
       if (_vehicleDaikouMode === true) _tkOpts.obdDaikouMode = true;
       // ★1km自動較正K注入 (2026-06-26・裁定①=代行のp50を学習Kに置換)★: ON時 OBD∫v×学習K。
-      if (_vehicleAutoCalibK === true) _tkOpts.autoCalibK = true;
+      if (_vehicleAutoCalibK === true) {
+        _tkOpts.autoCalibK = true;
+        // ★STEP2: 車単位の共有較正器を1個だけ生成し全県trackerへ注入=県跨ぎ/業務resetでKが残る★
+        if (
+          !_sharedKCalib &&
+          typeof self !== 'undefined' &&
+          self.KCalib &&
+          self.KCalib.createKCalibrator
+        ) {
+          _sharedKCalib = self.KCalib.createKCalibrator({
+            coldStartK:
+              typeof _vehicleColdStartK === 'number' && _vehicleColdStartK > 0
+                ? _vehicleColdStartK
+                : undefined,
+            // ★STEP3: 選択中の車の保存Ksを復元=接続/業務開始で即 confident(再較正不要)★
+            restoreKs: Array.isArray(_vehicleRestoreKs) ? _vehicleRestoreKs : undefined,
+            calibKm: 1.0,
+          });
+        }
+        if (_sharedKCalib) _tkOpts.externalKCalib = _sharedKCalib;
+      }
       tk = self.PipelineDistance.createDistanceTracker(dec, _tkOpts);
       _pipelineTrackers.set(pref, tk);
     } catch (_) {
@@ -304,6 +327,7 @@ function _resetPipelineTrackers() {
 //   ★_lastDeltaSrc★: 直近 _confirmedRoadDelta が算出した delta の距離源 ('obd'=∫v(OBD)駆動 / 'gps'=その他)。
 //     呼出側が mmResult.pipelineDeltaSrc として meter へ渡し、source-aware k 適用に使う。
 let _lastDeltaSrc = 'gps';
+let _lastCalibStatus = null; // ★1km自動較正K の状態(見える化用)★: autoCalibK時のみ非null {K,windows,confident,...}
 function _confirmedRoadDelta(msg, outSnap) {
   _lastDeltaSrc = 'gps'; // 既定 (ingest 前/失敗/静止 = gps扱い=随伴車k非適用=安全側)
   try {
@@ -363,6 +387,15 @@ function _confirmedRoadDelta(msg, outSnap) {
     // ★距離源タグ (2026-06-12・OBD+センサーメイン・アーキ)★: この delta が ∫v(OBD) 駆動か否かを
     //   meter へ伝える (= source-aware k: OBD駆動だけ随伴車k適用・GPS駆動は×1.0で過大ゼロ)。
     _lastDeltaSrc = res && res.reason === 'obd' ? 'obd' : 'gps';
+    // ★較正状態を見える化用に保持(read-only=距離不変)★: autoCalibK時のみ非null。
+    try {
+      _lastCalibStatus = typeof tk.calibStatus === 'function' ? tk.calibStatus() : null;
+      // ★監査P0是正: 「今 worker が較正してる車id」を同梱★=index.htmlが getActiveId でなく
+      //   この id に保存→走行中の車切替で旧車のKを新車に混入させない(cross-vehicle contamination根治)。
+      if (_lastCalibStatus) _lastCalibStatus.vehicleId = _vehicleId;
+    } catch (_) {
+      _lastCalibStatus = null;
+    }
     const confirmedDeltaM = res && typeof res.deltaM === 'number' ? res.deltaM : 0;
     return confirmedDeltaM > 0 ? confirmedDeltaM : 0;
   } catch (_) {
@@ -2569,7 +2602,26 @@ self.onmessage = function (e) {
     // ★p50モード受信 (2026-06-22): 代行(係数>1.0)で天井分位 p25→p50。存在時のみ更新(後勝ちclobber防止)。
     if ('daikouMode' in msg) _vehicleDaikouMode = msg.daikouMode === true;
     // ★1km自動較正K 受信 (2026-06-26・確定方式)★: ON で OBD∫v×学習K。存在時のみ更新。
-    if ('autoCalibK' in msg) _vehicleAutoCalibK = msg.autoCalibK === true;
+    if ('autoCalibK' in msg) {
+      _vehicleAutoCalibK = msg.autoCalibK === true;
+      if (!_vehicleAutoCalibK) _sharedKCalib = null; // ★OFFで共有較正器も破棄=byte不変★
+    }
+    // ★STEP3: 車id受信★: 別車に変わったら共有較正器をリセット(新車のKをロードし直す)・同一車は保持(較正継続)。
+    if ('vehicleId' in msg) {
+      const _newVid = msg.vehicleId || null;
+      if (_newVid !== _vehicleId) {
+        _vehicleId = _newVid;
+        _sharedKCalib = null; // 別車=作り直し→次tracker生成時に restoreKs で新車のKを復元
+      }
+    }
+    // ★STEP3: 選択中の車の保存Ks受信★: 次の _sharedKCalib 生成時に復元。
+    //   ★監査P1是正★: 同一車再選択/遅延受信でも反映するため既存共有較正器を破棄→次tracker生成で新Ks復元。
+    //   configVehicle は業務開始/車操作時のみ送られる(走行中は来ない)=走行中の生Ksを潰さない。
+    //   autoCalibK OFF では _sharedKCalib は元々null=この代入はno-op=byte不変。
+    if ('restoreKs' in msg) {
+      _vehicleRestoreKs = Array.isArray(msg.restoreKs) ? msg.restoreKs : null;
+      _sharedKCalib = null;
+    }
     // ★タイヤ円周比(今÷工場)★: 健全域[0.80,1.25]外/非数値は null(=恒等1.0)。物理サイズ変更補正。
     if ('tireRatio' in msg) {
       const tr = typeof msg.tireRatio === 'number' ? msg.tireRatio : null;
@@ -3465,6 +3517,7 @@ self.onmessage = function (e) {
       //   別途 0 化不要だが・freeze と整合させるため下の effectivelyStationary block で 0 に念押しする。
       pipelineDeltaM: _pipelineDeltaM_now,
       pipelineDeltaSrc: _pipelineDeltaSrc, // ★source-aware k: 'obd'=随伴車k適用 / 'gps'=×1.0★
+      calibStatus: _lastCalibStatus, // ★1km自動較正K 見える化用(autoCalibK時のみ非null)★
     });
   }
 };

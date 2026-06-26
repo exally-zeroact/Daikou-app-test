@@ -117,6 +117,10 @@ const Meter = (() => {
         // ★1km自動較正K (2026-06-26・確定方式)★: window.DK_AUTO_CALIB_K=true で OBD∫v×学習K(GPS長窓比)。
         //   既定false=従来経路(byte不変)。実機テスト用トグル/URLパラメータで立てる。
         autoCalibK: typeof self !== 'undefined' && self.DK_AUTO_CALIB_K === true,
+        // ★STEP3 車別K永続 (2026-06-26)★: 選択中の車id+保存Ks を渡す。worker は別車なら共有較正器を
+        //   リセットし、保存Ks(calibKs)を復元=「一度較正→接続/業務開始で即正確・再較正不要」。
+        vehicleId: prof && prof.id ? prof.id : null,
+        restoreKs: prof && Array.isArray(prof.calibKs) ? prof.calibKs : null,
       });
     } catch (_) {
       /* best-effort・課金距離は pipeline 側の健全域クランプで保護 */
@@ -1484,6 +1488,9 @@ const Meter = (() => {
     setVehicleType,
     getVehicleType,
     setDaikouDistanceFactor, // ★代行距離係数(DM−0.2%着地)。システムが固定値を loadSettings で適用★
+    // ★監査P1是正(2026-06-26)★: 車切替/保存/削除時に worker._vehicleId を即同期させるため公開。
+    //   DK_VEHICLE_PROFILE を読み configVehicle(vehicleId/restoreKs 含む)を送る。autoCalibK OFFでは calibStatus=null のまま=byte不変。
+    _postVehicleK,
     latchDisplay: _latchDisplay,
     // ★テスト用 escape hatch (prod からは呼ばない)
     _setDrainMmUntil: function (t) {

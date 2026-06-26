@@ -4618,6 +4618,40 @@
         >
           業務開始前に位置・方位・加速度センサーの許可が必要です
         </div>
+        <!-- ★1km自動較正K (2026-06-26): 今日の車 選択(業務開始の所で選ぶ)★
+             前回の車を既定表示・タップで設定(車の登録/変更)へ。未較正でも業務開始は可(走行中に自動較正)。 -->
+        <div
+          id="bizCarSelect"
+          onclick="
+            event.stopPropagation();
+            window.showOverlay && window.showOverlay('settings');
+          "
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            width: 80%;
+            max-width: 300px;
+            padding: 12px 14px;
+            background: #fff;
+            border: 2px solid #007aff;
+            border-radius: 12px;
+            cursor: pointer;
+            box-sizing: border-box;
+          "
+        >
+          <div style="text-align: left">
+            <div style="font-size: 11px; color: #8e8e93">今日の車</div>
+            <div style="font-weight: 700; font-size: 15px; color: #1c1c1e">
+              🚗 <span id="bizCarName">未登録</span>
+              <span id="bizCarCalib" style="font-size: 11px; font-weight: 600; color: #ff9500"
+                >⚠未較正</span
+              >
+            </div>
+          </div>
+          <div style="color: #007aff; font-weight: 700; font-size: 13px">変更 ▼</div>
+        </div>
         <!-- 業務開始ボタン（中央配置・大ボタン） -->
         <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
         <!-- ★OBD 接続は青バー(全画面常駐 #obdChip)に移設 (2026-06-08)★:
@@ -5162,6 +5196,11 @@
     <script src="js/obd-client.js"></script>
     <script src="js/obd-wheelspeed-map.js"></script>
     <script src="js/obd-wheelspeed-identify.js"></script>
+    <!-- ★1km自動較正K 見える化トースト判定 純関数 (window.KCalib.decideCalibToast)★:
+         worker は importScripts で別途読込。main は見える化トースト判定にのみ使用(距離計算はworker)。 -->
+    <script src="js/k-calib.js"></script>
+    <!-- ★車レジストリ (多台＋車別K永続・2026-06-26)★: 設定の車一覧/追加/削除・業務開始の車選択が使う。 -->
+    <script src="js/veh-registry.js"></script>
     <!-- ★1km自動較正K (autoCalibK・確定方式2026-06-26) 実機テスト用フラグ★:
          ?autocalibk=on でON(localStorage永続) / ?autocalibk=off でOFF。既定OFF=従来経路(byte不変)。
          meter.js が configVehicle で window.DK_AUTO_CALIB_K を worker に伝え OBD∫v×学習K を有効化。
@@ -5793,6 +5832,52 @@
         //   業務は・読むだけ・Worker B / meter.js / map-matcher.js 本体は 1 byte 不変。
         //   distance_m / 課金 / Meter.reset には・完全無関係 (= 表示専用)。
         if (m.type === 'mmResult') {
+          // ★1km自動較正K 見える化 (2026-06-26・トースト=青バー非接触・一時表示)★:
+          //   判定は純関数 KCalib.decideCalibToast(対立監査P0/P1是正済=完了は1回だけ/業務・県跨ぎで再表示/
+          //   『この区間のK』文言)。autoCalibK OFF は calibStatus=null=何も出ない(byte不変)。
+          if (
+            m.calibStatus &&
+            typeof window.KCalib !== 'undefined' &&
+            window.KCalib.decideCalibToast
+          ) {
+            try {
+              var _ct = window.KCalib.decideCalibToast(m.calibStatus, window._calibToastState);
+              window._calibToastState = _ct.state;
+              if (_ct.toast && typeof showToast === 'function') showToast(_ct.toast);
+              if (_ct.long && typeof showToastLong === 'function') showToastLong(_ct.long);
+            } catch (_) {
+              /* 見える化失敗は距離/課金に無関係 */
+            }
+          }
+          // ★STEP3 K自動保存 (2026-06-26)★: 較正器が貯めた健全窓Ks を選択中の車に永続保存。
+          //   窓数が変わった時だけ書く(localStorage頻書防止)→次回その車を選ぶと restoreKs で即「✓較正済」。
+          if (
+            m.calibStatus &&
+            Array.isArray(m.calibStatus.Ks) &&
+            typeof m.calibStatus.windows === 'number' &&
+            window.VehRegistry
+          ) {
+            try {
+              // ★監査P0是正: 保存先は「worker が今較正してる車id」(calibStatus.vehicleId)★。
+              //   getActiveId だと走行中の車切替で worker未切替の旧Ksが新車に混入する。worker idに紐づけ根治。
+              var _wid = m.calibStatus.vehicleId || null;
+              if (window._calibSavedVid !== _wid) {
+                // 車が変わった=保存カウンタをリセット(新車の窓を取りこぼさない)
+                window._calibSavedVid = _wid;
+                window._calibSavedN = -1;
+              }
+              if (_wid && m.calibStatus.windows !== window._calibSavedN) {
+                window._calibSavedN = m.calibStatus.windows;
+                window.VehRegistry.setCalibKs(localStorage, _wid, m.calibStatus.Ks);
+                if (window.DK_VEHICLE_PROFILE && window.DK_VEHICLE_PROFILE.id === _wid)
+                  window.DK_VEHICLE_PROFILE.calibKs = m.calibStatus.Ks.slice();
+                if (typeof window._renderVehList === 'function') window._renderVehList();
+                if (typeof window._updateBizCarSelect === 'function') window._updateBizCarSelect();
+              }
+            } catch (_) {
+              /* K保存失敗は距離/課金に無関係(次tickで再試行) */
+            }
+          }
           var _snapOk =
             m.snap && typeof m.snap.snapLat === 'number' && typeof m.snap.snapLng === 'number';
           if (_snapOk) {
@@ -8700,11 +8785,18 @@
       }
 
       // ─── トースト通知 ───
+      let _toastTimer = null; // ★単一#toast共有タイマー(重なり時の途中消え防止・対立監査P1)★
       function showToast(msg) {
         const t = document.getElementById('toast');
+        // ★style初期化: showToastLong の左寄せ/13px/行間1.8 の残留を毎回クリア(対立監査P1)★
+        t.style.whiteSpace = '';
+        t.style.textAlign = '';
+        t.style.fontSize = '';
+        t.style.lineHeight = '';
         t.textContent = msg;
         t.classList.add('show');
-        setTimeout(() => {
+        if (_toastTimer) clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => {
           t.classList.remove('show');
         }, 2000);
       }
@@ -8718,7 +8810,8 @@
         t.style.lineHeight = '1.8';
         t.textContent = msg;
         t.classList.add('show');
-        setTimeout(() => {
+        if (_toastTimer) clearTimeout(_toastTimer); // ★共有タイマー(重なり時の途中消え防止・対立監査P1)★
+        _toastTimer = setTimeout(() => {
           t.classList.remove('show');
           t.style.whiteSpace = '';
           t.style.textAlign = '';
@@ -8864,6 +8957,9 @@
         const elBReport = document.getElementById('screenBusinessReport');
         if (elBStart) elBStart.style.display = name === 'businessStart' ? 'flex' : 'none';
         if (elBReport) elBReport.style.display = name === 'businessReport' ? 'flex' : 'none';
+        // ★今日の車 選択ストリップを更新(業務開始画面を出す時)★
+        if (name === 'businessStart' && typeof window._updateBizCarSelect === 'function')
+          window._updateBizCarSelect();
 
         // ★設計変更宣言 (2026-05-24・横画面サイドレール + grid・iOS Safari :has() bug 回避):
         //   body.classList で screen 状態を class detection 化。既存 :has() rule は・触らず並記。
@@ -12494,6 +12590,39 @@
               min-height: 16px;
             "
           ></div>
+          <!-- ★車の管理 (多台リスト・2026-06-26)★: 登録した車の一覧＋追加/選択/削除。
+               タップで選択→下の編集カードに読込・「保存」で確定。各車のKは車別に永続。 -->
+          <div
+            id="vehListCard"
+            style="
+              margin-top: 14px;
+              padding: 12px;
+              background: #f2f2f7;
+              border-radius: 10px;
+              font-size: 13px;
+            "
+          >
+            <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
+              🚗 車の管理 (タップで選択・下で編集)
+            </div>
+            <div id="vehListRows"></div>
+            <div
+              id="vehAddBtn"
+              style="
+                border: 2px dashed #007aff;
+                border-radius: 10px;
+                padding: 12px;
+                text-align: center;
+                color: #007aff;
+                font-weight: 700;
+                font-size: 14px;
+                cursor: pointer;
+                margin-top: 4px;
+              "
+            >
+              ＋ 車を追加
+            </div>
+          </div>
           <!-- ★随伴車情報 + OBD距離能力 (2026-06-09・固定随伴車のVIN紐付け・Tier判定)★
                VIN/メーカー/距離能力は接続プローブで自動取得。車種/型式/タイヤは車検証/側面から手入力(固定車1回)。
                VINキーで localStorage 保存。タイヤは認定の管理項目(交換→再較正)。 -->
@@ -12508,7 +12637,34 @@
             "
           >
             <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
-              🚗 随伴車情報 (固定1台・一度登録すれば恒久)
+              🚗 随伴車情報 (一度登録すれば恒久・名前で識別)
+            </div>
+            <!-- ★1km自動較正K (2026-06-26): 車の名前(自由)＋較正状態。名前は識別用・改名してもKは保持★ -->
+            <div
+              class="row"
+              style="justify-content: space-between; padding: 3px 0; align-items: center"
+            >
+              <span style="color: #8e8e93">車の名前(自由)</span>
+              <input
+                id="vehName"
+                type="text"
+                placeholder="例: アルト / 1号車"
+                style="
+                  width: 55%;
+                  padding: 4px 8px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  height: 30px;
+                  box-sizing: border-box;
+                  -webkit-appearance: none;
+                  appearance: none;
+                "
+              />
+            </div>
+            <div class="row" style="justify-content: space-between; padding: 3px 0">
+              <span style="color: #8e8e93">較正状態</span>
+              <span id="vehCalibStatus" style="font-weight: 700; color: #ff9500">⚠ 未較正</span>
             </div>
             <div class="row" style="justify-content: space-between; padding: 3px 0">
               <span style="color: #8e8e93">VIN(自動)</span>
@@ -13362,6 +13518,8 @@
           var vehKatashikiEl = document.getElementById('vehKatashiki');
           var vehTireEl = document.getElementById('vehTire');
           var vehTireCurrentEl = document.getElementById('vehTireCurrent');
+          var vehNameEl = document.getElementById('vehName'); // ★車の名前(自由・識別用)★
+          var vehCalibStatusEl = document.getElementById('vehCalibStatus'); // ★較正状態表示★
           var vehTireRatioDispEl = document.getElementById('vehTireRatioDisp');
           var vehObdCapEl = document.getElementById('vehObdCap');
           var btnVehSave = document.getElementById('btnVehSave');
@@ -13537,6 +13695,15 @@
                   year: info.year,
                   model: vehModelEl ? vehModelEl.value.trim() : '',
                   katashiki: vehKatashikiEl ? vehKatashikiEl.value.trim() : '',
+                  // ★車の名前(自由・識別用)★: 空なら前値維持。名前は表示用でキーでない=改名してもKは保持。
+                  name:
+                    vehNameEl && vehNameEl.value.trim()
+                      ? vehNameEl.value.trim()
+                      : _prev && _prev.name
+                        ? _prev.name
+                        : '',
+                  // ★1km自動較正Kの永続(健全窓Ks)★: 保存で消さず継承(較正完了データを保持)。
+                  calibKs: _prev && Array.isArray(_prev.calibKs) ? _prev.calibKs : [],
                   // ★工場タイヤ=変更可能(司さん要望2026-06-23)★: 入力が空でなければ今の値で上書き、
                   //   空なら前の値を維持(誤クリア防止)。以前の「初回ロック・上書き禁止」を廃止。
                   tire:
@@ -13561,8 +13728,27 @@
                 // ★主キー= dk_veh_active(固定随伴車の現役登録)。VINがあれば dk_veh_<VIN> にも保存。★
                 localStorage.setItem('dk_veh_active', JSON.stringify(prof));
                 if (_curVin) localStorage.setItem('dk_veh_' + _curVin, JSON.stringify(prof));
+                // ★多台レジストリにも保存 (2026-06-26)★: 編集中の車(_editingVehId)を更新・無ければ新規追加。
+                //   id を prof に焼いて active に設定。較正Ks(calibKs)は prof が継承済(消さない)。
+                try {
+                  if (window.VehRegistry) {
+                    var _carToSave = Object.assign({}, prof);
+                    if (window._editingVehId) _carToSave.id = window._editingVehId;
+                    var _savedCar = window.VehRegistry.save(localStorage, _carToSave);
+                    window._editingVehId = _savedCar.id;
+                    window.VehRegistry.setActive(localStorage, _savedCar.id);
+                    prof.id = _savedCar.id;
+                    localStorage.setItem('dk_veh_active', JSON.stringify(_savedCar));
+                    if (typeof window._renderVehList === 'function') window._renderVehList();
+                    if (typeof window._updateBizCarSelect === 'function')
+                      window._updateBizCarSelect();
+                  }
+                } catch (_) {
+                  /* レジストリ保存失敗は単一保存で機能継続 */
+                }
                 // ★trace に焼く + ログ出力 (型式別解析用・VIN無くても効く)★
                 window.DK_VEHICLE_PROFILE = prof;
+                if (typeof window._syncWorkerVehicle === 'function') window._syncWorkerVehicle(); // ★保存後 worker._vehicleId 同期(ON時のみ)★
                 _applyTireProfileToUI(prof); // 工場サイズロック + 比表示更新(worker反映は次の業務開始で)
                 try {
                   // eslint-disable-next-line no-console
@@ -13766,6 +13952,19 @@
               var p = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
               if (p) {
                 if (vehModelEl && !vehModelEl.value) vehModelEl.value = p.model || '';
+                if (vehNameEl && !vehNameEl.value) vehNameEl.value = p.name || '';
+                // ★較正状態表示★: 健全窓Ksが3以上=較正済(中央値K表示)・未満=未較正。
+                if (vehCalibStatusEl) {
+                  var _ks = p && Array.isArray(p.calibKs) ? p.calibKs : [];
+                  if (_ks.length >= 3 && window.KCalib && window.KCalib.median) {
+                    vehCalibStatusEl.textContent =
+                      '✓ 較正済 K=' + window.KCalib.median(_ks).toFixed(3);
+                    vehCalibStatusEl.style.color = '#34c759';
+                  } else {
+                    vehCalibStatusEl.textContent = '⚠ 未較正';
+                    vehCalibStatusEl.style.color = '#ff9500';
+                  }
+                }
                 if (vehKatashikiEl && !vehKatashikiEl.value)
                   vehKatashikiEl.value = p.katashiki || '';
                 if (vehTireEl && !vehTireEl.value) vehTireEl.value = p.tire || '';
@@ -13779,6 +13978,186 @@
               /* ignore */
             }
           })();
+          // ★今日の車 選択ストリップ更新 (業務開始画面・dk_veh_active から名前+較正状態を反映)★
+          window._updateBizCarSelect = function () {
+            try {
+              var nameEl = document.getElementById('bizCarName');
+              var calibEl = document.getElementById('bizCarCalib');
+              if (!nameEl || !calibEl) return;
+              var pv = JSON.parse(localStorage.getItem('dk_veh_active') || 'null');
+              nameEl.textContent =
+                pv && pv.name
+                  ? pv.name
+                  : pv && (pv.model || pv.katashiki)
+                    ? pv.model || pv.katashiki
+                    : '未登録';
+              var ks = pv && Array.isArray(pv.calibKs) ? pv.calibKs : [];
+              if (ks.length >= 3 && window.KCalib && window.KCalib.median) {
+                calibEl.textContent = '✓較正済 K=' + window.KCalib.median(ks).toFixed(3);
+                calibEl.style.color = '#34c759';
+              } else {
+                calibEl.textContent = '⚠未較正';
+                calibEl.style.color = '#ff9500';
+              }
+            } catch (_) {
+              /* 表示更新失敗は無害(距離/課金に無関係) */
+            }
+          };
+          window._updateBizCarSelect();
+          // ★車の管理(多台リスト)描画＋操作 (2026-06-26)★: VehRegistry を使って一覧/追加/選択/削除。
+          function _esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+              return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+          }
+          function _carStatusText(car) {
+            var ks = car && Array.isArray(car.calibKs) ? car.calibKs : [];
+            if (ks.length >= 3 && window.KCalib && window.KCalib.median)
+              return { t: '✓ 較正済 K=' + window.KCalib.median(ks).toFixed(3), c: '#34c759' };
+            return { t: '⚠ 未較正', c: '#ff9500' };
+          }
+          // ★監査P1是正: 車を切り替えた瞬間に worker._vehicleId を同期(K混入防止)★。
+          //   autoCalibK ON時のみ configVehicle 送信=OFFは何もしない=byte完全不変。
+          window._syncWorkerVehicle = function () {
+            if (window.DK_AUTO_CALIB_K && typeof Meter !== 'undefined' && Meter._postVehicleK) {
+              try {
+                Meter._postVehicleK();
+              } catch (_) {
+                /* 同期失敗は次業務開始で回復 */
+              }
+            }
+          };
+          function _loadCarIntoCard(car) {
+            if (!car) return;
+            window._editingVehId = car.id || null;
+            if (vehNameEl) vehNameEl.value = car.name || '';
+            if (vehModelEl) vehModelEl.value = car.model || '';
+            if (vehKatashikiEl) vehKatashikiEl.value = car.katashiki || '';
+            if (vehTireEl) vehTireEl.value = car.tire || '';
+            if (vehTireCurrentEl) vehTireCurrentEl.value = car.tireCurrent || '';
+            if (vehCalibStatusEl) {
+              var st = _carStatusText(car);
+              vehCalibStatusEl.textContent = st.t;
+              vehCalibStatusEl.style.color = st.c;
+            }
+            if (typeof _applyTireProfileToUI === 'function') _applyTireProfileToUI(car);
+          }
+          function _newCarInCard() {
+            window._editingVehId = null;
+            [vehNameEl, vehModelEl, vehKatashikiEl, vehTireEl, vehTireCurrentEl].forEach(
+              function (e) {
+                if (e) e.value = '';
+              }
+            );
+            if (vehCalibStatusEl) {
+              vehCalibStatusEl.textContent = '⚠ 未較正';
+              vehCalibStatusEl.style.color = '#ff9500';
+            }
+            if (vehNameEl) vehNameEl.focus();
+          }
+          window._renderVehList = function () {
+            try {
+              if (!window.VehRegistry) return;
+              var rowsEl = document.getElementById('vehListRows');
+              if (!rowsEl) return;
+              var cars = window.VehRegistry.list(localStorage);
+              var activeId = window.VehRegistry.getActiveId(localStorage);
+              rowsEl.innerHTML = '';
+              if (!cars.length) {
+                rowsEl.innerHTML =
+                  '<div style="color:#8e8e93;padding:6px 2px;">まだ車がありません。「＋車を追加」で登録してください。</div>';
+              }
+              cars.forEach(function (car) {
+                var st = _carStatusText(car);
+                var sel = car.id === activeId;
+                var row = document.createElement('div');
+                row.style.cssText =
+                  'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border-radius:9px;margin-bottom:6px;background:#fff;border:1px solid ' +
+                  (sel ? '#007aff' : '#e5e5ea') +
+                  ';';
+                var left = document.createElement('div');
+                left.style.cssText = 'flex:1;cursor:pointer;';
+                left.innerHTML =
+                  '<div style="font-weight:700;">' +
+                  (sel ? '🔵 ' : '⚪ ') +
+                  '🚗 ' +
+                  _esc(car.name || car.model || car.id) +
+                  '</div><div style="font-size:11px;font-weight:600;color:' +
+                  st.c +
+                  ';margin-top:2px;">' +
+                  st.t +
+                  '</div>';
+                left.onclick = function () {
+                  window.VehRegistry.setActive(localStorage, car.id);
+                  try {
+                    localStorage.setItem('dk_veh_active', JSON.stringify(car));
+                  } catch (_) {
+                    /* ignore */
+                  }
+                  window.DK_VEHICLE_PROFILE = car;
+                  window._syncWorkerVehicle(); // ★worker._vehicleId 即同期(K混入防止・ON時のみ)★
+                  _loadCarIntoCard(car);
+                  window._renderVehList();
+                  if (typeof window._updateBizCarSelect === 'function')
+                    window._updateBizCarSelect();
+                };
+                var del = document.createElement('div');
+                del.textContent = '🗑';
+                del.style.cssText = 'cursor:pointer;font-size:16px;color:#ff3b30;padding:4px 6px;';
+                del.onclick = function (ev) {
+                  ev.stopPropagation();
+                  if (!window.confirm((car.name || 'この車') + ' を削除しますか？')) return;
+                  window.VehRegistry.remove(localStorage, car.id);
+                  // ★監査P1是正: VIN紐付けバックアップも消す(同VIN再追加で削除車の古いKs蘇生を防ぐ・btnVehDeleteと挙動統一)。
+                  if (car.vin) {
+                    try {
+                      localStorage.removeItem('dk_veh_' + car.vin);
+                    } catch (_) {
+                      /* ignore */
+                    }
+                  }
+                  if (window._editingVehId === car.id) _newCarInCard();
+                  var act = window.VehRegistry.getActive(localStorage);
+                  // ★監査P1是正: 削除後の新active車を本体プロファイルにも反映★(取り残しで旧車にK保存/送信を防ぐ)。
+                  window.DK_VEHICLE_PROFILE = act || null;
+                  window._syncWorkerVehicle(); // ★worker._vehicleId 即同期★
+                  try {
+                    if (act) localStorage.setItem('dk_veh_active', JSON.stringify(act));
+                    else localStorage.removeItem('dk_veh_active');
+                  } catch (_) {
+                    /* ignore */
+                  }
+                  window._renderVehList();
+                  if (typeof window._updateBizCarSelect === 'function')
+                    window._updateBizCarSelect();
+                };
+                row.appendChild(left);
+                row.appendChild(del);
+                rowsEl.appendChild(row);
+              });
+            } catch (_) {
+              /* 描画失敗は距離/課金に無関係 */
+            }
+          };
+          var _vehAddBtnEl = document.getElementById('vehAddBtn');
+          if (_vehAddBtnEl)
+            _vehAddBtnEl.addEventListener('click', function () {
+              _newCarInCard();
+            });
+          // 初期: 旧単一→リスト移行して描画 + active を編集カードに読込
+          try {
+            if (window.VehRegistry) {
+              window.VehRegistry.migrate(localStorage);
+              var _act0 = window.VehRegistry.getActive(localStorage);
+              if (_act0) {
+                window.DK_VEHICLE_PROFILE = _act0; // ★active車(id+calibKs付き)を本体に=業務開始のrestoreKs用★
+                _loadCarIntoCard(_act0);
+              }
+              window._renderVehList();
+            }
+          } catch (_) {
+            /* ignore */
+          }
           if (typeof window.OBDClient === 'undefined') {
             // OBDClient 未 load → 何もしない (要素は静的初期表示のまま)
             if (noteEl) noteEl.textContent = 'OBD モジュール未ロード';

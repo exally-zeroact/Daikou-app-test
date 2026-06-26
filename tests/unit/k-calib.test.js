@@ -114,3 +114,121 @@ describe('KCalib.createKCalibrator', () => {
     expect(cal.getK()).toBeNull();
   });
 });
+
+describe('KCalib.decideCalibToast (見える化トースト判定・対立監査P0/P1是正)', () => {
+  it('autoCalibK OFF(null)は何も出さない', () => {
+    const r = KCalib.decideCalibToast(null, { lastN: -1, done: false });
+    expect(r.toast).toBeNull();
+    expect(r.long).toBeNull();
+  });
+
+  it('windows=0は何も出さない', () => {
+    const r = KCalib.decideCalibToast({ windows: 0, confident: false }, { lastN: -1, done: false });
+    expect(r.toast).toBeNull();
+    expect(r.long).toBeNull();
+  });
+
+  it('進捗: 1/3 → 2/3 を窓増分で1回ずつ', () => {
+    let st = { lastN: -1, done: false };
+    let r = KCalib.decideCalibToast({ windows: 1, confident: false }, st);
+    expect(r.toast).toBe('OBD較正中 1/3');
+    st = r.state;
+    // 同じwindows=1で再tick → 出さない(連発しない)
+    r = KCalib.decideCalibToast({ windows: 1, confident: false }, st);
+    expect(r.toast).toBeNull();
+    st = r.state;
+    r = KCalib.decideCalibToast({ windows: 2, confident: false }, st);
+    expect(r.toast).toBe('OBD較正中 2/3');
+  });
+
+  it('★完了は1回だけ★(windows=3→4→5 で連発しない=確定を嘘で名乗らない)', () => {
+    let st = { lastN: 2, done: false };
+    let r = KCalib.decideCalibToast({ windows: 3, confident: true, K: 1.025 }, st);
+    expect(r.long).toBe('OBD較正 完了\nこの区間の K = 1.025');
+    st = r.state;
+    expect(st.done).toBe(true);
+    // windows=4(まだ走行中・Kも動く)→ もう出さない
+    r = KCalib.decideCalibToast({ windows: 4, confident: true, K: 1.03 }, st);
+    expect(r.long).toBeNull();
+    expect(r.toast).toBeNull();
+    st = r.state;
+    r = KCalib.decideCalibToast({ windows: 5, confident: true, K: 1.028 }, st);
+    expect(r.long).toBeNull();
+  });
+
+  it('★新tracker(業務/県跨ぎ=windows減)で巻き戻し→再表示★', () => {
+    // 完了済み状態
+    let st = { lastN: 5, done: true };
+    // 2業務目/別県: windows が 1 に落ちる → 検知して 1/3 から再表示
+    let r = KCalib.decideCalibToast({ windows: 1, confident: false }, st);
+    expect(r.toast).toBe('OBD較正中 1/3');
+    expect(r.state.done).toBe(false);
+    st = r.state;
+    // その後 3窓で再び完了1回
+    r = KCalib.decideCalibToast({ windows: 3, confident: true, K: 1.02 }, st);
+    expect(r.long).toContain('K = 1.020');
+  });
+});
+
+describe('KCalib serialize/restoreKs (車別K永続化)', () => {
+  function steps(K, n) {
+    const a = [];
+    for (let i = 0; i < n; i++) a.push({ g: 10, v: 10 / K, dt: 1, acc: 5 });
+    return a;
+  }
+  function feed(cal, pairs) {
+    for (const p of pairs) cal.addPair(p.g, p.v, p.dt, p.acc);
+  }
+
+  it('★serialize→restoreで getK/confident/windows が完全一致(往復不変)★', () => {
+    const a = KCalib.createKCalibrator({ calibKm: 1.0 });
+    feed(a, steps(1.02, 100));
+    feed(a, steps(1.03, 100));
+    feed(a, steps(1.025, 100));
+    const blob = a.serialize();
+    expect(blob.ks.length).toBe(3);
+    // 別インスタンスへ復元
+    const b = KCalib.createKCalibrator({ calibKm: 1.0, restoreKs: blob.ks });
+    expect(b.windows()).toBe(3);
+    expect(b.confident()).toBe(true);
+    expect(b.getK()).toBeCloseTo(a.getK(), 6);
+  });
+
+  it('★復元すれば接続即confident(再較正不要)★', () => {
+    const b = KCalib.createKCalibrator({ calibKm: 1.0, restoreKs: [1.02, 1.025, 1.03] });
+    expect(b.confident()).toBe(true);
+    expect(b.getK()).toBeCloseTo(1.025, 3);
+  });
+
+  it('健全域外/非有限/非配列は復元時に捨てる(壊れた保存で誤K焼かない)', () => {
+    // 1.5(健全域外),NaN,文字列を混ぜても健全な3個だけ残る
+    const b = KCalib.createKCalibrator({
+      calibKm: 1.0,
+      restoreKs: [1.5, NaN, '1.02', 1.02, 1.025, 1.03],
+    });
+    expect(b.windows()).toBe(3);
+    expect(b.getK()).toBeCloseTo(1.025, 3);
+  });
+
+  it('復元データが空/不正なら未較正(getK=null or coldStartK)', () => {
+    expect(KCalib.createKCalibrator({ restoreKs: [] }).getK()).toBeNull();
+    expect(KCalib.createKCalibrator({ restoreKs: null }).getK()).toBeNull();
+    expect(KCalib.createKCalibrator({ restoreKs: 'broken' }).getK()).toBeNull();
+    expect(KCalib.createKCalibrator({ restoreKs: [1.02], coldStartK: 1.018 }).getK()).toBe(1.018); // 1窓<3=coldStart
+  });
+
+  it('ksCapで直近N窓に丸める(永続肥大防止)', () => {
+    const a = KCalib.createKCalibrator({ calibKm: 1.0, ksCap: 5 });
+    for (let i = 0; i < 10; i++) feed(a, steps(1.025, 100)); // 10窓
+    expect(a.windows()).toBe(5); // capで5に丸め
+    expect(a.serialize().ks.length).toBe(5);
+  });
+
+  it('restoreKs()メソッドで後から再注入できる', () => {
+    const a = KCalib.createKCalibrator({ calibKm: 1.0 });
+    expect(a.getK()).toBeNull();
+    a.restoreKs([1.02, 1.025, 1.03]);
+    expect(a.confident()).toBe(true);
+    expect(a.getK()).toBeCloseTo(1.025, 3);
+  });
+});

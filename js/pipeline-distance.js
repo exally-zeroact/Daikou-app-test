@@ -1897,17 +1897,23 @@ function createDistanceTracker(decoder, opts) {
   //   OFF(既定)では生成せず byte不変。Node=require / browser=self.KCalib(index.htmlで先読み)。
   let kCalibrator = null;
   if (cfg.autoCalibK === true) {
-    let _KC = null;
-    if (typeof self !== 'undefined' && self.KCalib)
-      _KC = self.KCalib; // worker/browser(importScripts)
-    // eslint-disable-next-line no-undef
-    else if (typeof require === 'function') _KC = require('./k-calib.js'); // Node(tests)
-    if (_KC && _KC.createKCalibrator) {
-      kCalibrator = _KC.createKCalibrator({
-        coldStartK: cfg.obdColdStartK > 0 ? cfg.obdColdStartK : undefined,
-        accMax: cfg.calMaxAccM,
-        calibKm: 1.0,
-      });
+    // ★STEP2: 車単位の共有較正器(map-matcherから externalKCalib 注入)があればそれを使う★
+    //   =県別tracker全部が同じ較正器を共有→県跨ぎ/業務resetでKが残る(=県跨ぎリセット根治)。
+    if (opts.externalKCalib && typeof opts.externalKCalib.addPair === 'function') {
+      kCalibrator = opts.externalKCalib;
+    } else {
+      let _KC = null;
+      if (typeof self !== 'undefined' && self.KCalib)
+        _KC = self.KCalib; // worker/browser(importScripts)
+      // eslint-disable-next-line no-undef
+      else if (typeof require === 'function') _KC = require('./k-calib.js'); // Node(tests)
+      if (_KC && _KC.createKCalibrator) {
+        kCalibrator = _KC.createKCalibrator({
+          coldStartK: cfg.obdColdStartK > 0 ? cfg.obdColdStartK : undefined,
+          accMax: cfg.calMaxAccM,
+          calibKm: 1.0,
+        });
+      }
     }
     // ★k-calib未ロード(importScripts失敗等)なら autoCalibK を無効化し従来経路へ安全フォールバック★
     //   (autoCalibK=true なのに kCalibrator=null で生∫v(K=1.0)に落ちる過少を防ぐ)。
@@ -2507,6 +2513,11 @@ function createDistanceTracker(decoder, opts) {
     },
     totalM: function () {
       return total;
+    },
+    // ★1km自動較正K の状態(見える化用・2026-06-26)★: autoCalibK時のみ {K,windows,confident,...}。
+    //   read-only=距離に影響しない。worker→main へ転送し「較正中 n/3 / 較正完了 K=…」を表示する。
+    calibStatus: function () {
+      return kCalibrator ? kCalibrator.snapshot() : null;
     },
     reset: function () {
       total = 0;

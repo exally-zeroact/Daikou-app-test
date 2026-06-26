@@ -48,7 +48,18 @@
         ? clamp(opts.coldStartK, cLo, cHi)
         : null;
 
-    let Ks = []; // 健全窓Kのみ(距離に焼く母集団)
+    const ksCap = opts.ksCap != null ? opts.ksCap : 40; // 永続Ksの上限(直近N窓・無制限肥大防止)
+    // ★永続復元(serialize往復)用サニタイズ★: 健全域[hLo,hHi]の有限値のみ・直近ksCapに丸める。不正は捨てる。
+    function _sanitizeKs(arr) {
+      if (!Array.isArray(arr)) return [];
+      const out = [];
+      for (let i = 0; i < arr.length; i++) {
+        const k = arr[i];
+        if (typeof k === 'number' && isFinite(k) && k >= hLo && k <= hHi) out.push(k);
+      }
+      return out.slice(-ksCap);
+    }
+    let Ks = _sanitizeKs(opts.restoreKs); // ★車別K永続から復元(無ければ[])=接続即confident可★
     let rejected = 0; // 健全域外で捨てた窓数(診断)
     let winG = 0,
       winIv = 0;
@@ -68,9 +79,10 @@
       accIv += iv;
       if (winG >= calibM && winIv > 0) {
         const k = winG / winIv;
-        if (isFinite(k) && k >= hLo && k <= hHi)
+        if (isFinite(k) && k >= hLo && k <= hHi) {
           Ks.push(k); // ★健全窓のみ採用(外れ窓は除外)
-        else rejected++;
+          if (Ks.length > ksCap) Ks.shift(); // 直近ksCap窓に丸める(永続/メモリ肥大防止)
+        } else rejected++;
         winG = 0;
         winIv = 0;
       }
@@ -91,6 +103,14 @@
 
     return {
       addPair: addPair,
+      // ★車別K永続化(2026-06-26)★: serialize()→localStorage保存 / restoreKs(arr)で再注入。
+      //   健全窓Ksのみ持ち運ぶ=接続時に restore すれば即 confident(再較正不要)。距離/課金に無関係。
+      serialize: function () {
+        return { v: 1, ks: Ks.slice(-ksCap) };
+      },
+      restoreKs: function (arr) {
+        Ks = _sanitizeKs(arr);
+      },
       getK: getK, // ★距離適用用(confident gate内蔵=3窓未満は学習K不採用)★
       provisionalK: provisionalK, // 診断/表示用(距離に焼かない)
       windows: function () {
@@ -124,5 +144,40 @@
     };
   }
 
-  return { createKCalibrator: createKCalibrator, median: median };
+  // ★較正トースト判定 純関数 (見える化・対立監査P0/P1是正 2026-06-26)★:
+  //   毎tick の calibStatus と前回state から「今出すトースト」を決める。表示層のみ・距離/課金に無関係。
+  //   監査是正: ①完了は『未収束→収束』で1回だけ(windows増で連発しない・Kを何度も確定と嘘で名乗らない)
+  //            ②新tracker(業務/県跨ぎ=windows減)を検知しカウンタ/完了フラグ巻き戻し→再表示する
+  //            ③文言は『この区間のK』(per-業務/県リセットの実態・VIN永続未実装ゆえ『以降この車』と断定しない)
+  //   cs: {windows,confident,K} or null(autoCalibK OFF=何も出さない) / state: {lastN,done}(初期 {lastN:-1,done:false})
+  //   返り: { toast, long, state } — toast=2秒(進捗) / long=5秒(完了) / どちらかnull。
+  function decideCalibToast(cs, state) {
+    const s = {
+      lastN: state && typeof state.lastN === 'number' ? state.lastN : -1,
+      done: !!(state && state.done),
+    };
+    const out = { toast: null, long: null, state: s };
+    if (!cs || typeof cs.windows !== 'number') return out;
+    if (cs.windows < s.lastN) {
+      s.lastN = -1;
+      s.done = false;
+    } // ★新tracker(windows減)=業務/県跨ぎ→巻き戻し
+    if (cs.confident && typeof cs.K === 'number') {
+      if (!s.done) {
+        s.done = true;
+        s.lastN = cs.windows;
+        out.long = 'OBD較正 完了\nこの区間の K = ' + cs.K.toFixed(3);
+      }
+    } else if (cs.windows >= 1 && cs.windows > s.lastN) {
+      s.lastN = cs.windows;
+      out.toast = 'OBD較正中 ' + cs.windows + '/3';
+    }
+    return out;
+  }
+
+  return {
+    createKCalibrator: createKCalibrator,
+    median: median,
+    decideCalibToast: decideCalibToast,
+  };
 });
