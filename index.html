@@ -4743,24 +4743,68 @@
           </div>
           <div style="color: #007aff; font-weight: 700; font-size: 13px">変更 ▼</div>
         </div>
-        <!-- ★今日の車 ドロップダウン(その場で選択/追加・設定に飛ばない・司さん要望2026-06-27)★ -->
+        <!-- ★今日の車 モーダル(中央カードで選択/追加・司さん要望2026-06-27・旧ドロップダウンがハリボテで作り直し)★ -->
         <div
-          id="bizCarDropdown"
-          onclick="event.stopPropagation()"
+          id="bizCarModal"
+          onclick="
+            if (event.target === this) {
+              window._closeBizCarModal && window._closeBizCarModal();
+            }
+          "
           style="
             display: none;
-            width: 80%;
-            max-width: 300px;
-            margin-top: -14px;
-            background: #fff;
-            border: 2px solid #007aff;
-            border-top: none;
-            border-radius: 0 0 12px 12px;
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            background: rgba(0, 0, 0, 0.45);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
             box-sizing: border-box;
-            overflow: hidden;
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
           "
-        ></div>
+        >
+          <div
+            style="
+              width: 100%;
+              max-width: 360px;
+              background: #fff;
+              border-radius: 16px;
+              overflow: hidden;
+              box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+            "
+          >
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 18px;
+                border-bottom: 1px solid #f0f0f0;
+              "
+            >
+              <span style="font-weight: 800; font-size: 16px; color: #1c1c1e">🚗 今日の車</span>
+              <button
+                type="button"
+                onclick="window._closeBizCarModal && window._closeBizCarModal()"
+                style="
+                  border: none;
+                  background: #f2f2f7;
+                  color: #555;
+                  width: 30px;
+                  height: 30px;
+                  border-radius: 50%;
+                  font-size: 15px;
+                  font-weight: 700;
+                  cursor: pointer;
+                  line-height: 1;
+                "
+              >
+                ✕
+              </button>
+            </div>
+            <div id="bizCarDropdown"></div>
+          </div>
+        </div>
         <!-- ★OBD接続ボタン (2026-06-27・司さん要望): 今日の車と業務開始の間に同じ幅で配置。
              OBDは重要なので目立たせる。青バーの #obdChip の click を呼んで接続/切断(トグル)。
              見た目(接続済=緑/未接続=青枠)は bindObdUI(500ms) が更新。 -->
@@ -14343,8 +14387,7 @@
                 if (typeof _loadCarIntoCard === 'function') _loadCarIntoCard(car);
               }
               if (typeof window._syncWorkerVehicle === 'function') window._syncWorkerVehicle();
-              var dd = document.getElementById('bizCarDropdown');
-              if (dd) dd.style.display = 'none';
+              if (typeof window._closeBizCarModal === 'function') window._closeBizCarModal();
               if (typeof window._updateBizCarSelect === 'function') window._updateBizCarSelect();
               if (typeof window._renderVehList === 'function') window._renderVehList();
               if (typeof window._updateCalibGate === 'function') window._updateCalibGate();
@@ -14422,28 +14465,36 @@
               /* 描画失敗は無害 */
             }
           };
+          window._closeBizCarModal = function () {
+            try {
+              var modal = document.getElementById('bizCarModal');
+              if (modal) modal.style.display = 'none';
+            } catch (_) {
+              /* ignore */
+            }
+          };
+          // 「変更▼」: 今日の車モーダルを開く(車の選択/追加)。
           window._toggleBizCarDropdown = function () {
             try {
-              var dd = document.getElementById('bizCarDropdown');
-              if (!dd) return;
-              if (!dd.style.display || dd.style.display === 'none') {
+              var modal = document.getElementById('bizCarModal');
+              if (!modal) return;
+              if (!modal.style.display || modal.style.display === 'none') {
                 window._renderBizCarDropdown();
-                dd.style.display = 'block';
+                modal.style.display = 'flex';
               } else {
-                dd.style.display = 'none';
+                modal.style.display = 'none';
               }
             } catch (_) {
               /* ignore */
             }
           };
-          // ★司さん2026-06-27: 「車を登録する」は登録フォームを直接開く(ドロップダウンを開くだけだと
-          //   未登録時は「＋車を追加」のひと欄が少し出るだけで分かりにくい指摘)。名前/タイヤ入力を即表示。
+          // ★司さん2026-06-27: 「車を登録する」はモーダルを開いて登録フォーム(名前/タイヤ)を即展開。
           window._openBizCarAdd = function () {
             try {
-              var dd = document.getElementById('bizCarDropdown');
-              if (!dd) return;
+              var modal = document.getElementById('bizCarModal');
+              if (!modal) return;
               window._renderBizCarDropdown();
-              dd.style.display = 'block';
+              modal.style.display = 'flex';
               var form = document.getElementById('bizCarAddForm');
               if (form) form.style.display = 'block';
               var n = document.getElementById('bizAddName');
