@@ -3641,6 +3641,54 @@
     </script>
   </head>
   <body ontouchstart="" onclick="wakeScreen()">
+    <!-- ★iPhone/iPad 未対応ゲート (2026-06-27・司さん決定F: Android専用)★:
+         OBD(車両診断)接続にWeb Bluetooth=Androidが必須。iOSは未対応である事を全画面で明示。
+         JS初期化は止めない(オーバーレイのみ)=既存E2E(platform-ios等の直接関数呼出)に影響しない。 -->
+    <div
+      id="iosUnsupported"
+      style="
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: #ffffff;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 32px 28px;
+        box-sizing: border-box;
+      "
+    >
+      <div style="font-size: 44px; letter-spacing: 4px">📱➡️🤖</div>
+      <div style="font-size: 21px; font-weight: 800; color: #1c1c1e; margin-top: 18px">
+        ダイコメは Android 専用です
+      </div>
+      <div
+        style="font-size: 15px; color: #555; margin-top: 14px; line-height: 1.8; max-width: 360px"
+      >
+        iPhone・iPad は<b>未対応</b>です。<br />
+        車両診断（OBD）接続に Android の機能が必要なため、<br />
+        <b>Android 端末の Chrome</b> でご利用ください。
+      </div>
+    </div>
+    <script>
+      // iOS(iPhone/iPad)判定→未対応オーバーレイ表示。JSの初期化は止めない(表示のみ)。
+      (function () {
+        try {
+          var ua = navigator.userAgent || '';
+          var isIOS =
+            /iPad|iPhone|iPod/.test(ua) ||
+            (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+          if (isIOS) {
+            var el = document.getElementById('iosUnsupported');
+            if (el) el.style.display = 'flex';
+          }
+        } catch (_) {
+          /* 判定失敗は無視(表示しない=従来通り) */
+        }
+      })();
+    </script>
     <!-- S1 (2026-05-10): 複数タブ guard・閲覧専用モードバナー -->
     <!-- 他タブが既に開いている時のみ表示・このタブは GPS/距離計算/課金を停止 -->
     <div
