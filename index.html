@@ -2874,7 +2874,9 @@
              └─────────────────────┴────────────┘ */
         body {
           display: grid !important;
-          grid-template-columns: 1fr 160px !important;
+          /* 横画面の右カラム=btn-area。160→200pxに拡幅(2026-06-27 司さん): 右ナビバー回避の
+             padding を足してもボタン(追加料金等)が折り返さない幅を確保するため。 */
+          grid-template-columns: 1fr 210px !important;
           grid-template-rows: 40px 1fr !important;
           grid-template-areas:
             'appbar appbar'
@@ -2977,7 +2979,7 @@
           /* ★横画面の右ナビバー(Androidホームボタン/ジェスチャー)から右ボタンを離す(2026-06-27 司さん)。
              青バーは全幅のまま(bodyには足さない=白隙間再発防止)、btn-area自身の右paddingで内側へ。
              env報告時は 20px+inset、0返し端末でも最低56pxの床でホームボタンを避ける。 */
-          padding: 16px max(56px, calc(20px + env(safe-area-inset-right))) 16px 16px !important;
+          padding: 16px max(76px, calc(36px + env(safe-area-inset-right))) 16px 16px !important;
           gap: 12px !important;
         }
         /* ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元 + iOS Safari :has() bug 回避):
@@ -3072,9 +3074,10 @@
         }
 
         /* 2026/05/01 横画面UI修正 */
-        /* 1. 待機画面のバランス調整：btn-area を狭く */
+        /* 1. 待機画面のバランス調整：btn-area 幅。
+           ★2026-06-27 司さん: 右ナビバー回避の右paddingを足してもボタンが折り返さない様 180→210px。 */
         .btn-area {
-          width: 180px !important;
+          width: 210px !important;
         }
 
         /* 2. 縦画面用 走行に戻るボタンを完全非表示 */
