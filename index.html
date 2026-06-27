@@ -3860,11 +3860,13 @@
             if (!window._mmPipeline || !window._mmPipeline.stats) return null;
             const s = window._mmPipeline.stats;
             const rawDone = (s.roadsOk || 0) + (s.auxOk || 0);
-            // ★司さん2026-06-27: 実ロード数が定数 TOTAL_FILES を超えると「376/329」と100%超え表示に
-            //   なる(定数が古い)。表示は総数で頭打ちにして 329/329 を超えないようにする。
-            const done = Math.min(rawDone, TOTAL_FILES);
-            const pct = Math.min(100, Math.round((rawDone / TOTAL_FILES) * 100));
-            return { done: done, total: TOTAL_FILES, pct: pct };
+            // ★司さん2026-06-27: 定数329は古く実ロードは376まで続く→従来は329で100%表示後も
+            //   読み込み継続=「100%で止まって遅い」誤認。完了(_bgLoadDone)まで最大99%・完了で100%に
+            //   して、100%=実完了=ボタン解除と同時にする(体感ラグ解消)。fraction(376/329)も廃止。
+            const pct = _checkBgLoadDone()
+              ? 100
+              : Math.min(99, Math.round((rawDone / TOTAL_FILES) * 100));
+            return { pct: pct };
           } catch (_) {
             return null;
           }
@@ -3904,10 +3906,7 @@
         function _updateProgress() {
           const p = _calcProgress();
           if (p) {
-            _setHint(
-              '📥 初回データ準備中 ' + p.pct + '% (' + p.done + '/' + p.total + ')',
-              'progress'
-            );
+            _setHint('📥 初回データ準備中 ' + p.pct + '%', 'progress');
           } else {
             _setHint('📥 初回データ準備中...', 'progress');
           }
@@ -4691,7 +4690,7 @@
             type="button"
             onclick="
               event.stopPropagation();
-              window._toggleBizCarDropdown && window._toggleBizCarDropdown();
+              window._openBizCarAdd && window._openBizCarAdd();
             "
             style="
               display: none;
@@ -14432,6 +14431,28 @@
                 dd.style.display = 'block';
               } else {
                 dd.style.display = 'none';
+              }
+            } catch (_) {
+              /* ignore */
+            }
+          };
+          // ★司さん2026-06-27: 「車を登録する」は登録フォームを直接開く(ドロップダウンを開くだけだと
+          //   未登録時は「＋車を追加」のひと欄が少し出るだけで分かりにくい指摘)。名前/タイヤ入力を即表示。
+          window._openBizCarAdd = function () {
+            try {
+              var dd = document.getElementById('bizCarDropdown');
+              if (!dd) return;
+              window._renderBizCarDropdown();
+              dd.style.display = 'block';
+              var form = document.getElementById('bizCarAddForm');
+              if (form) form.style.display = 'block';
+              var n = document.getElementById('bizAddName');
+              if (n) {
+                try {
+                  n.focus();
+                } catch (_f) {
+                  /* focus失敗は無害 */
+                }
               }
             } catch (_) {
               /* ignore */
