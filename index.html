@@ -3857,8 +3857,11 @@
           try {
             if (!window._mmPipeline || !window._mmPipeline.stats) return null;
             const s = window._mmPipeline.stats;
-            const done = (s.roadsOk || 0) + (s.auxOk || 0);
-            const pct = Math.min(100, Math.round((done / TOTAL_FILES) * 100));
+            const rawDone = (s.roadsOk || 0) + (s.auxOk || 0);
+            // ★司さん2026-06-27: 実ロード数が定数 TOTAL_FILES を超えると「376/329」と100%超え表示に
+            //   なる(定数が古い)。表示は総数で頭打ちにして 329/329 を超えないようにする。
+            const done = Math.min(rawDone, TOTAL_FILES);
+            const pct = Math.min(100, Math.round((rawDone / TOTAL_FILES) * 100));
             return { done: done, total: TOTAL_FILES, pct: pct };
           } catch (_) {
             return null;
@@ -4757,6 +4760,33 @@
             box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
           "
         ></div>
+        <!-- ★OBD接続ボタン (2026-06-27・司さん要望): 今日の車と業務開始の間に同じ幅で配置。
+             OBDは重要なので目立たせる。青バーの #obdChip の click を呼んで接続/切断(トグル)。
+             見た目(接続済=緑/未接続=青枠)は bindObdUI(500ms) が更新。 -->
+        <button
+          id="bizObdConnect"
+          type="button"
+          onclick="
+            event.stopPropagation();
+            var c = document.getElementById('obdChip');
+            if (c) c.click();
+          "
+          style="
+            width: 80%;
+            max-width: 300px;
+            box-sizing: border-box;
+            padding: 13px 14px;
+            background: #fff;
+            border: 2px solid #007aff;
+            border-radius: 12px;
+            color: #007aff;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+          "
+        >
+          🔌 OBDを接続
+        </button>
         <!-- 業務開始ボタン（中央配置・大ボタン） -->
         <button class="btn-business-start" onclick="onBusinessStart()">業務開始</button>
         <!-- ★OBD 接続は青バー(全画面常駐 #obdChip)に移設 (2026-06-08)★:
@@ -14287,7 +14317,7 @@
                     '① 車を登録',
                     hasCar ? car.name || car.model || '登録済' : '名前＋工場タイヤ(ドアのシール)'
                   ) +
-                  row(obdOn, '② OBDを接続', obdOn ? '接続中' : '青バーの「OBD接続」') +
+                  row(obdOn, '② OBDを接続', obdOn ? '接続中' : '下の「OBDを接続」ボタン') +
                   row(calibrated, '③ 較正走行', calibrated ? '較正済' : '見通しの良い道で走るだけ');
               var regBtn = document.getElementById('setupRegBtn');
               if (regBtn) regBtn.style.display = hasCar ? 'none' : 'block';
@@ -14763,6 +14793,21 @@
             //   緑で一目で分かるのでレ点(✓)は不要・ラベルは常に「OBD」。
             var obdChipEl = document.getElementById('obdChip');
             if (obdChipEl) obdChipEl.classList.toggle('connected', !!_obdConnected);
+            // ★業務開始画面のOBD接続ボタン: 接続済=緑/未接続=青枠で状態を反映(司さん2026-06-27)
+            var bizObd = document.getElementById('bizObdConnect');
+            if (bizObd) {
+              if (_obdConnected) {
+                bizObd.textContent = '✅ OBD接続済';
+                bizObd.style.background = '#34c759';
+                bizObd.style.borderColor = '#34c759';
+                bizObd.style.color = '#fff';
+              } else {
+                bizObd.textContent = '🔌 OBDを接続';
+                bizObd.style.background = '#fff';
+                bizObd.style.borderColor = '#007aff';
+                bizObd.style.color = '#007aff';
+              }
+            }
 
             // ── ★OBD切断警告 判定 (3ティアの ティアC と同じ境界)★ ──
             var drivingScreen = (function () {
