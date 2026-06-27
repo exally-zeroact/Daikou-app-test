@@ -14757,11 +14757,10 @@
             //   ラベルは常に「OBD」固定 (速度はメーター本体に表示・ここでは重複させない)。
             var obdDot = document.getElementById('obdDot');
             if (obdDot) obdDot.className = _obdConnected ? 'gps-dot ok' : 'gps-dot';
-            // ★司さん2026-06-27: 接続中は一目で分かるようチップ自体を緑ベタ塗り(connectedクラス)★
+            // ★司さん2026-06-27: 接続中はチップ自体を緑ベタ塗り(connectedクラス)で示す。
+            //   緑で一目で分かるのでレ点(✓)は不要・ラベルは常に「OBD」。
             var obdChipEl = document.getElementById('obdChip');
             if (obdChipEl) obdChipEl.classList.toggle('connected', !!_obdConnected);
-            var obdChipLbl = document.getElementById('obdChipLabel');
-            if (obdChipLbl) obdChipLbl.textContent = _obdConnected ? 'OBD ✓' : 'OBD';
 
             // ── ★OBD切断警告 判定 (3ティアの ティアC と同じ境界)★ ──
             var drivingScreen = (function () {
