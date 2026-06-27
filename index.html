@@ -2294,14 +2294,16 @@
       #obdDriveBadge {
         display: none !important;
       }
-      /* ★司さん2026-06-27: GPSチップは不要(GPSは内部で動作・OBDが主役)→非表示。
-         OBDチップ(=接続ボタン)は残す。:not(.obd-chip)でGPSピルだけ消す。 */
-      .appbar .gps-pill:not(.obd-chip) {
+      /* ★司さん2026-06-27: GPS/OBDチップのドットは削除(緑on緑で見にくい)。
+         状態は背景色だけで示す=GPSチップもOBDチップと同じ見た目に統一。 */
+      #obdDot,
+      #gpsDot {
         display: none !important;
       }
-      /* ★司さん2026-06-27: OBDチップのドットは緑on緑で見にくい→削除。状態は背景色(緑/半透明)+「OBD ✓/OBD」で示す。 */
-      #obdDot {
-        display: none !important;
+      /* GPSピル: GPS良好(dotが.ok)のとき緑ベタ塗り = OBD接続中と同じ表現。 */
+      .appbar .gps-pill:not(.obd-chip):has(.gps-dot.ok) {
+        background: #34c759;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35) inset;
       }
       /* ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能):
          driving-grid 内の経由地点記録カード。既存 meter-card と同じ border-radius / padding
