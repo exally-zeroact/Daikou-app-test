@@ -2290,9 +2290,17 @@
         color: #ff3b30;
         margin-top: 4px;
       }
-      /* ★司さん要望2026-06-27: 走行距離カードの下のGPS/OBDソースバッジ(📡GPS/🟢OBD)だけ非表示。
-         青バー上のGPS/OBDチップ(=接続ボタン兼用)は残す。 */
+      /* ★司さん要望2026-06-27: 走行距離カードの下のGPS/OBDソースバッジ(📡GPS/🟢OBD)を非表示。 */
       #obdDriveBadge {
+        display: none !important;
+      }
+      /* ★司さん2026-06-27: GPSチップは不要(GPSは内部で動作・OBDが主役)→非表示。
+         OBDチップ(=接続ボタン)は残す。:not(.obd-chip)でGPSピルだけ消す。 */
+      .appbar .gps-pill:not(.obd-chip) {
+        display: none !important;
+      }
+      /* ★司さん2026-06-27: OBDチップのドットは緑on緑で見にくい→削除。状態は背景色(緑/半透明)+「OBD ✓/OBD」で示す。 */
+      #obdDot {
         display: none !important;
       }
       /* ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能):
