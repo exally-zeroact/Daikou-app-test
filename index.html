@@ -2974,7 +2974,10 @@
            3 ボタン同じ横幅 100% (= btn-area width 160 - padding 32 = 128px) / gap 12px。 */
         .btn-area {
           justify-content: center !important;
-          padding: 16px !important;
+          /* ★横画面の右ナビバー(Androidホームボタン/ジェスチャー)から右ボタンを離す(2026-06-27 司さん)。
+             青バーは全幅のまま(bodyには足さない=白隙間再発防止)、btn-area自身の右paddingで内側へ。
+             env報告時は 20px+inset、0返し端末でも最低56pxの床でホームボタンを避ける。 */
+          padding: 16px max(56px, calc(20px + env(safe-area-inset-right))) 16px 16px !important;
           gap: 12px !important;
         }
         /* ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元 + iOS Safari :has() bug 回避):
