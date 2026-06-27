@@ -14425,8 +14425,10 @@
                 '<div id="bizCarAddRow" style="padding:11px 14px;cursor:pointer;border-top:1px solid #eee;color:#007aff;font-weight:700;font-size:14px;text-align:center;">＋ 車を追加</div>' +
                 '<div id="bizCarAddForm" style="display:none;padding:11px 14px;border-top:1px solid #eee;background:#f7f7f9;">' +
                 '<input id="bizAddName" placeholder="車の名前(例:アルト)" style="width:100%;padding:7px 9px;border:1px solid #d1d1d6;border-radius:7px;font-size:13px;margin-bottom:6px;box-sizing:border-box;-webkit-appearance:none;height:34px;"/>' +
-                '<div style="font-size:11px;color:#8c8c8c;margin-bottom:4px;line-height:1.5;">タイヤサイズ（標準＝<b>運転席ドアのシール</b>／タイヤを替えてる場合は<b>今ついてるサイズ</b>）</div>' +
+                '<div style="font-size:11px;color:#8c8c8c;margin-bottom:4px;line-height:1.4;">工場タイヤ（<b>運転席ドアのシール</b>のサイズ）</div>' +
                 '<input id="bizAddTire" placeholder="例:155/65R14" style="width:100%;padding:7px 9px;border:1px solid #d1d1d6;border-radius:7px;font-size:13px;margin-bottom:8px;box-sizing:border-box;-webkit-appearance:none;height:34px;"/>' +
+                '<div style="font-size:11px;color:#8c8c8c;margin-bottom:4px;line-height:1.4;">今のタイヤ（<b>サイズが違う場合のみ</b>・替えてなければ空欄）</div>' +
+                '<input id="bizAddTireCurrent" placeholder="例:165/55R15" style="width:100%;padding:7px 9px;border:1px solid #d1d1d6;border-radius:7px;font-size:13px;margin-bottom:8px;box-sizing:border-box;-webkit-appearance:none;height:34px;"/>' +
                 '<button id="bizAddSave" type="button" style="width:100%;padding:9px;background:#007aff;color:#fff;border:none;border-radius:7px;font-weight:700;font-size:14px;cursor:pointer;">追加して選択</button></div>';
               dd.innerHTML = html;
               Array.prototype.forEach.call(dd.querySelectorAll('.bizCarOpt'), function (opt) {
@@ -14449,15 +14451,22 @@
                 saveBtn.onclick = function () {
                   var nm = ((document.getElementById('bizAddName') || {}).value || '').trim();
                   var tr = ((document.getElementById('bizAddTire') || {}).value || '').trim();
+                  var trc = (
+                    (document.getElementById('bizAddTireCurrent') || {}).value || ''
+                  ).trim();
                   if (!nm) {
                     var n = document.getElementById('bizAddName');
                     if (n) n.focus();
                     return;
                   }
+                  // 今のタイヤ(交換)がサイズ違いなら円周比で補正。設定の車管理と同じ_computeTireRatioを流用。
+                  var ratio =
+                    typeof _computeTireRatio === 'function' ? _computeTireRatio(tr, trc) : 1.0;
                   var saved = window.VehRegistry.save(localStorage, {
                     name: nm,
                     tire: tr,
-                    tireRatio: 1.0,
+                    tireCurrent: trc,
+                    tireRatio: ratio,
                   });
                   _bizSelectCar(saved.id);
                 };
