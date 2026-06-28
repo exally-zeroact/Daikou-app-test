@@ -4767,6 +4767,10 @@
             style="
               width: 100%;
               max-width: 360px;
+              max-height: calc(100vh - 40px);
+              max-height: calc(100dvh - 40px);
+              display: flex;
+              flex-direction: column;
               background: #fff;
               border-radius: 16px;
               overflow: hidden;
@@ -4775,6 +4779,7 @@
           >
             <div
               style="
+                flex-shrink: 0;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
@@ -4802,7 +4807,10 @@
                 ✕
               </button>
             </div>
-            <div id="bizCarDropdown"></div>
+            <div
+              id="bizCarDropdown"
+              style="overflow-y: auto; -webkit-overflow-scrolling: touch"
+            ></div>
           </div>
         </div>
         <!-- ★OBD接続ボタン (2026-06-27・司さん要望): 今日の車と業務開始の間に同じ幅で配置。
