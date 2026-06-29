@@ -4154,8 +4154,9 @@
           _saveConsent('dismissed');
           _hideBanner();
         };
-        // 初回起動時のみ表示
-        if (!_hasConsent()) {
+        // ★2026-06-30 司さん裁定A「起動オンボーディングはいらない」: データ収集バナーを自動表示しない
+        //   (false && で無効化)。データ収集(訓練/trace)は設定からのopt-inのみ・規約同意は外販時LP側へ。
+        if (false && !_hasConsent()) {
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', _showBanner);
           } else {
@@ -9651,8 +9652,10 @@
         if (isInstalled) return;
         // 完了済みならスキップ
         if (done) return;
-        // Safari初回訪問時のみ表示
-        document.getElementById('tutorialOverlay').classList.add('show');
+        // ★2026-06-30 司さん裁定A「起動オンボーディングはいらない・実務専用に」: チュートリアル
+        //   (ようこそ/センサー許可/ホーム画面に追加 の3画面)を起動時に自動表示しない。
+        //   markupは温存(使い方等から手動表示可)。センサー許可は業務開始画面の既存ブロックで業務開始時に要求。
+        // document.getElementById('tutorialOverlay').classList.add('show');
       })();
 
       // (2026-05-10) _tutorialPage は script 先頭に移動済 (TDZ 対策)
