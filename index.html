@@ -10860,6 +10860,56 @@
                 _msg('ログイン失敗(ネットワーク)', false);
               });
           }
+          function _signup() {
+            const em = ((document.getElementById('devAdminEmail') || {}).value || '').trim();
+            const pw = (document.getElementById('devAdminPass') || {}).value || '';
+            if (!em || !pw) {
+              _msg('メールとパスワードを入力', false);
+              return;
+            }
+            if (pw.length < 6) {
+              _msg('パスワードは6文字以上にしてください', false);
+              return;
+            }
+            _msg('アカウント作成中…');
+            fetch(SB_URL + '/auth/v1/signup', {
+              method: 'POST',
+              headers: { apikey: SB_ANON, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: em, password: pw }),
+            })
+              .then(function (r) {
+                return r.json().then(function (j) {
+                  return { ok: r.ok, j: j };
+                });
+              })
+              .then(function (res) {
+                if (!res.ok) {
+                  _msg(
+                    (res.j && (res.j.error_description || res.j.msg || res.j.message)) ||
+                      '登録失敗',
+                    false
+                  );
+                  return;
+                }
+                if (res.j && res.j.access_token) {
+                  try {
+                    sessionStorage.setItem(TOKEN_KEY, res.j.access_token);
+                  } catch (_) {
+                    /* ignore */
+                  }
+                  const who = document.getElementById('devAdminWho');
+                  if (who) who.textContent = 'ログイン中: ' + em;
+                  _showPanel(true);
+                  _msg('アカウント作成＆ログインしました', true);
+                  _loadDevices();
+                } else {
+                  _msg('登録しました。確認後ログインしてください', true);
+                }
+              })
+              .catch(function () {
+                _msg('登録失敗(ネットワーク)', false);
+              });
+          }
           function _add() {
             const id = ((document.getElementById('devAddId') || {}).value || '').trim();
             const lb = ((document.getElementById('devAddLabel') || {}).value || '').trim();
@@ -10915,6 +10965,8 @@
           function _wireAdmin() {
             const lb = document.getElementById('devAdminLoginBtn');
             if (lb) lb.onclick = _login;
+            const sb = document.getElementById('devAdminSignupBtn');
+            if (sb) sb.onclick = _signup;
             const ab = document.getElementById('devAddBtn');
             if (ab) ab.onclick = _add;
             const ob = document.getElementById('devAdminLogoutBtn');
@@ -13231,6 +13283,24 @@
                 "
               >
                 ログイン
+              </button>
+              <button
+                id="devAdminSignupBtn"
+                type="button"
+                style="
+                  width: 100%;
+                  padding: 8px;
+                  margin-top: 6px;
+                  background: #fff;
+                  color: #007aff;
+                  border: 1.5px solid #007aff;
+                  border-radius: 8px;
+                  font-size: 13px;
+                  font-weight: 700;
+                  cursor: pointer;
+                "
+              >
+                はじめての方：新規登録（上の欄に決めたメール+パスワードを入れて押す）
               </button>
             </div>
             <!-- ログイン後 -->
