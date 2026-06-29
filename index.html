@@ -7921,7 +7921,11 @@
         //   未登録 / expired 時は・showLicenseGate で・ゲート画面表示・業務開始 block
         //   絶対ルール準拠: distance_m / 課金距離ロジックには・触れない
         try {
+          // ★D裁定(2026-06-28): ライセンスゲートは既定OFF。localStorage DK_LICENSE_GATE_ON==='1' の
+          //   端末だけ発動(司さん端末/本番展開で明示ON)。既定OFFで E2E・既存ユーザー・未登録は素通り
+          //   =新方式ONで全員ブロックの事故を防ぐ。OFF時は License 未load と同じく従来挙動。
           if (
+            localStorage.getItem('DK_LICENSE_GATE_ON') === '1' &&
             typeof window.License !== 'undefined' &&
             typeof window.License.checkBeforeBusinessStart === 'function'
           ) {
