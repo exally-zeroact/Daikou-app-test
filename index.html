@@ -10724,6 +10724,214 @@
           else _wireLicenseUI();
         })();
 
+        // ★端末管理(管理者) 配線 (2026-06-29): Supabase auth(REST) + dk_register/list/remove RPC★
+        //   ログイン→自社の端末を一覧/追加/削除(SQL不要)。token は sessionStorage(管理操作のみ・揮発)。
+        (function () {
+          const SB_URL = 'https://tnfwipbgfgjaymlszeid.supabase.co';
+          const SB_ANON =
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
+          const TOKEN_KEY = 'DK_ADMIN_TOKEN';
+          function _msg(t, ok) {
+            const e = document.getElementById('devAdminMsg');
+            if (e) {
+              e.textContent = t || '';
+              e.style.color = ok === false ? '#ff3b30' : ok ? '#34c759' : '#8e8e93';
+            }
+          }
+          function _token() {
+            try {
+              return sessionStorage.getItem(TOKEN_KEY);
+            } catch (_) {
+              return null;
+            }
+          }
+          function _hdr() {
+            const h = { apikey: SB_ANON, 'Content-Type': 'application/json' };
+            const t = _token();
+            if (t) h.Authorization = 'Bearer ' + t;
+            return h;
+          }
+          function _esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+              return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+          }
+          function _showPanel(on) {
+            const lg = document.getElementById('devAdminLogin');
+            const pn = document.getElementById('devAdminPanel');
+            if (lg) lg.style.display = on ? 'none' : 'block';
+            if (pn) pn.style.display = on ? 'block' : 'none';
+          }
+          function _logout() {
+            try {
+              sessionStorage.removeItem(TOKEN_KEY);
+            } catch (_) {
+              /* ignore */
+            }
+            _showPanel(false);
+          }
+          function _loadDevices() {
+            fetch(SB_URL + '/rest/v1/rpc/dk_list_my_devices', {
+              method: 'POST',
+              headers: _hdr(),
+              body: '{}',
+            })
+              .then(function (r) {
+                if (r.status === 401) {
+                  _logout();
+                  _msg('セッション切れ・再ログインしてください', false);
+                  return null;
+                }
+                return r.ok ? r.json() : null;
+              })
+              .then(function (rows) {
+                const el = document.getElementById('devAdminList');
+                if (!el) return;
+                if (!Array.isArray(rows)) {
+                  el.innerHTML = '';
+                  return;
+                }
+                if (rows.length === 0) {
+                  el.innerHTML = '<div style="color:#8e8e93;">まだ端末が登録されていません</div>';
+                  _msg('登録端末: 0台', true);
+                  return;
+                }
+                el.innerHTML = rows
+                  .map(function (d) {
+                    return (
+                      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid #e5e5ea;">' +
+                      '<span style="flex:1;"><b>' +
+                      _esc(d.label || '(無名)') +
+                      '</b><br><span style="font-family:monospace;font-size:10px;color:#8e8e93;word-break:break-all;">' +
+                      _esc(d.device_id) +
+                      '</span></span>' +
+                      '<button class="devRm" data-id="' +
+                      _esc(d.device_id) +
+                      '" style="background:#fff;color:#ff3b30;border:1px solid #ff3b30;border-radius:6px;font-size:12px;font-weight:700;padding:5px 10px;cursor:pointer;">削除</button></div>'
+                    );
+                  })
+                  .join('');
+                Array.prototype.forEach.call(el.querySelectorAll('.devRm'), function (b) {
+                  b.onclick = function () {
+                    _remove(b.getAttribute('data-id'));
+                  };
+                });
+                _msg('登録端末: ' + rows.length + '台', true);
+              })
+              .catch(function () {
+                _msg('一覧取得に失敗(オンライン確認)', false);
+              });
+          }
+          function _login() {
+            const em = ((document.getElementById('devAdminEmail') || {}).value || '').trim();
+            const pw = (document.getElementById('devAdminPass') || {}).value || '';
+            if (!em || !pw) {
+              _msg('メールとパスワードを入力', false);
+              return;
+            }
+            _msg('ログイン中…');
+            fetch(SB_URL + '/auth/v1/token?grant_type=password', {
+              method: 'POST',
+              headers: { apikey: SB_ANON, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: em, password: pw }),
+            })
+              .then(function (r) {
+                return r.json().then(function (j) {
+                  return { ok: r.ok, j: j };
+                });
+              })
+              .then(function (res) {
+                if (!res.ok || !res.j || !res.j.access_token) {
+                  _msg((res.j && (res.j.error_description || res.j.msg)) || 'ログイン失敗', false);
+                  return;
+                }
+                try {
+                  sessionStorage.setItem(TOKEN_KEY, res.j.access_token);
+                } catch (_) {
+                  /* ignore */
+                }
+                const who = document.getElementById('devAdminWho');
+                if (who) who.textContent = 'ログイン中: ' + em;
+                _showPanel(true);
+                _msg('');
+                _loadDevices();
+              })
+              .catch(function () {
+                _msg('ログイン失敗(ネットワーク)', false);
+              });
+          }
+          function _add() {
+            const id = ((document.getElementById('devAddId') || {}).value || '').trim();
+            const lb = ((document.getElementById('devAddLabel') || {}).value || '').trim();
+            if (!id) {
+              _msg('端末IDを貼ってください', false);
+              return;
+            }
+            _msg('登録中…');
+            fetch(SB_URL + '/rest/v1/rpc/dk_register_device', {
+              method: 'POST',
+              headers: _hdr(),
+              body: JSON.stringify({ p_device_id: id, p_label: lb }),
+            })
+              .then(function (r) {
+                if (r.status === 401) {
+                  _logout();
+                  _msg('セッション切れ・再ログイン', false);
+                  return;
+                }
+                if (!r.ok) {
+                  _msg('登録失敗', false);
+                  return;
+                }
+                const i = document.getElementById('devAddId');
+                const l = document.getElementById('devAddLabel');
+                if (i) i.value = '';
+                if (l) l.value = '';
+                _msg('登録しました', true);
+                _loadDevices();
+              })
+              .catch(function () {
+                _msg('登録失敗(ネットワーク)', false);
+              });
+          }
+          function _remove(id) {
+            fetch(SB_URL + '/rest/v1/rpc/dk_remove_device', {
+              method: 'POST',
+              headers: _hdr(),
+              body: JSON.stringify({ p_device_id: id }),
+            })
+              .then(function (r) {
+                if (r.ok) {
+                  _msg('削除しました', true);
+                  _loadDevices();
+                } else {
+                  _msg('削除失敗', false);
+                }
+              })
+              .catch(function () {
+                _msg('削除失敗', false);
+              });
+          }
+          function _wireAdmin() {
+            const lb = document.getElementById('devAdminLoginBtn');
+            if (lb) lb.onclick = _login;
+            const ab = document.getElementById('devAddBtn');
+            if (ab) ab.onclick = _add;
+            const ob = document.getElementById('devAdminLogoutBtn');
+            if (ob) ob.onclick = _logout;
+            // 既存セッションあればパネル復帰
+            if (_token()) {
+              _showPanel(true);
+              _loadDevices();
+            } else {
+              _showPanel(false);
+            }
+          }
+          if (document.readyState === 'loading')
+            document.addEventListener('DOMContentLoaded', _wireAdmin);
+          else _wireAdmin();
+        })();
+
         // ★設計変更宣言 (2026-05-15・Phase E・ESC ハンドラ追加):
         //   ESC キー押下で現在 .spa-overlay.show 状態のオーバーレイを閉じる。
         //   従来は appbar-back ボタン (overlay 内左上 ＜) か bottom-nav 業務タブのみで close 可能だった。
@@ -12952,6 +13160,153 @@
             >
               再認証（オンライン確認）
             </button>
+          </div>
+          <!-- ★端末管理(管理者・2026-06-29)★: ログイン→自社の端末を一覧/追加/削除。SQL不要。
+               各端末はログインアカウント(tenant)所有。RPC dk_register_device/dk_list_my_devices/dk_remove_device。 -->
+          <div
+            id="deviceAdminCard"
+            style="
+              margin-top: 14px;
+              padding: 12px;
+              background: #f2f2f7;
+              border-radius: 10px;
+              font-size: 13px;
+            "
+          >
+            <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
+              👥 端末管理（管理者）
+            </div>
+            <!-- 未ログイン -->
+            <div id="devAdminLogin">
+              <div style="color: #8e8e93; margin-bottom: 6px; font-size: 12px">
+                ログインすると、会社の端末を追加/削除できます（請求/給与と同じアカウント）。
+              </div>
+              <input
+                id="devAdminEmail"
+                type="email"
+                placeholder="メールアドレス"
+                autocomplete="username"
+                style="
+                  width: 100%;
+                  padding: 8px 9px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 7px;
+                  font-size: 13px;
+                  margin-bottom: 6px;
+                  box-sizing: border-box;
+                  height: 36px;
+                  -webkit-appearance: none;
+                "
+              />
+              <input
+                id="devAdminPass"
+                type="password"
+                placeholder="パスワード"
+                autocomplete="current-password"
+                style="
+                  width: 100%;
+                  padding: 8px 9px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 7px;
+                  font-size: 13px;
+                  margin-bottom: 8px;
+                  box-sizing: border-box;
+                  height: 36px;
+                  -webkit-appearance: none;
+                "
+              />
+              <button
+                id="devAdminLoginBtn"
+                type="button"
+                style="
+                  width: 100%;
+                  padding: 9px;
+                  background: #007aff;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  font-weight: 700;
+                  cursor: pointer;
+                "
+              >
+                ログイン
+              </button>
+            </div>
+            <!-- ログイン後 -->
+            <div id="devAdminPanel" style="display: none">
+              <div
+                id="devAdminWho"
+                style="font-size: 11px; color: #8e8e93; margin-bottom: 8px"
+              ></div>
+              <div id="devAdminList" style="margin-bottom: 10px"></div>
+              <div style="font-weight: 700; margin: 8px 0 4px; color: #1c1c1e">＋ 端末を追加</div>
+              <input
+                id="devAddId"
+                placeholder="端末ID（各スマホの🔑ライセンスからコピー）"
+                style="
+                  width: 100%;
+                  padding: 8px 9px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 7px;
+                  font-size: 12px;
+                  margin-bottom: 6px;
+                  box-sizing: border-box;
+                  height: 36px;
+                  -webkit-appearance: none;
+                  font-family: monospace;
+                "
+              />
+              <input
+                id="devAddLabel"
+                placeholder="名前（例: 1号車）"
+                style="
+                  width: 100%;
+                  padding: 8px 9px;
+                  border: 1px solid #d1d1d6;
+                  border-radius: 7px;
+                  font-size: 13px;
+                  margin-bottom: 8px;
+                  box-sizing: border-box;
+                  height: 36px;
+                  -webkit-appearance: none;
+                "
+              />
+              <button
+                id="devAddBtn"
+                type="button"
+                style="
+                  width: 100%;
+                  padding: 9px;
+                  background: #34c759;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 14px;
+                  font-weight: 700;
+                  cursor: pointer;
+                "
+              >
+                この端末IDを登録する
+              </button>
+              <button
+                id="devAdminLogoutBtn"
+                type="button"
+                style="
+                  width: 100%;
+                  padding: 7px;
+                  background: transparent;
+                  color: #8e8e93;
+                  border: none;
+                  font-size: 12px;
+                  cursor: pointer;
+                  margin-top: 8px;
+                "
+              >
+                ログアウト
+              </button>
+            </div>
+            <div id="devAdminMsg" style="font-size: 12px; margin-top: 8px; min-height: 16px"></div>
           </div>
           <!-- ★車の管理 (多台リスト・2026-06-26)★: 登録した車の一覧＋追加/選択/削除。
                タップで選択→下の編集カードに読込・「保存」で確定。各車のKは車別に永続。 -->
