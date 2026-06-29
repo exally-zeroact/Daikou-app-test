@@ -23,7 +23,7 @@ jobs:
     # 2026-05-18: 5 → 10 拡大 (= npm ci cold cache 時の 5m 超過自動 cancel 対策)
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
