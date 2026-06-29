@@ -10633,16 +10633,96 @@
           el.setAttribute('aria-hidden', 'true');
         };
 
-        // 起動時・License 初期化 (= 非 block・promise・cache 更新のみ)
-        //   ・WiFi 接続あれば・RTDB 問い合わせ・cache 更新
-        //   ・オフライン・network 失敗時は・既存 cache 利用 (= 業務開始時に gate 判定)
-        if (typeof window.License !== 'undefined' && typeof window.License.init === 'function') {
-          try {
-            window.License.init();
-          } catch (_) {
-            /* graceful skip */
+        // 起動時・License 初期化 (= 非 block・promise・cache 更新のみ) + 設定のライセンスUI配線
+        //   ・WiFi 接続あれば・Supabase 問い合わせ・cache 更新 / オフライン時は既存cache
+        //   ・設定の #licenseCard: 端末ID表示/コピー・ゲートON/OFF・状態・再認証
+        (function () {
+          function _fmtLicState(st) {
+            const m = {
+              licensed: '✅ 有効',
+              grace: '⚠ 猶予中(期限切れ・要再認証)',
+              expired: '⛔ 期限切れ',
+              unregistered: '未登録',
+              unknown: '確認中…',
+            };
+            return m[st] || st;
           }
-        }
+          window._updateLicenseUI = function () {
+            try {
+              if (typeof window.License === 'undefined') return;
+              const idEl = document.getElementById('licDeviceId');
+              if (idEl) idEl.textContent = window.License.getDeviceId();
+              const stEl = document.getElementById('licState');
+              if (stEl) stEl.textContent = _fmtLicState(window.License.getState().state);
+              const tg = document.getElementById('licGateToggle');
+              if (tg) tg.checked = localStorage.getItem('DK_LICENSE_GATE_ON') === '1';
+            } catch (_) {
+              /* 表示のみ */
+            }
+          };
+          function _wireLicenseUI() {
+            const copyBtn = document.getElementById('licCopyBtn');
+            if (copyBtn)
+              copyBtn.onclick = function () {
+                try {
+                  const id =
+                    typeof window.License !== 'undefined' ? window.License.getDeviceId() : '';
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(id).then(function () {
+                      if (typeof showToast === 'function') showToast('端末IDをコピーしました');
+                    });
+                  } else if (typeof showToast === 'function') {
+                    showToast(id);
+                  }
+                } catch (_) {
+                  /* ignore */
+                }
+              };
+            const tg = document.getElementById('licGateToggle');
+            if (tg)
+              tg.onchange = function () {
+                try {
+                  if (tg.checked) localStorage.setItem('DK_LICENSE_GATE_ON', '1');
+                  else localStorage.removeItem('DK_LICENSE_GATE_ON');
+                  if (typeof showToast === 'function')
+                    showToast('ライセンスゲート: ' + (tg.checked ? 'ON(有効)' : 'OFF'));
+                } catch (_) {
+                  /* ignore */
+                }
+              };
+            const rf = document.getElementById('licRefreshBtn');
+            if (rf)
+              rf.onclick = function () {
+                try {
+                  if (typeof showToast === 'function') showToast('オンライン確認中…');
+                  if (typeof window.License !== 'undefined' && window.License.refresh) {
+                    window.License.refresh().then(function () {
+                      window._updateLicenseUI();
+                      if (typeof showToast === 'function') showToast('再認証 完了');
+                    });
+                  }
+                } catch (_) {
+                  /* ignore */
+                }
+              };
+            // 起動時 online 認証 → UI 反映
+            if (
+              typeof window.License !== 'undefined' &&
+              typeof window.License.init === 'function'
+            ) {
+              try {
+                window.License.init().then(function () {
+                  window._updateLicenseUI();
+                });
+              } catch (_) {
+                window._updateLicenseUI();
+              }
+            }
+          }
+          if (document.readyState === 'loading')
+            document.addEventListener('DOMContentLoaded', _wireLicenseUI);
+          else _wireLicenseUI();
+        })();
 
         // ★設計変更宣言 (2026-05-15・Phase E・ESC ハンドラ追加):
         //   ESC キー押下で現在 .spa-overlay.show 状態のオーバーレイを閉じる。
@@ -12802,6 +12882,77 @@
               min-height: 16px;
             "
           ></div>
+          <!-- ★ライセンス(台数管理・2026-06-28・Supabase dk_棚)★: 端末ID表示/コピー・ゲートON/OFF・状態・再認証。
+               ゲートは既定OFF(DK_LICENSE_GATE_ON)。司さん端末を登録→ここでONにすると業務開始時に台数ゲート発動。 -->
+          <div
+            id="licenseCard"
+            style="
+              margin-top: 14px;
+              padding: 12px;
+              background: #f2f2f7;
+              border-radius: 10px;
+              font-size: 13px;
+            "
+          >
+            <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
+              🔑 ライセンス（台数管理）
+            </div>
+            <div style="margin-bottom: 6px; color: #555">
+              端末ID:
+              <span
+                id="licDeviceId"
+                style="
+                  font-family: monospace;
+                  font-size: 11px;
+                  word-break: break-all;
+                  color: #1c1c1e;
+                "
+                >—</span
+              >
+            </div>
+            <button
+              id="licCopyBtn"
+              type="button"
+              style="
+                padding: 7px 12px;
+                background: #007aff;
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+              "
+            >
+              端末IDをコピー
+            </button>
+            <div style="margin: 10px 0 6px; color: #555">
+              状態: <span id="licState" style="font-weight: 700">—</span>
+            </div>
+            <label
+              style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 6px 0"
+            >
+              <input type="checkbox" id="licGateToggle" style="width: 18px; height: 18px" />
+              ライセンスゲートを有効にする（この端末）
+            </label>
+            <button
+              id="licRefreshBtn"
+              type="button"
+              style="
+                margin-top: 4px;
+                padding: 7px 12px;
+                background: #fff;
+                color: #007aff;
+                border: 1.5px solid #007aff;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 700;
+                cursor: pointer;
+              "
+            >
+              再認証（オンライン確認）
+            </button>
+          </div>
           <!-- ★車の管理 (多台リスト・2026-06-26)★: 登録した車の一覧＋追加/選択/削除。
                タップで選択→下の編集カードに読込・「保存」で確定。各車のKは車別に永続。 -->
           <div
