@@ -7957,10 +7957,12 @@
         //   未登録 / expired 時は・showLicenseGate で・ゲート画面表示・業務開始 block
         //   絶対ルール準拠: distance_m / 課金距離ロジックには・触れない
         try {
-          // ★D裁定(2026-06-28): ライセンスゲートは既定OFF。localStorage DK_LICENSE_GATE_ON==='1' の
-          //   端末だけ発動(司さん端末/本番展開で明示ON)。既定OFFで E2E・既存ユーザー・未登録は素通り
-          //   =新方式ONで全員ブロックの事故を防ぐ。OFF時は License 未load と同じく従来挙動。
+          // ★2026-07-02: ライセンスゲートは"完全無効"に固定。前セッションの暫定台数ゲート方式は
+          //   最終設計(会社ごとURL/QR+署名/VIN+2ヶ月期限+警告+更新ボタン)へ作り替え予定=[[project_daikome_license_code_activation_design_2026-06-30]]。
+          //   それまで業務開始を一切ブロックしない(自社運用を止めない)。旧DK_LICENSE_GATE_ONトグルON端末の
+          //   誤ブロック(未登録で業務開始不可=使えない)も、このfalse固定で解消。Phase1で本方式実装時に差替。
           if (
+            false &&
             localStorage.getItem('DK_LICENSE_GATE_ON') === '1' &&
             typeof window.License !== 'undefined' &&
             typeof window.License.checkBeforeBusinessStart === 'function'
@@ -10699,6 +10701,51 @@
             }
           };
           function _wireLicenseUI() {
+            // ★コード活性化(2026-06-30・ドライバー端末・ログイン不要)★
+            const actBtn = document.getElementById('licActivateBtn');
+            const actMsg = document.getElementById('licActivateMsg');
+            function _setActMsg(t, ok) {
+              if (actMsg) {
+                actMsg.textContent = t || '';
+                actMsg.style.color = ok === false ? '#ff3b30' : ok ? '#34c759' : '#8e8e93';
+              }
+            }
+            if (actBtn)
+              actBtn.onclick = function () {
+                const codeEl = document.getElementById('licActivateCode');
+                const code = ((codeEl && codeEl.value) || '').trim().toUpperCase();
+                if (!code) {
+                  _setActMsg('コードを入れてください', false);
+                  return;
+                }
+                if (typeof window.License === 'undefined' || !window.License.activate) {
+                  _setActMsg('ライセンス機能が未読込', false);
+                  return;
+                }
+                _setActMsg('有効化中…');
+                window.License.activate(code).then(function (r) {
+                  if (r && r.ok) {
+                    _setActMsg('✅ 有効化しました', true);
+                    if (window._updateLicenseUI) window._updateLicenseUI();
+                    if (codeEl) codeEl.value = '';
+                  } else {
+                    const reason = r && r.reason;
+                    const msg =
+                      reason === 'full'
+                        ? '契約台数がいっぱいです（' +
+                          (r.seat_limit || '') +
+                          '台）。台数を増やしてください'
+                        : reason === 'expired'
+                          ? '契約が期限切れです'
+                          : reason === 'invalid'
+                            ? 'コードが正しくありません'
+                            : reason === 'network'
+                              ? '通信エラー（電波を確認）'
+                              : '有効化できませんでした';
+                    _setActMsg('⚠ ' + msg, false);
+                  }
+                });
+              };
             const copyBtn = document.getElementById('licCopyBtn');
             if (copyBtn)
               copyBtn.onclick = function () {
@@ -10809,6 +10856,7 @@
             _showPanel(false);
           }
           function _loadDevices() {
+            _loadCodes(); // パネル表示時にコード一覧も同時ロード(関数宣言は巻上げ済)
             fetch(SB_URL + '/rest/v1/rpc/dk_list_my_devices', {
               method: 'POST',
               headers: _hdr(),
@@ -10858,6 +10906,88 @@
               })
               .catch(function () {
                 _msg('一覧取得に失敗(オンライン確認)', false);
+              });
+          }
+          // ★コード一覧(使用台数/上限/期限)★
+          function _loadCodes() {
+            fetch(SB_URL + '/rest/v1/rpc/dk_list_my_codes', {
+              method: 'POST',
+              headers: _hdr(),
+              body: '{}',
+            })
+              .then(function (r) {
+                if (r.status === 401) {
+                  _logout();
+                  return null;
+                }
+                return r.ok ? r.json() : null;
+              })
+              .then(function (rows) {
+                const el = document.getElementById('devCodeList');
+                if (!el) return;
+                if (!Array.isArray(rows) || rows.length === 0) {
+                  el.innerHTML =
+                    '<div style="color:#8e8e93;font-size:12px;">まだコードを発行していません</div>';
+                  return;
+                }
+                el.innerHTML = rows
+                  .map(function (c) {
+                    const exp = new Date(Number(c.expires_at) || 0);
+                    const expStr =
+                      exp.getFullYear() + '/' + (exp.getMonth() + 1) + '/' + exp.getDate();
+                    const full = (c.used || 0) >= (c.seat_limit || 0);
+                    return (
+                      '<div style="padding:7px 0;border-top:1px solid #e5e5ea;">' +
+                      '<div style="font-family:monospace;font-weight:700;font-size:15px;color:#1c1c1e;">' +
+                      _esc(c.code) +
+                      '</div><div style="font-size:12px;color:#555;">' +
+                      _esc(c.label || '(無名)') +
+                      ' ／ <b style="color:' +
+                      (full ? '#ff3b30' : '#34c759') +
+                      '">' +
+                      (c.used || 0) +
+                      '/' +
+                      c.seat_limit +
+                      '台</b> ／ ' +
+                      expStr +
+                      'まで</div></div>'
+                    );
+                  })
+                  .join('');
+              })
+              .catch(function () {
+                /* ignore */
+              });
+          }
+          function _createCode() {
+            const seats = parseInt((document.getElementById('devCodeSeats') || {}).value, 10) || 1;
+            const months =
+              parseInt((document.getElementById('devCodeMonths') || {}).value, 10) || 12;
+            const label = ((document.getElementById('devCodeLabel') || {}).value || '').trim();
+            _msg('発行中…');
+            fetch(SB_URL + '/rest/v1/rpc/dk_create_code', {
+              method: 'POST',
+              headers: _hdr(),
+              body: JSON.stringify({ p_seat_limit: seats, p_label: label, p_months: months }),
+            })
+              .then(function (r) {
+                if (r.status === 401) {
+                  _logout();
+                  _msg('セッション切れ・再ログイン', false);
+                  return null;
+                }
+                return r.ok ? r.json() : null;
+              })
+              .then(function (code) {
+                if (!code) {
+                  _msg('発行失敗', false);
+                  return;
+                }
+                _msg('発行: ' + code + '（このコードを各ドライバーに渡す）', true);
+                _loadCodes();
+              })
+              .catch(function () {
+                _msg('発行失敗(ネットワーク)', false);
               });
           }
           function _login() {
@@ -11007,6 +11137,8 @@
             if (sb) sb.onclick = _signup;
             const ab = document.getElementById('devAddBtn');
             if (ab) ab.onclick = _add;
+            const cc = document.getElementById('devCreateCodeBtn');
+            if (cc) cc.onclick = _createCode;
             const ob = document.getElementById('devAdminLogoutBtn');
             if (ob) ob.onclick = _logout;
             // 既存セッションあればパネル復帰
@@ -13185,6 +13317,7 @@
           <div
             id="licenseCard"
             style="
+              display: none;
               margin-top: 14px;
               padding: 12px;
               background: #f2f2f7;
@@ -13195,35 +13328,84 @@
             <div style="font-weight: 700; margin-bottom: 8px; color: #1c1c1e">
               🔑 ライセンス（台数管理）
             </div>
-            <div style="margin-bottom: 6px; color: #555">
-              端末ID:
-              <span
-                id="licDeviceId"
-                style="
-                  font-family: monospace;
-                  font-size: 11px;
-                  word-break: break-all;
-                  color: #1c1c1e;
-                "
-                >—</span
-              >
+            <!-- ★コード活性化(2026-06-30・ドライバー端末・ログイン不要)★: コードを入れて有効化するだけ。端末IDは裏で自動。 -->
+            <div style="margin-bottom: 6px; color: #555; font-size: 12px">
+              代行会社からもらったコードを入れて有効化してください。
             </div>
+            <input
+              id="licActivateCode"
+              placeholder="コード（例: DK-XXXXXXXX）"
+              autocapitalize="characters"
+              style="
+                width: 100%;
+                padding: 9px;
+                border: 1px solid #d1d1d6;
+                border-radius: 8px;
+                font-size: 14px;
+                margin-bottom: 6px;
+                box-sizing: border-box;
+                height: 38px;
+                -webkit-appearance: none;
+                font-family: monospace;
+                text-transform: uppercase;
+              "
+            />
             <button
-              id="licCopyBtn"
+              id="licActivateBtn"
               type="button"
               style="
-                padding: 7px 12px;
-                background: #007aff;
+                width: 100%;
+                padding: 10px;
+                background: #34c759;
                 color: #fff;
                 border: none;
                 border-radius: 8px;
-                font-size: 13px;
+                font-size: 15px;
                 font-weight: 700;
                 cursor: pointer;
+                margin-bottom: 10px;
               "
             >
-              端末IDをコピー
+              有効化する
             </button>
+            <div
+              id="licActivateMsg"
+              style="font-size: 12px; min-height: 14px; margin-bottom: 8px"
+            ></div>
+            <details style="margin-bottom: 4px">
+              <summary style="font-size: 11px; color: #8e8e93; cursor: pointer">
+                端末ID（サポート用・通常は不要）
+              </summary>
+              <div style="margin-bottom: 6px; color: #555">
+                端末ID:
+                <span
+                  id="licDeviceId"
+                  style="
+                    font-family: monospace;
+                    font-size: 11px;
+                    word-break: break-all;
+                    color: #1c1c1e;
+                  "
+                  >—</span
+                >
+              </div>
+              <button
+                id="licCopyBtn"
+                type="button"
+                style="
+                  padding: 7px 12px;
+                  background: #007aff;
+                  color: #fff;
+                  border: none;
+                  border-radius: 8px;
+                  font-size: 13px;
+                  font-weight: 700;
+                  cursor: pointer;
+                "
+              >
+                端末IDをコピー
+              </button>
+            </details>
             <div style="margin: 10px 0 6px; color: #555">
               状態: <span id="licState" style="font-weight: 700">—</span>
             </div>
@@ -13256,6 +13438,7 @@
           <div
             id="deviceAdminCard"
             style="
+              display: none;
               margin-top: 14px;
               padding: 12px;
               background: #f2f2f7;
@@ -13347,41 +13530,60 @@
                 id="devAdminWho"
                 style="font-size: 11px; color: #8e8e93; margin-bottom: 8px"
               ></div>
-              <div id="devAdminList" style="margin-bottom: 10px"></div>
-              <div style="font-weight: 700; margin: 8px 0 4px; color: #1c1c1e">＋ 端末を追加</div>
-              <input
-                id="devAddId"
-                placeholder="端末ID（各スマホの🔑ライセンスからコピー）"
-                style="
-                  width: 100%;
-                  padding: 8px 9px;
-                  border: 1px solid #d1d1d6;
-                  border-radius: 7px;
-                  font-size: 12px;
-                  margin-bottom: 6px;
-                  box-sizing: border-box;
-                  height: 36px;
-                  -webkit-appearance: none;
-                  font-family: monospace;
-                "
-              />
-              <input
-                id="devAddLabel"
-                placeholder="名前（例: 1号車）"
-                style="
-                  width: 100%;
-                  padding: 8px 9px;
-                  border: 1px solid #d1d1d6;
-                  border-radius: 7px;
-                  font-size: 13px;
-                  margin-bottom: 8px;
-                  box-sizing: border-box;
-                  height: 36px;
-                  -webkit-appearance: none;
-                "
-              />
+              <!-- ★コード発行(2026-06-30)★: 台数ぶんのコードを発行→各ドライバーに渡す。端末はコード入力で活性化。 -->
+              <div style="font-weight: 700; margin: 4px 0 4px; color: #1c1c1e">🎫 コードを発行</div>
+              <div style="display: flex; gap: 6px; margin-bottom: 6px">
+                <input
+                  id="devCodeSeats"
+                  type="number"
+                  min="1"
+                  value="3"
+                  placeholder="台数"
+                  style="
+                    width: 70px;
+                    padding: 8px;
+                    border: 1px solid #d1d1d6;
+                    border-radius: 7px;
+                    font-size: 13px;
+                    box-sizing: border-box;
+                    height: 36px;
+                    -webkit-appearance: none;
+                  "
+                />
+                <input
+                  id="devCodeMonths"
+                  type="number"
+                  min="1"
+                  value="12"
+                  placeholder="月数"
+                  style="
+                    width: 70px;
+                    padding: 8px;
+                    border: 1px solid #d1d1d6;
+                    border-radius: 7px;
+                    font-size: 13px;
+                    box-sizing: border-box;
+                    height: 36px;
+                    -webkit-appearance: none;
+                  "
+                />
+                <input
+                  id="devCodeLabel"
+                  placeholder="名前(例:山田代行)"
+                  style="
+                    flex: 1;
+                    padding: 8px;
+                    border: 1px solid #d1d1d6;
+                    border-radius: 7px;
+                    font-size: 13px;
+                    box-sizing: border-box;
+                    height: 36px;
+                    -webkit-appearance: none;
+                  "
+                />
+              </div>
               <button
-                id="devAddBtn"
+                id="devCreateCodeBtn"
                 type="button"
                 style="
                   width: 100%;
@@ -13393,10 +13595,68 @@
                   font-size: 14px;
                   font-weight: 700;
                   cursor: pointer;
+                  margin-bottom: 8px;
                 "
               >
-                この端末IDを登録する
+                コードを発行する
               </button>
+              <div id="devCodeList" style="margin-bottom: 12px"></div>
+              <hr style="border: none; border-top: 1px solid #e5e5ea; margin: 8px 0" />
+              <div id="devAdminList" style="margin-bottom: 10px"></div>
+              <details style="margin-bottom: 4px">
+                <summary style="font-size: 11px; color: #8e8e93; cursor: pointer">
+                  端末IDを直接登録（上級者・通常はコード発行でOK）
+                </summary>
+                <div style="font-weight: 700; margin: 8px 0 4px; color: #1c1c1e">＋ 端末を追加</div>
+                <input
+                  id="devAddId"
+                  placeholder="端末ID（各スマホの🔑ライセンスからコピー）"
+                  style="
+                    width: 100%;
+                    padding: 8px 9px;
+                    border: 1px solid #d1d1d6;
+                    border-radius: 7px;
+                    font-size: 12px;
+                    margin-bottom: 6px;
+                    box-sizing: border-box;
+                    height: 36px;
+                    -webkit-appearance: none;
+                    font-family: monospace;
+                  "
+                />
+                <input
+                  id="devAddLabel"
+                  placeholder="名前（例: 1号車）"
+                  style="
+                    width: 100%;
+                    padding: 8px 9px;
+                    border: 1px solid #d1d1d6;
+                    border-radius: 7px;
+                    font-size: 13px;
+                    margin-bottom: 8px;
+                    box-sizing: border-box;
+                    height: 36px;
+                    -webkit-appearance: none;
+                  "
+                />
+                <button
+                  id="devAddBtn"
+                  type="button"
+                  style="
+                    width: 100%;
+                    padding: 9px;
+                    background: #34c759;
+                    color: #fff;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 700;
+                    cursor: pointer;
+                  "
+                >
+                  この端末IDを登録する
+                </button>
+              </details>
               <button
                 id="devAdminLogoutBtn"
                 type="button"
