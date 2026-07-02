@@ -56,7 +56,123 @@
     return { state: state, allowed: allowed, daysLeft: daysLeft, message: message };
   }
 
-  const api = { evaluateLicense: evaluateLicense, WARN_DAYS: WARN_DAYS };
+  // ============================================================
+  // Ed25519 署名検証 (2026-07-03・STEP2)
+  //   トークン契約 (Edge Function `dk-issue-license` と一致):
+  //     payloadB64 = base64url(utf8(JSON.stringify(payload)))
+  //     署名対象   = utf8bytes(payloadB64)  ← 送信文字列そのもの(JSON再直列化しない=キー順ズレ耐性)
+  //     token      = payloadB64 + "." + base64url(sig)
+  //   公開鍵はアプリ同梱の base64url raw(32byte・jwk.x)。秘密鍵はサーバのみ。
+  // ============================================================
+
+  // crypto.subtle を browser / node(webcrypto) 両対応で解決
+  function _getSubtle() {
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.crypto && globalThis.crypto.subtle) {
+        return globalThis.crypto.subtle;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      if (typeof require === 'function') {
+        // eslint-disable-next-line no-undef, global-require
+        const nodeCrypto = require('crypto');
+        if (nodeCrypto && nodeCrypto.webcrypto && nodeCrypto.webcrypto.subtle) {
+          return nodeCrypto.webcrypto.subtle;
+        }
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return null;
+  }
+
+  function _b64urlToBytes(s) {
+    if (typeof s !== 'string' || s.length === 0) return null;
+    let b = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4 !== 0) b += '=';
+    try {
+      if (typeof atob === 'function') {
+        const bin = atob(b);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      }
+      if (typeof Buffer !== 'undefined') {
+        return new Uint8Array(Buffer.from(b, 'base64'));
+      }
+    } catch (_) {
+      return null;
+    }
+    return null;
+  }
+
+  function _bytesToUtf8(bytes) {
+    if (typeof TextDecoder !== 'undefined') return new TextDecoder().decode(bytes);
+    if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('utf8');
+    return null;
+  }
+
+  function _utf8ToBytes(str) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+    if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(str, 'utf8'));
+    return null;
+  }
+
+  // token を公開鍵で検証 → { valid, payload }。改ざん/不正/形式異常/未対応環境は {valid:false, payload:null}。
+  async function verifyLicenseToken(token, publicKeyB64url) {
+    const fail = { valid: false, payload: null };
+    try {
+      if (typeof token !== 'string' || typeof publicKeyB64url !== 'string') return fail;
+      const dot = token.indexOf('.');
+      if (dot <= 0 || dot !== token.lastIndexOf('.')) return fail; // 「.」はちょうど1個
+      const payloadB64 = token.slice(0, dot);
+      const sigB64 = token.slice(dot + 1);
+      if (!payloadB64 || !sigB64) return fail;
+
+      const subtle = _getSubtle();
+      if (!subtle) return fail; // Ed25519 未対応環境 → 検証不可(安全側で無効扱い)
+
+      const rawPub = _b64urlToBytes(publicKeyB64url);
+      const sigBytes = _b64urlToBytes(sigB64);
+      if (!rawPub || rawPub.length !== 32 || !sigBytes) return fail;
+      const msg = _utf8ToBytes(payloadB64);
+      if (!msg) return fail;
+
+      let pubKey;
+      try {
+        pubKey = await subtle.importKey('raw', rawPub, { name: 'Ed25519' }, false, ['verify']);
+      } catch (_) {
+        return fail; // 公開鍵 import 失敗 = 不正鍵 or 未対応
+      }
+      const ok = await subtle.verify({ name: 'Ed25519' }, pubKey, sigBytes, msg);
+      if (ok !== true) return fail;
+
+      // 署名OK → payload を復号
+      const payloadBytes = _b64urlToBytes(payloadB64);
+      if (!payloadBytes) return fail;
+      const json = _bytesToUtf8(payloadBytes);
+      const payload = JSON.parse(json);
+      if (!payload || typeof payload !== 'object') return fail;
+      return { valid: true, payload: payload };
+    } catch (_) {
+      return fail; // JSON parse 失敗等は全て無効扱い(throw しない)
+    }
+  }
+
+  // 検証→状態を1本化。署名NG/偽トークンは payload=null → unlicensed。running=true は常に allowed。
+  async function evaluateLicenseToken(token, publicKeyB64url, nowMs, opts) {
+    const v = await verifyLicenseToken(token, publicKeyB64url);
+    return evaluateLicense(v.valid ? v.payload : null, nowMs, opts);
+  }
+
+  const api = {
+    evaluateLicense: evaluateLicense,
+    verifyLicenseToken: verifyLicenseToken,
+    evaluateLicenseToken: evaluateLicenseToken,
+    WARN_DAYS: WARN_DAYS,
+  };
 
   if (typeof window !== 'undefined') window.LicenseV2 = api;
   /* eslint-disable no-undef */

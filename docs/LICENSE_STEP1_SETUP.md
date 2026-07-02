@@ -48,17 +48,37 @@ Deno.serve(async (req) => {
   if (!co) return json({ ok:false, reason:'invalid' })
   // (任意) 台数チェック: dk_licensed_devices 等で company の active device 数 < seat_limit
   const payload = { company_id: co.company_id, device_id, vin: vin||'', status: co.status, exp: Date.now()+EXP_MS }
-  const token = await signEd25519(payload, Deno.env.get('DK_LICENSE_PRIVKEY')!)  // pkcs8をimport→sign→base64url(payload).base64url(sig)
+  const token = await signEd25519(payload, Deno.env.get('DK_LICENSE_PRIVKEY')!)
   return json({ ok:true, token })
 })
-// signEd25519 / json は実装(WebCrypto: importKey('pkcs8',...,{name:'Ed25519'})→sign('Ed25519',...))
+```
+### ★トークン契約(client の license-v2.verifyLicenseToken と厳密一致・ここがズレると本番で検証全失敗)★
+```
+payloadB64 = base64url( utf8( JSON.stringify(payload) ) )
+署名対象   = utf8bytes(payloadB64)         ← ★payloadB64 の "文字列" のバイトに署名(JSONを再直列化しない)★
+token      = payloadB64 + "." + base64url(signature)
+base64url  = '+'→'-' '/'→'_' パディング('=')なし
+```
+signEd25519 の実装(Deno WebCrypto):
+```ts
+async function signEd25519(payload, pkcs8Pem) {
+  const key = await crypto.subtle.importKey('pkcs8', pemToDer(pkcs8Pem), { name:'Ed25519' }, false, ['sign'])
+  const payloadB64 = b64url(new TextEncoder().encode(JSON.stringify(payload)))
+  const sig = await crypto.subtle.sign({ name:'Ed25519' }, key, new TextEncoder().encode(payloadB64)) // ★payloadB64文字列に署名★
+  return payloadB64 + '.' + b64url(new Uint8Array(sig))
+}
+// b64url = base64→url-safe置換+パディング除去 / pemToDer = PEM base64本文をデコード
 ```
 - deploy: `supabase functions deploy dk-issue-license` ＋ secret設定: `supabase secrets set DK_LICENSE_PRIVKEY="<pkcs8 pem>"`
 - anon から POST 可（会社検証はurl_tokenで行う・service_roleはEdge内のみ）。
 
 ## 手順④：疎通確認（テスト先行スクリプト・俺が用意）
-- signEd25519 で発行したトークンを、license-v2 に足す verify(公開鍵) で検証→OK/改ざんNGを確認。
-- dk_companies の status を off に→再発行トークンの status:'off'→ evaluateLicense が expired を返すのを確認。
+- ★済(2026-07-03)★: client 側 `license-v2.verifyLicenseToken(token, 公開鍵)` + `evaluateLicenseToken` を
+  テスト先行で実装済(tests/unit/license-v2-verify.test.js・11件緑)。テスト内でその場生成した
+  Ed25519鍵で「正=valid / 改ざん=invalid / 別鍵=invalid / 期限切れ=expired / status:off=expired /
+  偽トークンでも running=true は allowed」を確認済。★環境の Ed25519 WebCrypto 往復は実測OK★。
+- 残: 司さんが手順①の PUBLIC(jwk.x) を渡す → license-v2.js に定数で埋め込む(現状は呼出側が公開鍵を渡す設計)。
+- 残: Edge Function を deploy 後、実発行トークンを↑の verify に通して往復疎通(status off→expired 含む)。
 
 ---
 
@@ -67,7 +87,11 @@ Deno.serve(async (req) => {
 - ★俺がやる★: license-v2 に署名検証(crypto)を足す(テスト先行)・PUBLIC鍵を同梱・issue疎通スクリプト・以降STEP3(URL活性化UI+警告+更新ボタン)。
 
 ## 要検証(捏造せず deploy時に実測)
-- WebCrypto Ed25519 が Android Chrome(対象端末)で使えるか。ダメなら tweetnacl(JS実装)を同梱にfallback。
-- raw公開鍵(jwk.x) ↔ pkcs8秘密鍵 の署名/検証往復。
+- ★済★: raw公開鍵(jwk.x 32byte) の import→verify 往復は node WebCrypto で実測OK(正=true/改ざん=false)。
+- ★残(gate ON 前の必須ゲート)★: WebCrypto Ed25519 が Android Chrome(対象端末)で使えるか実機確認。
+  現 verifyLicenseToken は未対応環境で fail-closed(=全トークン invalid→unlicensed)。gate OFF の今は無害だが、
+  ★gate を ON にする前に必ず feature-detect し、非対応なら tweetnacl(JS実装) へ fallback する★。でないと
+  非対応端末の正規ユーザーまで unlicensed になる(業務中 running=true だけは常に allowed で救済される)。
+- ★残★: pkcs8秘密鍵(サーバ) で署名したトークンを、raw公開鍵(クライアント) で検証する実鍵での往復(deploy時)。
 
 再開: 「ライセンス本実装 STEP1から」→ この docs/LICENSE_STEP1_SETUP.md を開いて①から。
