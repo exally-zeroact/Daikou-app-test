@@ -198,7 +198,13 @@ const Meter = (() => {
   const DISP_RATE_MAX_MPS = 55; // 等速ペース rate の物理上限 (= 198km/h・cold-start/glitch の瞬時値 spike を EMA から除外)
   const DISP_MAX_FRAME_DT_S = 0.4; // dtFrame 上限秒 (= タブ復帰/描画間引きの一撃飛び防止・残差は次フレーム連続収束)
   const DISP_CLOSE_TAU_S = 1.0; // gap 収束 spring の時定数 (= lump/復帰時に gap を τ 秒で詰める。3.0→1.0=走行中の遅れを約1/3に・メーターに食らいつく・司さん要望2026-06-24。overshoot/単調/cap不変)
-  const DISP_CATCHUP_MAX_MPS = 24; // 追従速度上限 (= 大 lump 復帰の「ドン」抑制・直近走行速度の妥当倍率内)
+  // ★2026-07-03: 追従速度上限を"固定24m/s(86km/h)"から"直近走行速度×倍率(floorあり)"の可変に。
+  //   固定24は高速道路/しまなみ(90-150km/h)で画面が実距離に置いていかれる原因だった(司さん実機報告・
+  //   trace で内部距離は正確=表示層のみの遅れと確定)。コメント元の設計意図「直近走行速度の妥当倍率内」を
+  //   正しく実装: cap = max(FLOOR, rate*MULT)。走行速度に追随するのでどんな速度でも遅れず、
+  //   停車/低速の大 lump 復帰は FLOOR(=108km/h)で「ドン」を抑える。distance_m は不変(表示専用)。
+  const DISP_CATCHUP_FLOOR_MPS = 30; // 追従上限の下限 (= 108km/h・低速/停車での lump 復帰ドン抑制)
+  const DISP_CATCHUP_MULT = 1.5; // 追従上限 = 直近走行速度(rate)のこの倍率まで許容 (= 高速でも画面が食らいつく)
   void DISP_CATCHUP_TAU_S; // 等速ペース化で未使用 (= 形維持・lint 黙らせ)
 
   // ─── fareConfig (v2・後方互換維持) ───
@@ -1003,9 +1009,11 @@ const Meter = (() => {
     //   (= 停車時残差 0・収束残差 0)。山 (cap/gain/bleed) は作らない。
     const closeRate = gap / DISP_CLOSE_TAU_S;
     let eff = rate + closeRate; // 実速度ペース + gap 収束 spring (= 永続 lag を残さず target に収束)
-    // ★追従速度上限★: 大 lump 復帰 (穴明け一括加算) を 55m/s 張り付きの「ドン」でなく
-    //   直近走行速度の妥当倍率内で飲む。定速/停車では eff がこの上限を下回るため不発。
-    if (eff > DISP_CATCHUP_MAX_MPS) eff = DISP_CATCHUP_MAX_MPS;
+    // ★追従速度上限 (2026-07-03 可変化)★: 直近走行速度(rate)×MULT まで許容=どんな速度でも画面が
+    //   実距離に食らいつく(150km/hでも遅れない)。低速/停車の大 lump 復帰は FLOOR で「ドン」を抑える。
+    //   定速走行では eff がこの上限を下回るため不発(= 遅れない・overshoot は別の gap clamp で保証)。
+    const _catchupCap = Math.max(DISP_CATCHUP_FLOOR_MPS, rate * DISP_CATCHUP_MULT);
+    if (eff > _catchupCap) eff = _catchupCap;
     let step = eff * dtFrame; // 等速ペース前進量
     if (!(step > 0)) {
       // rate 未確立 (= 最初の数 fix) で gap が残る場合のみ、収束保証のため
