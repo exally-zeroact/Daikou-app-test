@@ -224,6 +224,46 @@
     return Public.init();
   };
 
+  // ★コード活性化 (2026-06-30・ドライバー端末・ログイン不要)★:
+  //   dk_activate_device(code, device_id) を呼び、成功なら cache を licensed に更新。
+  //   返り: { ok:true, expires_at } / { ok:false, reason:'invalid'|'expired'|'full'|'network' }。
+  //   端末IDは内部で取得(ユーザーは触らない)。台数縛り/失効はサーバ側判定。
+  Public.activate = function (code, label) {
+    const deviceId = _getDeviceId();
+    return fetch(SUPABASE_URL + '/rest/v1/rpc/dk_activate_device', {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON,
+        Authorization: 'Bearer ' + SUPABASE_ANON,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_code: String(code || '').trim(),
+        p_device_id: deviceId,
+        p_label: label || '',
+      }),
+    })
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(function (r) {
+        if (r && r.ok === true) {
+          _writeCache({
+            licensed: true,
+            expires_at: Number(r.expires_at) || 0,
+            last_check: Date.now(),
+            tenant_id: '',
+            label: r.label || '',
+          });
+          return { ok: true, expires_at: Number(r.expires_at) || 0 };
+        }
+        return { ok: false, reason: (r && r.reason) || 'error', seat_limit: r && r.seat_limit };
+      })
+      .catch(function () {
+        return { ok: false, reason: 'network' };
+      });
+  };
+
   if (typeof window !== 'undefined') {
     window.License = Public;
   }
