@@ -62,6 +62,12 @@
   //   診断専用・距離/課金は 1 byte も非関与。chunk は device_id+chunk_seq+時刻順で解析側が連結。
   const TIME_FLUSH_MS = 90000; // 90 秒ごとに未送信 buffer を chunk upload (最大損失 ≤90 秒)
   const WATCH_OPTIONS = { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 };
+  // ★2026-07-03 司さん指示「自動trace廃止・オンライン＋ボタン押下時のみ送信」★:
+  //   走行中の自動 chunk 送信 (点数/時間) と離脱時の自動 beacon 送信を全廃し、送信は
+  //   「📡 GPS trace 送信」ボタン押下時のみ (= オンライン時に手動) に限定する。
+  //   watchPosition による収集は継続 (ボタン押下時に送る中身を memory に貯める)。
+  //   ※長時間 (≈83分/MAX_SAMPLES 5000点) を超える先頭分は上限で破棄 (手動運用の許容トレードオフ)。
+  const MANUAL_ONLY = true;
 
   // ─── Feature flag handling (= ?trace=on/off で切替) ────────
   // ★設計変更宣言 (2026-05-23・テストビルド既定 ON):
@@ -396,7 +402,8 @@
     if (_lastAutoFlushAt == null) _lastAutoFlushAt = p.timestamp;
     const _dueByCount = samples.length >= AUTO_FLUSH_SAMPLES;
     const _dueByTime = samples.length > 0 && p.timestamp - _lastAutoFlushAt >= TIME_FLUSH_MS;
-    if (_dueByCount || _dueByTime) {
+    if (!MANUAL_ONLY && (_dueByCount || _dueByTime)) {
+      // ★MANUAL_ONLY=true では発火しない (2026-07-03)。送信は手動ボタンのみ。
       _lastAutoFlushAt = p.timestamp;
       _flushTrace(true);
     }
@@ -574,13 +581,16 @@
     }
   }
   // pagehide (= bfcache/離脱の最終 hook) と visibilitychange(hidden) で beacon flush。
-  try {
-    window.addEventListener('pagehide', _beaconFlush);
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'hidden') _beaconFlush();
-    });
-  } catch (_) {
-    /* listener 登録不可 → 静かに無視 (= auto-flush/手動送信のみで運用) */
+  // ★MANUAL_ONLY=true (2026-07-03 司さん指示) では登録しない=離脱時の自動送信を全廃。手動ボタンのみ。
+  if (!MANUAL_ONLY) {
+    try {
+      window.addEventListener('pagehide', _beaconFlush);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') _beaconFlush();
+      });
+    } catch (_) {
+      /* listener 登録不可 → 静かに無視 (= auto-flush/手動送信のみで運用) */
+    }
   }
 
   // ─── DOM 配線 (= #overlaySettings に挿入された UI element に bind) ─

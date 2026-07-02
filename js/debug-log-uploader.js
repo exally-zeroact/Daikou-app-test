@@ -76,8 +76,10 @@
     } else if (stored === '0') {
       _enabled = false;
     } else {
-      const _isProd = typeof DEBUG !== 'undefined' && DEBUG && DEBUG.isProduction === true;
-      _enabled = !_isProd;
+      // ★2026-07-03 司さん指示「自動trace廃止」★: console log の自動アップロードは
+      //   テストビルドでも既定 OFF。有効化は ?debuglog=on を明示した時のみ (= 診断セッション限定)。
+      //   旧はテストビルドで非本番なら既定 ON (30秒毎に自動 push) にしていたが撤去。
+      _enabled = false;
     }
   } catch (_) {
     _enabled = false;
