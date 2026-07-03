@@ -61,7 +61,13 @@ const Meter = (() => {
   //   速度依存で 1/rf より僅か上振れ→較正と走行の速度分布が違うと per-step 過大しうる。較正値に ×0.997 を
   //   掛けて吸収(代表速度較正×無作為走行で 0/10000 過大ゼロ・平均-0.5%実測)。検定は代表速度で行う前提。
   const CERTK_SAFETY = 0.997;
-  let _activeVehicleK = 1.0; // 業務開始でロックされる適用係数
+  // ★注記(2026-07・監査): 以下の車別k機構(_activeVehicleK/_resolveVK/_factoryK/FACTORY_K/_clampVK/
+  //   calibrateVehicleK/CERTK_SAFETY)は「デッド」ではない=タクシー/cert経路で生きてる★:
+  //   ・_postVehicleK(L92)が _factoryK/prof.k を pipeline の obdVehicleK(cert測定K)へ送る(autoCalibK OFF時)。
+  //   ・calibrateVehicleK は export(L1495)=精算時のcert較正で呼ぶ。
+  //   代行(autoCalibK ON)経路では meter の距離乗算は ×1.0(_kForDelta・L355)=この層のkは非作用(dormant)。
+  //   ＝「代行距離には非作用/cert・タクシーでは有効」。削除するとcert経路が壊れる。
+  let _activeVehicleK = 1.0; // 業務開始でロックされる適用係数(cert/タクシー経路の器差k)
   // ★代行距離係数 (2026-06-18・司さん確定「DM−0.2%は"距離計算式"に入れる」)★:
   //   距離増分(cal/gapCal)に乗算し distance_m / business_distance_m を DM−0.2% に着地させる。
   //   料金=calcFare(distance_m) / display / 総走行 は distance_m に従う(料金に係数は掛けない)。

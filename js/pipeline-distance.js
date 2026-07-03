@@ -313,6 +313,10 @@ const DEFAULTS = {
   //     rawChord×routingAcceptMaxRatio(2.5) かつ routed ≤ tunnelRouteMaxM かつ routed ≤ spd×dt×routingMaxRatio。
   //   どれか外れたら従来の boundary/doppler fill に落ちる (純加算回収=安全)。OFF で 1byte 不変。
   //   ★batch(computeDistance)/tracker(createDistanceTracker) は同一 stepDistance を通るため parity 構造保証★。
+  //   ★但し書き(2026-07・監査D)★: この parity は ★GPS距離側(stepDistance)のみ★。OBD∫v×K・autoCalibK・
+  //   K凍結・δ/量子化/ラチェットは tracker の _core クロージャ専用で ★batch(computeDistance)には無い★。
+  //   ∴ replay/batch系テストはOBD方式を検証しない=OBD/autoCalibKは ★tracker経由の単体テストで担保★
+  //   (tests/unit/k-freeze-deterministic・k-calib-shared・integration/vehicle-k-meter が autoCalibK+obd:true で検証)。
   tunnelRouteFill: true, // 長穴を出口アンカー道路 routing で充填 (既定 ON・never-over サニティ付き)。
   tunnelRouteMaxStraightM: 3000, // rawChord がこれ超の長穴は routing せず従来 fill (遠距離=道路網外れ防止)。
   tunnelRouteMaxM: 3500, // routing 結果がこれ超なら採用しない (絶対上限・過大暴走遮断)。

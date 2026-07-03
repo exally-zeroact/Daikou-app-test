@@ -41,7 +41,7 @@
   const SUPABASE_ANON =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
   const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000; // 7 日 grace
-  const _ONLINE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 時間ごと online 再確認 (= 期限内でも・将来配線用)
+  // (削除2026-07: _ONLINE_CHECK_INTERVAL_MS は未参照デッド定数だったため撤去。24h再確認は最終方式license-v2で実装)
 
   // ─── device_id 取得 (= 既存 DAIKOME_DEVICE_ID 流用) ────────
   //   debug-trace.js が・先に load されている場合・既に・初回生成済 (= 同 key 流用)
