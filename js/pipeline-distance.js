@@ -1896,6 +1896,9 @@ function createDistanceTracker(decoder, opts) {
   // ★1km自動較正K (autoCalibK・確定方式)★: 良GPS長窓で K=GPS距離÷OBD∫v を学習(js/k-calib.js)。
   //   OFF(既定)では生成せず byte不変。Node=require / browser=self.KCalib(index.htmlで先読み)。
   let kCalibrator = null;
+  // ★2026-07-03 Fix B: autoCalibK の"元の要求"を保持(fallbackで cfg.autoCalibK が false に潰れても
+  //   「要求したのに効いてない=degraded」を calibStatus で検知可能にするため)。observability専用・距離不変。
+  const _autoCalibKReq = cfg.autoCalibK === true;
   if (cfg.autoCalibK === true) {
     // ★STEP2: 車単位の共有較正器(map-matcherから externalKCalib 注入)があればそれを使う★
     //   =県別tracker全部が同じ較正器を共有→県跨ぎ/業務resetでKが残る(=県跨ぎリセット根治)。
@@ -1917,7 +1920,21 @@ function createDistanceTracker(decoder, opts) {
     }
     // ★k-calib未ロード(importScripts失敗等)なら autoCalibK を無効化し従来経路へ安全フォールバック★
     //   (autoCalibK=true なのに kCalibrator=null で生∫v(K=1.0)に落ちる過少を防ぐ)。
-    if (!kCalibrator) cfg.autoCalibK = false;
+    if (!kCalibrator) {
+      cfg.autoCalibK = false;
+      // ★2026-07-03 Fix B: 無音で生∫v(過小)に落ちない。degraded を警告=実機で気付ける★。
+      /* eslint-disable no-console -- degraded を実機ログに必ず出す(無音過小の再発防止・診断) */
+      try {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(
+            '[pipeline] autoCalibK 要求されたが較正器を生成できず(k-calib未ロード等) → 生OBD∫v(過小)にfallback=degraded'
+          );
+        }
+      } catch (_) {
+        /* best-effort */
+      }
+      /* eslint-enable no-console */
+    }
   }
   // breakdown/stats を区間分類のため保持 (stepDistance が要求する構造)
   let bd, stats;
@@ -2516,8 +2533,33 @@ function createDistanceTracker(decoder, opts) {
     },
     // ★1km自動較正K の状態(見える化用・2026-06-26)★: autoCalibK時のみ {K,windows,confident,...}。
     //   read-only=距離に影響しない。worker→main へ転送し「較正中 n/3 / 較正完了 K=…」を表示する。
+    // ★2026-07-03 Fix B: 無音の「要求したのに効いてない」を検知可能にする★:
+    //   従来は kCalibrator 無しで null を返し「autoCalibK OFF」と「degraded(較正器ロード失敗)」が
+    //   区別不能だった。修正後は autoCalibK要求時は必ずオブジェクトを返し requested/active/degraded を出す。
+    //   requested=元の要求 / active=実際にKが乗る(confident) / degraded=要求したのに較正器無し。
+    //   ※値は observability のみ。距離/課金の数字には一切影響しない。
     calibStatus: function () {
-      return kCalibrator ? kCalibrator.snapshot() : null;
+      if (kCalibrator) {
+        const snap = kCalibrator.snapshot() || {};
+        snap.requested = _autoCalibKReq;
+        snap.degraded = false;
+        snap.active = snap.confident === true; // confident=実際に学習Kが距離に乗る状態
+        return snap;
+      }
+      // kCalibrator 無し: 要求されてたなら degraded(=無音過小)、未要求なら従来通り null。
+      // ★対立監査P2-①: このオブジェクトに絶対 Ks を入れないこと★。index.html:6080 の保存条件は
+      //   Array.isArray(calibStatus.Ks) で、Ks:[] を足すと保存済みKsを空で上書きしてしまう。Ks は出さない。
+      if (_autoCalibKReq) {
+        return {
+          requested: true,
+          degraded: true,
+          active: false,
+          confident: false,
+          K: null,
+          windows: 0,
+        };
+      }
+      return null;
     },
     reset: function () {
       total = 0;

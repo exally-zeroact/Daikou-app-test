@@ -427,6 +427,30 @@
   startWatch();
   _addSensorListeners(); // ★後半④: 加速度/ジャイロ/コンパスも並行 subscribe (gps.js permission に相乗り)
 
+  // ★2026-07-03 自己診断スナップショット★: 実行時にKが実際に乗ってるか・どのビルドかをtraceに焼く。
+  //   今回の事故(Kが黙って乗らず過小課金・何日も原因不明)の再発時に、1本のtraceで即断定するための核。
+  //   passive=window の状態を読むだけ(距離/課金に無関与)。値は数値/文字列のみ(Firebase schema安全)。
+  //     ac  = window.DK_AUTO_CALIB_K (1=有効/0=無効) ← OFFキー診断の核
+  //     act = calibStatus.active (1=学習Kが実際に乗ってる/0=乗ってない/-1=不明)
+  //     deg = calibStatus.degraded (1=較正器ロード失敗/0=正常/-1=不明)
+  //     k   = 適用K値 (-1=不明)   win = 較正窓数 (-1=不明)   sw = SWが掴んでるビルド名(''=不明)
+  function _diagSnapshot() {
+    try {
+      if (typeof window === 'undefined') return null;
+      const cs = window._lastCalibStatus || null;
+      return {
+        ac: window.DK_AUTO_CALIB_K === true ? 1 : 0,
+        act: cs ? (cs.active === true ? 1 : 0) : -1,
+        deg: cs ? (cs.degraded === true ? 1 : 0) : -1,
+        k: cs && typeof cs.K === 'number' ? cs.K : -1,
+        win: cs && typeof cs.windows === 'number' ? cs.windows : -1,
+        sw: (typeof window.DK_SW_CACHE === 'string' && window.DK_SW_CACHE) || '',
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── upload 内部実装 (= 1 chunk batch を POST・auto-flush と手動送信の共通経路) ─
   //   ★設計変更宣言 (2026-06-04・auto-flush): 旧 window.uploadGpsTrace のインライン POST を
   //     _postBatch(batch) + _flushTrace(isAuto) に分解。診断専用・距離/課金は 1 byte も非関与。
@@ -461,6 +485,8 @@
           // ★auto-flush: chunk 連番 + 自動/手動 区別 (= 解析側が device_id でまとめ chunk_seq 順に連結)
           chunk_seq: seq,
           auto_flush: !!isAuto,
+          // ★2026-07-03 自己診断: 実行時のK適用状態を焼く(Kが乗ってるか/どのビルドか=原因確定の核)
+          diag: _diagSnapshot(),
         },
         samples: batch,
         writeKey: WRITE_KEY,
@@ -562,6 +588,8 @@
         chunk_seq: seq,
         auto_flush: true,
         beacon: true,
+        // ★対立監査P1-b是正: 離脱trace(beacon)にも診断を焼く(_postBatchと対等・Kが乗ってたか欠落防止)
+        diag: _diagSnapshot(),
         // ★随伴車別 k 含む車両profile (アプリ離脱trace でも過大ゼロ事後監査可能に・_postBatch と対等)
         vehicle: (typeof window !== 'undefined' && window.DK_VEHICLE_PROFILE) || null,
       },

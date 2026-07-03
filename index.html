@@ -5432,14 +5432,55 @@
     <script>
       (function () {
         try {
-          var OFFKEY = 'DK_AUTO_CALIB_K_OFF'; // 既定ON・このキーがある時だけOFF
+          // ★2026-07-03 実機事故の根治: 永続OFFキーを廃止★。
+          //   旧: ?autocalibk=off が localStorage 'DK_AUTO_CALIB_K_OFF' に永続 → 一度踏むと
+          //   どのバージョンに更新しても autoCalibK が黙って無効化され、生OBD∫vで過小課金(事故の真因)。
+          //   新: (a)起動毎にOFFキーを必ず消す=焼き付き自動治癒 (b)?autocalibk=off はこのセッション
+          //   限りのデバッグ用(永続させない) (c)ドライバーはURLに何も付けなくてもKが常時ON。
+          try {
+            localStorage.removeItem('DK_AUTO_CALIB_K_OFF'); // ★焼き付き治癒(既存の永続OFFを解除)
+          } catch (_) {
+            /* best-effort */
+          }
           var p = new URLSearchParams(location.search).get('autocalibk');
-          if (p === 'off') localStorage.setItem(OFFKEY, '1');
-          else if (p === 'on') localStorage.removeItem(OFFKEY);
-          window.DK_AUTO_CALIB_K = localStorage.getItem(OFFKEY) !== '1'; // OFFキー無ければON
+          window.DK_AUTO_CALIB_K = p !== 'off'; // 素で常時ON。?autocalibk=off はセッション限定OFF(永続なし)。
         } catch (_) {
           window.DK_AUTO_CALIB_K = true;
         }
+      })();
+    </script>
+
+    <script>
+      // ★2026-07-03 自己診断trace(足す①): SWが掴んでるビルド名を window.DK_SW_CACHE に取得★。
+      //   trace meta に焼く=旧キャッシュのコードで走ってないかを実機traceで判定できる。
+      //   設定画面を開かなくても起動時に一度取る。best-effort(失敗しても距離/課金に無関係)。
+      (function () {
+        function _fetchSwCache(retries) {
+          try {
+            if (!('serviceWorker' in navigator)) return;
+            var c = navigator.serviceWorker.controller;
+            if (!c) {
+              if (retries > 0)
+                setTimeout(function () {
+                  _fetchSwCache(retries - 1);
+                }, 1500);
+              return;
+            }
+            var ch = new MessageChannel();
+            ch.port1.onmessage = function (ev) {
+              if (ev && ev.data && ev.data.type === 'CACHE_NAME' && ev.data.value)
+                window.DK_SW_CACHE = ev.data.value;
+            };
+            c.postMessage({ type: 'GET_CACHE_NAME' }, [ch.port2]);
+          } catch (_) {
+            /* best-effort */
+          }
+        }
+        if (document.readyState === 'complete') _fetchSwCache(5);
+        else
+          window.addEventListener('load', function () {
+            _fetchSwCache(5);
+          });
       })();
     </script>
 
@@ -6072,6 +6113,40 @@
             } catch (_) {
               /* 見える化失敗は距離/課金に無関係 */
             }
+          }
+          // ★2026-07-03 Fix B配線(対立監査P1-①是正)★: degraded(較正エンジン未ロード=較正Kが
+          //   乗らず生OBD∫vで過小課金)を検知して window フラグに反映。従来は無音で過小のまま走ってた
+          //   (実機事故の真因)。_updateCalibGate が永続バナー警告＋代行開始ゲート閉鎖に使う=無音再発防止。
+          window._autoCalibKDegraded = !!(
+            m.calibStatus &&
+            m.calibStatus.requested === true &&
+            m.calibStatus.degraded === true
+          );
+          // ★2026-07-03 自己診断trace(足す①): 直近のcalibStatusをwindowに保存=debug-traceがmetaに焼く★
+          window._lastCalibStatus = m.calibStatus || null;
+          // ★2026-07-03 Fix B広げる(③の穴を塞ぐ): degraded(較正器ロード失敗)だけでなく
+          //   「保存calibKs≥3=本来Kが乗るはず なのに実行時 active≠true(=生∫vで走ってる)」も掴む。
+          //   復元漏れ等でKが黙って乗ってない状態を検知→代行開始ブロック＋警告=黙って過小課金を不可能に。
+          try {
+            var _acar =
+              window.VehRegistry && window.VehRegistry.getActive
+                ? window.VehRegistry.getActive(localStorage)
+                : null;
+            var _savedKn = _acar && Array.isArray(_acar.calibKs) ? _acar.calibKs.length : 0;
+            var _rawNotApplied = !!(
+              window.DK_AUTO_CALIB_K && // K有効
+              window.OBD_DRIVE_DISTANCE && // OBD駆動中(KはOBD駆動時のみ意味)
+              _savedKn >= 3 && // この車は較正済(本来Kが乗る)
+              m.calibStatus && // workerがcalibStatus報告済(起動直後のnullで誤爆しない)
+              m.calibStatus.active !== true // なのにKが乗ってない=異常
+            );
+            // ★対立監査P1-a是正: 単発フリッカー(configVehicle復元前の1tick等)で誤ブロックしないよう
+            //   3連続 mmResult で active!==true の時だけ確定=接続直後のtransientを吸収★。
+            window._notAppliedStreak = _rawNotApplied ? (window._notAppliedStreak || 0) + 1 : 0;
+            window._autoCalibKNotApplied = window._notAppliedStreak >= 3;
+          } catch (_) {
+            window._autoCalibKNotApplied = false;
+            window._notAppliedStreak = 0;
           }
           // ★STEP3 K自動保存 (2026-06-26)★: 較正器が貯めた健全窓Ks を選択中の車に永続保存。
           //   窓数が変わった時だけ書く(localStorage頻書防止)→次回その車を選ぶと restoreKs で即「✓較正済」。
@@ -11373,6 +11448,7 @@
               received = true;
               if (ev && ev.data && ev.data.type === 'CACHE_NAME' && ev.data.value) {
                 el.textContent = ev.data.value;
+                window.DK_SW_CACHE = ev.data.value; // ★自己診断trace用にビルド名を保持
               } else {
                 el.textContent = '(取得失敗)';
               }
@@ -15123,6 +15199,10 @@
           //   OFF/OBD未接続(=GPSで従来と同一)はブロックしない=従来通り開始可。失敗時もブロックしない(営業止めない側)。
           window._calibGateBlocked = function () {
             try {
+              // ★2026-07-03 Fix B配線: degraded(較正エンジン未ロード)/notApplied(較正済なのにKが乗ってない)は
+              //   代行開始させない★=未較正課金ゼロと同じ思想(過小の距離で課金を始めさせない)。更新/再起動で復旧。
+              if (window._autoCalibKDegraded === true || window._autoCalibKNotApplied === true)
+                return true;
               if (!window.DK_AUTO_CALIB_K) return false;
               if (!window.OBD_DRIVE_DISTANCE) return false;
               var car =
@@ -15197,7 +15277,15 @@
                   typeof window._calibAccKm === 'number'
                     ? Math.max(0.1, 3 - window._calibAccKm).toFixed(1)
                     : String(3 - _n);
-                ban.textContent = '🔧 OBD較正中 ' + _n + '/3（あと約' + _rem + 'km）';
+                if (window._autoCalibKDegraded === true || window._autoCalibKNotApplied === true) {
+                  // ★2026-07-03 Fix B: 較正済なのにKが乗ってない(未ロード/復元漏れ)。較正中でなく"故障"→赤+更新誘導★
+                  ban.textContent =
+                    '⚠ 較正Kが未適用：距離が過小になります。アプリを更新/再起動してください';
+                  ban.style.background = '#ff3b30';
+                } else {
+                  ban.textContent = '🔧 OBD較正中 ' + _n + '/3（あと約' + _rem + 'km）';
+                  ban.style.background = '#ff9500';
+                }
                 ban.style.display = 'block';
               } else {
                 ban.style.display = 'none';
@@ -15670,6 +15758,21 @@
             //   meter の VK_MAX=1.01 ハードクランプは GPS/OBD 双方の ★過大ゼロ天井★ として不変。
             //   raw ∫v(k=1) も並行記録される (pipeline bd.obdRawM・精度突合用)。
             window.OBD_DRIVE_DISTANCE = _obdConnected === true;
+            // ★2026-07-03 対立監査P1-a是正: OBD接続時に保存K(restoreKs)をworkerへ再注入する★。
+            //   接続直後の「較正済なのに worker がまだ復元前=active=false」transient を潰し、
+            //   Fix Bの誤ブロック(較正済ドライバーの代行開始を一瞬止める)を根治。configVehicleで即confident化。
+            if (
+              _obdConnected &&
+              window.DK_AUTO_CALIB_K &&
+              typeof Meter !== 'undefined' &&
+              Meter._postVehicleK
+            ) {
+              try {
+                Meter._postVehicleK();
+              } catch (_) {
+                /* 次業務開始で回復 */
+              }
+            }
           });
           O.on('error', function (msg) {
             if (noteEl) noteEl.textContent = 'エラー: ' + msg;
