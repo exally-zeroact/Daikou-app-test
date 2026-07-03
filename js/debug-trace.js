@@ -383,6 +383,8 @@
       gyro: _lastGyro, // 直近ジャイロ {a,b,g} or null
       compass: _lastCompass, // 直近コンパス度 (-1=未取得)
       biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
+      om: typeof window !== 'undefined' && window._cumObdM >= 0 ? Math.round(window._cumObdM) : -1, // ★2026-07-04 距離内訳: OBD∫v駆動 累積m(業務窓の差分でGPS漏れ測定)
+      gm: typeof window !== 'undefined' && window._cumGpsM >= 0 ? Math.round(window._cumGpsM) : -1, // ★GPS(その他)駆動 累積m
       obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用
       obd_odo: _obdOdoSnapshot(), // ★OBDオドメーター(01A6・km・-1=未対応/未取得)。業務開始/終了の差=タイヤ回転距離(メーター級)照合用
       obd_0131: _obd0131Snapshot(), // ★0131 ECU距離(km・1km粗・-1=未対応/未取得)。業務開始/終了の差=ECU積算距離=B(真距離)基準。01A6非対応の軽/古い車向け

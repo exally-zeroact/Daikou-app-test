@@ -6124,6 +6124,13 @@
           );
           // ★2026-07-03 自己診断trace(足す①): 直近のcalibStatusをwindowに保存=debug-traceがmetaに焼く★
           window._lastCalibStatus = m.calibStatus || null;
+          // ★2026-07-04 距離内訳計装: 距離増分を「OBD∫v駆動 vs GPS(その他)駆動」で分けて累積★。
+          //   同経路ブレの残り源(OBD有効点のGPS弦漏れ)を実走traceで数値化する用。距離/課金に無関与(読むだけ集計)。
+          if (typeof m.pipelineDeltaM === 'number' && m.pipelineDeltaM > 0) {
+            if (m.pipelineDeltaSrc === 'obd')
+              window._cumObdM = (window._cumObdM || 0) + m.pipelineDeltaM;
+            else window._cumGpsM = (window._cumGpsM || 0) + m.pipelineDeltaM;
+          }
           // ★2026-07-03 Fix B広げる(③の穴を塞ぐ): degraded(較正器ロード失敗)だけでなく
           //   「保存calibKs≥3=本来Kが乗るはず なのに実行時 active≠true(=生∫vで走ってる)」も掴む。
           //   復元漏れ等でKが黙って乗ってない状態を検知→代行開始ブロック＋警告=黙って過小課金を不可能に。
