@@ -54,9 +54,11 @@ describe('STEP2 externalKCalib 共有(車単位較正器)', () => {
     expect(shared.confident()).toBe(true);
     expect(shared.getK()).toBeCloseTo(kAfter1, 6);
 
-    // 2業務目を走ると窓は更に増える(リセットされず累積)
+    // ★2026-07-04 K凍結後の挙動: confident済なので2業務目は学習しない(窓は凍結・K保持=決定的)★
+    //   (旧: 継続学習で窓が増える → K凍結で「一度較正→ずっと正確・再較正不要」に変更)
     drive(tk2, 120, p.t, p.lat);
-    expect(shared.snapshot().windows).toBeGreaterThan(wAfter1);
+    expect(shared.snapshot().windows).toBe(wAfter1); // 凍結=増えない(ドリフトしない)
+    expect(shared.getK()).toBeCloseTo(kAfter1, 6); // K保持(共有較正器の値は決定的)
   });
 
   it('★K自動保存サイクル: 走行で貯めたKs→車に保存→別日その車で復元→再較正せず即confident同K★', () => {

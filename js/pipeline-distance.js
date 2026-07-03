@@ -2053,7 +2053,16 @@ function createDistanceTracker(decoder, opts) {
       const dtObd = ((cur.t || 0) - (prev.t || 0)) / 1000;
       // ★autoCalibK: 良GPS長窓で K=GPS距離÷OBD∫v を学習 (生spd=OBD車速・GPS弦は位置から)。
       //   addPair が acc/dt/飛び/異常速度 を内部gate(無効値は-1で渡せば弾く)。距離には未だ影響しない=学習のみ。
-      if (cfg.autoCalibK === true && kCalibrator && dtObd > 0) {
+      // ★2026-07-04 K凍結(同経路ブレ根治)★: confident(較正済)になったら学習を止める。
+      //   従来は confident 後も学習し続け median K が業務ごとにドリフト→同経路でも適用Kが変わり距離がブレた
+      //   (実機モコ 生OBD∫vピタリ一致なのに td 0.6%ブレ)。confident後は凍結=距離=生OBD∫v×固定K=決定的。
+      //   =DECIDED「一度較正→ずっと正確・再較正不要」。再較正はタイヤ変更等の明示trigger(別途)でのみ。
+      if (
+        cfg.autoCalibK === true &&
+        kCalibrator &&
+        dtObd > 0 &&
+        !(typeof kCalibrator.confident === 'function' && kCalibrator.confident())
+      ) {
         kCalibrator.addPair(
           haversineM(prev.lat, prev.lng, cur.lat, cur.lng),
           spd >= 0 ? spd : -1,
