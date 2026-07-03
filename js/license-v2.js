@@ -1,6 +1,10 @@
 // ============================================================
 // js/license-v2.js
 // ★ライセンスv2 状態機械 (2026-07-02・会社URL/QR+署名トークン方式・STEP2の純ロジック)★
+// ★★重要: 本 file は現状 index.html に未ロード=本番未配線(先行実装)★★。最終ライセンス方式
+//   (URL/QR+Ed25519署名・project_daikome_license_code_activation_design_2026-06-30)の STEP2 として
+//   テスト先行で実装済(tests/unit/license-v2-*.test.js で検証)。STEP1(Supabase署名土台)完了後に
+//   index.html へ配線し、暫定の js/license.js(Supabase RPC)を置き換える。当面はテストのみで生きる。
 //
 //   evaluateLicense(payload, nowMs, {running}) = 純関数。副作用なし・距離/課金に無関係。
 //   payload = 署名検証済みトークンの中身 or null。{ exp(ms), status:'on'|'off', company_id, device_id, vin }

@@ -10,6 +10,8 @@
 //
 //   prod の・距離機構 (= distance_m / calcFare / commit) / 課金経路 / Worker B /
 //   map-matcher は・**1 byte も触らない**。本 file は独立・通常時は何もしない (= 早期 return)。
+//   ★2026-07-03 MANUAL_ONLY=true(L70): 自動flush(点数/時間)+離脱beacon は無効化済=送信は📡ボタン
+//     押下時のみ(オンライン)。watchPosition による収集は継続。以下の auto-flush/beacon 記述は無効経路。
 //
 //   activation:
 //     ★設計変更宣言 (2026-05-23・テストビルド常時 ON 化・noise calibration 30 日収集 加速):
@@ -382,7 +384,7 @@
       accel: _accelSinceGps.slice(), // この GPS 区間の加速度 [{x,y,z,t}] (= gps.js が worker へ送る batch 相当)
       gyro: _lastGyro, // 直近ジャイロ {a,b,g} or null
       compass: _lastCompass, // 直近コンパス度 (-1=未取得)
-      biz: _bizSnapshot(), // ★後半④rev3: 業務状態{bd:業務距離,dm:総距離,run:代行中,tc:業務回数,act:業務active}=業務別自動分割用
+      biz: _bizSnapshot(), // ★後半④rev3: 業務状態{tc:業務回数,it:代行中(current_trip!=null),act:業務active,end:終了limbo,td:業務開始からの総距離m}=業務別自動分割用
       om: typeof window !== 'undefined' && window._cumObdM >= 0 ? Math.round(window._cumObdM) : -1, // ★2026-07-04 距離内訳: OBD∫v駆動 累積m(業務窓の差分でGPS漏れ測定)
       gm: typeof window !== 'undefined' && window._cumGpsM >= 0 ? Math.round(window._cumGpsM) : -1, // ★GPS(その他)駆動 累積m
       obd: _obdSpeedSnapshot(), // ★OBD車速(km/h・-1=未接続/鮮度切れ)。passive: OBDClient を読むだけ・∫v(OBD)オフライン検証用

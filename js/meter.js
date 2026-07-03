@@ -1,9 +1,12 @@
 // ============================================================
 // meter.js  (ダイコメ メーター本体・白紙書き直し・clean-rebuild-pipeline)
 //
-// ★アーキテクチャ (2026-05-30 白紙書き直し)★
-//   距離 distance_m = 「道路 snap 道なり累積」を ★単一エンジン★ で駆動する。
-//     エンジン = js/pipeline-distance.js (createDistanceTracker・実走 9,677m 検証済)。
+// ★アーキテクチャ (2026-05-30 白紙書き直し・2026-07 現状注記)★
+//   距離 distance_m = ★単一エンジン★(js/pipeline-distance.js createDistanceTracker) が返す
+//   pipelineDeltaM を running gate 内で加算するだけ(単一経路)。
+//   ★現状の距離の実体: 既定 smoothedRawMode(平滑生GPS弦)+OBD接続中は ∫v(OBD)×較正K が優先★
+//     (下記「道路snap道なり累積」は旧方式の記述=snapは既定で距離に使わない。意味論は道路snap道なりではない)。
+//     エンジンは実走 9,677m 検証済。
 //     エンジンは Worker B (map-matcher.js) 内で動き、GPS 1 点ごとに ingest して
 //     その区間の道なり増分を mmResult.pipelineDeltaM として main に返す。
 //     meter は running gate 内で state.distance_m += pipelineDeltaM するだけ (= 単一経路)。
@@ -62,7 +65,8 @@ const Meter = (() => {
   // ★代行距離係数 (2026-06-18・司さん確定「DM−0.2%は"距離計算式"に入れる」)★:
   //   距離増分(cal/gapCal)に乗算し distance_m / business_distance_m を DM−0.2% に着地させる。
   //   料金=calcFare(distance_m) / display / 総走行 は distance_m に従う(料金に係数は掛けない)。
-  //   ★1.0=byte不変(タクシー認定/テスト/cert-gate)。代行は loadSettings がシステム固定値(≈1.011)を自動適用★。
+  //   ★1.0=byte不変(タクシー認定/テスト/cert-gate)。代行は index.html:7064 がシステム固定値(現≈1.0085・
+  //   2026-07-04 autoCalibK経路に再較正・旧1.011/1.013)を自動適用=DM Light基準+0.2%着地★。
   //   操作者は触らない。タクシー認定運用は 1.0(過大ゼロ法要件・distance_m≤真距離)。
   let _daikouDistFactor = 1.0;
   function setDaikouDistanceFactor(f) {

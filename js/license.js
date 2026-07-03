@@ -1,12 +1,19 @@
 // ============================================================
 // js/license.js
-// 端末ライセンス台数ロック (= 案 C・既存 Firebase RTDB 再利用・2026-05-24)
+// 端末ライセンス台数ロック (= 暫定MVP・2026-06-28 Supabase移行・旧Firebase RTDB案から更新)
 //
-// ★設計変更宣言:
+// ★2026-07 現状の注記(重要)★:
+//   ・backend は ★Supabase RPC★(dk_check_device_license 等・L30-35)。旧「Firebase RTDB」記述は無効。
+//   ・★業務開始ゲートは index.html で if(false) 固定=恒久無効(自社運用のため意図的に殺してある)★。
+//     よって本 file の _evaluateState/grace/expired 一式は現状ゲートとして機能していない。
+//   ・★最終方式は URL/QR + Ed25519署名 (js/license-v2.js・STEP1待ちの先行実装)★。本 file(RPC/コード活性化)
+//     はそれまでの暫定。最終方式が配線されたら本 file の去就を決める。
+//
+// ★設計変更宣言(旧・Firebase時代の記述=Supabase移行済ゆえ参考):
 //   ダイコメ ¥1,980/月/台 サブスクの・台数ロックを・端末側で実装。
 //   ・device_id は・既存 DAIKOME_DEVICE_ID (= debug-trace.js L44/L99-105) を・流用
 //     (= 新規生成しない・既存値が・あれば・即利用)
-//   ・Firebase RTDB /licensed_devices/{device_id} を・問い合わせ
+//   ・(旧)Firebase RTDB /licensed_devices/{device_id} を・問い合わせ → 現Supabase RPC
 //     hit + expires_at > now → 有効
 //   ・localStorage cache: { licensed, expires_at, last_check }
 //   ・★ オフライン稼働: cache 期限内なら・オンライン確認なしで業務開始可 ★
