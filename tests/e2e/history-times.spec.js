@@ -39,19 +39,21 @@ test('履歴: 開始/経由/終了 の時刻 + 距離が表示される / 旧ent
   const items = ov.locator('.ride-item');
   await expect(items).toHaveCount(2);
 
-  // 1件目(新): 開始/経由/終了 の時刻ラベル + 時刻 + 距離
-  const first = items.nth(0);
-  await expect(first.locator('.ride-times')).toContainText('開始');
-  await expect(first.locator('.ride-times')).toContainText('21:00');
-  await expect(first.locator('.ride-times')).toContainText('経由');
-  await expect(first.locator('.ride-times')).toContainText('21:08');
-  await expect(first.locator('.ride-times')).toContainText('終了');
-  await expect(first.locator('.ride-times')).toContainText('21:30');
-  await expect(first.locator('.ride-dist')).toContainText('12.34');
+  // ★2026-07-04 並び順変更(最近の乗車を1番上=保存順の逆で描画)に伴い表示順が反転★:
+  //   rides=[新,旧] を保存 → 逆順描画で nth(0)=旧(=保存順で最後=最近扱い) / nth(1)=新。
+  // nth(0) = 旧フォーマット: 「終了」1個に fallback (開始/経由は出ない・後方互換)
+  const firstOld = items.nth(0);
+  await expect(firstOld.locator('.ride-times')).toContainText('終了');
+  await expect(firstOld.locator('.ride-times')).toContainText('20:15');
+  await expect(firstOld.locator('.ride-times')).not.toContainText('開始');
 
-  // 2件目(旧フォーマット): 「終了」1個に fallback (開始/経由は出ない)
-  const second = items.nth(1);
-  await expect(second.locator('.ride-times')).toContainText('終了');
-  await expect(second.locator('.ride-times')).toContainText('20:15');
-  await expect(second.locator('.ride-times')).not.toContainText('開始');
+  // nth(1) = 新: 開始/経由/終了 の時刻ラベル + 時刻 + 距離
+  const secondNew = items.nth(1);
+  await expect(secondNew.locator('.ride-times')).toContainText('開始');
+  await expect(secondNew.locator('.ride-times')).toContainText('21:00');
+  await expect(secondNew.locator('.ride-times')).toContainText('経由');
+  await expect(secondNew.locator('.ride-times')).toContainText('21:08');
+  await expect(secondNew.locator('.ride-times')).toContainText('終了');
+  await expect(secondNew.locator('.ride-times')).toContainText('21:30');
+  await expect(secondNew.locator('.ride-dist')).toContainText('12.34');
 });
