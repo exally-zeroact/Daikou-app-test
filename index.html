@@ -1274,8 +1274,9 @@
         gap: 4px;
       }
       #overlayHistory .ride-num {
-        font-size: 12px;
-        color: #aaa;
+        font-size: 13px;
+        color: #333; /* ★2026-07-04 司さん指示: 濃く(旧 #aaa 薄グレー)＋太字 */
+        font-weight: 700;
       }
       /* ★履歴の時刻行 (2026-06-20): 開始/経由/清算終了 を1行に・ラベル付き・折返し可 */
       #overlayHistory .ride-times {
@@ -2490,7 +2491,7 @@
       }
       .route-card .route-body {
         flex: 1 1 auto;
-        font-size: 13px;
+        font-size: 16px; /* ★2026-07-04 司さん指示: 業務中の住所が小さくて見にくい→13px→16px */
         font-weight: 700;
         color: #1d4ed8;
         line-height: 1.5;
