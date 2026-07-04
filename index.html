@@ -11787,38 +11787,31 @@
             );
           }
 
-          // 上部 summary: 表示中の全 ride 合算
-          const allRides = buckets.reduce(function (acc, b) {
-            return acc.concat(b.rides);
-          }, []);
-          const totalDist = allRides.reduce(function (a, b) {
-            return a + (b.distance_m || 0);
-          }, 0);
-          const totalFare = allRides.reduce(function (a, b) {
-            return a + (b.fare || 0);
-          }, 0);
-          const summary = document.createElement('div');
-          summary.className = 'summary-card';
-          summary.innerHTML =
-            '<div class="summary-item">' +
-            '<div class="summary-label">走行回数</div>' +
-            '<div class="summary-value">' +
-            allRides.length +
-            '<span class="summary-unit">回</span></div>' +
-            '</div>' +
-            '<div class="summary-item">' +
-            '<div class="summary-label">総距離</div>' +
-            '<div class="summary-value">' +
-            (totalDist / 1000).toFixed(1) +
-            '<span class="summary-unit">km</span></div>' +
-            '</div>' +
-            '<div class="summary-item">' +
-            '<div class="summary-label">総売上</div>' +
-            '<div class="summary-value" style="color:#007AFF;">¥' +
-            totalFare.toLocaleString() +
-            '</div>' +
-            '</div>';
-          wrap.appendChild(summary);
+          // ★2026-07-04 司さん指示: サマリー(走行回数/総距離/総売上)を「その日ごと」に★
+          //   (旧: 表示中の全 ride=30日ぶんを合算していた → 各日セクションにその日の合算を出す)。
+          function _daySummaryHtml(rides) {
+            const cnt = rides.length;
+            const dist = rides.reduce(function (a, b) {
+              return a + (b.distance_m || 0);
+            }, 0);
+            const fare = rides.reduce(function (a, b) {
+              return a + (b.fare || 0);
+            }, 0);
+            return (
+              '<div class="summary-item"><div class="summary-label">走行回数</div>' +
+              '<div class="summary-value">' +
+              cnt +
+              '<span class="summary-unit">回</span></div></div>' +
+              '<div class="summary-item"><div class="summary-label">総距離</div>' +
+              '<div class="summary-value">' +
+              (dist / 1000).toFixed(1) +
+              '<span class="summary-unit">km</span></div></div>' +
+              '<div class="summary-item"><div class="summary-label">総売上</div>' +
+              '<div class="summary-value" style="color:#007AFF;">¥' +
+              fare.toLocaleString() +
+              '</div></div>'
+            );
+          }
 
           // ★設計変更宣言 (2026-05-16・履歴画面 経路表示):
           //   ride.start_address / end_address / waypoints[] が記録されている ride のみ
@@ -11905,6 +11898,11 @@
             dateHeader.className = 'date-header';
             dateHeader.textContent = _fmtDateHeader(bucket.t, bucket.dateStr);
             wrap.appendChild(dateHeader);
+            // ★2026-07-04: その日ごとのサマリー(走行回数/総距離/総売上)を日付ヘッダ直下に★
+            const daySummary = document.createElement('div');
+            daySummary.className = 'summary-card';
+            daySummary.innerHTML = _daySummaryHtml(bucket.rides);
+            wrap.appendChild(daySummary);
             const list = document.createElement('div');
             list.className = 'ride-list';
             // ★2026-07-04 並び順: 最近の乗車を1番上に (司さん指示)★。保存は時系列(古→新)なので
@@ -11947,7 +11945,15 @@
             wrap.appendChild(list);
           });
           if (typeof dlog === 'function')
-            dlog('[History] render: ' + allRides.length + ' rides / ' + buckets.length + ' days');
+            dlog(
+              '[History] render: ' +
+                buckets.reduce(function (a, b) {
+                  return a + b.rides.length;
+                }, 0) +
+                ' rides / ' +
+                buckets.length +
+                ' days'
+            );
         }
         window._hist_render = _hist_render;
       })();
