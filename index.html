@@ -8730,7 +8730,22 @@
         if (!histSaved) {
           histSaved = true;
           const now = new Date();
-          const histKey = 'daikou_history_' + now.toDateString();
+          // ★2026-07-04 日跨ぎ業務を割らない (司さん指示)★: 履歴の日付キーは「精算時刻」でなく
+          //   ★業務(セッション)開始日★で統一する。=業務開始〜業務終了の全乗車が同じ日セクションに入る
+          //   (旧: now.toDateString()=精算時刻の日付→深夜0時跨ぎで同一業務が前日/当日に割れていた)。
+          //   業務開始時刻 = Business.getState().start_time(business.js state.start_time)。未取得は now に fallback。
+          let _bizStartTs = null;
+          try {
+            _bizStartTs =
+              typeof Business !== 'undefined' && Business.getState
+                ? Business.getState().start_time
+                : null;
+          } catch (_) {
+            _bizStartTs = null;
+          }
+          const _keyDate =
+            typeof _bizStartTs === 'number' && _bizStartTs > 0 ? new Date(_bizStartTs) : now;
+          const histKey = 'daikou_history_' + _keyDate.toDateString();
           const hist = JSON.parse(localStorage.getItem(histKey) || '[]');
           // ★設計変更宣言 (2026-05-16・履歴画面 経路表示・hist エントリに住所追加):
           //   Business.getCurrentTrip() から start_address / waypoints / end_address を取得し
@@ -11891,7 +11906,11 @@
             wrap.appendChild(dateHeader);
             const list = document.createElement('div');
             list.className = 'ride-list';
-            bucket.rides.forEach(function (ride, i) {
+            // ★2026-07-04 並び順: 最近の乗車を1番上に (司さん指示)★。保存は時系列(古→新)なので
+            //   ★逆順で描画★=新しい乗車が上。回目(N回目)は保存順のindex(j+1)で時系列を維持(1回目=その日の最初)。
+            for (let j = bucket.rides.length - 1; j >= 0; j--) {
+              const ride = bucket.rides[j];
+              const i = j; // 回目=時系列(保存順)。表示は逆順でも回目は不変。
               const item = document.createElement('div');
               item.className = 'ride-item';
               let extrasText = '';
@@ -11923,7 +11942,7 @@
                 '</div>' +
                 '</div>';
               list.appendChild(item);
-            });
+            }
             wrap.appendChild(list);
           });
           if (typeof dlog === 'function')
