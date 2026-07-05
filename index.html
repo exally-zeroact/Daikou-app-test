@@ -7,10 +7,7 @@
       window.DAIKOME_APP_VERSION = '1.0.0';
     </script>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#007AFF" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -86,21 +83,22 @@
    旧コードは display:block のみで overflow 未定義 → Android Chrome で
    .content (overflow:hidden) を貫通したスクロールが発生し止まらなくなることがあった。
    flex:1 + overflow-y:auto + overscroll-behavior:contain で内側完結スクロールに固定。
-   touch-action:pan-y で縦スワイプ以外（ピンチ・横）を抑制し誤操作を防ぐ。 */
+   touch-action:pan-y pinch-zoom = 縦スクロール＋ピンチズームを許可(高齢従業員が拡大して読める・
+   司さん要望2026-07-05)・横スワイプ誤操作のみ引き続き抑制。 */
       #screenDriving {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         overscroll-behavior-y: contain;
-        touch-action: pan-y;
+        touch-action: pan-y pinch-zoom;
       }
       /* 履歴スクロールボックス（screenIdle 内ネスト）にも同等の対策。
    親 screenIdle が contain 済みでも、内側の history-box から overscroll が
    親に bubble して二重スクロール状態になるのを防ぐ。 */
       .history-box {
         overscroll-behavior-y: contain;
-        touch-action: pan-y;
+        touch-action: pan-y pinch-zoom;
       }
 
       /* AppBar */
