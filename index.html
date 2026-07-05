@@ -1224,7 +1224,7 @@
       #overlayHistory .date-header {
         font-size: 13px;
         font-weight: 700;
-        color: #8e8e93;
+        color: #111;
         letter-spacing: 1px;
         padding: 4px 0;
       }
@@ -1241,7 +1241,7 @@
       }
       #overlayHistory .summary-label {
         font-size: 11px;
-        color: #aaa;
+        color: #111;
         margin-bottom: 4px;
       }
       #overlayHistory .summary-value {
@@ -1251,7 +1251,7 @@
       }
       #overlayHistory .summary-unit {
         font-size: 11px;
-        color: #aaa;
+        color: #111;
       }
       #overlayHistory .ride-list {
         background: #fff;
@@ -1297,13 +1297,13 @@
       #overlayHistory .ride-times .t-lbl {
         font-size: 10px;
         font-weight: 700;
-        color: #8e8e93;
+        color: #111;
       }
       #overlayHistory .ride-times .t-wp .t-lbl {
-        color: #1d4ed8;
+        color: #111;
       }
       #overlayHistory .ride-times .t-arrow {
-        color: #c7c7cc;
+        color: #111;
         font-weight: 700;
       }
       /* ★距離を見やすく (2026-06-20): 12px灰→13px濃色・数値は16px太字の青で強調 */
@@ -1314,10 +1314,18 @@
       #overlayHistory .ride-dist b {
         font-size: 16px;
         font-weight: 800;
-        color: #007aff;
+        color: #111;
       }
+      /* ★2026-07-05: 右カラムに 走行(上)+金額(下) を縦バランス配置 */
       #overlayHistory .ride-right {
         text-align: right;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 3px;
+        flex: 0 0 auto;
+        margin-left: 10px;
       }
       #overlayHistory .ride-fare {
         font-size: 18px;
@@ -1334,16 +1342,17 @@
          既存 .ride-extras と同じ控えめなトーン (11px / margin-top 2px) に、route-card と
          同じ青系 (#1d4ed8) を採用して「経路」とすぐわかるようにする。
          長い経路の折返し対応に word-break: break-word を付与。 */
+      /* ★2026-07-05 司さん指示: 走行を右へ移し左に余白ができた分、住所を大きく(11px→15px) */
       #overlayHistory .ride-route {
-        font-size: 11px;
-        color: #1d4ed8;
+        font-size: 15px;
+        color: #111;
         font-weight: 700;
-        margin-top: 2px;
+        margin-top: 3px;
         word-break: break-word;
-        line-height: 1.4;
+        line-height: 1.35;
       }
       #overlayHistory .ride-route .route-sep {
-        color: #93c5fd;
+        color: #111;
         margin: 0 3px;
         font-weight: 700;
       }
@@ -11807,7 +11816,7 @@
               (dist / 1000).toFixed(1) +
               '<span class="summary-unit">km</span></div></div>' +
               '<div class="summary-item"><div class="summary-label">総売上</div>' +
-              '<div class="summary-value" style="color:#007AFF;">¥' +
+              '<div class="summary-value" style="color:#111;">¥' +
               fare.toLocaleString() +
               '</div></div>'
             );
@@ -11840,9 +11849,7 @@
             }
             parts.push(endAddr ? _histEscape(endAddr) : WARN);
             return (
-              '<div class="ride-route">🗺 ' +
-              parts.join('<span class="route-sep">→</span>') +
-              '</div>'
+              '<div class="ride-route">' + parts.join('<span class="route-sep">→</span>') + '</div>'
             );
           }
           // ★設計変更宣言 (2026-06-20・履歴に時刻表示): 開始/経由/清算終了 の時刻行を作る。
@@ -11867,7 +11874,7 @@
             if (!start && !end && !hasWp) {
               // 旧 entry: 清算時刻 (ride.time) のみ表示
               return ride.time
-                ? '<div class="ride-times">🕐 <span class="t-seg"><span class="t-lbl">終了</span>' +
+                ? '<div class="ride-times"><span class="t-seg"><span class="t-lbl">終了</span>' +
                     _histEscape(ride.time) +
                     '</span></div>'
                 : '';
@@ -11890,7 +11897,7 @@
             });
             if (end) segs.push(seg('終了', end, ''));
             return (
-              '<div class="ride-times">🕐 ' + segs.join('<span class="t-arrow">→</span>') + '</div>'
+              '<div class="ride-times">' + segs.join('<span class="t-arrow">→</span>') + '</div>'
             );
           }
           buckets.forEach(function (bucket) {
@@ -11923,19 +11930,21 @@
               if (ride.surcharge) extrasText = (extrasText ? extrasText + '　' : '') + '割増あり';
               const routeHtml = _buildRouteHtml(ride);
               const timesHtml = _buildTimesHtml(ride);
+              // ★2026-07-05 司さん指示: 走行(距離)を左下→右カラム(金額の上)へ移動=右で距離/金額を縦バランス。
+              //   左は 回目/時刻/住所 になり余白が空く→住所(.ride-route)を大きく表示(CSS側)。
               item.innerHTML =
                 '<div class="ride-left">' +
                 '<div class="ride-num">' +
                 (i + 1) +
                 '回目</div>' +
                 timesHtml +
-                '<div class="ride-dist">走行 <b>' +
-                ((ride.distance_m || 0) / 1000).toFixed(2) +
-                '</b> km</div>' +
                 (extrasText ? '<div class="ride-extras">' + extrasText + '</div>' : '') +
                 routeHtml +
                 '</div>' +
                 '<div class="ride-right">' +
+                '<div class="ride-dist"><b>' +
+                ((ride.distance_m || 0) / 1000).toFixed(2) +
+                '</b> km</div>' +
                 '<div class="ride-fare">¥' +
                 (ride.fare || 0).toLocaleString() +
                 '</div>' +
