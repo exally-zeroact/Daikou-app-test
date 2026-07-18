@@ -56,6 +56,13 @@
         font-family: 'Noto Sans JP', sans-serif;
         background: #fff;
         color: #111;
+        /* ★2026-07-18 司さん指示: 画面タッチで文字が選択されコピー/ペーストのメニューが出るのを防ぐ。
+           user-select は継承するので body で一括禁止 → アプリUI全体が非選択に。長押しの callout も抑止。
+           入力欄(input/textarea/contenteditable)と .selectable / 端末ID欄(inline user-select:all)は
+           下の例外ルールで選択可能に戻す(コピーしたい所は残す)。 */
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
         /* ★設計変更宣言 (2026-06-06・司さん指示・Android下部ボタン見切れ根治):
            100vh は Android のシステムナビバー(◀●■)の ★下まで★ 含むため、body 末尾の .btn-area
            (追加料金/確定) がナビバーに隠れて見切れていた。100dvh(可視領域だけの動的ビューポート高)に
@@ -67,6 +74,16 @@
         flex-direction: column;
         overflow: hidden;
         overscroll-behavior: none;
+      }
+      /* ★2026-07-18: 上の全体選択禁止の例外 = コピー/入力したい所だけ選択を戻す。
+         入力欄・編集可能域と、明示 .selectable を付けた要素(端末IDのinline user-select:all も含む)。 */
+      input,
+      textarea,
+      [contenteditable='true'],
+      .selectable {
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-touch-callout: default;
       }
       /* 画面内 scroll コンテナはバウンスを内側で完結させる（親への伝播禁止） */
       /* 2026-05-08: #screenDriving を追加。メーター画面で起きる Android rubber-band/iOS momentum 由来の
