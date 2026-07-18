@@ -178,8 +178,8 @@
       }
       .appbar-nav .nav-label {
         font-size: 13px;
-        font-weight: 700;
-        color: rgba(255, 255, 255, 0.72);
+        font-weight: 800; /* ★2026-07-18 司さん指示: タブ文字が薄い→濃く(0.72→0.95)太く */
+        color: rgba(255, 255, 255, 0.95);
         letter-spacing: 0.2px;
       }
       .appbar-nav .nav-item.active .nav-label {
@@ -1998,8 +1998,15 @@
         font-size: 18px;
         font-weight: 700;
         color: #111;
-        padding: 14px 0 10px;
+        /* ★2026-07-18 司さん指示: 日時の幅を下のカードと揃える(左右12px=stats-dashboardと同じ) */
+        padding: 14px 12px 12px;
         letter-spacing: 1px;
+      }
+      /* ★2026-07-18 司さん指示: 縦画面は上に寄りすぎ→適度に下げてバランス(中央寄せはしない・上に余白) */
+      @media (orientation: portrait) {
+        #screenIdle {
+          padding-top: 7vh;
+        }
       }
       .stats-grid {
         display: grid;
@@ -2033,33 +2040,34 @@
       .stat-card-large {
         background: #f5f5f5;
         border-radius: 12px;
-        padding: 10px 10px;
+        padding: 14px 10px; /* ★2026-07-18 司さん指示: カードを少し高く(10→14) */
         text-align: center;
       }
       .stat-card-large .stat-label {
-        font-size: 11px;
-        color: #888;
+        font-size: 12px; /* ★2026-07-18 司さん指示: ラベルを濃く大きく(見にくい) */
+        color: #555;
+        font-weight: 700;
         margin-bottom: 4px;
         letter-spacing: 0.5px;
         display: block;
       }
       .stat-card-large .stat-value {
-        font-size: 22px;
+        font-size: 30px; /* ★2026-07-18 司さん指示: 数字を大きく(22→30・見にくい) */
         font-weight: 900;
         color: #111;
         line-height: 1.05;
         display: block;
       }
       .stat-card-large .stat-unit {
-        font-size: 12px;
-        color: #888;
+        font-size: 13px;
+        color: #555;
         margin-left: 3px;
-        font-weight: 600;
+        font-weight: 700;
       }
       .stats-dashboard {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 8px;
+        gap: 12px; /* ★2026-07-18 司さん指示: カード同士の隙間をバランス(8→12) */
         padding: 0 12px;
       }
       /* ★設計変更宣言 (2026-05-19・司さん指示 履歴/業務終了 横並び):
@@ -2078,8 +2086,8 @@
         border: 1.5px solid #007aff;
         border-radius: 12px;
         color: #007aff;
-        font-size: 14px;
-        font-weight: 700;
+        font-size: 15px; /* ★2026-07-18 司さん指示: 履歴の文字が細い→太字化+少し大きく */
+        font-weight: 800;
         cursor: pointer;
         font-family: 'Noto Sans JP', sans-serif;
         -webkit-tap-highlight-color: transparent;
@@ -2100,8 +2108,8 @@
         border: 1.5px solid #ff3b30;
         border-radius: 12px;
         color: #ff3b30;
-        font-size: 14px;
-        font-weight: 700;
+        font-size: 15px; /* ★2026-07-18 司さん指示: 業務終了の文字が細い→太字化+少し大きく */
+        font-weight: 800;
         cursor: pointer;
         font-family: 'Noto Sans JP', sans-serif;
         -webkit-tap-highlight-color: transparent;
@@ -2297,8 +2305,9 @@
       }
       .meter-label {
         font-size: 12px;
-        /* ★司さん2026-06-27: 現在料金/走行距離のラベルを濃く(薄すぎ→#aaa→#444) */
-        color: #444;
+        /* ★2026-07-18 司さん指示: 待機画面のラベルと濃さ統一(#444→#555・太字) */
+        color: #555;
+        font-weight: 700;
         margin-bottom: 4px;
         letter-spacing: 1px;
       }
@@ -2313,7 +2322,9 @@
       }
       .meter-unit {
         font-size: 14px;
-        color: #aaa;
+        /* ★2026-07-18 司さん指示: 単位の薄い灰を濃く統一(#aaa→#555・太字) */
+        color: #555;
+        font-weight: 700;
       }
       .meter-sub {
         font-size: 12px;
@@ -2343,7 +2354,7 @@
         background: #eff6ff;
         border: 1.5px solid #bfdbfe;
         border-radius: 12px;
-        padding: 14px 16px;
+        padding: 20px 16px; /* ★2026-07-18 司さん指示: 住所カードの縦幅を高く(14→20) */
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -2362,24 +2373,30 @@
       .waypoint-card .wp-main {
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 4px;
         text-align: left;
         min-width: 0;
       }
       .waypoint-card .wp-title {
-        font-size: 15px;
+        font-size: 17px; /* ★2026-07-18 司さん指示: 住所の文字を大きく(15→17) */
         font-weight: 700;
         color: #1d4ed8;
-        line-height: 1.2;
+        line-height: 1.25;
       }
       .waypoint-card.recorded .wp-title {
         color: #15803d;
       }
+      /* ★2026-07-18 司さん指示: 住所の矢印を濃く(太字・濃青) */
+      .waypoint-card .wp-title .route-sep {
+        color: #1d4ed8;
+        font-weight: 800;
+        margin: 0 3px;
+      }
       .waypoint-card .wp-sub {
-        font-size: 12px;
-        font-weight: 500;
-        color: #64748b;
-        line-height: 1.3;
+        font-size: 14px; /* ★2026-07-18 司さん指示: サブ文字を大きく(12→14)・濃く(#64748b→#555) */
+        font-weight: 600;
+        color: #555;
+        line-height: 1.35;
       }
       .waypoint-card .wp-badge {
         flex: 0 0 auto;
@@ -2445,13 +2462,20 @@
       }
 
       /* FARE */
+      /* ★2026-07-18 司さん指示: 合計料金+走行距離を同大きさで(縦=下に積む・横は@mediaで左右) */
+      .fare-total-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
       .fare-total {
         text-align: center;
         padding: 12px 0;
       }
       .fare-total-label {
         font-size: 12px;
-        color: #aaa;
+        color: #555; /* ★2026-07-18 司さん指示: 薄い灰を濃く統一 */
+        font-weight: 700;
         margin-bottom: 4px;
       }
       .fare-total-amount {
@@ -2459,6 +2483,12 @@
         font-weight: 900;
         color: #111;
         line-height: 1;
+      }
+      .fare-dist-unit {
+        font-size: 22px;
+        color: #555;
+        font-weight: 700;
+        margin-left: 2px;
       }
       .breakdown {
         background: #f5f5f5;
@@ -2475,7 +2505,8 @@
       }
       .breakdown-row .lbl {
         font-size: 13px;
-        color: #aaa;
+        color: #555; /* ★2026-07-18 司さん指示: 内訳ラベルの薄い灰を濃く統一 */
+        font-weight: 700;
       }
       .breakdown-row .val {
         font-size: 13px;
@@ -2509,20 +2540,19 @@
         margin-bottom: 8px;
       }
       .route-card .route-icon {
-        flex: 0 0 auto;
-        font-size: 16px;
-        line-height: 1;
+        display: none; /* ★2026-07-18 司さん指示: 住所のアイコン(🗺)を除去 */
       }
       .route-card .route-body {
         flex: 1 1 auto;
-        font-size: 16px; /* ★2026-07-04 司さん指示: 業務中の住所が小さくて見にくい→13px→16px */
+        font-size: 17px; /* ★2026-07-18 住所を大きく統一(13→16→17) */
         font-weight: 700;
         color: #1d4ed8;
         line-height: 1.5;
         word-break: break-word;
       }
       .route-card .route-sep {
-        color: #93c5fd;
+        color: #1d4ed8; /* ★2026-07-18 司さん指示: 矢印を濃く(薄青→濃青) */
+        font-weight: 800;
         margin: 0 4px;
         font-weight: 700;
       }
@@ -3062,8 +3092,8 @@
           width: 100% !important;
           box-sizing: border-box !important;
           padding: 14px 8px !important;
-          font-size: 14px !important;
-          font-weight: 700 !important;
+          font-size: 15px !important; /* ★2026-07-18 横も履歴/業務終了を太字化+少し大きく */
+          font-weight: 800 !important;
           letter-spacing: 1px !important;
           font-family: 'Noto Sans JP', sans-serif !important;
           border-radius: 12px !important;
@@ -3329,10 +3359,12 @@
           gap: 8px !important;
         }
         .btn-back-landscape.show {
-          padding: 14px !important;
-          font-size: 15px !important;
+          /* ★2026-07-18 司さん指示: 「← 走行に戻る」が途切れる→フォント/文字間隔/左右paddingを詰めて
+             210pxの右カラムに全部収める(nowrapのまま切れない)。 */
+          padding: 14px 4px !important;
+          font-size: 13px !important;
           border-radius: 12px !important;
-          letter-spacing: 1px !important;
+          letter-spacing: 0 !important;
         }
         /* 走行に戻ると精算終了は誤タップ防止で離す */
         .btn-back-landscape.show ~ .btn-main.show {
@@ -3420,6 +3452,7 @@
           margin-left: auto;
           margin-right: auto;
           box-sizing: border-box;
+          padding-bottom: 8px; /* ★2026-07-18 横も日時とカードの間に余白 */
         }
         .stats-dashboard {
           max-width: 80%;
@@ -3429,21 +3462,22 @@
           box-sizing: border-box;
           display: grid !important;
           grid-template-columns: 1fr 1fr;
-          gap: 6px;
+          gap: 16px; /* ★2026-07-18 司さん指示: 横のカード同士の隙間をバランス(6→12→16) */
         }
         .stat-card-large {
           margin-bottom: 0 !important;
-          padding: 8px 10px !important;
+          /* ★2026-07-18 司さん指示: カードの縦幅を広げる(8→18px) */
+          padding: 18px 12px !important;
         }
         .stat-card-large .stat-label {
-          font-size: 10px !important;
-          margin-bottom: 2px !important;
+          font-size: 14px !important; /* ★2026-07-18 横も文字を大きく(12→14) */
+          margin-bottom: 4px !important;
         }
         .stat-card-large .stat-value {
-          font-size: 22px !important;
+          font-size: 34px !important; /* ★2026-07-18 横も数字を大きく(27→30→34) */
         }
         .stat-card-large .stat-unit {
-          font-size: 11px !important;
+          font-size: 14px !important;
         }
         .btn-history {
           max-width: 80%;
@@ -3467,42 +3501,61 @@
           margin-top: 4px !important;
         }
 
-        /* DRIVING：meter-card 50%中央寄せ */
+        /* ★2026-07-18 司さん指示: 横・走行画面は 現在料金+走行距離を左・住所カードを右(2列)に。
+           住所カードの見切れを解消し、カードの縦幅/文字/数字を待機画面(landscape)と統一。 */
         .driving-grid {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
+          display: grid;
+          grid-template-columns: 1fr 1fr; /* ★2026-07-18 司さん指示: 住所を狭く・現在料金を広く・左右統一(0.82:1.18→1:1) */
+          grid-auto-rows: min-content;
+          gap: 14px;
+          align-content: center;
+          max-width: 92%;
+          width: 100%;
+          margin-left: auto;
+          margin-right: auto;
+          box-sizing: border-box;
         }
         .meter-value {
-          font-size: 32px;
+          font-size: 34px; /* 待機画面(landscape 34px)と数字を統一 */
         }
-        .meter-card {
-          padding: 12px 24px;
+        .driving-grid > .meter-card {
+          padding: 18px 12px; /* 待機カードと縦幅統一 */
           display: flex;
-          /* ★司さん2026-06-27: 横画面も縦積み中央(ラベル上・数字中央)で料金/距離の数字を真ん中に揃える
-             (旧 space-between は数字が右寄りで不揃いだった) */
           flex-direction: column;
           justify-content: center;
           align-items: center;
-          max-width: 50%;
-          width: 100%;
-          margin-left: auto;
-          margin-right: auto;
+          max-width: none;
+          width: auto;
+          margin: 0;
+          grid-column: 1;
           box-sizing: border-box;
+        }
+        .driving-grid > .meter-card:nth-child(1) {
+          grid-row: 1;
+        }
+        .driving-grid > .meter-card:nth-child(2) {
+          grid-row: 2;
         }
         .meter-label {
-          font-size: 13px;
-          margin-bottom: 0;
+          font-size: 14px; /* 待機ラベルと統一 */
+          margin-bottom: 4px;
         }
-        /* ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・横画面対応):
-           既存 meter-card 50% 中央寄せレイアウトと整合させる。column flex を維持して
-           縦並び (driving-grid 直下) のまま配置する。 */
-        .waypoint-card {
-          max-width: 50%;
-          width: 100%;
-          margin-left: auto;
-          margin-right: auto;
+        /* 住所(経由地)カード = 右カラム・2行ぶんの高さ。幅が広がり見切れ解消。 */
+        .driving-grid > .waypoint-card {
+          grid-column: 2;
+          grid-row: 1 / span 2;
+          max-width: none;
+          width: auto;
+          margin: 0;
+          align-self: stretch;
           box-sizing: border-box;
+        }
+        /* 稀に出る警告/追加料金セクションは全幅で下段に(グリッド崩れ防止) */
+        .driving-grid > .drive-source,
+        .driving-grid > #roadAttrBanner,
+        .driving-grid > #extrasSectionLabel,
+        .driving-grid > .extras-list {
+          grid-column: 1 / -1;
         }
         .route-card {
           max-width: 50%;
@@ -3519,11 +3572,21 @@
         .fare-total-amount {
           font-size: 40px;
         }
-        .fare-total {
-          max-width: 50%;
+        /* ★2026-07-18 司さん指示: 横は 合計料金=左 / 走行距離=右 で同大きさ */
+        .fare-total-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          max-width: 80%;
           width: 100%;
           margin-left: auto;
           margin-right: auto;
+          box-sizing: border-box;
+        }
+        .fare-total {
+          max-width: none;
+          width: auto;
+          margin: 0;
           box-sizing: border-box;
         }
         .breakdown {
@@ -5031,7 +5094,7 @@
                    wp-title を動的に書き換えて「出発地 → 経由地」を表示する。
                    updateWaypointCardUI が startUiTimer (500ms) で Business.getCurrentTrip
                    から start_address と waypoints を読み、矢印区切りで連結描画する。 -->
-              <div class="wp-title" id="waypointTitle">📍 経由地点を記録</div>
+              <div class="wp-title" id="waypointTitle">経由地点を記録</div>
               <div class="wp-sub" id="waypointSub">
                 <span class="wp-sub-tap">タップ</span>で現在地の住所を記録
               </div>
@@ -5100,9 +5163,18 @@
       <div id="screenFare" style="display: none">
         <!-- 日時（全画面共通・dateTimeLine クラス） -->
         <div class="idle-datetime-line dateTimeLine">2026年5月1日（金） 15:43</div>
-        <div class="fare-total">
-          <div class="fare-total-label">合計料金</div>
-          <div class="fare-total-amount">¥<span id="fareTotalAmount">0</span></div>
+        <!-- ★2026-07-18 司さん指示: 合計料金と走行距離を同じ大きさで(縦=下に積む/横=左右) -->
+        <div class="fare-total-grid">
+          <div class="fare-total">
+            <div class="fare-total-label">合計料金</div>
+            <div class="fare-total-amount">¥<span id="fareTotalAmount">0</span></div>
+          </div>
+          <div class="fare-total">
+            <div class="fare-total-label">走行距離</div>
+            <div class="fare-total-amount">
+              <span id="fareDist">0.00</span><span class="fare-dist-unit">km</span>
+            </div>
+          </div>
         </div>
         <!-- ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能・routeCard):
              fare-total と breakdown の間に表示する経路サマリ。Business.getCurrentTrip() で
@@ -8612,21 +8684,22 @@
           const WARN = '<span class="route-warn">⚠ 位置不明</span>';
           const LIVE_SEP = ' <span class="route-sep">→</span> ';
           // 常時末尾表示 (= 重複回避なし)・「(現在地)」 サフィックスで自然
+          // ★2026-07-18 司さん指示: 住所のアイコン(📍/📡)を除去
           const liveSuffix = liveAddr
             ? LIVE_SEP +
-              '<span class="route-live">📡 ' +
+              '<span class="route-live">' +
               ESC(liveAddr) +
               '<span class="route-live-tag">(現在地)</span></span>'
             : '';
           if (!startAddr && count === 0) {
             // 代行開始直後で出発地住所がまだ取得できていない (retry 待ち)
             if (liveAddr) {
-              titleEl.innerHTML = '📍 出発地取得中...' + liveSuffix;
+              titleEl.innerHTML = '出発地取得中...' + liveSuffix;
             } else {
-              titleEl.textContent = '📍 出発地取得中...';
+              titleEl.textContent = '出発地取得中...';
             }
           } else if (count === 0) {
-            titleEl.innerHTML = '📍 ' + ESC(startAddr) + ' から出発' + liveSuffix;
+            titleEl.innerHTML = ESC(startAddr) + ' から出発' + liveSuffix;
           } else {
             // 出発地 → 経由 1 → 経由 2 → ... を矢印連結 + 末尾 現在地
             const parts = [];
@@ -8635,8 +8708,7 @@
               const a = wp && wp.address;
               parts.push(a ? ESC(a) : WARN);
             }
-            titleEl.innerHTML =
-              '📍 ' + parts.join(' <span class="route-sep">→</span> ') + liveSuffix;
+            titleEl.innerHTML = parts.join(' <span class="route-sep">→</span> ') + liveSuffix;
           }
         }
 
@@ -8724,9 +8796,10 @@
         // ★ Phase 3: display_distance_m (= Reconciliation 同期値) を採用
         const distance_for_calc = s.display_distance_m || s.distance_m || 0;
         const rawFareForDisplay = Meter.calcFare(distance_for_calc);
+        // ★2026-07-18 司さん指示: 走行距離は合計料金の隣/下に大表示(fareDist)。内訳からは除外(重複回避)。
+        const _fd = document.getElementById('fareDist');
+        if (_fd) _fd.textContent = (distance_for_calc / 1000).toFixed(2);
         let html = '';
-        // 2026/05/01 仕様変更：走行情報を内訳の上に表示（分かりやすさ向上）
-        html += row('走行距離', (distance_for_calc / 1000).toFixed(2) + 'km');
         html += row('経過時間', Math.floor(s.elapsed_sec / 60) + '分');
         html += '<hr class="breakdown-divider">';
         html += row('基本料金', '¥' + cfg.base_fare.toLocaleString());
