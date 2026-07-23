@@ -1891,6 +1891,19 @@
         color: #aaa;
         margin-top: 4px;
       }
+      /* 現在地（空車画面・日時の上・2026-07-23 司さん要望）: アイコンなし・薄めで控えめ */
+      .idle-location-line {
+        text-align: center;
+        font-size: 14px;
+        font-weight: 600;
+        color: #888;
+        padding: 0 12px;
+        letter-spacing: 0.5px;
+        line-height: 1.3;
+      }
+      .idle-location-line:empty {
+        display: none;
+      }
       /* 日時1行表示（2026/05/01仕様変更） */
       .idle-datetime-line {
         text-align: center;
@@ -4454,6 +4467,8 @@
           padding-bottom: calc(14px + env(safe-area-inset-bottom));
         "
       >
+        <!-- 現在地（日時の上・2026-07-23 司さん要望・空車画面のみ） -->
+        <div class="idle-location-line" id="idleLocation"></div>
         <!-- 日時（1行表示・絵文字なし・2026/05/01仕様） -->
         <div class="idle-datetime-line dateTimeLine" id="idleDateTime">
           2026年5月1日（金） 15:43
@@ -7097,6 +7112,27 @@
         document.querySelectorAll('.dateTimeLine').forEach((el) => {
           el.textContent = text;
         });
+        // ★2026-07-23 司さん要望★: 空車画面の日時の上に現在地(町名)だけ表示。
+        //   空車表示中のみ Business.getCurrentLiveAddress()(3段fallback)で更新。取得前は:empty で非表示。
+        const _locEl = document.getElementById('idleLocation');
+        if (_locEl) {
+          const _idle = document.getElementById('screenIdle');
+          const _idleVisible = _idle && getComputedStyle(_idle).display !== 'none';
+          if (_idleVisible) {
+            let _addr = null;
+            try {
+              if (
+                typeof Business !== 'undefined' &&
+                typeof Business.getCurrentLiveAddress === 'function'
+              ) {
+                _addr = Business.getCurrentLiveAddress();
+              }
+            } catch (_) {
+              /* 起動直後で cache 未確立等 → 非表示のまま */
+            }
+            _locEl.textContent = _addr || '';
+          }
+        }
       }
       setInterval(updateClock, 1000);
       updateClock();
@@ -8932,7 +8968,10 @@
           //   確定画面の料金は calcFare(display) で算出する。catch-up 途中だと display<実距離
           //   (= 過少方向・過大請求は出ないが厳密一致せず)。確定の瞬間に display=distance_m へ latch し
           //   メーター=実距離=料金 を一致させる。distance_m/calcFare 式は不変 (display 層のみ)。
-          if (typeof Meter.latchDisplay === 'function') Meter.latchDisplay();
+          // ★2026-07-23 過大請求根治★: 確定後もメーターが動き続けて総額が伸びる問題を根治。
+          //   freezeBilling で display latch に加えて distance_m の加算も停止(精算終了/走行に戻るまで)。
+          if (typeof Meter.freezeBilling === 'function') Meter.freezeBilling();
+          else if (typeof Meter.latchDisplay === 'function') Meter.latchDisplay();
           const s = Meter.getState();
           // ★設計変更宣言 (2026-05-16・Step2・renderFare 計算式を startUiTimer と統一):
           //   旧: let fare = s.fare_yen (= state.fare_yen ・Tier 1 commit ベース)
@@ -9062,6 +9101,8 @@
         if (blockIfSensorNotGranted()) return;
         appState = 'driving';
         histSaved = false; // 再走行するので保存フラグリセット
+        // ★2026-07-23★: 確定で凍結した課金距離を解除し再走行分を再び計上 (running は維持のまま)
+        if (typeof Meter.unfreezeBilling === 'function') Meter.unfreezeBilling();
         // Meterは止めていないのでresume不要
         try {
           FB.updateVehicle({ status: 'driving' });
