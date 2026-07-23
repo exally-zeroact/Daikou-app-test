@@ -154,6 +154,8 @@ const Meter = (() => {
   //   ★既存キーは消さない (index.html / business.js が読む)。
   let state = {
     running: false, // 代行中 (= 課金 gate)
+    billing_frozen: false, // ★確定(到着)で課金距離を凍結 (= 精算終了/走行に戻る まで distance_m 加算停止)。
+    //   確定後もメーターが動き続けて総額が伸びる過大請求(司さん実機報告2026-07-23)の根治フラグ。
     distance_m: 0, // 課金距離 (= 道路 snap 道なり累積・pipeline delta 駆動・不可侵)
     distanceSource: 'pipeline', // 直近で distance_m を更新したソース ('pipeline' | 'inline')
     fare_yen: 0, // 課金料金
@@ -366,14 +368,14 @@ const Meter = (() => {
       // ★代行距離係数を距離計算式に乗算 → distance_m が DM−0.2% に着地 (料金/表示/総走行は追従)★。
       //   既定1.0=byte不変。mm_distance_m(L323)は RAW(係数なし)=cert/監査ベースライン温存。
       const cal = delta * _kForDelta * _daikouDistFactor;
-      // 課金距離 (running gate・絶対不可侵経路)
-      if (state.running) {
+      // 課金距離 (running gate・絶対不可侵経路)。★確定(billing_frozen)後は加算停止=総額を伸ばさない★
+      if (state.running && !state.billing_frozen) {
         state.distance_m += cal;
         state.fare_yen = calcFare(state.distance_m);
         state.distanceSource = 'pipeline';
       }
-      // 業務単位累積 (business_active gate・空車中も加算・後付メーター対等)
-      if (state.business_active) {
+      // 業務単位累積 (business_active gate・空車中も加算・後付メーター対等)。確定後は同様に凍結。
+      if (state.business_active && !state.billing_frozen) {
         state.business_distance_m = (state.business_distance_m || 0) + cal;
       }
     } else if (delta > 0 && Date.now() < _drainMmUntil) {
@@ -440,6 +442,7 @@ const Meter = (() => {
     const prevBusinessDisplay = (state && state.business_display_distance_m) || prevBusinessDist;
     state = {
       running: true,
+      billing_frozen: false, // ★代行開始で凍結解除 (前 trip の凍結を持ち越さない)
       distance_m: 0,
       distanceSource: 'pipeline',
       fare_yen: fareConfig.base_fare,
@@ -546,6 +549,18 @@ const Meter = (() => {
     _latchDisplay();
   }
 
+  // ─── 確定(到着)で課金距離を凍結 ───
+  //   確定後もメーターが動き続けて総額が伸びる過大請求(司さん実機報告2026-07-23)の根治。
+  //   running は維持(待機/経過時間は継続)しつつ distance_m の加算だけ止め、display は実距離に latch。
+  //   走行に戻る(unfreezeBilling)で解除・精算終了(reset)で解除。
+  function freezeBilling() {
+    state.billing_frozen = true;
+    _latchDisplay();
+  }
+  function unfreezeBilling() {
+    state.billing_frozen = false;
+  }
+
   // ─── 業務終了 ───
   function businessEnd() {
     state.running = false;
@@ -581,6 +596,7 @@ const Meter = (() => {
     const prevBusinessDisplay = (state && state.business_display_distance_m) || prevBusinessDist;
     state = {
       running: false,
+      billing_frozen: false, // ★trip reset で凍結解除 (次の代行に持ち越さない)
       distance_m: 0,
       distanceSource: 'pipeline',
       fare_yen: 0,
@@ -650,7 +666,8 @@ const Meter = (() => {
     }
 
     // 待機時間累積 (fareConfig v2): 速度 < 3km/h かつ running で wait_sec を増加。
-    if (state.running && state.last_timestamp) {
+    //   ★確定(billing_frozen)後は待機時間も止める=確定で総額を完全ロック(距離+待機とも凍結)★
+    if (state.running && !state.billing_frozen && state.last_timestamp) {
       const dtSec2 = (gpsResult.timestamp - state.last_timestamp) / 1000;
       if (dtSec2 > 0 && dtSec2 < 60 && (gpsResult.speedKmh || 0) < 3) {
         state.wait_sec += dtSec2;
@@ -665,6 +682,7 @@ const Meter = (() => {
     //   engine 経路 (pipelineDeltaM) とは Worker B 有無で排他のため二重計上しない。
     if (
       state.running &&
+      !state.billing_frozen && // ★確定後は gap補完も停止 (停車中の速度×時間 過大注入を根治)
       state.last_timestamp &&
       !(mmWorker && _workerLoadedPrefs.size > 0) &&
       (gpsResult.speedKmh || 0) > 0
@@ -1510,6 +1528,8 @@ const Meter = (() => {
     //   DK_VEHICLE_PROFILE を読み configVehicle(vehicleId/restoreKs 含む)を送る。autoCalibK OFFでは calibStatus=null のまま=byte不変。
     _postVehicleK,
     latchDisplay: _latchDisplay,
+    freezeBilling, // ★確定(到着)で課金距離を凍結
+    unfreezeBilling, // ★走行に戻るで解除
     // ★テスト用 escape hatch (prod からは呼ばない)
     _setDrainMmUntil: function (t) {
       _drainMmUntil = typeof t === 'number' ? t : 0;
