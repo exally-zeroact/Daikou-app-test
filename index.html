@@ -896,24 +896,26 @@
       #overlayHelp .content {
         padding: 16px 14px;
       }
+      /* ★2026-07-18 司さん指示・使い方 全面作り直し(高齢従業員向けに大きく・濃く・平易に) */
       #overlayHelp .section-title {
-        font-size: 14px;
-        font-weight: 700;
-        color: #8e8e93;
-        margin: 18px 4px 8px;
-        letter-spacing: 1px;
+        font-size: 17px;
+        font-weight: 800;
+        color: #1c1c1e;
+        margin: 22px 4px 10px;
+        letter-spacing: 0.5px;
       }
       #overlayHelp .section-title:first-child {
         margin-top: 4px;
       }
       #overlayHelp .acc-card {
         background: #fff;
-        border-radius: 10px;
-        margin-bottom: 8px;
+        border: 1px solid #e3e3e8;
+        border-radius: 12px;
+        margin-bottom: 10px;
         overflow: hidden;
       }
       #overlayHelp .acc-head {
-        padding: 14px 16px;
+        padding: 16px 16px;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -922,7 +924,7 @@
         background: #fff;
         width: 100%;
         font-family: 'Noto Sans JP', sans-serif;
-        font-size: 15px;
+        font-size: 18px;
         color: #111;
         text-align: left;
       }
@@ -930,26 +932,26 @@
         background: #f2f2f7;
       }
       #overlayHelp .acc-head-num {
-        display: inline-block;
-        width: 24px;
-        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
         border-radius: 50%;
         background: #007aff;
         color: #fff;
-        font-size: 13px;
-        font-weight: 700;
-        text-align: center;
-        line-height: 24px;
-        margin-right: 10px;
+        font-size: 16px;
+        font-weight: 800;
+        margin-right: 12px;
         flex-shrink: 0;
       }
       #overlayHelp .acc-head-text {
         flex: 1;
-        font-weight: 700;
+        font-weight: 800;
       }
       #overlayHelp .acc-arrow {
-        color: #8e8e93;
-        font-size: 18px;
+        color: #555;
+        font-size: 20px;
         transition: transform 0.2s;
         flex-shrink: 0;
       }
@@ -957,21 +959,26 @@
         transform: rotate(180deg);
       }
       #overlayHelp .acc-body {
-        padding: 0 16px 14px 50px;
-        font-size: 14px;
-        color: #3c3c43;
-        line-height: 1.7;
+        padding: 0 18px 16px 58px;
+        font-size: 16px;
+        color: #2b2b2e;
+        line-height: 1.9;
         display: none;
       }
       #overlayHelp .acc-card.open .acc-body {
         display: block;
       }
+      /* 本文中の強調(ボタン名/画面名) */
+      #overlayHelp .acc-body b {
+        color: #111;
+        font-weight: 800;
+      }
       #overlayHelp .faq-card .acc-head-num {
-        background: #8e8e93;
-        font-size: 14px;
+        background: #34c759;
+        font-size: 15px;
       }
       #overlayHelp .faq-card .acc-body {
-        padding-left: 16px;
+        padding-left: 18px;
       }
       @media (orientation: landscape) and (min-width: 700px) {
         #overlayHelp .acc-grid {
@@ -3322,6 +3329,18 @@
           max-height: calc(100vh - 40px);
           min-height: 0;
           justify-content: center;
+        }
+        /* ★2026-07-18 司さん指示: 横で使い方がスクロールできず詰まるバグ根治。
+           上の汎用.content(高さ100vh-40px/overflow:hidden・=業務画面用グリッドセル)が
+           overlay内の #overlayHelp .content にも波及しコンテンツを350pxでクリップ→無スクロール化していた。
+           overlay自体(.spa-overlay)がスクロール担当なので、使い方の.contentは高さ制約/overflow/中央寄せを解除。 */
+        #overlayHelp .content {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+          display: block !important;
+          justify-content: normal !important;
+          flex: none !important;
         }
 
         /* ボタンエリア：右半分（縦に並ぶ）*/
@@ -14221,11 +14240,9 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              ① まずホーム画面に追加してください（必須）。iPhone は Safari の共有ボタン
-              →「ホーム画面に追加」、Android Chrome はメニュー
-              →「アプリをインストール」。ホーム画面追加していないと業務開始ボタンが押せません。<br />②
-              下の「設定」タブ
-              →「料金設定」で、初乗り料金・初乗り距離・加算料金・加算距離を入力してください。同じ画面の「追加料金」タブで迎車料金・高速料金などの項目も登録できます。
+              ①
+              最初に<b>ホーム画面に追加</b>してください（これをしないと業務開始が押せません）。iPhoneはSafariの共有ボタン→「ホーム画面に追加」、AndroidはChromeメニュー→「アプリをインストール」。<br />②
+              下の<b>設定</b>タブ→<b>料金設定</b>で、初乗り料金・距離、加算料金・距離を入れます。迎車・高速などは「追加料金」タブで登録できます。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -14234,10 +14251,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              初回起動時に画面中央の青い「センサーを許可する」ボタンを押してください。iPhone
-              はコンパス・加速度・位置情報の許可ダイアログが順番に出るので全て「許可」を選びます。Android
-              は自動許可で位置情報のダイアログのみ出るので「許可」を選びます。許可が完了すると上部の
-              GPS バッジが「GPS待機」→「精度Xm」に変わります。
+              初回に画面中央の青い<b>センサーを許可する</b>ボタンを押します。位置情報などの許可が順に出るので、全て<b>「許可」</b>を選んでください。上の<b>GPS</b>バッジの点が<b>緑</b>になれば準備完了です（点が白いままなら未接続）。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -14246,10 +14260,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              許可完了後に表示される青い「業務開始」ボタンを押します。一日の業務スタート（GPS
-              起動・画面消灯防止・集計値 0
-              リセット）が走り、空車画面に遷移します。お客様を乗せる時は空車画面の「代行開始」ボタンを押すと走行距離・料金がリアルタイム計算されます。目的地で「確定」→
-              料金画面（内訳表示）→「空車」を押して 1 trip 確定です。
+              許可のあとに出る青い<b>業務開始</b>ボタンを押すと1日が始まり、空車画面になります。お客様を乗せたら<b>代行開始</b>を押すと、走行距離と料金がリアルタイムで動きます。目的地で<b>確定</b>→料金画面で<b>精算終了</b>を押すと1件完了、空車画面に戻ります。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -14258,10 +14269,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              実車中の画面上部に並ぶ「割増」ボタン群を ON / OFF できます。複数同時に ON
-              にすると倍率は掛け算（深夜×1.2 + 悪天候×1.1 = 1.32
-              倍）。深夜・週末・冬季の自動割増は時刻 / 曜日 /
-              日付で自動判定し対象時間に入ると勝手に適用されます。割増ボタンの追加・編集は「設定」→「料金設定」→「割増」または「自動割増」タブから。
+              実車中の上に並ぶ<b>割増</b>ボタンでON/OFFできます。割増ボタンは<b>設定→料金設定→割増</b>で自分で作れます（名前・倍率・色）。2つ以上ONにすると倍率は掛け算です（例：1.2倍と1.1倍を両方ONで1.32倍）。深夜・週末などの<b>自動割増</b>は、<b>設定→料金設定→自動割増</b>でONにしておくと時間になって自動で入ります。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -14270,9 +14278,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              実車中の「追加料金」ボタンを押すと項目選択モーダルが出ます。迎車料金・高速料金・キャンセル料など登録済の項目をタップで即加算。同じ項目をタップした回数だけ累計されます（例:
-              高速料金 ¥1,000 を 3 回タップで合計
-              ¥3,000）。項目自体の追加・編集は「設定」→「料金設定」→「追加料金」タブから自由にできます。
+              実車中の<b>追加料金</b>ボタンで、迎車・高速・キャンセル料などを選ぶと加算されます。同じ項目は押した回数ぶん足されます（高速¥1,000を3回で¥3,000）。項目の追加・変更は<b>設定→料金設定→追加料金</b>から。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -14281,10 +14287,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              空車画面の「業務終了」ボタンを押します。確認ダイアログが出るので「OK」で日報画面に遷移。日報画面では「続ける」（業務を再開して空車画面に戻る）と「終了」（業務開始画面に戻る）の
-              2
-              択。「終了」を押した後の業務開始画面には「業務再開」ボタンが残り、いつでもその業務を再開できます（時間制限はありません）。完全に新しい業務を始めたい場合は「業務開始」を押すと集計値が
-              0 リセットされます。
+              空車画面の<b>業務終了</b>→「OK」で日報が出ます。<b>続ける</b>でその業務を再開、<b>終了</b>で最初の画面に戻ります。終了後も<b>業務再開</b>ボタンが残るので、いつでも戻せます（時間制限なし）。新しく始めるときは<b>業務開始</b>を押すと集計が0に戻ります。
             </div>
           </div>
           <div class="acc-card" onclick="this.classList.toggle('open')">
@@ -14293,9 +14296,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              下の「履歴」タブ、または空車画面の「履歴」ボタンから、当日の trip
-              一覧を確認できます。各行に開始時刻・走行距離・料金・追加料金の内訳が表示され、上部に「走行回数」「総距離」「総売上」の集計も出ます。表示は当日分のみで、日付が変わると新しい
-              1 日になります。
+              空車画面の<b>履歴</b>ボタンで、その日の記録を見られます。各件に時刻・走行距離・料金が出て、上に<b>走行回数・総距離・総売上</b>の合計も出ます。日付が変わると新しい1日になります。
             </div>
           </div>
         </div>
@@ -14308,10 +14309,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              iPhone は「設定」アプリ → ダイコメ → 位置情報 →「常に」を選択。Android
-              は「設定」アプリ → アプリ → ダイコメ → 権限 → 位置情報
-              →「常に許可」を選択。設定変更後、ダイコメに戻ると GPS バッジが
-              「GPS待機」→「精度Xm」に変わります。
+              iPhoneは<b>設定→ダイコメ→位置情報→「常に」</b>。Androidは<b>設定→アプリ→ダイコメ→権限→位置情報→「常に許可」</b>。ダイコメに戻るとGPSバッジの点が緑になります。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -14321,10 +14319,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              業務中にタスクキルされた場合、再起動すると自動的に直前の状態（実車中・走行距離・料金・追加料金・総走行距離）に復元されます。iPhone
-              は再起動後にオレンジバナーが出るので「センサーを再起動する」ボタンを 1 回押せば GPS /
-              コンパス /
-              加速度が復活し、計測が続行します。時間制限はないため、長時間後の復元でも引き継げます。
+              業務中に閉じても、開き直すと直前の状態（実車中・距離・料金）に自動で戻ります。iPhoneはオレンジのバナーに出る<b>センサーを再起動する</b>を1回押せば計測が続きます。時間制限はありません。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -14334,9 +14329,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              使えます。47
-              都道府県の道路データは初回起動時に端末内に保存されるので、地下・トンネル・電波の届かない場所でも料金計算（道路に沿った距離計算）は継続します。Firebase
-              への送信は復活時にまとめて再送されます。
+              使えます。全国の道路データは最初に端末へ保存されるので、トンネルや電波の無い所でも距離・料金の計算は続きます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -14346,8 +14339,8 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」タブ
-              →「料金設定」→「追加料金」タブで、項目の名前と金額を自由に追加・編集・削除できます。実車中の「追加料金」モーダルに即時反映されます。
+              <b>設定→料金設定→追加料金</b
+              >で、名前と金額を自由に追加・変更・削除できます。実車中のボタンにすぐ反映されます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -14357,10 +14350,8 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」タブ
-              →「料金設定」→「割増」タブで、手動割増ボタンを追加できます。名前・倍率・色を自由に設定でき、複数
-              ON で倍率は掛け算されます。深夜・週末・冬季の時刻ベース割増は「自動割増」タブから ON /
-              OFF と倍率設定が可能です。
+              <b>設定→料金設定→割増</b
+              >で手動の割増ボタンを追加できます（名前・倍率・色）。複数ONで倍率は掛け算。深夜・週末などの自動割増は<b>自動割増</b>タブでON/OFFできます。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -14369,8 +14360,8 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              「設定」→「料金設定」→「基本」タブで、初乗り料金・初乗り距離・加算料金・加算距離が正しく入っているか確認してください。0
-              や空欄のままだと加算料金がカウントされません。設定変更後は「保存」ボタンを必ず押してください。
+              <b>設定→料金設定→基本</b
+              >で、初乗り料金・距離、加算料金・距離が正しく入っているか確認してください。空欄や0だと加算されません。変更後は<b>保存</b>を必ず押してください。
             </div>
           </div>
           <div class="acc-card faq-card" onclick="this.classList.toggle('open')">
@@ -14380,9 +14371,7 @@
               ><span class="acc-arrow">▾</span>
             </button>
             <div class="acc-body">
-              業務終了
-              →「終了」を押すと業務開始画面に戻りますが、画面に「前回の業務を引き継ぐ場合は」の赤い注釈と「業務再開」ボタンが残ります。これは前の業務を再開する経路です（時間制限なし）。完全に新しい業務として始めたい場合は「業務開始」を押してください（集計値が
-              0 リセット）。
+              業務終了→「終了」のあと最初の画面に残る<b>業務再開</b>は、前の業務を続けるためのボタンです（時間制限なし）。新しく始めたいときは<b>業務開始</b>を押すと集計が0に戻ります。
             </div>
           </div>
         </div>
