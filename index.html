@@ -5031,6 +5031,21 @@
             追加料金
           </div>
           <div class="extras-list" id="extrasList"></div>
+          <!-- 値引きセクション (追加した値引きを一覧・✕で削除・2026-07-25) -->
+          <div
+            id="discountsSectionLabel"
+            style="
+              display: none;
+              font-size: 11px;
+              font-weight: 700;
+              color: #8e8e93;
+              letter-spacing: 1px;
+              margin: 8px 12px 4px;
+            "
+          >
+            値引き
+          </div>
+          <div class="extras-list" id="discountsList"></div>
         </div>
       </div>
 
@@ -7718,6 +7733,7 @@
           }
 
           renderExtras();
+          renderDiscounts();
 
           // Firebase送信（2秒ごと）
           if (s.elapsed_sec % 2 === 0) {
@@ -7795,6 +7811,45 @@
       function removeExtra(i) {
         extras.splice(i, 1);
         renderExtras();
+      }
+
+      // ─── 値引き 一覧表示 + 削除 (追加料金と同型・-¥表示) ───
+      function renderDiscounts() {
+        const el = document.getElementById('discountsList');
+        const lbl = document.getElementById('discountsSectionLabel');
+        if (!el) return;
+        if (!discounts || discounts.length === 0) {
+          el.innerHTML = '';
+          if (lbl) lbl.style.display = 'none';
+          return;
+        }
+        if (lbl) lbl.style.display = 'block';
+        const groups = new Map();
+        discounts.forEach((d, i) => {
+          const key = d.name + '|' + d.amount;
+          if (!groups.has(key)) {
+            groups.set(key, { name: d.name, amount: d.amount, count: 0, lastIdx: i });
+          }
+          const g = groups.get(key);
+          g.count++;
+          g.lastIdx = i;
+        });
+        el.innerHTML = Array.from(groups.values())
+          .map(
+            (g) =>
+              `<div class="extra-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>${g.name}<span style="font-size:11px;color:#8E8E93;margin-left:6px;font-family:'DM Mono',monospace;">×${g.count}</span></span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="color:#5856d6;">-¥${(g.amount * g.count).toLocaleString()}</span>
+        <button class="extra-del-btn" onclick="removeDiscount(${g.lastIdx})">✕</button>
+      </div>
+    </div>`
+          )
+          .join('');
+      }
+      function removeDiscount(i) {
+        discounts.splice(i, 1);
+        renderDiscounts();
       }
 
       function fmt(sec) {
