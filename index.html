@@ -2209,6 +2209,12 @@
         flex-direction: column;
         gap: 12px;
       }
+      /* 住所+キャンセルの束(縦: 住所の下にキャンセル) */
+      .addr-cancel {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
       .meter-card {
         background: #f5f5f5;
         border-radius: 12px;
@@ -2431,6 +2437,9 @@
       .breakdown-row .val.extra {
         color: #ff9500;
       }
+      .breakdown-row .val.discount {
+        color: #5856d6; /* ★値引き(紫・-¥表示) */
+      }
       .breakdown-divider {
         border: none;
         border-top: 0.5px solid #e5e5e5;
@@ -2622,8 +2631,41 @@
       .btn-extra {
         background: #ff9500;
       }
+      .btn-discount {
+        background: #5856d6; /* ★値引き(紫・追加料金オレンジと区別) */
+      }
       .btn-confirm {
         background: #34c759;
+      }
+      /* ★確定 (driving・フッター下段 全幅・2026-07-25) */
+      .btn-driving-confirm {
+        display: none;
+        width: 100%;
+        padding: 14px 0;
+        font-size: 15px;
+        letter-spacing: 3px;
+      }
+      .btn-driving-confirm.show {
+        display: block;
+      }
+      /* ★代行キャンセル (住所下・緑丸位置・2026-07-25)・赤背景白文字・幅は住所カードと同じ(grid stretch) */
+      .btn-cancel-trip {
+        display: block;
+        width: 100%;
+        margin: 0;
+        padding: 13px 0;
+        background: #ff3b30;
+        color: #fff;
+        border: none;
+        border-radius: 12px;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        font-family: 'Noto Sans JP', sans-serif;
+        cursor: pointer;
+      }
+      .btn-cancel-trip:active {
+        filter: brightness(0.88);
       }
 
       /* 縦画面用 走行に戻るボタン（fare時のみ表示） */
@@ -3060,10 +3102,13 @@
           grid-template-columns: 1fr !important;
           gap: 8px !important;
         }
-        /* ★ 代行中 btn-row (= 追加料金 + 確定) を縦並び 2 ボタンに統一 */
+        /* ★ 代行中 btn-row (= 追加料金 + 値引き) を縦並びに。値引きを上(赤丸位置)に。 */
         .btn-row {
           grid-template-columns: 1fr !important;
           gap: 8px !important;
+        }
+        .btn-row .btn-discount {
+          order: -1; /* ★横画面: 値引きを追加料金の上に(司さん赤丸) */
         }
 
         /* 2026/05/01 横画面UI修正 */
@@ -3464,14 +3509,32 @@
           font-size: 14px; /* 待機ラベルと統一 */
           margin-bottom: 4px;
         }
-        /* 住所(経由地)カード = 右カラム・2行ぶんの高さ。幅が広がり見切れ解消。 */
-        .driving-grid > .waypoint-card {
+        /* 住所+キャンセルの束 = 右カラム・料金/距離の全高に整列(2行span)。
+           中で 住所=伸びて高く / キャンセル=自然な低い高さ。 */
+        .driving-grid > .addr-cancel {
           grid-column: 2;
           grid-row: 1 / span 2;
+          align-self: stretch;
           max-width: none;
           width: auto;
           margin: 0;
-          align-self: stretch;
+          box-sizing: border-box;
+          gap: 10px;
+        }
+        .driving-grid > .addr-cancel > .waypoint-card {
+          flex: 1 1 auto; /* ★住所が余白を全部取って高くなる(キャンセルより縦幅大) */
+          max-width: none;
+          width: auto;
+          margin: 0;
+          box-sizing: border-box;
+        }
+        .driving-grid > .addr-cancel > .btn-cancel-trip {
+          flex: 0 0 auto; /* ★キャンセルは自然な低い高さ */
+          width: 100%;
+          margin: 0;
+          padding: 12px 8px;
+          font-size: 14px;
+          letter-spacing: 1px;
           box-sizing: border-box;
         }
         /* 稀に出る警告/追加料金セクションは全幅で下段に(グリッド崩れ防止) */
@@ -4888,24 +4951,31 @@
                位置情報は座標として後段で復元可能)。代行開始時に Business.onTripStart で
                current_trip が初期化されるとき UI を未記録状態にリセットする。
                走行中の誤タップを軽減するため :active で 0.985 倍縮小 + 押下時にトースト表示。 -->
-          <div
-            id="waypointCard"
-            class="waypoint-card"
-            role="button"
-            tabindex="0"
-            onclick="onWaypointBtn()"
-          >
-            <div class="wp-main">
-              <!-- ★設計変更宣言 (2026-05-16・waypointCard 表示拡張):
-                   wp-title を動的に書き換えて「出発地 → 経由地」を表示する。
-                   updateWaypointCardUI が startUiTimer (500ms) で Business.getCurrentTrip
-                   から start_address と waypoints を読み、矢印区切りで連結描画する。 -->
-              <div class="wp-title" id="waypointTitle">経由地点を記録</div>
-              <div class="wp-sub" id="waypointSub">
-                <span class="wp-sub-tap">タップ</span>で現在地の住所を記録
+          <!-- 住所+キャンセルを1枠に(横画面: 住所=高・キャンセル=低で右カラムに縦積み) -->
+          <div class="addr-cancel">
+            <div
+              id="waypointCard"
+              class="waypoint-card"
+              role="button"
+              tabindex="0"
+              onclick="onWaypointBtn()"
+            >
+              <div class="wp-main">
+                <!-- ★設計変更宣言 (2026-05-16・waypointCard 表示拡張):
+                     wp-title を動的に書き換えて「出発地 → 経由地」を表示する。
+                     updateWaypointCardUI が startUiTimer (500ms) で Business.getCurrentTrip
+                     から start_address と waypoints を読み、矢印区切りで連結描画する。 -->
+                <div class="wp-title" id="waypointTitle">経由地点を記録</div>
+                <div class="wp-sub" id="waypointSub">
+                  <span class="wp-sub-tap">タップ</span>で現在地の住所を記録
+                </div>
               </div>
+              <div class="wp-badge" id="waypointBadge">0</div>
             </div>
-            <div class="wp-badge" id="waypointBadge">0</div>
+            <!-- キャンセル (代行取消=距離も料金も加算しない) -->
+            <button class="btn-cancel-trip" id="btnCancelTrip" onclick="onCancelTrip()">
+              キャンセル
+            </button>
           </div>
           <!-- 距離ソース表示 (2026-05-09・M3/M4) -->
           <!-- ★設計変更宣言 (2026-05-10): 初期 display:none・JS が真の異常時のみ block -->
@@ -5024,8 +5094,16 @@
            sibling combinator で 履歴/業務終了 を driving 時非表示制御可能 -->
       <div class="btn-row" id="btnRow">
         <button class="btn-sub btn-extra" onclick="openExtraModal()">追加料金</button>
-        <button class="btn-sub btn-confirm" onclick="onSend()">確定</button>
+        <button class="btn-sub btn-discount" onclick="openDiscountModal()">値引き</button>
       </div>
+      <!-- 確定 (driving時のみ・フッター下段 全幅・2026-07-25 司さん要望) -->
+      <button
+        class="btn-sub btn-confirm btn-driving-confirm"
+        id="btnDrivingConfirm"
+        onclick="onSend()"
+      >
+        確定
+      </button>
       <!-- ★設計変更宣言 (2026-05-20 司さん指示・横画面右カラム復元 + inline style 保険):
            landscape 空車時 btn-area に 履歴 → 業務終了 → 代行開始 を縦並びで表示。
            portrait は CSS で完全非表示 (= screenIdle 内で表示)。
@@ -5068,6 +5146,22 @@
           <span>任意入力</span>
           <input type="number" id="customAmount" placeholder="0" inputmode="numeric" />
           <button class="modal-custom-btn" onclick="addCustomExtra()">追加料金</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 値引きモーダル (2026-07-25・追加料金と同型) -->
+    <div class="modal-overlay" id="discountModalOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">値引きを選択</div>
+          <div class="modal-cancel" onclick="closeDiscountModal()">キャンセル</div>
+        </div>
+        <div class="modal-items" id="discountModalItems"></div>
+        <div class="modal-custom" style="margin-top: 8px">
+          <span>任意入力</span>
+          <input type="number" id="customDiscountAmount" placeholder="0" inputmode="numeric" />
+          <button class="modal-custom-btn" onclick="addCustomDiscount()">値引き</button>
         </div>
       </div>
     </div>
@@ -5732,6 +5826,7 @@
       let surchargeRate = 1.2;
       let surchargeEnabled = false;
       let extras = [];
+      let discounts = []; // ★値引き (追加料金と同型・合計から減算)★
       let todayDist = 0;
       let todayCount = 0;
       // ★設計変更宣言 (2026-05-14・本日売上 global fallback):
@@ -6943,6 +7038,9 @@
         if (localStorage.getItem('daikou_extras') === null) {
           localStorage.setItem('daikou_extras', JSON.stringify([]));
         }
+        if (localStorage.getItem('daikou_discounts') === null) {
+          localStorage.setItem('daikou_discounts', JSON.stringify([])); // ★値引きプリセット(空で開始)
+        }
 
         const s = localStorage.getItem('daikou_settings');
         if (s) {
@@ -7434,7 +7532,7 @@
           typeof extras !== 'undefined' && Array.isArray(extras)
             ? extras.reduce((a, b) => a + b.amount, 0)
             : 0;
-        const fareStr = (fare + extraTotal).toLocaleString();
+        const fareStr = Math.max(0, fare + extraTotal - _discountTotal()).toLocaleString();
         if (fareStr !== _lastDriveFareYen) {
           const elFare = document.getElementById('driveFare');
           if (elFare) elFare.textContent = fareStr;
@@ -7555,7 +7653,7 @@
           let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           const extraTotal = extras.reduce((a, b) => a + b.amount, 0);
-          const total = fare + extraTotal;
+          const total = Math.max(0, fare + extraTotal - _discountTotal());
           // 距離 / 料金 / 業務総走行の読み出しは rAF と共通の _renderMeterReadout() に一本化
           // (= driveDist=display_distance_m 滑らか・driveFare=calcFare(display)+surcharge+extras・
           //    totalDist=Business.getReport().total_distance_m)。textContent 比較で二重書込なし。
@@ -7879,6 +7977,7 @@
           // 代行開始
           appState = 'driving';
           extras = [];
+          discounts = [];
           surchargeOn = false;
           // UI更新を先に行う
           showScreen('driving');
@@ -8635,6 +8734,11 @@
         extras.forEach((e) => {
           html += row(e.name, '+¥' + e.amount.toLocaleString(), 'extra');
         });
+        if (Array.isArray(discounts)) {
+          discounts.forEach((d) => {
+            html += row(d.name, '-¥' + (d.amount || 0).toLocaleString(), 'discount');
+          });
+        }
         document.getElementById('breakdown').innerHTML = html;
 
         // 今日の実績・履歴は1回だけ保存
@@ -8810,8 +8914,11 @@
           correctionDistanceM = s.distance_m;
           let fare = s.fare_yen;
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
-          correctionTotal = fare + extras.reduce((a, b) => a + b.amount, 0);
-          // 業務管理連携用に保持（reset前に）
+          correctionTotal = Math.max(
+            0,
+            fare + extras.reduce((a, b) => a + b.amount, 0) - _discountTotal()
+          );
+          // 業務管理連携用に保持（reset前に）★値引き反映済みの実請求額を記録★
           tripDistanceM = s.distance_m;
           tripFareYen = correctionTotal;
           // 仕事開始時刻を取得
@@ -8877,6 +8984,7 @@
         }
         appState = 'idle';
         extras = [];
+        discounts = [];
         surchargeOn = false;
         Meter.reset();
         // リロード復元データ削除・バナー非表示
@@ -8987,7 +9095,7 @@
           let fare = Meter.calcFare(s.display_distance_m || s.distance_m || 0);
           if (surchargeOn) fare = Math.round(fare * surchargeRate);
           let extraTotal = extras.reduce((a, b) => a + b.amount, 0);
-          let total = fare + extraTotal;
+          let total = Math.max(0, fare + extraTotal - _discountTotal());
           // ★設計変更宣言 (2026-05-15・経由地点 + 住所表示機能):
           //   確定ボタン押下時に到着地住所を取得し current_trip.end_address に保持する。
           //   renderFare が getCurrentTrip 経由で経路カードを描画する直前に呼ぶ必要がある。
@@ -9217,6 +9325,82 @@
         closeExtraModal();
       }
 
+      // ─── 値引き (追加料金と同型・合計から減算・2026-07-25 司さん要望) ───
+      function _discountTotal() {
+        return Array.isArray(discounts) ? discounts.reduce((a, b) => a + (b.amount || 0), 0) : 0;
+      }
+      function openDiscountModal() {
+        if (blockIfSensorNotGranted()) return;
+        const items = JSON.parse(localStorage.getItem('daikou_discounts') || '[]');
+        const el = document.getElementById('discountModalItems');
+        el.innerHTML = items
+          .map(
+            (item, i) =>
+              `<div class="modal-item" onclick="addDiscount(${i})">
+      <span class="modal-item-name">${item.name}</span>
+      <span class="modal-item-price">-¥${(item.amount || 0).toLocaleString()}</span>
+    </div>`
+          )
+          .join('');
+        document.getElementById('customDiscountAmount').value = '';
+        document.getElementById('discountModalOverlay').classList.add('show');
+      }
+      function closeDiscountModal() {
+        document.getElementById('discountModalOverlay').classList.remove('show');
+      }
+      function addDiscount(i) {
+        const items = JSON.parse(localStorage.getItem('daikou_discounts') || '[]');
+        if (items[i]) discounts.push({ name: items[i].name, amount: items[i].amount });
+        closeDiscountModal();
+      }
+      function addCustomDiscount() {
+        const v = parseInt(document.getElementById('customDiscountAmount').value);
+        if (!v || v <= 0) return;
+        discounts.push({ name: '任意値引き', amount: v });
+        closeDiscountModal();
+      }
+
+      // ─── 代行キャンセル (取消: 距離も料金も加算しない・2026-07-25 司さん要望) ───
+      //   代行中に押すと、現在のtripを記録せず破棄して空車へ戻る (Business.onTripEnd を呼ばない)。
+      function onCancelTrip() {
+        if (blockIfSensorNotGranted()) return;
+        if (appState !== 'driving' && appState !== 'fare') return;
+        if (!confirm('この代行を取消します。距離も料金も加算されません。よろしいですか？')) return;
+        // メーター停止+trip reset (distance_m/料金を破棄) ・記録(onTripEnd)はしない
+        try {
+          Meter.stop();
+        } catch (_) {}
+        if (uiTimer) {
+          clearInterval(uiTimer);
+          uiTimer = null;
+        }
+        if (typeof stopRafDisplay === 'function') stopRafDisplay();
+        appState = 'idle';
+        extras = [];
+        discounts = [];
+        surchargeOn = false;
+        histSaved = false;
+        try {
+          Meter.reset();
+        } catch (_) {}
+        localStorage.removeItem('daikou_driving_state');
+        const _rb = document.getElementById('restoreBanner');
+        if (_rb) _rb.classList.remove('show');
+        try {
+          FB.setIdle();
+        } catch (_) {}
+        showScreen('idle');
+        try {
+          updateBusinessDashboard();
+        } catch (_) {}
+        const _title = document.getElementById('appbarTitle');
+        if (_title) _title.textContent = '空　車';
+        const _si = document.getElementById('surchargeInfo');
+        if (_si) _si.style.display = 'none';
+        if (typeof updateSurchargeBadge === 'function') updateSurchargeBadge();
+        if (typeof showToast === 'function') showToast('代行を取消しました');
+      }
+
       // ─── 画面切替 ───
       // 2026/05/01 仕様：画面ごとに表示するボタンを show クラスで制御
       //   業務未開始(businessStart) : 専用画面・[業務開始] のみ
@@ -9269,6 +9453,8 @@
         if (btnBackL) btnBackL.classList.remove('show');
         if (btnResumeL) btnResumeL.classList.remove('show');
         if (btnConfirmL) btnConfirmL.classList.remove('show');
+        const _bdcReset = document.getElementById('btnDrivingConfirm');
+        if (_bdcReset) _bdcReset.classList.remove('show');
 
         // 画面ごとの表示
         if (name === 'idle') {
@@ -9278,6 +9464,8 @@
           }
         } else if (name === 'driving') {
           if (btnRow) btnRow.classList.add('show');
+          const _bdc = document.getElementById('btnDrivingConfirm');
+          if (_bdc) _bdc.classList.add('show');
         } else if (name === 'fare') {
           if (btnMain) {
             btnMain.textContent = '精算終了';
@@ -9324,7 +9512,7 @@
             let fare = s.fare_yen;
             if (surchargeOn) fare = Math.round(fare * surchargeRate);
             const extraTotal = extras.reduce((a, b) => a + b.amount, 0);
-            const total = fare + extraTotal;
+            const total = Math.max(0, fare + extraTotal - _discountTotal());
             const mmStats2 = typeof Meter.getMMStats === 'function' ? Meter.getMMStats() : null;
             localStorage.setItem(
               'daikou_driving_state',
@@ -12316,6 +12504,57 @@
           } catch (_) {}
         }
 
+        // ━━ 値引き (追加料金と同型・プリセット管理) ━━
+        let discountItems = [];
+        function loadDiscounts() {
+          try {
+            const raw = localStorage.getItem('daikou_discounts');
+            discountItems = raw ? JSON.parse(raw) || [] : [];
+          } catch (_) {
+            discountItems = [];
+          }
+          renderDiscountItems();
+        }
+        function renderDiscountItems() {
+          const el = $('_fare_discountItems');
+          if (!el) return;
+          el.innerHTML = discountItems
+            .map(
+              (item, i) =>
+                '<div class="extra-item">' +
+                '<input class="extra-name" type="text" value="' +
+                String(item.name || '').replace(/"/g, '&quot;') +
+                '" placeholder="項目名（例：常連割）" oninput="window._fare_setDiscountName(' +
+                i +
+                ',this.value)">' +
+                '<div class="extra-item-row">' +
+                '<input class="extra-amount" type="number" value="' +
+                (item.amount || '') +
+                '" placeholder="0" inputmode="numeric" oninput="window._fare_setDiscountAmount(' +
+                i +
+                ',this.value)">' +
+                '<span class="extra-unit">円</span>' +
+                '<button class="extra-del" onclick="window._fare_removeDiscount(' +
+                i +
+                ')">削除</button>' +
+                '</div></div>'
+            )
+            .join('');
+        }
+        function addDiscountItem() {
+          discountItems.push({ name: '', amount: 0 });
+          renderDiscountItems();
+        }
+        function removeDiscountCfg(i) {
+          discountItems.splice(i, 1);
+          renderDiscountItems();
+        }
+        function saveDiscounts() {
+          try {
+            localStorage.setItem('daikou_discounts', JSON.stringify(discountItems));
+          } catch (_) {}
+        }
+
         // ━━ プレビュータブ ━━
         function renderPreviewSurcharges() {
           const root = $('_fare_previewSurcharges');
@@ -12672,6 +12911,7 @@
           loadWait();
           renderZones();
           loadExtras();
+          loadDiscounts();
           bindToggle(
             '_fare_tiersEnabledToggle',
             () => fc.tiersEnabled,
@@ -12740,6 +12980,7 @@
             } catch (_) {}
           }
           saveExtras();
+          saveDiscounts();
           showToast('保存しました');
         }
         function showToast(msg) {
@@ -12764,6 +13005,14 @@
         };
         window._fare_setExtraAmount = function (i, v) {
           if (extraItems[i]) extraItems[i].amount = parseInt(v, 10) || 0;
+        };
+        window._fare_addDiscountItem = addDiscountItem;
+        window._fare_removeDiscount = removeDiscountCfg;
+        window._fare_setDiscountName = function (i, v) {
+          if (discountItems[i]) discountItems[i].name = v;
+        };
+        window._fare_setDiscountAmount = function (i, v) {
+          if (discountItems[i]) discountItems[i].amount = parseInt(v, 10) || 0;
         };
       })();
       // ★起動計測ログ Phase 0 (2026-05-25): inline script eval 完了 mark (= read-only)
@@ -14152,6 +14401,7 @@
       <div class="layout">
         <nav class="tab-nav" id="_fare_tabNav">
           <button class="tab-btn active" data-tab="extras">追加料金</button>
+          <button class="tab-btn" data-tab="discounts">値引き</button>
           <button class="tab-btn" data-tab="basic">基本</button>
           <button class="tab-btn" data-tab="tiers">段階</button>
           <button class="tab-btn" data-tab="surcharges">割増</button>
@@ -14443,6 +14693,20 @@
               </div>
               <div id="_fare_extraItems"></div>
               <button class="btn-add" onclick="window._fare_addExtraItem()">＋ 項目を追加</button>
+            </div>
+          </section>
+          <section class="tab-pane" data-pane="discounts">
+            <div class="card">
+              <div class="card-title">値引き項目 (常連割・クーポンなど)</div>
+              <div class="card-desc">
+                業務画面でワンタップ減算できる値引きを登録します。例: 常連割 500円 / クーポン
+                300円。
+                合計はこの値引きぶん差し引かれ(0円未満にはならず)、その実請求額で記録されます。
+              </div>
+              <div id="_fare_discountItems"></div>
+              <button class="btn-add" onclick="window._fare_addDiscountItem()">
+                ＋ 値引きを追加
+              </button>
             </div>
           </section>
           <section class="tab-pane" data-pane="preview">
