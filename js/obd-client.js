@@ -761,8 +761,8 @@
       }
       global.OBD_PROBE_RESULT = results;
       try {
-        // eslint-disable-next-line no-console
-        console.log('[OBD-PROBE] ' + JSON.stringify(results));
+        if (typeof global !== 'undefined' && typeof global.dlog === 'function')
+          global.dlog('[OBD-PROBE] ' + JSON.stringify(results));
       } catch (_) {
         /* ignore */
       }
@@ -1060,8 +1060,8 @@
         };
         global.OBD_WHEELSPEED_PROBE = result;
         try {
-          // eslint-disable-next-line no-console
-          console.log('[OBD-WHEELSPEED] ' + JSON.stringify(result));
+          if (typeof global !== 'undefined' && typeof global.dlog === 'function')
+            global.dlog('[OBD-WHEELSPEED] ' + JSON.stringify(result));
         } catch (_) {
           /* ignore */
         }
@@ -1182,8 +1182,8 @@
           verdict.obd010d_kmh = obd010d; // 押下時速度(走行中押下=速度別CANのID特定に使う)
           global.OBD_CANPROBE = verdict;
           try {
-            // eslint-disable-next-line no-console
-            console.log('[OBD-CANPROBE] ' + JSON.stringify(verdict));
+            if (typeof global !== 'undefined' && typeof global.dlog === 'function')
+              global.dlog('[OBD-CANPROBE] ' + JSON.stringify(verdict));
           } catch (_) {
             /* ignore */
           }

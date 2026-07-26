@@ -14464,7 +14464,6 @@
           <button class="tab-btn" data-tab="vehicles">車種</button>
           <button class="tab-btn" data-tab="wait">待機</button>
           <!-- ★区間(ゾーン)料金はcalcFare未実装=設定しても効かない死に機能→タブを隠す(監査・嘘設定で信頼破壊を防ぐ・今後対応)★ -->
-          <button class="tab-btn" data-tab="zones" style="display: none">区間</button>
           <button class="tab-btn" data-tab="preview">確認</button>
         </nav>
         <div class="tab-content">
@@ -14725,20 +14724,6 @@
               </div>
             </div>
           </section>
-          <section class="tab-pane" data-pane="zones">
-            <div class="card">
-              <div class="card-title">区間料金</div>
-              <div class="card-desc">
-                「○○エリア → ○○エリア で固定料金」の設定<br />詳細設定はPCからも可能
-              </div>
-              <div class="form-row">
-                <div class="form-label">使用</div>
-                <div class="toggle" id="_fare_zonesEnabledToggle"></div>
-              </div>
-            </div>
-            <div id="_fare_zonesList"></div>
-            <button class="btn-add" onclick="window._fare_addZone()">＋ 区間追加</button>
-          </section>
           <section class="tab-pane active" data-pane="extras">
             <div class="card">
               <div class="card-title">追加料金項目 (迎車料金・キャンセル料など)</div>
@@ -14912,8 +14897,8 @@
             var r = cc / cf; // ★今÷工場★
             if (!(r >= 0.8 && r <= 1.25)) {
               try {
-                // eslint-disable-next-line no-console
-                console.log('[OBD-TIRE] ratio out of band, clamped to 1.0: ' + r);
+                if (typeof dlog === 'function')
+                  dlog('[OBD-TIRE] ratio out of band, clamped to 1.0: ' + r);
               } catch (_) {
                 /* ignore */
               }
@@ -15110,8 +15095,7 @@
                 if (typeof window._syncWorkerVehicle === 'function') window._syncWorkerVehicle(); // ★保存後 worker._vehicleId 同期(ON時のみ)★
                 _applyTireProfileToUI(prof); // 工場サイズロック + 比表示更新(worker反映は次の業務開始で)
                 try {
-                  // eslint-disable-next-line no-console
-                  console.log('[OBD-VEHICLE] ' + JSON.stringify(prof));
+                  if (typeof dlog === 'function') dlog('[OBD-VEHICLE] ' + JSON.stringify(prof));
                 } catch (_) {
                   /* ignore */
                 }
@@ -15155,8 +15139,8 @@
                 if (vehTireRatioDispEl) vehTireRatioDispEl.textContent = '×1.000';
                 if (typeof _refreshTireRatioDisp === 'function') _refreshTireRatioDisp();
                 try {
-                  // eslint-disable-next-line no-console
-                  console.log('[OBD-VEHICLE-DELETE] ' + JSON.stringify(_prev || {}));
+                  if (typeof dlog === 'function')
+                    dlog('[OBD-VEHICLE-DELETE] ' + JSON.stringify(_prev || {}));
                 } catch (_) {
                   /* ignore */
                 }
