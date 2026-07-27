@@ -249,8 +249,16 @@ describe('6. index.html 配線 verify (= script load + onBusinessStart gate + ov
     expect(html).toMatch(/<script src="js\/license\.js"><\/script>/);
   });
 
-  it('onBusinessStart 内で・window.License.checkBeforeBusinessStart 呼出', () => {
-    expect(html).toMatch(/window\.License\.checkBeforeBusinessStart/);
+  it('onBusinessStart gate = DK_LICENSE_GATE_ON駆動で LicenseActivate.checkBeforeBusinessStart 呼出(STEP3)', () => {
+    // ★STEP3(2026-07-27): 会社URL/署名方式に配線。ゲートは DK_LICENSE_GATE_ON==='1' の端末だけ発動(既定OFF)。
+    expect(html).toMatch(/window\.LicenseActivate\.checkBeforeBusinessStart/);
+    expect(html).toMatch(/getItem\('DK_LICENSE_GATE_ON'\) === '1'/);
+  });
+
+  it('STEP3 script: tweetnacl→license-v2→license-activate を load', () => {
+    expect(html).toMatch(/<script src="js\/tweetnacl\.min\.js"><\/script>/);
+    expect(html).toMatch(/<script src="js\/license-v2\.js"><\/script>/);
+    expect(html).toMatch(/<script src="js\/license-activate\.js"><\/script>/);
   });
 
   it('未登録時・window.showLicenseGate を・呼出', () => {

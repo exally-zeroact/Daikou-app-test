@@ -112,6 +112,9 @@ const CORE_CODE_FILES = [
   '/js/firebase-config.js',
   '/js/firebase.js',
   '/js/license.js',
+  '/js/tweetnacl.min.js',
+  '/js/license-v2.js',
+  '/js/license-activate.js',
   '/js/trace-outbox.js',
 ];
 
