@@ -369,7 +369,7 @@
       <div class="wrap">
         <div class="nav">
           <div class="logo">🚗 ダイコメ</div>
-          <a class="mini" href="#signup">会社URLを発行</a>
+          <a class="mini" href="#signup">無料でためす</a>
         </div>
         <div class="hero-grid">
           <div>
@@ -378,8 +378,10 @@
               OBDと連動して距離を正確に測り、料金を自動で計算。<br />
               高価な専用メーター機は、もういりません。
             </p>
-            <a class="cta" href="#signup">会社URLを発行する（無料）</a>
-            <span class="cta-note">登録すると、ドライバーに配る専用URL／QRがすぐ出ます。</span>
+            <a class="cta" href="#signup">2か月 無料でためす</a>
+            <span class="cta-note"
+              >カード登録は不要。すぐに専用URL／QRが出て、ドライバーに配れます。</span
+            >
           </div>
           <img
             class="hero-img"
@@ -455,8 +457,10 @@
     <!-- Signup -->
     <section class="signup" id="signup">
       <div class="wrap">
-        <h2 class="sec">会社URLを発行する</h2>
-        <p class="sec-sub">無料で発行できます。ドライバーに配る専用URL／QRがすぐ手に入ります。</p>
+        <h2 class="sec">2か月 無料でためす</h2>
+        <p class="sec-sub">
+          カード登録なしで、2か月フルにお試しできます。専用URL／QRがすぐ出て、ドライバーに配れます。
+        </p>
         <form class="form-card" id="regForm">
           <label
             >会社名<input id="fName" required maxlength="100" placeholder="例）〇〇運転代行"
@@ -469,13 +473,13 @@
             >使う台数 <span class="hint">（随伴車の台数）</span>
             <input id="fSeat" type="number" min="1" max="50" value="1" />
           </label>
-          <button class="submit" type="submit" id="regBtn">会社URLを発行する</button>
+          <button class="submit" type="submit" id="regBtn">2か月 無料ではじめる</button>
           <div class="err" id="regErr" style="display: none"></div>
         </form>
         <div id="reg-result">
-          <h3>✅ 会社URLを発行しました</h3>
+          <h3>✅ 2か月の無料お試しを開始しました</h3>
           <p style="font-size: 14px; color: var(--muted)">
-            このURL（またはQR）を、ドライバーの随伴車スマホで開いてください。
+            このURL（またはQR）を、ドライバーの随伴車スマホで開いてください。無料期間中はすべての機能が使えます。
           </p>
           <div class="url-box" id="regUrl"></div>
           <button class="copy" id="copyBtn" type="button">URLをコピー</button>
@@ -548,7 +552,7 @@
             })
             .then(function (j) {
               btn.disabled = false;
-              btn.textContent = '会社URLを発行する';
+              btn.textContent = '2か月 無料ではじめる';
               if (j && j.ok && j.company_url) {
                 document.getElementById('regUrl').textContent = j.company_url;
                 renderQR(j.company_url);
@@ -561,7 +565,7 @@
             })
             .catch(function () {
               btn.disabled = false;
-              btn.textContent = '会社URLを発行する';
+              btn.textContent = '2か月 無料ではじめる';
               showErr('ネットに繋がる所で、もう一度お試しください。');
             });
         });
