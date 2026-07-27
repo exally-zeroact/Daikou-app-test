@@ -6,12 +6,15 @@ create table if not exists dk_companies (
   company_id uuid primary key default gen_random_uuid(),
   url_token  text unique not null,
   name       text default '',
+  contact    text default '',               -- 連絡先(セルフ登録・2026-07-27)
   status     text not null default 'on',   -- 'on' | 'off'(未払い停止)
   seat_limit int  not null default 1,       -- 契約台数N
   plan       text default '',
   created_at timestamptz default now()
 );
 alter table dk_companies enable row level security;  -- 直アクセス不可・Edge Function(service_role)のみ
+-- 既存テーブルへの追加(冪等・2026-07-27 セルフ登録用):
+alter table dk_companies add column if not exists contact text default '';
 
 -- 会社ごとの活性化端末(台数カウントの真実源)。同一 device_id 再活性化は席を消費しない。
 create table if not exists dk_company_devices (
