@@ -20,6 +20,11 @@
   const WARN_DAYS = 7; // 残りこの日数以下で「Wi-Fiのある所で開いて」警告
   const DAY = 24 * 60 * 60 * 1000;
 
+  // ★アプリ同梱 公開鍵 (Ed25519 raw base64url = jwk.x・32byte)。秘密鍵はサーバ(Edge Function
+  //   secret DK_LICENSE_PRIVKEY)のみ。この鍵に対応する秘密鍵で署名した dk-issue-license トークン
+  //   だけが verify を通る。2026-07-27 生成。公開鍵は公開してよい。
+  const PUBLIC_KEY = 'Xcnw1PowYwc4FwPTW40jcsEipF3ZlV4IFziBD9uhaiY';
+
   function evaluateLicense(payload, nowMs, opts) {
     opts = opts || {};
     const running = opts.running === true;
@@ -171,10 +176,21 @@
     return evaluateLicense(v.valid ? v.payload : null, nowMs, opts);
   }
 
+  // 埋め込み公開鍵(PUBLIC_KEY)を使う版。呼出側は鍵を渡さなくてよい=単一の真実源。
+  function verifyLicenseTokenEmbedded(token) {
+    return verifyLicenseToken(token, PUBLIC_KEY);
+  }
+  function evaluateLicenseTokenEmbedded(token, nowMs, opts) {
+    return evaluateLicenseToken(token, PUBLIC_KEY, nowMs, opts);
+  }
+
   const api = {
     evaluateLicense: evaluateLicense,
     verifyLicenseToken: verifyLicenseToken,
     evaluateLicenseToken: evaluateLicenseToken,
+    verifyLicenseTokenEmbedded: verifyLicenseTokenEmbedded,
+    evaluateLicenseTokenEmbedded: evaluateLicenseTokenEmbedded,
+    PUBLIC_KEY: PUBLIC_KEY,
     WARN_DAYS: WARN_DAYS,
   };
 
