@@ -485,8 +485,27 @@
           <button class="copy" id="copyBtn" type="button">URLをコピー</button>
           <div id="qr"></div>
           <p style="font-size: 12.5px; color: var(--muted); margin-top: 8px">
-            ※このURLは大切に保管してください（端末の追加・機種変で使います）。
+            ※ドライバーに配るのはこのURL／QRです。
           </p>
+          <div
+            style="
+              border-top: 1px solid var(--line);
+              margin: 20px 0 0;
+              padding-top: 18px;
+              text-align: left;
+            "
+          >
+            <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px">
+              🔑 会社の管理ページ（あなた用・保管してください）
+            </div>
+            <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 8px">
+              台数の確認・端末の入れ替え・URLの再表示ができます。このリンクは他の人に渡さないでください。
+            </div>
+            <div class="url-box" id="manageUrl"></div>
+            <button class="copy" id="copyManage" type="button" style="margin-top: 8px">
+              管理リンクをコピー
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -556,6 +575,7 @@
               if (j && j.ok && j.company_url) {
                 document.getElementById('regUrl').textContent = j.company_url;
                 renderQR(j.company_url);
+                if (j.manage_url) document.getElementById('manageUrl').textContent = j.manage_url;
                 result.style.display = 'block';
                 form.style.display = 'none';
                 result.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -577,6 +597,22 @@
             b.textContent = 'コピーしました';
             setTimeout(function () {
               b.textContent = 'URLをコピー';
+            }, 1800);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(done, done);
+          } else {
+            done();
+          }
+        });
+
+        document.getElementById('copyManage').addEventListener('click', function () {
+          var url = document.getElementById('manageUrl').textContent;
+          var b = document.getElementById('copyManage');
+          var done = function () {
+            b.textContent = 'コピーしました';
+            setTimeout(function () {
+              b.textContent = '管理リンクをコピー';
             }, 1800);
           };
           if (navigator.clipboard && navigator.clipboard.writeText) {
