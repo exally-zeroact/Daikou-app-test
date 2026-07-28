@@ -57,10 +57,11 @@ Deno.serve(async (req: Request) => {
   let row = null;
   for (let attempt = 0; attempt < 2 && !row; attempt++) {
     const url_token = randToken();
+    const admin_token = randToken(); // 代表者ページ用の別トークン(秘密)
     const { data, error } = await sb
       .from('dk_companies')
-      .insert({ url_token, name, contact, seat_limit: seat, status: 'on' })
-      .select('company_id, url_token')
+      .insert({ url_token, admin_token, name, contact, seat_limit: seat, status: 'on' })
+      .select('company_id, url_token, admin_token')
       .single();
     if (!error && data) row = data;
     else if (error && error.code !== '23505') return json({ ok: false, reason: 'db_error' }, 500);
@@ -72,5 +73,7 @@ Deno.serve(async (req: Request) => {
     company_id: row.company_id,
     url_token: row.url_token,
     company_url: APP_BASE + '/?c=' + row.url_token,
+    admin_token: row.admin_token,
+    manage_url: APP_BASE + '/manage.html?k=' + row.admin_token, // 代表者用 管理リンク
   });
 });

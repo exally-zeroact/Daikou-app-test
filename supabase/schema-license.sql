@@ -15,6 +15,10 @@ create table if not exists dk_companies (
 alter table dk_companies enable row level security;  -- 直アクセス不可・Edge Function(service_role)のみ
 -- 既存テーブルへの追加(冪等・2026-07-27 セルフ登録用):
 alter table dk_companies add column if not exists contact text default '';
+-- 代表者ページ用の管理トークン(url_tokenとは別の秘密・2026-07-28):
+alter table dk_companies add column if not exists admin_token text;
+-- 既存行に admin_token を付与(未設定のみ):
+update dk_companies set admin_token = encode(gen_random_bytes(16), 'hex') where admin_token is null;
 
 -- 会社ごとの活性化端末(台数カウントの真実源)。同一 device_id 再活性化は席を消費しない。
 create table if not exists dk_company_devices (
