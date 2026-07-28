@@ -93,23 +93,26 @@ Deno.serve(async (req: Request) => {
   if (error) return json({ ok: false, reason: 'db_error' }, 500);
   if (!co) return json({ ok: false, reason: 'invalid_url' }, 404);
 
-  // ★台数チェックは「車(VIN)単位」★: 席キー = VIN(OBDで読めた車台番号)。VIN無し(OBDなし)は device_id。
-  //   同じ車(VIN)なら何台のスマホで読み込んでも1席=読み込むスマホは何台でもOK。
-  //   契約台数 = 同時に使える車の数。席チェックは有効化(オンライン)の瞬間だけ=業務はオフラインでOK。
-  const seatKey = vin && vin.trim() ? vin.trim() : device_id;
+  // ★台数 = 有効化したスマホ(device_id)の数★ (司さん決定 2026-07-28: 車VIN固定はめんどくさい→スマホ単位)。
+  //   契約台数まで有効化OK・どの車でも使える(車に固定しない)。同一device再活性化は無料(冪等)。
+  //   スマホ壊れ/入れ替えは管理画面で古い端末を外して席を空ける。席チェックは有効化(オンライン)時だけ=業務はオフラインOK。
   try {
-    const { data: rows } = await sb
+    const { data: dev } = await sb
       .from('dk_company_devices')
-      .select('device_id, vin')
-      .eq('company_id', co.company_id);
-    const keyOf = (r: { device_id: string; vin?: string | null }) =>
-      r.vin && r.vin.trim() ? r.vin.trim() : r.device_id;
-    const existingKeys = new Set((rows || []).map(keyOf));
-    // この車(席キー)が未登録 かつ 既に契約台数ぶんの車が埋まっていれば拒否。
-    if (!existingKeys.has(seatKey) && existingKeys.size >= (co.seat_limit || 1)) {
-      return json({ ok: false, reason: 'seat_limit', seat_limit: co.seat_limit });
+      .select('device_id')
+      .eq('company_id', co.company_id)
+      .eq('device_id', device_id)
+      .maybeSingle();
+    if (!dev) {
+      const { count } = await sb
+        .from('dk_company_devices')
+        .select('device_id', { count: 'exact', head: true })
+        .eq('company_id', co.company_id);
+      if ((count || 0) >= (co.seat_limit || 1)) {
+        return json({ ok: false, reason: 'seat_limit', seat_limit: co.seat_limit });
+      }
     }
-    // 端末を記録(device_id単位=同じ車の複数スマホも各行=一覧用)。台数は distinct VIN で数える。
+    // 端末を記録(upsert・冪等)。台数カウントの真実源。vinは参考情報として保存(判定には使わない)。
     await sb
       .from('dk_company_devices')
       .upsert(
