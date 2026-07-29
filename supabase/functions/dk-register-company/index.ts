@@ -1,9 +1,10 @@
 // supabase/functions/dk-register-company
-// ダイコメ ライセンス: 会社セルフ登録 → 会社URL自動発行 (2026-07-27・LP用)。
-//   入力(POST JSON): { company_name, contact?, seat_limit? }
-//   出力: { ok:true, company_id, url_token, company_url } | { ok:false, reason }
-//   url_token = 推測不能な乱数(16byte hex)。dk_companies を service_role で作成。
-//   ★今は無料発行(Stripe課金は将来・status:'on'で発行)。スパム対策は将来Stripe/認証でゲート★。
+// ダイコメ ライセンス: 会社登録(アカウント方式) (2026-07-29)。
+//   ★ログイン済みユーザー(メールのマジックリンク)が、自分の会社を作る/取得する★
+//   入力(POST JSON): { company_name, contact?, seat_limit? }  ※Authorization: Bearer <ユーザーaccess_token> 必須
+//   出力: { ok:true, company_id, url_token, company_url, existed? } | { ok:false, reason }
+//   owner_id = 呼出ユーザー(auth.uid)。既に会社があればそれを返す(重複作成しない=1オーナー1会社)。
+//   url_token = 推測不能な乱数(16byte hex)。作成は service_role。
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const APP_BASE = 'https://daikou-app-test.vercel.app'; // 会社URLのベース(本番切替時に差替)
@@ -33,6 +34,19 @@ Deno.serve(async (req: Request) => {
   }
   if (req.method !== 'POST') return json({ ok: false, reason: 'method' }, 405);
 
+  // ---- 認証: 呼出ユーザーの access_token から owner_id を得る ----
+  const authHeader = req.headers.get('Authorization') || '';
+  const anon = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const {
+    data: { user },
+    error: uerr,
+  } = await anon.auth.getUser();
+  if (uerr || !user) return json({ ok: false, reason: 'unauthorized' }, 401);
+  const owner_id = user.id;
+
   let input: { company_name?: string; contact?: string; seat_limit?: number | string };
   try {
     input = await req.json();
@@ -48,20 +62,36 @@ Deno.serve(async (req: Request) => {
   if (name.length > 100 || contact.length > 200)
     return json({ ok: false, reason: 'too_long' }, 400);
 
-  const sb = createClient(
+  const svc = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // url_token の衝突は極めて稀だが unique 制約に当たったら1回だけ再試行。
+  // 既にこのオーナーの会社があれば、それを返す(重複作成しない)。
+  const { data: existing } = await svc
+    .from('dk_companies')
+    .select('company_id, url_token')
+    .eq('owner_id', owner_id)
+    .limit(1)
+    .maybeSingle();
+  if (existing) {
+    return json({
+      ok: true,
+      company_id: existing.company_id,
+      url_token: existing.url_token,
+      company_url: APP_BASE + '/?c=' + existing.url_token,
+      existed: true,
+    });
+  }
+
+  // 新規作成。url_token の衝突は極めて稀だが unique に当たったら1回だけ再試行。
   let row = null;
   for (let attempt = 0; attempt < 2 && !row; attempt++) {
     const url_token = randToken();
-    const admin_token = randToken(); // 代表者ページ用の別トークン(秘密)
-    const { data, error } = await sb
+    const { data, error } = await svc
       .from('dk_companies')
-      .insert({ url_token, admin_token, name, contact, seat_limit: seat, status: 'on' })
-      .select('company_id, url_token, admin_token')
+      .insert({ url_token, name, contact, seat_limit: seat, status: 'on', owner_id })
+      .select('company_id, url_token')
       .single();
     if (!error && data) row = data;
     else if (error && error.code !== '23505') return json({ ok: false, reason: 'db_error' }, 500);
@@ -73,7 +103,5 @@ Deno.serve(async (req: Request) => {
     company_id: row.company_id,
     url_token: row.url_token,
     company_url: APP_BASE + '/?c=' + row.url_token,
-    admin_token: row.admin_token,
-    manage_url: APP_BASE + '/manage.html?k=' + row.admin_token, // 代表者用 管理リンク
   });
 });

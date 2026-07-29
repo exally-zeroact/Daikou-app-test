@@ -369,7 +369,7 @@
       <div class="wrap">
         <div class="nav">
           <div class="logo">🚗 ダイコメ</div>
-          <a class="mini" href="#signup">無料でためす</a>
+          <a class="mini" href="login.html">ログイン / 登録</a>
         </div>
         <div class="hero-grid">
           <div>
@@ -378,9 +378,9 @@
               OBDと連動して距離を正確に測り、料金を自動で計算。<br />
               高価な専用メーター機は、もういりません。
             </p>
-            <a class="cta" href="#signup">2か月 無料でためす</a>
+            <a class="cta" href="login.html">2か月 無料でためす</a>
             <span class="cta-note"
-              >カード登録は不要。すぐに専用URL／QRが出て、ドライバーに配れます。</span
+              >メールだけで登録。カード登録は不要。すぐに専用URL／QRが出て、ドライバーに配れます。</span
             >
           </div>
           <img
@@ -437,8 +437,8 @@
         <p class="sec-sub">申込も設置も、その日のうちに。</p>
         <div class="steps">
           <div class="step">
-            <h4>会社を登録</h4>
-            <p>下のフォームで登録すると、あなたの会社専用URL（とQR）が出ます。</p>
+            <h4>メールで登録</h4>
+            <p>メールアドレスで登録・ログインすると、あなたの会社専用URL（とQR）が出ます。</p>
           </div>
           <div class="step">
             <h4>ドライバーが開く</h4>
@@ -459,80 +459,14 @@
       <div class="wrap">
         <h2 class="sec">2か月 無料でためす</h2>
         <p class="sec-sub">
-          カード登録なしで、2か月フルにお試しできます。専用URL／QRがすぐ出て、ドライバーに配れます。
+          メールアドレスだけで始められます。カード登録は不要。<br />
+          登録するとすぐ、ドライバーに配る専用URL／QRが出ます。
         </p>
-        <form class="form-card" id="regForm">
-          <label
-            >会社名<input id="fName" required maxlength="100" placeholder="例）〇〇運転代行"
-          /></label>
-          <label
-            >連絡先 <span class="hint">（任意・メール／電話）</span>
-            <input id="fContact" maxlength="200" placeholder="例）090-0000-0000" />
-          </label>
-          <label
-            >使う台数 <span class="hint">（随伴車の台数）</span>
-            <input id="fSeat" type="number" min="1" max="50" value="1" />
-          </label>
-          <button class="submit" type="submit" id="regBtn">2か月 無料ではじめる</button>
-          <div class="err" id="regErr" style="display: none"></div>
-        </form>
-        <div id="reg-result">
-          <h3>✅ 2か月の無料お試しを開始しました</h3>
-          <p style="font-size: 14px; color: var(--muted)">
-            このURL（またはQR）を、ドライバーの随伴車スマホで開いてください。無料期間中はすべての機能が使えます。
-          </p>
-          <div class="url-box" id="regUrl"></div>
-          <button class="copy" id="copyBtn" type="button">URLをコピー</button>
-          <div id="qr"></div>
-          <p style="font-size: 12.5px; color: var(--muted); margin-top: 8px">
-            ※ドライバーに配るのはこのURL／QRです。
-          </p>
-          <div
-            style="
-              border-top: 1px solid var(--line);
-              margin: 20px 0 0;
-              padding-top: 18px;
-              text-align: left;
-            "
-          >
-            <div style="font-weight: 700; font-size: 14px; margin-bottom: 4px">
-              🔑 会社の管理ページ（あなた用・保管してください）
-            </div>
-            <div style="font-size: 12.5px; color: var(--muted); margin-bottom: 8px">
-              台数の確認・端末の入れ替え・URLの再表示ができます。このリンクは他の人に渡さないでください。
-            </div>
-            <div class="url-box" id="manageUrl"></div>
-            <button class="copy" id="copyManage" type="button" style="margin-top: 8px">
-              管理リンクをコピー
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 管理リンク再発行(登録済みの会社向け) -->
-    <section style="padding-top: 0">
-      <div class="wrap" style="max-width: 460px">
-        <div class="form-card">
-          <div style="font-weight: 800; font-size: 16px; margin-bottom: 6px">
-            管理リンクを忘れた方（登録済みの会社）
-          </div>
-          <div style="font-size: 13px; color: var(--muted); margin-bottom: 12px">
-            ドライバーに配っている「会社URL」を貼ると、会社の管理ページのリンクを再表示します。
-          </div>
-          <input id="reUrl" placeholder="会社URL（…/?c=… ）を貼る" />
-          <button class="submit" id="reBtn" type="button" style="margin-top: 14px">
-            管理リンクを再表示
-          </button>
-          <div class="err" id="reErr" style="display: none"></div>
-          <div id="re-result" style="display: none; margin-top: 14px">
-            <div style="font-size: 13px; color: var(--muted); margin-bottom: 6px">
-              ✅ <span id="reName"></span> の管理リンク：
-            </div>
-            <div class="url-box" id="reManage"></div>
-            <button class="copy" id="reCopy" type="button" style="margin-top: 8px">コピー</button>
-          </div>
-        </div>
+        <a class="cta" href="login.html">メールではじめる</a>
+        <p style="font-size: 13px; color: var(--muted); margin-top: 16px">
+          すでに登録済みの方も、同じ「メールではじめる」からログインできます。<br />
+          ログインすれば、会社の管理画面（URL・台数・端末）がいつでも見られます。
+        </p>
       </div>
     </section>
 
@@ -542,171 +476,5 @@
         © ダイコメ
       </div>
     </footer>
-
-    <script src="js/qrcode.min.js"></script>
-    <script>
-      (function () {
-        'use strict';
-        var FN = 'https://tnfwipbgfgjaymlszeid.supabase.co/functions/v1/dk-register-company';
-        var ANON =
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
-        var form = document.getElementById('regForm');
-        var btn = document.getElementById('regBtn');
-        var errEl = document.getElementById('regErr');
-        var result = document.getElementById('reg-result');
-
-        function showErr(msg) {
-          errEl.textContent = msg;
-          errEl.style.display = 'block';
-        }
-
-        function renderQR(url) {
-          try {
-            var qr = window.qrcode(0, 'M');
-            qr.addData(url);
-            qr.make();
-            document.getElementById('qr').innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2 });
-          } catch (e) {
-            document.getElementById('qr').innerHTML = '';
-          }
-        }
-
-        form.addEventListener('submit', function (e) {
-          e.preventDefault();
-          errEl.style.display = 'none';
-          var name = document.getElementById('fName').value.trim();
-          var contact = document.getElementById('fContact').value.trim();
-          var seat = parseInt(document.getElementById('fSeat').value, 10) || 1;
-          if (!name) {
-            showErr('会社名を入れてください');
-            return;
-          }
-          btn.disabled = true;
-          btn.textContent = '発行中…';
-          fetch(FN, {
-            method: 'POST',
-            headers: {
-              apikey: ANON,
-              Authorization: 'Bearer ' + ANON,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ company_name: name, contact: contact, seat_limit: seat }),
-          })
-            .then(function (r) {
-              return r.json();
-            })
-            .then(function (j) {
-              btn.disabled = false;
-              btn.textContent = '2か月 無料ではじめる';
-              if (j && j.ok && j.company_url) {
-                document.getElementById('regUrl').textContent = j.company_url;
-                renderQR(j.company_url);
-                if (j.manage_url) document.getElementById('manageUrl').textContent = j.manage_url;
-                result.style.display = 'block';
-                form.style.display = 'none';
-                result.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              } else {
-                showErr('発行できませんでした。少し時間をおいて、もう一度お試しください。');
-              }
-            })
-            .catch(function () {
-              btn.disabled = false;
-              btn.textContent = '2か月 無料ではじめる';
-              showErr('ネットに繋がる所で、もう一度お試しください。');
-            });
-        });
-
-        document.getElementById('copyBtn').addEventListener('click', function () {
-          var url = document.getElementById('regUrl').textContent;
-          var done = function () {
-            var b = document.getElementById('copyBtn');
-            b.textContent = 'コピーしました';
-            setTimeout(function () {
-              b.textContent = 'URLをコピー';
-            }, 1800);
-          };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url).then(done, done);
-          } else {
-            done();
-          }
-        });
-
-        document.getElementById('copyManage').addEventListener('click', function () {
-          var url = document.getElementById('manageUrl').textContent;
-          var b = document.getElementById('copyManage');
-          var done = function () {
-            b.textContent = 'コピーしました';
-            setTimeout(function () {
-              b.textContent = '管理リンクをコピー';
-            }, 1800);
-          };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(url).then(done, done);
-          } else {
-            done();
-          }
-        });
-
-        // 管理リンク再発行(登録済みの会社が 会社URL を貼る → 管理リンク再表示)
-        var REISSUE_FN = 'https://tnfwipbgfgjaymlszeid.supabase.co/functions/v1/dk-reissue';
-        document.getElementById('reBtn').addEventListener('click', function () {
-          var reErr = document.getElementById('reErr');
-          var reBtn = document.getElementById('reBtn');
-          reErr.style.display = 'none';
-          var v = document.getElementById('reUrl').value.trim();
-          if (!v) {
-            reErr.textContent = '会社URLを貼ってください';
-            reErr.style.display = 'block';
-            return;
-          }
-          reBtn.disabled = true;
-          reBtn.textContent = '確認中…';
-          fetch(REISSUE_FN, {
-            method: 'POST',
-            headers: {
-              apikey: ANON,
-              Authorization: 'Bearer ' + ANON,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ url_token: v }),
-          })
-            .then(function (r) {
-              return r.json();
-            })
-            .then(function (j) {
-              reBtn.disabled = false;
-              reBtn.textContent = '管理リンクを再表示';
-              if (j && j.ok && j.manage_url) {
-                document.getElementById('reName').textContent = j.name || '';
-                document.getElementById('reManage').textContent = j.manage_url;
-                document.getElementById('re-result').style.display = 'block';
-              } else {
-                reErr.textContent = 'その会社URLが見つかりません。URLをご確認ください。';
-                reErr.style.display = 'block';
-              }
-            })
-            .catch(function () {
-              reBtn.disabled = false;
-              reBtn.textContent = '管理リンクを再表示';
-              reErr.textContent = 'ネットに繋がる所で、もう一度お試しください。';
-              reErr.style.display = 'block';
-            });
-        });
-        document.getElementById('reCopy').addEventListener('click', function () {
-          var url = document.getElementById('reManage').textContent;
-          var b = document.getElementById('reCopy');
-          var done = function () {
-            b.textContent = 'コピーしました';
-            setTimeout(function () {
-              b.textContent = 'コピー';
-            }, 1600);
-          };
-          if (navigator.clipboard && navigator.clipboard.writeText)
-            navigator.clipboard.writeText(url).then(done, done);
-          else done();
-        });
-      })();
-    </script>
   </body>
 </html>
