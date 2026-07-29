@@ -510,6 +510,32 @@
       </div>
     </section>
 
+    <!-- 管理リンク再発行(登録済みの会社向け) -->
+    <section style="padding-top: 0">
+      <div class="wrap" style="max-width: 460px">
+        <div class="form-card">
+          <div style="font-weight: 800; font-size: 16px; margin-bottom: 6px">
+            管理リンクを忘れた方（登録済みの会社）
+          </div>
+          <div style="font-size: 13px; color: var(--muted); margin-bottom: 12px">
+            ドライバーに配っている「会社URL」を貼ると、会社の管理ページのリンクを再表示します。
+          </div>
+          <input id="reUrl" placeholder="会社URL（…/?c=… ）を貼る" />
+          <button class="submit" id="reBtn" type="button" style="margin-top: 14px">
+            管理リンクを再表示
+          </button>
+          <div class="err" id="reErr" style="display: none"></div>
+          <div id="re-result" style="display: none; margin-top: 14px">
+            <div style="font-size: 13px; color: var(--muted); margin-bottom: 6px">
+              ✅ <span id="reName"></span> の管理リンク：
+            </div>
+            <div class="url-box" id="reManage"></div>
+            <button class="copy" id="reCopy" type="button" style="margin-top: 8px">コピー</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <footer>
       <div class="wrap">
         iPhone／Android 両対応・OBDが無くてもGPSで使えます。<br />
@@ -620,6 +646,65 @@
           } else {
             done();
           }
+        });
+
+        // 管理リンク再発行(登録済みの会社が 会社URL を貼る → 管理リンク再表示)
+        var REISSUE_FN = 'https://tnfwipbgfgjaymlszeid.supabase.co/functions/v1/dk-reissue';
+        document.getElementById('reBtn').addEventListener('click', function () {
+          var reErr = document.getElementById('reErr');
+          var reBtn = document.getElementById('reBtn');
+          reErr.style.display = 'none';
+          var v = document.getElementById('reUrl').value.trim();
+          if (!v) {
+            reErr.textContent = '会社URLを貼ってください';
+            reErr.style.display = 'block';
+            return;
+          }
+          reBtn.disabled = true;
+          reBtn.textContent = '確認中…';
+          fetch(REISSUE_FN, {
+            method: 'POST',
+            headers: {
+              apikey: ANON,
+              Authorization: 'Bearer ' + ANON,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ url_token: v }),
+          })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (j) {
+              reBtn.disabled = false;
+              reBtn.textContent = '管理リンクを再表示';
+              if (j && j.ok && j.manage_url) {
+                document.getElementById('reName').textContent = j.name || '';
+                document.getElementById('reManage').textContent = j.manage_url;
+                document.getElementById('re-result').style.display = 'block';
+              } else {
+                reErr.textContent = 'その会社URLが見つかりません。URLをご確認ください。';
+                reErr.style.display = 'block';
+              }
+            })
+            .catch(function () {
+              reBtn.disabled = false;
+              reBtn.textContent = '管理リンクを再表示';
+              reErr.textContent = 'ネットに繋がる所で、もう一度お試しください。';
+              reErr.style.display = 'block';
+            });
+        });
+        document.getElementById('reCopy').addEventListener('click', function () {
+          var url = document.getElementById('reManage').textContent;
+          var b = document.getElementById('reCopy');
+          var done = function () {
+            b.textContent = 'コピーしました';
+            setTimeout(function () {
+              b.textContent = 'コピー';
+            }, 1600);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText)
+            navigator.clipboard.writeText(url).then(done, done);
+          else done();
         });
       })();
     </script>
