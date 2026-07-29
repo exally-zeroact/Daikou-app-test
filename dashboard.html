@@ -249,11 +249,7 @@
         text-align: center;
       }
 
-      /* register form (会社がまだ無い時) */
-      #register {
-        display: none;
-      }
-
+      /* register form (会社がまだ無い時)。初期非表示は inline style で(show()は display='' で戻すため) */
       #register .lead {
         font-size: 14px;
         color: var(--muted);
@@ -342,7 +338,7 @@
       <div id="loading">読み込み中…</div>
 
       <!-- 会社がまだ無い時: 登録フォーム -->
-      <div id="register" class="card">
+      <div id="register" class="card" style="display: none">
         <h2 style="font-size: 18px; color: var(--ink)">はじめに、会社を登録</h2>
         <p class="lead">登録すると、ドライバーに配る専用URL／QRがこの画面に出ます。</p>
         <label>会社名<input id="fName" maxlength="100" placeholder="例）〇〇運転代行" /></label>
