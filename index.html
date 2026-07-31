@@ -2599,8 +2599,10 @@
       /* 2列ボタン（driving のみ表示） */
       .btn-row {
         display: none;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
+        /* ★2026-07-31: 請求書ボタン追加で 2列→3列。指の当たりを確保するため gap を詰める。
+           横画面は既存の !important で1列縦並びのまま(下部メディアクエリ)。 */
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
       }
       .btn-row.show {
         display: grid;
@@ -2633,6 +2635,15 @@
       }
       .btn-discount {
         background: #5856d6; /* ★値引き(紫・追加料金オレンジと区別) */
+      }
+      /* ★請求書・2026-07-31: ダイコメ青。追加料金オレンジ/値引き紫と区別 */
+      .btn-invoice {
+        background: #007aff;
+      }
+      /* 会社が選ばれている間は色を変える(選び間違いにその場で気づける) */
+      .btn-invoice.is-selected {
+        background: #0051a8;
+        box-shadow: inset 0 0 0 2px #ffffff;
       }
       .btn-confirm {
         background: #34c759;
@@ -5084,6 +5095,21 @@
             値引き
           </div>
           <div class="extras-list" id="discountsList"></div>
+          <!-- 請求書セクション (追加料金/値引きと同型・✕で現金にもどす・2026-07-31) -->
+          <div
+            id="invoiceSectionLabel"
+            style="
+              display: none;
+              font-size: 11px;
+              font-weight: 700;
+              color: #8e8e93;
+              letter-spacing: 1px;
+              margin: 8px 12px 4px;
+            "
+          >
+            請求書
+          </div>
+          <div class="extras-list" id="invoiceList"></div>
         </div>
       </div>
 
@@ -5148,6 +5174,11 @@
       <div class="btn-row" id="btnRow">
         <button class="btn-sub btn-extra" onclick="openExtraModal()">追加料金</button>
         <button class="btn-sub btn-discount" onclick="openDiscountModal()">値引き</button>
+        <!-- ★請求書 (2026-07-31・司さん要件): 実車中に会社を選ぶとその代行が請求書払いになる。
+             どの会社の請求書かを知っているのは現場のドライバーだけなので、その場で1タップ。 -->
+        <button class="btn-sub btn-invoice" id="btnInvoice" onclick="openInvoiceModal()">
+          請求書
+        </button>
       </div>
       <!-- 確定 (driving時のみ・フッター下段 全幅・2026-07-25 司さん要望) -->
       <button
@@ -5200,6 +5231,17 @@
           <input type="number" id="customAmount" placeholder="0" inputmode="numeric" />
           <button class="modal-custom-btn" onclick="addCustomExtra()">追加料金</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 請求書モーダル (2026-07-31・追加料金/値引きと同型) -->
+    <div class="modal-overlay" id="invoiceModalOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">請求書の会社を選ぶ</div>
+          <div class="modal-cancel" onclick="closeInvoiceModal()">キャンセル</div>
+        </div>
+        <div class="modal-items" id="invoiceModalItems"></div>
       </div>
     </div>
 
@@ -9475,6 +9517,110 @@
         discounts.push({ name: '任意値引き', amount: v });
         closeDiscountModal();
       }
+
+      // ─── 請求書 (2026-07-31・司さん要件) ───────────────────
+      //   実車中に「請求書」ボタン→会社を選ぶ→その代行が請求書払いとして残る。
+      //   ★オフラインで動く★(会社一覧は端末に持っている) ・料金/距離には一切触らない。
+      //   ★何があっても業務を止めない★(一覧が空でも、失敗しても、代行はそのまま続く)。
+      function _invoiceCustomers() {
+        try {
+          const raw = localStorage.getItem('dk_customers_cache');
+          const list = raw ? JSON.parse(raw) : [];
+          return Array.isArray(list) ? list.filter((c) => c && c.name && c.active !== false) : [];
+        } catch (_) {
+          return [];
+        }
+      }
+      function openInvoiceModal() {
+        if (blockIfSensorNotGranted()) return;
+        const list = _invoiceCustomers();
+        const cur =
+          (window.Business && Business.getTripCustomer && Business.getTripCustomer()) || null;
+        const el = document.getElementById('invoiceModalItems');
+        let html = '';
+        if (!list.length) {
+          html =
+            '<div class="modal-item" style="justify-content:center;color:#8e8e93">' +
+            '請求書の会社が登録されていません<br>（会社の管理画面から登録してください）' +
+            '</div>';
+        } else {
+          html = list
+            .map(
+              (c, i) =>
+                `<div class="modal-item" onclick="pickInvoiceCustomer(${i})">
+      <span class="modal-item-name">${c.name}</span>
+      <span class="modal-item-price">${cur && cur.customer_id === c.customer_id ? '選択中' : ''}</span>
+    </div>`
+            )
+            .join('');
+        }
+        // 現金に戻す(選び間違えたとき)
+        if (cur) {
+          html +=
+            '<div class="modal-item" onclick="clearInvoiceCustomer()">' +
+            '<span class="modal-item-name">現金にもどす</span>' +
+            '<span class="modal-item-price"></span></div>';
+        }
+        el.innerHTML = html;
+        document.getElementById('invoiceModalOverlay').classList.add('show');
+      }
+      function closeInvoiceModal() {
+        document.getElementById('invoiceModalOverlay').classList.remove('show');
+      }
+      function pickInvoiceCustomer(i) {
+        try {
+          const c = _invoiceCustomers()[i];
+          if (c && window.Business && Business.setTripCustomer) {
+            Business.setTripCustomer(c.customer_id, c.name);
+            if (typeof showToast === 'function') showToast('請求書: ' + c.name);
+          }
+        } catch (_) {
+          /* 業務は止めない */
+        }
+        _updateInvoiceBtn();
+        closeInvoiceModal();
+      }
+      function clearInvoiceCustomer() {
+        try {
+          if (window.Business && Business.setTripCustomer) Business.setTripCustomer(null);
+          if (typeof showToast === 'function') showToast('現金にもどしました');
+        } catch (_) {
+          /* 業務は止めない */
+        }
+        _updateInvoiceBtn();
+        closeInvoiceModal();
+      }
+      // 選ばれている会社を画面に出す。
+      //   ★ボタンの文字は「請求書」固定★(会社名を入れるとボタンからはみ出して読めない)。
+      //   会社名は 追加料金/値引き と同じ一覧セクションに出す = 見せ方を全部そろえる。
+      function _updateInvoiceBtn() {
+        try {
+          const cur =
+            (window.Business && Business.getTripCustomer && Business.getTripCustomer()) || null;
+          const btn = document.getElementById('btnInvoice');
+          if (btn) btn.classList.toggle('is-selected', !!cur);
+
+          const el = document.getElementById('invoiceList');
+          const lbl = document.getElementById('invoiceSectionLabel');
+          if (!el) return;
+          if (!cur) {
+            el.innerHTML = '';
+            if (lbl) lbl.style.display = 'none';
+            return;
+          }
+          if (lbl) lbl.style.display = 'block';
+          const name = String(cur.customer_name || '').replace(/[<>&]/g, '');
+          el.innerHTML = `<div class="extra-item" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>${name}</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button class="extra-del-btn" onclick="clearInvoiceCustomer()">✕</button>
+      </div>
+    </div>`;
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      window._updateInvoiceBtn = _updateInvoiceBtn;
 
       // ─── 代行キャンセル (取消: 距離も料金も加算しない・2026-07-25 司さん要望) ───
       //   代行中に押すと、現在のtripを記録せず破棄して空車へ戻る (Business.onTripEnd を呼ばない)。

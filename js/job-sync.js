@@ -145,10 +145,17 @@
           return at - bt;
         })
         .map(function (t, i) {
+          // 掛け先(請求書払い)。会社が選ばれていなければ現金。
+          // 変な支払区分が来たら現金に倒す(倉庫に変な値を入れない)。
+          const custId = typeof t.customer_id === 'string' && t.customer_id ? t.customer_id : null;
+          const payType = custId && t.payment_type === 'invoice' ? 'invoice' : 'cash';
           return {
             seq: i + 1, // 何件目か = 請求書の明細順を毎回同じにする
             distance_m: t.distance_m, // ★メーター確定値をそのまま★
             fare_yen: t.fare_yen, // ★メーター確定値をそのまま★
+            customer_id: custId,
+            customer_name: custId ? _str(t.customer_name) : '',
+            payment_type: payType,
             start_time: _isNum(t.start_time) ? t.start_time : null,
             end_time: _isNum(t.end_time) ? t.end_time : null,
             start_address: _str(t.start_address),

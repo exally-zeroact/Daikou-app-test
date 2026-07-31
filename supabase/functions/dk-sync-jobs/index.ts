@@ -132,6 +132,10 @@ Deno.serve(async (req: Request) => {
           seq: isNum(t.seq) ? Math.round(t.seq) : i + 1,
           distance_m: t.distance_m as number, // ★そのまま★
           fare_yen: Math.round(t.fare_yen as number), // ★そのまま(円は整数)★
+          // 掛け先(請求書払い)。変な支払区分は現金に倒す。
+          customer_id: typeof t.customer_id === 'string' && t.customer_id ? t.customer_id : null,
+          customer_name: str(t.customer_name),
+          payment_type: t.customer_id && t.payment_type === 'invoice' ? 'invoice' : 'cash',
           started_at: toIso(t.start_time),
           ended_at: toIso(t.end_time),
           start_address: str(t.start_address),
