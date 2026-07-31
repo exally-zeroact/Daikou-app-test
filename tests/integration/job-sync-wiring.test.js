@@ -92,4 +92,65 @@ describe('job-sync の Edge Function', () => {
     expect(sql).toMatch(/dk_shifts_owner_sel/);
     expect(sql).toMatch(/dk_trips_owner_sel/);
   });
+
+  it('★請求先マスタを二重に持たない(dk_customers を作らない)★', () => {
+    // 唯一の正は代行請求書アプリの companies。ダイコメ側に別マスタを作ると
+    // 会社を2箇所に登録することになる(司さん指摘)。
+    expect(read('supabase/migrate-standalone.sql')).not.toMatch(/dk_customers/);
+  });
+
+  it('★請求書アプリの明細に二重登録しない鍵(dk_ref)を持つ★', () => {
+    expect(fn).toMatch(/dk_ref/);
+    // 既存行は insert のみ。meisai を update/delete しない(事務所が書いた備考を消さない)
+    expect(fn).not.toMatch(/from\('meisai'\)\s*\.\s*update/);
+    expect(fn).not.toMatch(/from\('meisai'\)\s*\.\s*delete/);
+  });
+
+  it('請求書アプリへの流し込みは請求書払いの代行だけ(現金は入れない)', () => {
+    expect(fn).toMatch(/payment_type === 'invoice'/);
+  });
+});
+
+describe('請求先マスタ(customer-master)の配線', () => {
+  const html = read('index.html');
+  const src = read('js/customer-master.js');
+
+  it('index.html が customer-master.js を読み込んでいる', () => {
+    expect(html).toMatch(/<script src="js\/customer-master\.js"><\/script>/);
+  });
+
+  it('読込順: dk-config → customer-master', () => {
+    const c = html.indexOf('js/dk-config.js');
+    const m = html.indexOf('src="js/customer-master.js"');
+    expect(c).toBeGreaterThan(-1);
+    expect(m).toBeGreaterThan(-1);
+    expect(c).toBeLessThan(m);
+  });
+
+  it('★起動処理から CustomerMaster.init() が呼ばれている★', () => {
+    expect(html).toMatch(/window\.CustomerMaster[\s\S]{0,140}\.init\(\)/);
+  });
+
+  it('sw.js の PRECACHE に入っている', () => {
+    expect(read('sw.js')).toMatch(/['"]\/js\/customer-master\.js['"]/);
+  });
+
+  it('接続先を直書きしていない', () => {
+    expect(src).not.toMatch(/[a-z0-9]{15,}\.supabase\.co/);
+  });
+
+  it('実車中のモーダルと同じキャッシュを読む(dk_customers_cache)', () => {
+    expect(src).toMatch(/dk_customers_cache/);
+    expect(html).toMatch(/dk_customers_cache/);
+  });
+
+  it('★業務コアに触っていない★', () => {
+    const code = src
+      .split('\n')
+      .map((l) => l.split('//')[0])
+      .join('\n');
+    expect(code).not.toMatch(/\bMeter\./);
+    expect(code).not.toMatch(/\bBusiness\./);
+    expect(code).not.toMatch(/calcFare/);
+  });
 });

@@ -142,7 +142,7 @@ create table if not exists dk_trips (
   fare_yen      int not null,               -- ★メーター確定値★
   -- 請求書払い(掛け)。実車中に「請求書」ボタンで選ばれた会社。未選択なら現金。
   --   customer_name は「その時の名前」を焼き付ける(後でマスタから消えても過去の請求書が壊れない)
-  customer_id   uuid,
+  customer_id   text,          -- 代行請求書アプリ companies.id
   customer_name text default '',
   payment_type  text not null default 'cash',   -- 'cash' | 'invoice'
   started_at    timestamptz,
@@ -155,7 +155,7 @@ create table if not exists dk_trips (
 );
 
 -- 既存の表にも足せるように(冪等)
-alter table dk_trips add column if not exists customer_id   uuid;
+alter table dk_trips add column if not exists customer_id   text;
 alter table dk_trips add column if not exists customer_name text default '';
 alter table dk_trips add column if not exists payment_type  text not null default 'cash';
 
@@ -166,52 +166,6 @@ create index if not exists dk_trips_customer_idx
 
 create index if not exists dk_trips_company_started_idx
   on dk_trips (company_id, started_at desc);
-
--- ---------------------------------------------------------------------------
--- 5.5) 請求書マスタ(掛け先の会社一覧)
---      ★実車中の「請求書」ボタンを押すと、この一覧から会社を選ぶ★
---      ドライバー端末はこれを持ち歩く(オフラインでも一覧が出る必要があるため)。
---      登録・編集は事務所側(ログインした会社)が行う。
--- ---------------------------------------------------------------------------
-create table if not exists dk_customers (
-  customer_id  uuid primary key default gen_random_uuid(),
-  company_id   uuid not null references dk_companies(company_id) on delete cascade,
-  name         text not null,               -- 会社名(ドライバーが見て選ぶ名前)
-  kana         text default '',             -- 並べ替え/検索用
-  honorific    text default '御中',          -- 請求書の宛名につける敬称
-  billing_name text default '',             -- 請求書の正式な宛先(空なら name を使う)
-  closing_day  int  default 31,             -- 締め日(31=月末)
-  note         text default '',
-  active       boolean not null default true, -- false = 一覧に出さない(過去データは残る)
-  sort_order   int default 0,               -- よく使う会社を上に出す
-  created_at   timestamptz default now(),
-  updated_at   timestamptz default now()
-);
-
-create index if not exists dk_customers_company_idx
-  on dk_customers (company_id, active, sort_order, name);
-
-alter table dk_customers enable row level security;
-
--- 事務所(ログインした会社)は自分の掛け先を読める/作れる/直せる
-drop policy if exists dk_customers_owner_sel on dk_customers;
-create policy dk_customers_owner_sel on dk_customers
-  for select using (
-    company_id in (select company_id from dk_companies where owner_id = auth.uid())
-  );
-
-drop policy if exists dk_customers_owner_ins on dk_customers;
-create policy dk_customers_owner_ins on dk_customers
-  for insert with check (
-    company_id in (select company_id from dk_companies where owner_id = auth.uid())
-  );
-
-drop policy if exists dk_customers_owner_upd on dk_customers;
-create policy dk_customers_owner_upd on dk_customers
-  for update using (
-    company_id in (select company_id from dk_companies where owner_id = auth.uid())
-  );
--- ※delete は作らない。消すのでなく active=false にする(過去の請求書が壊れないように)。
 
 -- RLS: 会社は自分の実績だけ読める。書き込みは Edge Function(service_role)のみ。
 alter table dk_shifts enable row level security;

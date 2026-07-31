@@ -73,10 +73,10 @@ Deno.serve(async (req: Request) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // 会社を引く(service_role = RLSバイパス)
+  // 会社を引く(service_role = RLSバイパス)。owner_id は請求書アプリへの橋渡しに使う。
   const { data: co, error: coErr } = await sb
     .from('dk_companies')
-    .select('company_id')
+    .select('company_id, owner_id')
     .eq('url_token', url_token)
     .maybeSingle();
   if (coErr) return json({ ok: false, reason: 'db_error' }, 500);
@@ -150,6 +150,13 @@ Deno.serve(async (req: Request) => {
         if (tErr) continue; // 代行が入らなかった勤務は「受け取った」と言わない=次回再送
       }
 
+      // ★請求書アプリ(代行請求書)の明細に流し込む (2026-08-01・司さん承認)★
+      //   請求書払いの代行だけ。会社を選ばなかった代行(現金)は入れない。
+      //   ・重複しない鍵 dk_ref = 端末:勤務開始:何件目 (再送で trip_id が変わっても変わらない)
+      //   ・★既に入っている行には一切触らない★=事務所が後から書いた備考/人数を絶対に消さない
+      //   ・失敗しても勤務の受け取りは取り消さない(明細は次回の再送で入る)
+      await pushToInvoiceApp(sb, co.owner_id as string | null, device_id, s, trips);
+
       accepted.push(s.start_time as number);
     } catch (_) {
       // この勤務は諦めて次へ(1件の失敗で全部を落とさない)
@@ -159,3 +166,66 @@ Deno.serve(async (req: Request) => {
 
   return json({ ok: true, accepted });
 });
+
+// 代行請求書アプリの `meisai` に、請求書払いの代行を1件1行で入れる。
+//   meisai の列: company(会社名) / date / destination(行き先) / amount(金額) / distance(距離) /
+//                name(名前) / note(備考) / people(人数) / extra(jsonb・自由項目)
+//   ★extra.dk_ref に安定した鍵を入れて二重登録を防ぐ★
+async function pushToInvoiceApp(
+  sb: ReturnType<typeof createClient>,
+  ownerId: string | null,
+  deviceId: string,
+  shift: Record<string, unknown>,
+  trips: Record<string, unknown>[]
+): Promise<void> {
+  try {
+    if (!ownerId) return; // 会社がまだアカウント登録していない = 請求書アプリ側に置き場が無い
+    const invoiceTrips = trips.filter((t) => t.payment_type === 'invoice' && t.customer_name);
+    if (!invoiceTrips.length) return;
+
+    const shiftStart = isNum(shift.start_time) ? shift.start_time : 0;
+    const refOf = (t: Record<string, unknown>) => `${deviceId}:${shiftStart}:${t.seq}`;
+    const refs = invoiceTrips.map(refOf);
+
+    // 既に入っている分を調べる(入っている行には触らない)
+    const { data: exist } = await sb
+      .from('meisai')
+      .select('extra')
+      .eq('user_id', ownerId)
+      .in('extra->>dk_ref', refs);
+    const done = new Set(
+      (exist || [])
+        .map((r: Record<string, unknown>) => {
+          const e = r.extra as Record<string, unknown> | null;
+          return e && typeof e.dk_ref === 'string' ? e.dk_ref : null;
+        })
+        .filter(Boolean) as string[]
+    );
+
+    const rows = invoiceTrips
+      .filter((t) => !done.has(refOf(t)))
+      .map((t) => {
+        const started = t.started_at ? String(t.started_at) : null;
+        return {
+          user_id: ownerId,
+          company: String(t.customer_name || ''), // 請求先(companies.name と同じ文字列)
+          date: started ? started.slice(0, 10) : null, // YYYY-MM-DD
+          destination: String(t.end_address || ''), // 行き先 = 到着地
+          amount: t.fare_yen, // ★メーター確定の料金をそのまま★
+          distance:
+            typeof t.distance_m === 'number' ? Math.round((t.distance_m / 1000) * 10) / 10 : null, // km(小数1桁)
+          name: '',
+          note: '',
+          extra: {
+            dk_ref: refOf(t), // ★二重登録を防ぐ鍵★
+            dk_from: String(t.start_address || ''), // 出発地(請求書アプリの標準列に無いので自由項目へ)
+            dk_source: 'daikome',
+          },
+        };
+      });
+    if (!rows.length) return;
+    await sb.from('meisai').insert(rows);
+  } catch (_) {
+    // 請求書側で何が起きても、ダイコメの実績受け取りは止めない
+  }
+}

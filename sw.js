@@ -117,6 +117,7 @@ const CORE_CODE_FILES = [
   '/js/license-v2.js',
   '/js/license-activate.js',
   '/js/job-sync.js',
+  '/js/customer-master.js',
   '/js/trace-outbox.js',
 ];
 
