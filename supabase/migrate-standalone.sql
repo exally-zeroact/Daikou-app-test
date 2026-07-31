@@ -105,15 +105,81 @@ create policy dk_devices_owner_del on dk_company_devices
 -- insert/update(端末登録)は dk-issue-license(service_role)経由のみ。ポリシーを作らない = 誰も直接書けない。
 
 -- ---------------------------------------------------------------------------
--- 4) 確認: ここまでが正しく入ったかを目で見る
---    期待: 2つの表が rls_enabled = true で並び、ポリシーが3本(select 2 / delete 1)出る。
+-- 4) 勤務(シフト) = 業務開始 → 業務終了。1晩の勤務ぜんたい。
+--    メーターが localStorage に貯めた履歴を dk-sync-jobs が入れる。
+--    ★鍵 = (company_id, device_id, started_at)★ … 同じ勤務を何度送っても増えない(冪等)。
+-- ---------------------------------------------------------------------------
+create table if not exists dk_shifts (
+  shift_id         uuid primary key default gen_random_uuid(),
+  company_id       uuid not null references dk_companies(company_id) on delete cascade,
+  device_id        text not null,
+  driver_id        uuid,                    -- 後で dk_drivers に紐付ける(今は空)
+  started_at       timestamptz not null,
+  ended_at         timestamptz,
+  elapsed_sec      int,
+  total_distance_m double precision,        -- 総走行(空車込み)
+  actual_total_m   double precision,        -- 実車の合計
+  empty_distance_m double precision,        -- 空車 = 総走行 − 実車
+  fare_total_yen   int,                     -- 売上合計
+  trip_count       int,                     -- 代行の件数
+  created_at       timestamptz default now(),
+  unique (company_id, device_id, started_at)
+);
+
+create index if not exists dk_shifts_company_started_idx
+  on dk_shifts (company_id, started_at desc);
+
+-- ---------------------------------------------------------------------------
+-- 5) 代行 = 代行開始 → 精算終了。★課金の単位。売上と歩合の元ネタ。★
+--    距離・料金はメーターが確定した値をそのまま入れる(再計算・補正はしない)。
+-- ---------------------------------------------------------------------------
+create table if not exists dk_trips (
+  trip_id       uuid primary key default gen_random_uuid(),
+  shift_id      uuid not null references dk_shifts(shift_id) on delete cascade,
+  company_id    uuid not null references dk_companies(company_id) on delete cascade,
+  seq           int not null,               -- 勤務内の何件目か(明細の順を毎回同じにする)
+  distance_m    double precision not null,  -- ★メーター確定値★
+  fare_yen      int not null,               -- ★メーター確定値★
+  started_at    timestamptz,
+  ended_at      timestamptz,
+  start_address text default '',
+  end_address   text default '',
+  waypoints     jsonb default '[]'::jsonb,
+  created_at    timestamptz default now(),
+  unique (shift_id, seq)
+);
+
+create index if not exists dk_trips_company_started_idx
+  on dk_trips (company_id, started_at desc);
+
+-- RLS: 会社は自分の実績だけ読める。書き込みは Edge Function(service_role)のみ。
+alter table dk_shifts enable row level security;
+alter table dk_trips  enable row level security;
+
+drop policy if exists dk_shifts_owner_sel on dk_shifts;
+create policy dk_shifts_owner_sel on dk_shifts
+  for select using (
+    company_id in (select company_id from dk_companies where owner_id = auth.uid())
+  );
+
+drop policy if exists dk_trips_owner_sel on dk_trips;
+create policy dk_trips_owner_sel on dk_trips
+  for select using (
+    company_id in (select company_id from dk_companies where owner_id = auth.uid())
+  );
+
+-- ---------------------------------------------------------------------------
+-- 6) 確認: ここまでが正しく入ったかを目で見る
+--    期待: 4つの表が rls_enabled = true で並び、ポリシーが5本(select 4 / delete 1)出る。
 -- ---------------------------------------------------------------------------
 select tablename, rowsecurity as rls_enabled
   from pg_tables
- where schemaname = 'public' and tablename in ('dk_companies', 'dk_company_devices')
+ where schemaname = 'public'
+   and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips')
  order by tablename;
 
 select tablename, policyname, cmd
   from pg_policies
- where schemaname = 'public' and tablename in ('dk_companies', 'dk_company_devices')
+ where schemaname = 'public'
+   and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips')
  order by tablename, policyname;

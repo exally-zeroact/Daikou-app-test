@@ -116,6 +116,7 @@ const CORE_CODE_FILES = [
   '/js/tweetnacl.min.js',
   '/js/license-v2.js',
   '/js/license-activate.js',
+  '/js/job-sync.js',
   '/js/trace-outbox.js',
 ];
 

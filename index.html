@@ -5591,6 +5591,10 @@
     <script src="js/tweetnacl.min.js"></script>
     <script src="js/license-v2.js"></script>
     <script src="js/license-activate.js"></script>
+    <!-- ★job-sync.js (2026-07-31・事務所機能の土台): localStorage に貯まった業務履歴を
+         後から読んでクラウドへ送るだけの独立部品。business.js / 距離コア / 業務の流れには一切触らない。
+         会社URLで活性化していない端末(自社運用)は何も送らない。送信失敗は次回再送(業務は絶対止めない)。 -->
+    <script src="js/job-sync.js"></script>
 
     <!-- ★debug-trace.js：較正用 GPS trace 収集 (2026-05-21・noise model 較正タスク用)
          feature flag OFF default・URL ?trace=on で activate・他端末ではサイレント
@@ -11113,6 +11117,16 @@
               try {
                 if (typeof window._updateLicenseBanner === 'function')
                   window._updateLicenseBanner();
+              } catch (_) {
+                /* ignore */
+              }
+              // ★実績のクラウド送信を起動 (2026-07-31・事務所機能の土台)★
+              //   ライセンス処理の後に呼ぶ = 会社url_tokenが揃ってから送る。
+              //   裏で走るだけ・失敗しても何も起きない(次回再送)。業務は絶対に止めない。
+              try {
+                if (window.JobSync && typeof window.JobSync.init === 'function') {
+                  window.JobSync.init();
+                }
               } catch (_) {
                 /* ignore */
               }
