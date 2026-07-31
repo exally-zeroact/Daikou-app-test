@@ -179,6 +179,13 @@ async function pushToInvoiceApp(
   trips: Record<string, unknown>[]
 ): Promise<void> {
   try {
+    // ★★既定オフ (2026-08-01)★★
+    //   代行請求書アプリは既に実務で使われていて、明細が1000件超入っている。
+    //   司さんは今そこへ「手入力」している。自動投入を同時に走らせると★二重になる★。
+    //   よって Edge Function secret `DK_MEISAI_AUTOPUSH=1` を明示的に立てるまで何もしない。
+    //   (手入力から自動に切り替える、と決めた時に立てる)
+    if (Deno.env.get('DK_MEISAI_AUTOPUSH') !== '1') return;
+
     if (!ownerId) return; // 会社がまだアカウント登録していない = 請求書アプリ側に置き場が無い
     const invoiceTrips = trips.filter((t) => t.payment_type === 'invoice' && t.customer_name);
     if (!invoiceTrips.length) return;
