@@ -301,12 +301,14 @@
     </div>
 
     <script src="js/qrcode.min.js"></script>
+    <script src="js/dk-config.js"></script>
     <script>
       (function () {
         'use strict';
-        var FN = 'https://tnfwipbgfgjaymlszeid.supabase.co/functions/v1/dk-company-manage';
-        var ANON =
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
+        // ★このページ(秘密リンク方式の管理画面)はアカウント方式 dashboard.html に置き換え済=廃止予定。
+        //   接続先だけは単一真実源(js/dk-config.js)に寄せてある(移設時の取り残し防止)。
+        var FN = window.DKConfig.fn('dk-company-manage');
+        var ANON = window.DKConfig.ANON_KEY;
         var K = new URLSearchParams(location.search).get('k') || '';
         var loading = document.getElementById('loading');
         var errEl = document.getElementById('err');

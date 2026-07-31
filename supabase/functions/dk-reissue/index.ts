@@ -6,7 +6,12 @@
 //     より強くするならメール確認(登録メールへ送る)を後で足す。★
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BASE = 'https://daikou-app-test.vercel.app';
+// ★この関数は秘密リンク方式=アカウント方式(dashboard.html)に置き換え済で廃止予定・未デプロイ。
+//   接続先/URLの取り残しを防ぐため env 化だけ揃えてある。
+const APP_BASE = (Deno.env.get('DK_APP_BASE') || 'https://daikou-app-test.vercel.app').replace(
+  /\/+$/,
+  ''
+);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

@@ -178,12 +178,13 @@
       <div class="foot">はじめての方も、このまま登録できます。</div>
     </div>
 
+    <script src="js/dk-config.js"></script>
     <script>
       (function () {
         'use strict';
-        var SB_URL = 'https://tnfwipbgfgjaymlszeid.supabase.co';
-        var ANON =
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
+        // 接続先は js/dk-config.js(単一の真実源)から。ここには書かない。
+        var SB_URL = window.DKConfig.SB_URL;
+        var ANON = window.DKConfig.ANON_KEY;
         var btn = document.getElementById('sendBtn');
         var errEl = document.getElementById('err');
 

@@ -7,7 +7,12 @@
 //   url_token = 推測不能な乱数(16byte hex)。作成は service_role。
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const APP_BASE = 'https://daikou-app-test.vercel.app'; // 会社URLのベース(本番切替時に差替)
+// 会社URLのベース。★移設/本番ドメイン切替はコードを触らず Edge Function secret DK_APP_BASE で行う★
+//   (未設定ならテスト環境のURLにフォールバック=今までの挙動)
+const APP_BASE = (Deno.env.get('DK_APP_BASE') || 'https://daikou-app-test.vercel.app').replace(
+  /\/+$/,
+  ''
+);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

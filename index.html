@@ -5580,6 +5580,9 @@
     <!-- ★debug-log-uploader.js: Eruda console を Firebase RTDB 自動 push (2026-05-29 追加・解析側 Claude 並行参照用)
          feature flag・既定 ON (テストビルド) / OFF (本番)・?debuglog=on/off で切替・debug-trace.js と device_id 共有 -->
     <script src="js/debug-log-uploader.js"></script>
+    <!-- ★dk-config.js = Supabase接続先の単一真実源 (2026-07-31・独立/移設のため)。
+         接続先を使う全モジュール(license.js / license-activate.js / 端末管理配線)より必ず先に load。 -->
+    <script src="js/dk-config.js"></script>
     <!-- ★設計変更宣言 (2026-05-24・端末ライセンス台数ロック): 既存 DAIKOME_DEVICE_ID 流用・debug-trace.js 後に load -->
     <script src="js/license.js"></script>
     <!-- ★ライセンス最終方式(会社URL/QR+Ed25519署名) STEP3配線 (2026-07-27):
@@ -11197,9 +11200,9 @@
         // ★端末管理(管理者) 配線 (2026-06-29): Supabase auth(REST) + dk_register/list/remove RPC★
         //   ログイン→自社の端末を一覧/追加/削除(SQL不要)。token は sessionStorage(管理操作のみ・揮発)。
         (function () {
-          const SB_URL = 'https://tnfwipbgfgjaymlszeid.supabase.co';
-          const SB_ANON =
-            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
+          // 接続先は js/dk-config.js(単一の真実源)から。ここには書かない(移設漏れ防止)。
+          const SB_URL = window.DKConfig.SB_URL;
+          const SB_ANON = window.DKConfig.ANON_KEY;
           const TOKEN_KEY = 'DK_ADMIN_TOKEN';
           function _msg(t, ok) {
             const e = document.getElementById('devAdminMsg');

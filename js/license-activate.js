@@ -14,10 +14,7 @@
 (function (global) {
   'use strict';
 
-  const SB_URL = 'https://tnfwipbgfgjaymlszeid.supabase.co';
-  const SB_ANON =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
-  const FN_URL = SB_URL + '/functions/v1/dk-issue-license';
+  // ★接続先は js/dk-config.js(単一の真実源)から取る。ここには書かない(移設漏れ防止)。★
   const DEVICE_ID_KEY = 'DAIKOME_DEVICE_ID'; // license.js / debug-trace と同 key 流用
   const K_TOKEN = 'dk_license_token'; // 署名トークン(本体)
   const K_COMPANY = 'dk_license_company'; // 会社url_token(再同期用)
@@ -32,6 +29,24 @@
       if (typeof require === 'function') {
         // eslint-disable-next-line no-undef, global-require
         return require('./license-v2.js');
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return null;
+  }
+
+  // 接続先(dk-config)。無ければ null = 通信できない扱い(業務は止めない)。
+  function _cfg() {
+    try {
+      if (global && global.DKConfig) return global.DKConfig;
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      if (typeof require === 'function') {
+        // eslint-disable-next-line no-undef, global-require
+        return require('./dk-config.js');
       }
     } catch (_) {
       /* ignore */
@@ -127,15 +142,13 @@
   async function activate(urlToken) {
     urlToken = (urlToken || '').trim();
     if (!urlToken) return { ok: false, reason: 'no_token' };
+    const cfg = _cfg();
+    if (!cfg) return { ok: false, reason: 'offline' }; // 接続先が読めない=通信不可扱い
     let j;
     try {
-      const res = await fetch(FN_URL, {
+      const res = await fetch(cfg.fn('dk-issue-license'), {
         method: 'POST',
-        headers: {
-          apikey: SB_ANON,
-          Authorization: 'Bearer ' + SB_ANON,
-          'Content-Type': 'application/json',
-        },
+        headers: cfg.headers(),
         body: JSON.stringify({ url_token: urlToken, device_id: _deviceId(), vin: _vin() }),
       });
       j = await res.json();

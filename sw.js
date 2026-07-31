@@ -111,6 +111,7 @@ const CORE_CODE_FILES = [
   '/js/debug-config.js',
   '/js/firebase-config.js',
   '/js/firebase.js',
+  '/js/dk-config.js',
   '/js/license.js',
   '/js/tweetnacl.min.js',
   '/js/license-v2.js',
