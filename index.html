@@ -13661,6 +13661,26 @@
         <div class="appbar-title">設定</div>
       </div>
       <div class="wrap">
+        <!-- ★事務所への入口 (2026-08-01)★
+             司さん「どのURLもここにしかいかんけど」= 会社URL(?c=) を開くとメーターが出るのは
+             仕様(ドライバーのスマホを使えるようにする物)だが、メーターから事務所へ戻る道が
+             1つも無かった。ここに1つ置く。★UIだけ・メーターの中身には触っていない★ -->
+        <div class="section">
+          <div class="section-title">事務所</div>
+          <div
+            class="row"
+            data-office-link="1"
+            onclick="location.href = 'dashboard.html'"
+            style="cursor: pointer"
+          >
+            <div class="row-label">
+              事務所をひらく（売上表・給料・月次集計）<br />
+              <span style="color: #8e8e93; font-size: 12px">社長用・ログインが要ります</span>
+            </div>
+            <div style="color: #8e8e93; font-size: 13px">›</div>
+          </div>
+        </div>
+
         <!-- 料金設定 → #overlayFare (MA Phase D で fare.html を overlay 化) -->
         <div class="section">
           <div class="section-title">料金設定</div>
