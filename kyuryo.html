@@ -126,6 +126,32 @@
         text-align: center;
       }
 
+      .periodbar {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+
+      .pbtn {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 16px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
+        cursor: pointer;
+        font-family: inherit;
+      }
+
+      .pbtn.on {
+        background: var(--blue-d);
+        border-color: var(--blue-d);
+        color: #fff;
+      }
+
       .navb {
         background: #fff;
         border: 1px solid var(--line);
@@ -408,6 +434,7 @@
         <div><span class="logo">ダイコメ</span><span class="tag">給料</span></div>
         <div>
           <button class="linkbtn" onclick="location.href = 'uriage.html'">売上表</button>
+          <button class="linkbtn" onclick="location.href = 'shukei.html'">月次集計</button>
           <button class="linkbtn" onclick="location.href = 'dashboard.html'">会社設定</button>
           <button class="linkbtn" id="btnLogout">ログアウト</button>
         </div>
@@ -427,6 +454,8 @@
           <div class="m" id="monthLabel">—</div>
           <button class="navb" id="nextM">次の月 ›</button>
         </div>
+        <!-- ★司さんは月3回払い（1〜10 / 11〜20 / 21〜末日）＝どの期の明細かを選ぶ★ -->
+        <div class="periodbar" id="periodBar"></div>
       </div>
 
       <div class="err noprint" id="err" style="display: none"></div>
@@ -544,14 +573,15 @@
           <table>
             <tbody>
               <tr>
-                <td>何日から</td>
+                <td>何日から（月1回・日数で切るとき）</td>
                 <td><input class="hrs" id="pStart" /> 日</td>
               </tr>
               <tr>
-                <td>締め方</td>
+                <td>払い方</td>
                 <td>
                   <select id="pMode">
-                    <option value="month_end">その月の末日まで（司さんのやり方）</option>
+                    <option value="thirds">月3回（1〜10日 / 11〜20日 / 21日〜末日）</option>
+                    <option value="month_end">月1回（下の「何日から」〜末日）</option>
                     <option value="days">日数で切る</option>
                   </select>
                 </td>
@@ -567,8 +597,9 @@
             <span class="saved" id="setSaved"></span>
           </div>
           <div class="note">
-            司さんの実物どおりの既定は「21日から
-            その月の末日まで」です（1月は11日、2月は8日…と長さが変わります）。
+            既定は<b>月3回</b>（1〜10日 / 11〜20日 / 21日〜末日）です。実物の「月別」シートの
+            <b>バ1〜10 / バ11〜20 / バ21〜31</b> がこの3回で、バ21〜31 は給料明細（21日〜末日）の
+            人数ぶんの合計と一致します。
           </div>
         </div>
       </div>
@@ -588,6 +619,8 @@
         var COMPANY = null;
         var TAB = 'slip';
         var YM = { year: new Date().getFullYear(), month: new Date().getMonth() + 1 };
+        var PERIODS = []; // その月の期（司さんは月3回払い＝3つ）
+        var PIDX = 0; // いま見ている期
         var PERIOD = null;
         var SET = null; // dk_payroll_settings の行（生）
         var RAW = {
@@ -659,10 +692,12 @@
         };
         $('prevM').onclick = function () {
           YM = PayrollPeriod.shift(YM, -1);
+          PIDX = 0;
           loadPeriod();
         };
         $('nextM').onclick = function () {
           YM = PayrollPeriod.shift(YM, 1);
+          PIDX = 0;
           loadPeriod();
         };
         Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
@@ -735,11 +770,13 @@
         function loadPeriod() {
           if (!COMPANY) return;
           var st = PayrollDaily.normSettings(SET);
-          PERIOD = PayrollPeriod.periodOf(YM.year, YM.month, {
+          PERIODS = PayrollPeriod.periodsOf(YM.year, YM.month, {
             startDay: st.periodStartDay,
             endMode: st.periodEndMode,
             days: st.periodDays,
           });
+          if (!(PIDX >= 0 && PIDX < PERIODS.length)) PIDX = 0;
+          PERIOD = PERIODS[PIDX];
           showErr('');
           showMsg('読み込み中…');
 
@@ -799,6 +836,7 @@
           $('monthLabel').textContent = PERIOD
             ? PERIOD.year + '年 ' + PERIOD.label + '　' + PERIOD.rangeLabel
             : '—';
+          renderPeriodBar();
           $('monthCard').style.display = TAB === 'slip' || TAB === 'hours' ? '' : 'none';
           $('paneSlip').style.display = TAB === 'slip' ? '' : 'none';
           $('paneHours').style.display = TAB === 'hours' ? '' : 'none';
@@ -808,6 +846,32 @@
           if (TAB === 'hours') renderDays();
           if (TAB === 'emp') renderEmp();
           if (TAB === 'set') renderSet();
+        }
+
+        // ── 期の選び方（司さんは月3回払い）────────────────
+        function renderPeriodBar() {
+          var bar = $('periodBar');
+          if (!PERIODS || PERIODS.length < 2) {
+            bar.innerHTML = ''; // 1回払いの会社では出さない
+            return;
+          }
+          bar.innerHTML = PERIODS.map(function (p, i) {
+            return (
+              '<button class="pbtn' +
+              (i === PIDX ? ' on' : '') +
+              '" data-pidx="' +
+              i +
+              '">' +
+              esc(p.name) +
+              '</button>'
+            );
+          }).join('');
+          Array.prototype.forEach.call(bar.querySelectorAll('[data-pidx]'), function (b) {
+            b.onclick = function () {
+              PIDX = parseInt(b.getAttribute('data-pidx'), 10) || 0;
+              loadPeriod();
+            };
+          });
         }
 
         // ── 明細（実物の給料1〜8と同じ並び）──────────────
@@ -831,7 +895,7 @@
               '</div></div>' +
               '<div class="sums">合計 <span>¥' +
               yen(e.totalPay) +
-              '</span><span>' +
+              '</span> <span>' +
               hrs(e.totalHours) +
               ' 時間</span></div>' +
               '<div class="who">' +

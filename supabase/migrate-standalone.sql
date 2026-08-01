@@ -259,7 +259,7 @@ create table if not exists dk_payroll_settings (
   reserve_pool_rate          double precision not null default 0.05,
   reserve_owner_rate         double precision not null default 0.05,
   period_start_day           int not null default 21,
-  period_end_mode            text not null default 'month_end',
+  period_end_mode            text not null default 'thirds',   -- 月3回払い(1-10/11-20/21-末)
   period_days                int not null default 11,
   owner_device_id            text default '',
   roles                      jsonb not null default
@@ -267,7 +267,18 @@ create table if not exists dk_payroll_settings (
   updated_at                 timestamptz default now()
 );
 
--- 6-7) RLS: 会社は自分の分だけ 読める / 足せる / 直せる
+-- 6-7) 月次集計の手入力ぶん（PayPay など。メーターが区別していない受け取り方）
+create table if not exists dk_month_extras (
+  company_id uuid not null references dk_companies(company_id) on delete cascade,
+  ym         text not null,                       -- '2026-01'
+  paypay_yen double precision not null default 0,
+  note       text default '',
+  updated_at timestamptz default now(),
+  primary key (company_id, ym)
+);
+
+-- 6-8) RLS: 会社は自分の分だけ 読める / 足せる / 直せる
+alter table dk_month_extras     enable row level security;
 alter table dk_shift_edits      enable row level security;
 alter table dk_device_labels    enable row level security;
 alter table dk_sales_settings   enable row level security;
@@ -282,7 +293,7 @@ declare
 begin
   foreach t in array array[
     'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
-    'dk_employees', 'dk_work_hours', 'dk_payroll_settings'
+    'dk_employees', 'dk_work_hours', 'dk_payroll_settings', 'dk_month_extras'
   ] loop
     foreach c in array array['select', 'insert', 'update'] loop
       execute format('drop policy if exists %I on %I', t || '_owner_' || left(c, 3), t);
@@ -307,14 +318,15 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 7) 確認: ここまでが正しく入ったかを目で見る
---    期待: 10個の表が rls_enabled = true で並ぶ。
+--    期待: 11個の表が rls_enabled = true で並ぶ。
 -- ---------------------------------------------------------------------------
 select tablename, rowsecurity as rls_enabled
   from pg_tables
  where schemaname = 'public'
    and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips',
                      'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
-                     'dk_employees', 'dk_work_hours', 'dk_payroll_settings')
+                     'dk_employees', 'dk_work_hours', 'dk_payroll_settings',
+                     'dk_month_extras')
  order by tablename;
 
 select tablename, policyname, cmd
@@ -322,5 +334,6 @@ select tablename, policyname, cmd
  where schemaname = 'public'
    and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips',
                      'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
-                     'dk_employees', 'dk_work_hours', 'dk_payroll_settings')
+                     'dk_employees', 'dk_work_hours', 'dk_payroll_settings',
+                     'dk_month_extras')
  order by tablename, policyname;

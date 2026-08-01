@@ -117,7 +117,11 @@
         : base;
       out.ownerDeviceId = typeof r.owner_device_id === 'string' ? r.owner_device_id : '';
       out.periodStartDay = r.period_start_day === undefined ? 21 : n(r.period_start_day) || 21;
-      out.periodEndMode = r.period_end_mode === 'days' ? 'days' : 'month_end';
+      // ★既定は thirds＝月3回払い（実物の月別シート「バ1～10/バ11～20/バ21～31」）★
+      out.periodEndMode =
+        r.period_end_mode === 'days' || r.period_end_mode === 'month_end'
+          ? r.period_end_mode
+          : 'thirds';
       out.periodDays = r.period_days === undefined ? 11 : n(r.period_days) || 11;
       return out;
     } catch (_) {

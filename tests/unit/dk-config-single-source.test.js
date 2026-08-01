@@ -30,6 +30,7 @@ const HTML_FILES = [
   // 事務所の画面(売上表 / 給料)も同じ土台に乗っているので、ここも見張る
   'uriage.html',
   'kyuryo.html',
+  'shukei.html',
 ];
 
 // DKConfig を参照していなければならない消費側(= 接続先を使う画面/モジュール)
@@ -40,6 +41,7 @@ const CONSUMERS = [
   'manage.html',
   'uriage.html',
   'kyuryo.html',
+  'shukei.html',
   'js/license.js',
   'js/license-activate.js',
 ];
