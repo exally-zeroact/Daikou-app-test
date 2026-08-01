@@ -453,6 +453,7 @@
 
     <script src="js/qrcode.min.js"></script>
     <script src="js/dk-config.js"></script>
+    <script src="js/dk-session.js"></script>
     <script>
       (function () {
         'use strict';
@@ -571,64 +572,13 @@
         })();
 
         // ---------- セッション ----------
-        function parseHash() {
-          var h = (location.hash || '').replace(/^#/, '');
-          if (!h) return null;
-          var p = new URLSearchParams(h);
-          var at = p.get('access_token');
-          if (!at) return null;
-          var now = Math.floor(Date.now() / 1000);
-          var exp = parseInt(p.get('expires_at') || '0', 10);
-          if (!exp) exp = now + (parseInt(p.get('expires_in') || '3600', 10) || 3600);
-          return {
-            access_token: at,
-            refresh_token: p.get('refresh_token') || '',
-            expires_at: exp,
-          };
-        }
-        function saveSess(s) {
-          SESS = s;
-          try {
-            localStorage.setItem(SESS_KEY, JSON.stringify(s));
-          } catch (e) {}
-        }
-        function loadSess() {
-          try {
-            return JSON.parse(localStorage.getItem(SESS_KEY) || 'null');
-          } catch (e) {
-            return null;
-          }
-        }
+        // ★ログインの持ち方は js/dk-session.js ただ1つ★（2026-08-01）
+        //   前は管理画面が自分用にもう1つ持っていて、タブの中の画面と同時に
+        //   トークンを更新しに行き、取り合いで片方が無効になっていた
+        //   ＝司さん「毎回ログインはどうにかならんのかね？」の原因のひとつ。
         function clearSess() {
           SESS = null;
-          try {
-            localStorage.removeItem(SESS_KEY);
-          } catch (e) {}
-        }
-        function refreshSess(s) {
-          if (!s.refresh_token) return Promise.resolve(null);
-          return fetch(SB_URL + '/auth/v1/token?grant_type=refresh_token', {
-            method: 'POST',
-            headers: { apikey: ANON, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: s.refresh_token }),
-          })
-            .then(function (r) {
-              return r.ok ? r.json() : null;
-            })
-            .then(function (j) {
-              if (!j || !j.access_token) return null;
-              var now = Math.floor(Date.now() / 1000);
-              var ns = {
-                access_token: j.access_token,
-                refresh_token: j.refresh_token || s.refresh_token,
-                expires_at: j.expires_at || now + (j.expires_in || 3600),
-              };
-              saveSess(ns);
-              return ns;
-            })
-            .catch(function () {
-              return null;
-            });
+          DKSession.clear();
         }
 
         // ---------- REST ----------
@@ -647,9 +597,15 @@
         function getUser() {
           return fetch(SB_URL + '/auth/v1/user', {
             headers: { apikey: ANON, Authorization: 'Bearer ' + SESS.access_token },
-          }).then(function (r) {
-            return r.ok ? r.json() : null;
-          });
+          })
+            .then(function (r) {
+              if (r.ok) return r.json();
+              // ★401/403 だけが「ログインが切れた」★ 5xx や通信不調は 'net'
+              return DKSession.isAuthError(r) ? null : 'net';
+            })
+            .catch(function () {
+              return 'net';
+            });
         }
 
         // ---------- 画面 ----------
@@ -767,10 +723,21 @@
         function loadCompany() {
           return api('/dk_companies?select=company_id,name,url_token,seat_limit,status')
             .then(function (r) {
-              return r.ok ? r.json() : null;
+              // ★ここが「毎回ログイン」の直接の原因だった（2026-08-01）★
+              //   前は「配列が返らなければ goLogin()」＝通信が一瞬こけただけでログアウトしていた。
+              //   ログインが切れたと言えるのは、サーバーが 401/403 と言った時だけ。
+              if (r.ok) return r.json();
+              if (DKSession.isAuthError(r)) return 'auth';
+              return 'net';
             })
             .then(function (cos) {
-              if (!Array.isArray(cos)) return goLogin();
+              if (cos === 'auth') return goLogin();
+              if (cos === 'net' || !Array.isArray(cos)) {
+                show('loading', true);
+                $('loading').textContent =
+                  'いまつながりません。電波が戻ったら「更新」してください。';
+                return;
+              }
               if (cos.length === 0) {
                 showRegister();
               } else {
@@ -779,9 +746,9 @@
               }
             })
             .catch(function () {
-              show('loading', false);
-              $('loading').style.display = 'block';
-              $('loading').textContent = 'ネットに繋がる所で開いてください。';
+              // 通信で落ちただけ。★ログアウトさせない★
+              show('loading', true);
+              $('loading').textContent = 'いまつながりません。電波が戻ったら「更新」してください。';
             });
         }
 
@@ -878,35 +845,29 @@
         // ---------- 起動 ----------
         function start() {
           bindStaticButtons();
-          var s = parseHash();
-          if (s) {
-            saveSess(s);
-            try {
-              history.replaceState(null, '', location.pathname + location.search);
-            } catch (e) {}
-          } else {
-            s = loadSess();
-          }
-          if (!s || !s.access_token) return goLogin();
-
-          var now = Math.floor(Date.now() / 1000);
-          var ready;
-          if (s.expires_at && s.expires_at <= now + 10) {
-            ready = refreshSess(s);
-          } else {
-            SESS = s;
-            ready = Promise.resolve(s);
-          }
-          ready.then(function (valid) {
-            if (!valid) return goLogin();
+          DKSession.ensure().then(function (valid) {
+            if (!valid) return goLogin(); // 本当にログインが要る時だけ
             SESS = valid;
-            getUser().then(function (u) {
-              if (!u || !u.id) return goLogin();
-              $('whoMail').textContent = u.email || '';
-              show('who', true);
-              show('foot', true);
-              loadCompany();
-            });
+            getUser()
+              .then(function (u) {
+                // ★繋がらなかっただけならログアウトさせない★
+                if (u === 'net') {
+                  show('who', true);
+                  show('foot', true);
+                  return loadCompany();
+                }
+                if (!u || !u.id) return goLogin();
+                $('whoMail').textContent = u.email || '';
+                show('who', true);
+                show('foot', true);
+                loadCompany();
+              })
+              .catch(function () {
+                // 通信で落ちただけ。ログイン画面へ飛ばさない
+                show('who', true);
+                show('foot', true);
+                loadCompany();
+              });
           });
         }
 

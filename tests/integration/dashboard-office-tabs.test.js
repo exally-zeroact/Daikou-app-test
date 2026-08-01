@@ -149,3 +149,34 @@ describe('★事務所を別の住所で開いても、ドライバーに配る�
     m.OFFICE_FILES.forEach((f) => expect(fs.existsSync(path.join(ROOT, f))).toBe(true));
   });
 });
+
+describe('★ログインは1つの実装だけ（毎回ログインの再発防止）★', () => {
+  // 司さん「毎回ログインはどうにかならんのかね？／管理画面ログインしとったら他はなしでいけるんやないん？」
+  it('管理画面は js/dk-session.js を使う（独自のログイン処理を持たない）', () => {
+    expect(DASH).toContain('src="js/dk-session.js"');
+    expect(DASH).toContain('DKSession.ensure()');
+    // 自前の更新処理を持っていないこと
+    expect(DASH).not.toContain('function refreshSess');
+    expect(DASH).not.toContain('grant_type=refresh_token');
+  });
+
+  it('★通信が落ちただけでログアウトさせない★', () => {
+    // 「配列が返らなければ goLogin」という書き方が戻ったら落ちる
+    expect(DASH).not.toContain('if (!Array.isArray(cos)) return goLogin();');
+    expect(DASH).toContain('DKSession.isAuthError');
+  });
+
+  it('4画面とも同じ保存場所を使う＝1回ログインすれば全部で使える', () => {
+    const sess = read('js/dk-session.js');
+    expect(sess).toContain("const KEY = 'dk_dash_sess'");
+    ['uriage.html', 'kyuryo.html', 'shukei.html'].forEach((f) => {
+      expect(read(f)).toContain('DKSession.ensure()');
+    });
+  });
+
+  it('更新の取り合いを止める仕組みが入っている', () => {
+    const sess = read('js/dk-session.js');
+    expect(sess).toContain('_inflight');
+    expect(sess).toContain('dk_dash_refresh');
+  });
+});

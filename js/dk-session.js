@@ -120,18 +120,69 @@
 
   // ─── 通信 ───────────────────────────────────────────
 
+  // ★更新は一度に1つだけ★（司さん「毎回ログインはどうにかならんのかね？」2026-08-01）
+  //   管理画面とタブの中の画面が同時に更新しに行くと、片方が使った refresh_token が
+  //   無効になって もう片方が弾かれる＝ログイン画面に飛ばされる。
+  //   ・同じページの中 … 走っている約束を使い回す
+  //   ・別のフレーム/タブ … 鍵(localStorage)を置いて、終わるのを待って保存済みを読む
+  let _inflight = null;
+  const LOCK = 'dk_dash_refresh';
+  const LOCK_MS = 8000;
+
+  function _lockHeld() {
+    try {
+      const ls = _ls();
+      if (!ls) return false;
+      const t = parseInt(ls.getItem(LOCK) || '0', 10);
+      return isFinite(t) && Date.now() - t < LOCK_MS;
+    } catch (_) {
+      return false;
+    }
+  }
+  function _lockTake() {
+    try {
+      const ls = _ls();
+      if (ls) ls.setItem(LOCK, String(Date.now()));
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  function _lockFree() {
+    try {
+      const ls = _ls();
+      if (ls) ls.removeItem(LOCK);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  function _wait(ms) {
+    return new Promise(function (r) {
+      setTimeout(r, ms);
+    });
+  }
+
+  // 更新する。返り値:
+  //   session … 成功
+  //   null    … ★本当にログインが切れた★（サーバーが「その鍵は無効」と言った）
+  //   'net'   … 通信できなかっただけ（★ログアウトさせない★）
   function refresh(sess) {
     const cfg = _cfg();
     if (!cfg || !sess || !sess.refresh_token) return Promise.resolve(null);
-    return fetch(cfg.SB_URL + '/auth/v1/token?grant_type=refresh_token', {
+    if (_inflight) return _inflight;
+    _lockTake();
+    _inflight = fetch(cfg.SB_URL + '/auth/v1/token?grant_type=refresh_token', {
       method: 'POST',
       headers: { apikey: cfg.ANON_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: sess.refresh_token }),
     })
       .then(function (r) {
-        return r.ok ? r.json() : null;
+        if (r.ok) return r.json();
+        // 400/401 = 鍵が無効（本当に切れた）。それ以外(5xx)は通信不調あつかい。
+        if (r.status === 400 || r.status === 401 || r.status === 403) return null;
+        return 'net';
       })
       .then(function (j) {
+        if (j === 'net') return 'net';
         if (!j || !j.access_token) return null;
         const now = Math.floor(Date.now() / 1000);
         const ns = {
@@ -143,11 +194,20 @@
         return ns;
       })
       .catch(function () {
-        return null;
+        return 'net'; // ★繋がらなかっただけ。ログアウトさせない★
+      })
+      .then(function (out) {
+        _inflight = null;
+        _lockFree();
+        return out;
       });
+    return _inflight;
   }
 
-  // 使える session を用意する。無ければ null（呼び出し側がログインへ送る）
+  // 使える session を用意する。
+  //   返り値: session … 使える / null … ログインが要る
+  //   ★通信できなかっただけの時は、保存してある session をそのまま返す★
+  //     （ここで null を返すとログイン画面に飛ばされてしまう）
   function ensure() {
     try {
       // マジックリンクで戻ってきた直後なら # から拾って保存し、URLを綺麗にする
@@ -168,7 +228,22 @@
       const s = load();
       if (!s) return Promise.resolve(null);
       if (!needsRefresh(s)) return Promise.resolve(s);
-      return refresh(s);
+
+      // 別のフレーム/タブが更新中なら、それを待って保存済みを読む（取り合いを避ける）
+      if (!_inflight && _lockHeld()) {
+        return _wait(600).then(function () {
+          const again = load();
+          if (again && !needsRefresh(again)) return again;
+          return refresh(again || s).then(function (out) {
+            return out === 'net' ? again || s : out;
+          });
+        });
+      }
+
+      return refresh(s).then(function (out) {
+        if (out === 'net') return s; // 繋がらないだけ。ログインは切らない
+        return out;
+      });
     } catch (_) {
       return Promise.resolve(null);
     }
@@ -219,9 +294,24 @@
     rest: rest,
     goLogin: goLogin,
     logout: logout,
+    // ★通信の失敗でログアウトさせないための判定★
+    //   本当にログインが切れたのは、サーバーが 401/403 と言った時だけ。
+    //   通信できなかった・500だった、では絶対にログアウトさせない。
+    isAuthError: function (res) {
+      try {
+        if (!res) return false; // 通信できなかった = 切れていない
+        return res.status === 401 || res.status === 403;
+      } catch (_) {
+        return false;
+      }
+    },
     // テスト用
     _setStore: function (s) {
       _storeOverride = s;
+    },
+    _resetLock: function () {
+      _inflight = null;
+      _lockFree();
     },
   };
 
