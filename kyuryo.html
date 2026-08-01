@@ -346,6 +346,17 @@
         padding: 2px 4px 2px 8px;
       }
 
+      .manual {
+        background: #fff4e5;
+        color: #a15c00;
+        border: 1px solid #ffd9a0;
+        border-radius: 999px;
+        padding: 1px 8px;
+        font-size: 11px;
+        font-weight: 700;
+        margin-right: 6px;
+      }
+
       .xbtn {
         background: none;
         border: none;
@@ -486,6 +497,8 @@
       <div id="paneHours" style="display: none">
         <div id="days"></div>
         <div class="note">
+          <b>スマホがまだ無くても使えます。</b>「＋ 手で車を足す」で、その日の車の
+          <b>売上と時間を手で打てます</b>（今までの計算表と同じやり方）。<br />
           <b>時間</b>は車が働いた時間です（空欄ならメーターの記録から自動で入ります）。<br />
           <b>乗った人</b
           >を選ぶと、その人の時数はその車の時間になります（実物の計算表と同じ）。<br />
@@ -647,6 +660,7 @@
           labels: [],
           employees: [],
           workHours: [],
+          manualDays: [], // 手で入れた1日分（スマホが無くても給料を出せる）
           salesSettings: null,
           payrollSettings: null,
         };
@@ -830,10 +844,18 @@
                 PERIOD.end +
                 '&limit=2000'
             ),
+            soft(
+              'dk_manual_days?select=*&work_date=gte.' +
+                PERIOD.start +
+                '&work_date=lte.' +
+                PERIOD.end +
+                '&limit=2000'
+            ),
           ]).then(function (res) {
             RAW.shifts = res[0] || [];
             RAW.edits = res[1] || [];
             RAW.workHours = res[2] || [];
+            RAW.manualDays = res[3] || [];
             EDIT_BY_SHIFT = {};
             RAW.edits.forEach(function (e) {
               if (e && e.shift_id) EDIT_BY_SHIFT[e.shift_id] = e;
@@ -981,9 +1003,22 @@
 
           PERIOD.dates.forEach(function (date) {
             var day = (REP && REP.days[date]) || null;
-            var shifts = RAW.shifts.filter(function (s) {
+            var meter = RAW.shifts.filter(function (s) {
               return PayrollDaily.dateOf(s.started_at) === date;
             });
+            // ★手で入れた1日分も同じ並びに出す（メーターがある車は出さない＝二重に見せない）★
+            var meterDevs = {};
+            meter.forEach(function (s) {
+              meterDevs[s.device_id] = true;
+            });
+            var manual = RAW.manualDays.filter(function (m) {
+              return m.work_date === date && !meterDevs[m.device_id];
+            });
+            var shifts = meter.concat(
+              PayrollDaily.manualAsShifts(manual).shifts.map(function (x) {
+                return x;
+              })
+            );
             var wh = RAW.workHours.filter(function (w) {
               return w.work_date === date;
             });
@@ -1004,12 +1039,25 @@
             html += '</div>';
 
             if (!shifts.length) {
-              html += '<div class="empty">この日は記録がありません。</div>';
+              html += '<div class="empty">この日はまだ何もありません。</div>';
             }
 
             shifts.forEach(function (s) {
-              var e = EDIT_BY_SHIFT[s.shift_id] || {};
-              var auto = PayrollDaily.carHoursOf(s, null);
+              var isManual = !!s.isManual;
+              var man = isManual
+                ? RAW.manualDays.filter(function (m) {
+                    return m.work_date === date && m.device_id === s.device_id;
+                  })[0] || {}
+                : null;
+              var e = isManual
+                ? {
+                    toll_yen: man.toll_yen,
+                    bridge_yen: man.bridge_yen,
+                    other_yen: man.other_yen,
+                    hours: man.hours,
+                  }
+                : EDIT_BY_SHIFT[s.shift_id] || {};
+              var auto = isManual ? 0 : PayrollDaily.carHoursOf(s, null);
               var label = CTX && CTX.labels[s.device_id] ? CTX.labels[s.device_id] : s.device_id;
               var own = CTX && CTX.settings.ownerDeviceId === s.device_id;
               var crew = wh.filter(function (w) {
@@ -1021,18 +1069,42 @@
                 esc(label) +
                 (own ? '（自分の車）' : '') +
                 '</span>' +
-                '<span class="kv">売上 ¥' +
-                yen(num(s.fare_total_yen) - (UriageAgg.deductOf(e, RAW.salesSettings) || 0)) +
-                '</span>' +
-                '時間 <input class="hrs" data-sid="' +
-                esc(s.shift_id) +
-                '" data-dev="' +
-                esc(s.device_id) +
-                '" value="' +
-                (e.hours === null || e.hours === undefined ? '' : e.hours) +
-                '" placeholder="' +
-                (auto ? auto : '') +
-                '">';
+                (isManual
+                  ? '<span class="manual">手入力</span>売上 <input class="yen" data-man-date="' +
+                    date +
+                    '" data-man-dev="' +
+                    esc(s.device_id) +
+                    '" data-man-f="sales_yen" value="' +
+                    num(man.sales_yen) +
+                    '">'
+                  : '<span class="kv">売上 ¥' +
+                    yen(num(s.fare_total_yen) - (UriageAgg.deductOf(e, RAW.salesSettings) || 0)) +
+                    '</span>') +
+                '　時間 ' +
+                (isManual
+                  ? '<input class="hrs" data-man-date="' +
+                    date +
+                    '" data-man-dev="' +
+                    esc(s.device_id) +
+                    '" data-man-f="hours" value="' +
+                    num(man.hours) +
+                    '">'
+                  : '<input class="hrs" data-sid="' +
+                    esc(s.shift_id) +
+                    '" data-dev="' +
+                    esc(s.device_id) +
+                    '" value="' +
+                    (e.hours === null || e.hours === undefined ? '' : e.hours) +
+                    '" placeholder="' +
+                    (auto ? auto : '') +
+                    '">') +
+                (isManual
+                  ? '<button class="xbtn" data-man-del-date="' +
+                    date +
+                    '" data-man-del-dev="' +
+                    esc(s.device_id) +
+                    '" title="この行を消す">✕</button>'
+                  : '');
 
               crew.forEach(function (w) {
                 var emp = RAW.employees.filter(function (x) {
@@ -1082,6 +1154,31 @@
               html += '</div>';
             });
 
+            // ★手で1台ぶん足す（スマホが無い日・アプリ無しで走った日）★
+            var used = {};
+            shifts.forEach(function (x) {
+              used[x.device_id] = true;
+            });
+            var addable = ((CTX && CTX.devices) || []).filter(function (d) {
+              return !used[d];
+            });
+            html +=
+              '<div class="carrow"><select data-man-add="' +
+              date +
+              '"><option value="">＋ 手で車を足す</option>' +
+              addable
+                .map(function (d) {
+                  return (
+                    '<option value="' +
+                    esc(d) +
+                    '">' +
+                    esc((CTX.labels && CTX.labels[d]) || d) +
+                    '</option>'
+                  );
+                })
+                .join('') +
+              '<option value="__new__">＋ 新しい車…</option></select></div>';
+
             html += '</div>';
           });
           box.innerHTML = html;
@@ -1124,6 +1221,118 @@
               delWorkHour(b.getAttribute('data-del-date'), b.getAttribute('data-del-emp'));
             };
           });
+          // 手で入れた1日分：直す
+          Array.prototype.forEach.call(document.querySelectorAll('[data-man-f]'), function (i) {
+            i.onchange = function () {
+              saveManual(
+                i.getAttribute('data-man-date'),
+                i.getAttribute('data-man-dev'),
+                i.getAttribute('data-man-f'),
+                i.value
+              );
+            };
+          });
+          // 手で入れた1日分：消す
+          Array.prototype.forEach.call(
+            document.querySelectorAll('[data-man-del-dev]'),
+            function (b) {
+              b.onclick = function () {
+                delManual(b.getAttribute('data-man-del-date'), b.getAttribute('data-man-del-dev'));
+              };
+            }
+          );
+          // 手で車を足す
+          Array.prototype.forEach.call(document.querySelectorAll('[data-man-add]'), function (sel) {
+            sel.onchange = function () {
+              if (!sel.value) return;
+              var date = sel.getAttribute('data-man-add');
+              var dev = sel.value;
+              if (dev === '__new__') {
+                var name = window.prompt('車の名前を入れてください（例: 2号車）');
+                if (!name) {
+                  sel.value = '';
+                  return;
+                }
+                dev = 'manual-' + name;
+                saveLabel(dev, name);
+              }
+              saveManual(date, dev, 'sales_yen', 0);
+            };
+          });
+        }
+
+        // ── 手で入れた1日分 ───────────────────────────
+        function manualRow(date, dev) {
+          return (
+            RAW.manualDays.filter(function (m) {
+              return m.work_date === date && m.device_id === dev;
+            })[0] || null
+          );
+        }
+
+        function saveManual(date, dev, field, value) {
+          if (!COMPANY) return;
+          var cur = manualRow(date, dev) || {};
+          var v = num(value);
+          if (v < 0) v = 0;
+          var body = {
+            company_id: COMPANY.company_id,
+            work_date: date,
+            device_id: dev,
+            sales_yen: num(cur.sales_yen),
+            hours: num(cur.hours),
+            toll_yen: num(cur.toll_yen),
+            bridge_yen: num(cur.bridge_yen),
+            other_yen: num(cur.other_yen),
+            trip_count: num(cur.trip_count),
+            updated_at: new Date().toISOString(),
+          };
+          body[field] = v;
+          upsert('dk_manual_days', 'company_id,work_date,device_id', body)
+            .then(function (r) {
+              if (!r.ok) return showErr('手で入れた分を保存できませんでした。');
+              showErr('');
+              var found = false;
+              RAW.manualDays = RAW.manualDays.map(function (m) {
+                if (m.work_date === date && m.device_id === dev) {
+                  found = true;
+                  return body;
+                }
+                return m;
+              });
+              if (!found) RAW.manualDays.push(body);
+              recalc();
+              renderDays();
+            })
+            .catch(function () {
+              showErr('手で入れた分を保存できませんでした。');
+            });
+        }
+
+        function delManual(date, dev) {
+          if (!COMPANY) return;
+          DKSession.rest(
+            SESS,
+            'dk_manual_days?company_id=eq.' +
+              encodeURIComponent(COMPANY.company_id) +
+              '&work_date=eq.' +
+              encodeURIComponent(date) +
+              '&device_id=eq.' +
+              encodeURIComponent(dev),
+            { method: 'DELETE' }
+          )
+            .then(function (r) {
+              if (!r.ok) return showErr('消せませんでした。');
+              showErr('');
+              RAW.manualDays = RAW.manualDays.filter(function (m) {
+                return !(m.work_date === date && m.device_id === dev);
+              });
+              recalc();
+              renderDays();
+            })
+            .catch(function () {
+              showErr('消せませんでした。');
+            });
         }
 
         function saveCarHours(shiftId, value) {

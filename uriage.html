@@ -322,6 +322,9 @@
     <script src="js/dk-config.js"></script>
     <script src="js/dk-session.js"></script>
     <script src="js/uriage-agg.js"></script>
+    <script src="js/daiko-payroll.js"></script>
+    <script src="js/payroll-period.js"></script>
+    <script src="js/payroll-daily.js"></script>
     <script>
       (function () {
         'use strict';
@@ -361,6 +364,9 @@
 
         function ymLabel(d) {
           return d.getFullYear() + '年' + (d.getMonth() + 1) + '月';
+        }
+        function ymKey(d) {
+          return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
         }
         function monthRange(d) {
           var from = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0);
@@ -445,12 +451,29 @@
             soft('dk_shift_edits?select=*&limit=2000'),
             soft('dk_device_labels?select=*&limit=500'),
             soft('dk_sales_settings?select=*&limit=1'),
+            soft('dk_manual_days?select=*&limit=2000'),
           ])
             .then(function (res) {
               RAW.shifts = Array.isArray(res[0]) ? res[0] : [];
               RAW.edits = Array.isArray(res[1]) ? res[1] : [];
               RAW.labels = Array.isArray(res[2]) ? res[2] : [];
               var st = Array.isArray(res[3]) && res[3].length ? res[3][0] : null;
+              // ★手で入れた1日分も同じ数字で出す（給料・月次集計と食い違わないように）★
+              //   メーターの記録がある車は出さない＝二重計上しない。
+              var manual = (Array.isArray(res[4]) ? res[4] : []).filter(function (m) {
+                if (!m || !m.work_date) return false;
+                var inMonth = String(m.work_date).slice(0, 7) === ymKey(MONTH);
+                if (!inMonth) return false;
+                return !RAW.shifts.some(function (sh) {
+                  return (
+                    sh.device_id === m.device_id &&
+                    String(sh.started_at).slice(0, 10) === m.work_date
+                  );
+                });
+              });
+              var conv = PayrollDaily.manualAsShifts(manual);
+              RAW.shifts = RAW.shifts.concat(conv.shifts);
+              RAW.edits = RAW.edits.concat(conv.edits);
               SETTINGS = UriageAgg.normSettings(st);
               window.__editsById = {};
               RAW.edits.forEach(function (e) {
@@ -584,21 +607,23 @@
                   (s.fare_total_yen || 0).toLocaleString() +
                   '</td>' +
                   '<td colspan="2">' +
-                  '高速 <input class="yen" data-sid="' +
-                  esc(s.shift_id) +
-                  '" data-f="toll_yen" value="' +
-                  (e.toll_yen || 0) +
-                  '"> ' +
-                  '橋 <input class="yen" data-sid="' +
-                  esc(s.shift_id) +
-                  '" data-f="bridge_yen" value="' +
-                  (e.bridge_yen || 0) +
-                  '"> ' +
-                  'その他 <input class="yen" data-sid="' +
-                  esc(s.shift_id) +
-                  '" data-f="other_yen" value="' +
-                  (e.other_yen || 0) +
-                  '">' +
+                  (s.isManual
+                    ? '<span class="kv">手で入れた分（給料の画面で直せます）</span>'
+                    : '高速 <input class="yen" data-sid="' +
+                      esc(s.shift_id) +
+                      '" data-f="toll_yen" value="' +
+                      (e.toll_yen || 0) +
+                      '"> ' +
+                      '橋 <input class="yen" data-sid="' +
+                      esc(s.shift_id) +
+                      '" data-f="bridge_yen" value="' +
+                      (e.bridge_yen || 0) +
+                      '"> ' +
+                      'その他 <input class="yen" data-sid="' +
+                      esc(s.shift_id) +
+                      '" data-f="other_yen" value="' +
+                      (e.other_yen || 0) +
+                      '">') +
                   '</td>' +
                   '</tr>';
               });

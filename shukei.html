@@ -366,6 +366,7 @@
           labels: [],
           employees: [],
           workHours: [],
+          manualDays: [],
           salesSettings: null,
           payrollSettings: null,
         };
@@ -496,6 +497,13 @@
                 '&limit=5000'
             ),
             soft('dk_month_extras?select=*&limit=200'),
+            soft(
+              'dk_manual_days?select=*&work_date=gte.' +
+                YEAR +
+                '-01-01&work_date=lte.' +
+                YEAR +
+                '-12-31&limit=5000'
+            ),
           ]).then(function (res) {
             RAW.shifts = res[0] || [];
             RAW.edits = res[1] || [];
@@ -504,6 +512,7 @@
             RAW.workHours = res[4] || [];
             RAW.payrollSettings = (res[5] && res[5][0]) || null;
             RAW.salesSettings = (res[6] && res[6][0]) || null;
+            RAW.manualDays = res[9] || []; // 手で入れた1日分（スマホが無い日も数える）
 
             // 請求書払いを日ごとにまとめる
             var byDate = {};

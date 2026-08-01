@@ -108,10 +108,16 @@ describe('★元データは書き換えない（メーターが確定した数�
     tables.forEach((t) => expect(t.indexOf('dk_')).toBe(0));
   });
 
-  it('★消すのは「乗った人の割り当て」だけ★（従業員も勤務も消さない）', () => {
+  it('★消せるのは「手で入れた物」だけ★（メーターの記録も従業員も消さない）', () => {
     const dels = writes.filter((w) => w.method === 'DELETE');
-    expect(dels.length).toBe(1);
-    expect(dels[0].target).toContain('dk_work_hours');
+    // 乗った人の割り当て(dk_work_hours) と 手で入れた1日分(dk_manual_days) の2つだけ。
+    // どちらも人が手で入れた物なので、打ち間違いを消せないと使えない。
+    expect(dels.length).toBe(2);
+    const targets = dels.map((d) => d.target).join(' ');
+    expect(targets).toContain('dk_work_hours');
+    expect(targets).toContain('dk_manual_days');
+    // ★メーターが確定した記録は消す道が無い★
+    expect(targets).not.toMatch(/dk_shifts|dk_trips|dk_employees/);
   });
 });
 
@@ -158,5 +164,33 @@ describe('金額の計算は自前で書かない（エンジンだけが正）'
 
   it('引く実費は売上表と同じ関数を通す', () => {
     expect(HTML).toContain('UriageAgg.deductOf');
+  });
+});
+
+describe('★手で1日分を足せる（スマホが無くても給料が出せる）★', () => {
+  it('手で入れた分を読み込んでいる', () => {
+    expect(HTML).toContain('dk_manual_days');
+    expect(HTML).toContain('RAW.manualDays');
+  });
+
+  it('売上と時間を手で打てる／行を消せる／車を足せる', () => {
+    expect(HTML).toContain('data-man-f="sales_yen"');
+    expect(HTML).toContain('data-man-f="hours"');
+    expect(HTML).toContain('data-man-del-dev');
+    expect(HTML).toContain('data-man-add');
+  });
+
+  it('★手で入れた分は見た目で分かる★', () => {
+    expect(HTML).toContain('>手入力<');
+    expect(HTML).toContain('.manual {');
+  });
+
+  it('★メーターがある車は手入力の行を出さない（二重に見せない）★', () => {
+    expect(HTML).toContain('!meterDevs[m.device_id]');
+  });
+
+  it('勤務っぽい形への変換は lib の1箇所だけ（画面で組み立て直さない）', () => {
+    expect(HTML).toContain('PayrollDaily.manualAsShifts');
+    expect(HTML).not.toMatch(/fare_total_yen:\s*num\(/);
   });
 });

@@ -18,6 +18,10 @@
 //   ▼売上から引く実費は ★売上表と同じ関数(UriageAgg.deductOf)★ を通す。
 //     別々に書くと売上表と給料で売上が食い違う。
 //
+//   ▼★手で入れた1日分（dk_manual_days）も入り口にする★ 2026-08-01
+//     司さん「おれが使えるようにしろ」。メーターを1台も繋いでいないと今までは永久に空だった。
+//     同じ日・同じ車にメーターの記録もある時は ★足さずにメーターを正とする★（二重計上を防ぐ）。
+//
 //   ▼絶対に守ること
 //     ・throw しない ・NaN を出さない ・お金を勝手に丸めない（表示側で丸める）
 //     ・辞めた人でも「過去に働いた分」は計算に入れる（他の人の給料が動いてしまうため）
@@ -150,8 +154,16 @@
     try {
       const r = raw && typeof raw === 'object' ? raw : {};
 
+      const seen = {};
       arr(r.labels).forEach(function (l) {
-        if (l && l.device_id) ctx.labels[l.device_id] = l.label || '';
+        if (!l || !l.device_id) return;
+        ctx.labels[l.device_id] = l.label || '';
+        // ★名前を付けた車は「知っている車」として扱う★
+        //   （記録がまだ1件も無くても、手入力で選べるようにするため）
+        if (!seen[l.device_id]) {
+          seen[l.device_id] = true;
+          ctx.devices.push(l.device_id);
+        }
       });
 
       const editById = {};
@@ -159,7 +171,6 @@
         if (e && e.shift_id) editById[e.shift_id] = e;
       });
 
-      const seen = {};
       arr(r.shifts).forEach(function (s) {
         if (!s || typeof s !== 'object') return;
         const dev = s.device_id;
@@ -177,6 +188,41 @@
         c.expense += Uriage ? Uriage.deductOf(e, ctx.salesSettings) : 0; // ★売上表と同じ引き方★
         c.hours += carHoursOf(s, e); // 同じ車で1日2回働いたら足す
 
+        c.fromMeter = true; // ★メーターの記録がある印★（下で手入力を無視する判断に使う）
+
+        if (!seen[dev]) {
+          seen[dev] = true;
+          ctx.devices.push(dev);
+        }
+      });
+
+      // ★手で入れた1日分（スマホが繋がる前でも給料を出せるように）★
+      //   同じ日・同じ車にメーターの記録もある時は ★足し算しない★。メーターの方を正とする。
+      //   （足すと二重計上になり、全員の給料と会社の取り分が狂う）
+      arr(r.manualDays).forEach(function (m) {
+        if (!m || typeof m !== 'object') return;
+        const dev = m.device_id;
+        const date = m.work_date;
+        if (!dev || typeof dev !== 'string' || !date || typeof date !== 'string') return;
+
+        if (!ctx.byDate[date]) ctx.byDate[date] = {};
+        const exist = ctx.byDate[date][dev];
+        if (exist && exist.fromMeter) {
+          exist.manualIgnored = true; // 画面で「メーターを使っています」と出せるように
+          return; // ★二重計上しない★
+        }
+        ctx.byDate[date][dev] = {
+          device_id: dev,
+          sales: n(m.sales_yen),
+          expense: Uriage
+            ? Uriage.deductOf(
+                { toll_yen: m.toll_yen, bridge_yen: m.bridge_yen, other_yen: m.other_yen },
+                ctx.salesSettings
+              )
+            : 0,
+          hours: n(m.hours),
+          fromManual: true,
+        };
         if (!seen[dev]) {
           seen[dev] = true;
           ctx.devices.push(dev);
@@ -242,7 +288,12 @@
       Object.keys(cars).forEach(function (dev) {
         const c = cars[dev];
         if (dev === own) {
-          out.owner = { sales: c.sales, expense: c.expense, hours: c.hours };
+          out.owner = {
+            sales: c.sales,
+            expense: c.expense,
+            hours: c.hours,
+            fromManual: !!c.fromManual,
+          };
         } else {
           out.cars.push({
             id: dev,
@@ -251,6 +302,7 @@
             sales: c.sales,
             expense: c.expense,
             hours: c.hours,
+            fromManual: !!c.fromManual, // 手で入れた分か（画面で見分けが付くように）
           });
         }
       });
@@ -417,8 +469,43 @@
     return out;
   }
 
+  // 手で入れた1日分を「勤務っぽい形」に直す（売上表がそのまま使えるように）
+  //   ★売上表・給料・月次集計で数字が食い違わないよう、変換はここ1箇所だけ★
+  function manualAsShifts(manualDays) {
+    const shifts = [];
+    const edits = [];
+    try {
+      arr(manualDays).forEach(function (m) {
+        if (!m || !m.work_date || !m.device_id) return;
+        const id = 'manual:' + m.work_date + ':' + m.device_id;
+        shifts.push({
+          shift_id: id,
+          device_id: m.device_id,
+          started_at: m.work_date + 'T20:00:00+09:00',
+          fare_total_yen: n(m.sales_yen),
+          trip_count: n(m.trip_count),
+          total_distance_m: 0,
+          actual_total_m: 0,
+          isManual: true,
+        });
+        edits.push({
+          shift_id: id,
+          toll_yen: n(m.toll_yen),
+          bridge_yen: n(m.bridge_yen),
+          other_yen: n(m.other_yen),
+          hours: n(m.hours),
+          isManual: true,
+        });
+      });
+    } catch (_) {
+      /* ignore */
+    }
+    return { shifts: shifts, edits: edits };
+  }
+
   const api = {
     JST_OFFSET_MIN: JST_OFFSET_MIN,
+    manualAsShifts: manualAsShifts,
     dateOf: dateOf,
     carHoursOf: carHoursOf,
     normSettings: normSettings,

@@ -277,7 +277,26 @@ create table if not exists dk_month_extras (
   primary key (company_id, ym)
 );
 
--- 6-8) RLS: 会社は自分の分だけ 読める / 足せる / 直せる
+-- 6-8) 手で入れた1日分（スマホが無くても給料を出せるように）
+--     ★同じ日・同じ車にメーターの記録がある時は、ロジック側で足し算せずメーターを正とする★
+create table if not exists dk_manual_days (
+  company_id  uuid not null references dk_companies(company_id) on delete cascade,
+  work_date   date not null,
+  device_id   text not null,
+  sales_yen   double precision not null default 0,
+  hours       double precision not null default 0,
+  toll_yen    double precision not null default 0,
+  bridge_yen  double precision not null default 0,
+  other_yen   double precision not null default 0,
+  trip_count  int not null default 0,
+  note        text default '',
+  updated_at  timestamptz default now(),
+  primary key (company_id, work_date, device_id)
+);
+create index if not exists dk_manual_days_date_idx on dk_manual_days (company_id, work_date);
+
+-- 6-9) RLS: 会社は自分の分だけ 読める / 足せる / 直せる
+alter table dk_manual_days      enable row level security;
 alter table dk_month_extras     enable row level security;
 alter table dk_shift_edits      enable row level security;
 alter table dk_device_labels    enable row level security;
@@ -293,7 +312,8 @@ declare
 begin
   foreach t in array array[
     'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
-    'dk_employees', 'dk_work_hours', 'dk_payroll_settings', 'dk_month_extras'
+    'dk_employees', 'dk_work_hours', 'dk_payroll_settings', 'dk_month_extras',
+    'dk_manual_days'
   ] loop
     foreach c in array array['select', 'insert', 'update'] loop
       execute format('drop policy if exists %I on %I', t || '_owner_' || left(c, 3), t);
@@ -310,6 +330,10 @@ begin
       end if;
     end loop;
   end loop;
+  -- 手で入れた物は消せる（打ち間違いを取り消せるように）
+  execute 'drop policy if exists dk_manual_days_owner_del on dk_manual_days';
+  execute 'create policy dk_manual_days_owner_del on dk_manual_days for delete using '
+       || '(company_id in (select company_id from dk_companies where owner_id = auth.uid()))';
   -- 時数だけは消せる（乗る人を間違えた日を取り消せるように）
   execute 'drop policy if exists dk_work_hours_owner_del on dk_work_hours';
   execute 'create policy dk_work_hours_owner_del on dk_work_hours for delete using '
@@ -318,7 +342,7 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 7) 確認: ここまでが正しく入ったかを目で見る
---    期待: 11個の表が rls_enabled = true で並ぶ。
+--    期待: 12個の表が rls_enabled = true で並ぶ。
 -- ---------------------------------------------------------------------------
 select tablename, rowsecurity as rls_enabled
   from pg_tables
@@ -326,7 +350,7 @@ select tablename, rowsecurity as rls_enabled
    and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips',
                      'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
                      'dk_employees', 'dk_work_hours', 'dk_payroll_settings',
-                     'dk_month_extras')
+                     'dk_month_extras', 'dk_manual_days')
  order by tablename;
 
 select tablename, policyname, cmd
@@ -335,5 +359,5 @@ select tablename, policyname, cmd
    and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips',
                      'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
                      'dk_employees', 'dk_work_hours', 'dk_payroll_settings',
-                     'dk_month_extras')
+                     'dk_month_extras', 'dk_manual_days')
  order by tablename, policyname;

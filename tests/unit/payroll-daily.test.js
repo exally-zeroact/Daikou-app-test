@@ -477,3 +477,140 @@ describe('★壊れたデータでも画面を殺さない★', () => {
     expect(r.ownerShare).toBe(18390);
   });
 });
+
+// ---- 手で入れた1日分（メーター無しでも給料が出せる）--------------------------
+describe('★手で入れた1日分（司さん「おれが使えるようにしろ」）★', () => {
+  const base = {
+    labels: LABELS,
+    employees: EMP,
+    payrollSettings: { owner_device_id: 'devT' },
+  };
+
+  it('★スマホが1台も繋がっていなくても給料が出る★', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [], // メーターの記録ゼロ
+        manualDays: [
+          { work_date: '2026-01-10', device_id: 'dev2', sales_yen: 25700, hours: 9 },
+          { work_date: '2026-01-10', device_id: 'dev3', sales_yen: 24100, hours: 8.25 },
+          { work_date: '2026-01-10', device_id: 'dev4', sales_yen: 21500, hours: 8.75 },
+          { work_date: '2026-01-10', device_id: 'devT', sales_yen: 6900, hours: 5.5 },
+        ],
+        workHours: CTX_0110.workHours,
+      })
+    );
+    const r = D.computeDay('2026-01-10', ctx);
+    // 実物の1/10 とぴったり同じになる（メーター経由でも手入力でも答えは同じ）
+    expect(r.poolSales).toBe(71300);
+    expect(r.poolHours).toBe(26);
+    expect(r.staffTotal).toBe(55900);
+    expect(r.ownerShare).toBe(18390);
+  });
+
+  it('手で入れた実費も売上から引かれる（売上表と同じ引き方）', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [],
+        manualDays: [
+          { work_date: '2026-01-07', device_id: 'dev2', sales_yen: 23900, hours: 8 },
+          {
+            work_date: '2026-01-07',
+            device_id: 'dev3',
+            sales_yen: 26300,
+            hours: 7.75,
+            toll_yen: 1520,
+          },
+        ],
+        workHours: CTX_0107.workHours,
+      })
+    );
+    const r = D.computeDay('2026-01-07', ctx);
+    expect(r.poolSales).toBe(48680); // 経費1,520を引いた後
+  });
+
+  it('★同じ日・同じ車にメーターの記録もある時は足し算しない（二重計上しない）★', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [shift('s2', 'dev2', '2026-01-10', 25700)],
+        edits: [{ shift_id: 's2', hours: 9 }],
+        manualDays: [
+          // うっかり同じ日の同じ車を手でも入れてしまった
+          { work_date: '2026-01-10', device_id: 'dev2', sales_yen: 25700, hours: 9 },
+        ],
+        workHours: [{ work_date: '2026-01-10', employee_id: 'e1', device_id: 'dev2' }],
+      })
+    );
+    const r = D.computeDay('2026-01-10', ctx);
+    expect(r.poolSales).toBe(25700); // ★51,400 になっていない★
+    expect(r.poolHours).toBe(9); // ★18 になっていない★
+  });
+
+  it('メーターがある日は そちらを正とする（手入力の額に引っぱられない）', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [shift('s2', 'dev2', '2026-01-10', 25700)],
+        edits: [{ shift_id: 's2', hours: 9 }],
+        manualDays: [{ work_date: '2026-01-10', device_id: 'dev2', sales_yen: 999999, hours: 99 }],
+        workHours: [{ work_date: '2026-01-10', employee_id: 'e1', device_id: 'dev2' }],
+      })
+    );
+    const r = D.computeDay('2026-01-10', ctx);
+    expect(r.poolSales).toBe(25700);
+    expect(r.poolHours).toBe(9);
+  });
+
+  it('メーターと手入力がまざっていても正しく足される（別の車なら足す）', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [shift('s2', 'dev2', '2026-01-10', 25700)],
+        edits: [{ shift_id: 's2', hours: 9 }],
+        manualDays: [{ work_date: '2026-01-10', device_id: 'dev3', sales_yen: 24100, hours: 8.25 }],
+        workHours: [
+          { work_date: '2026-01-10', employee_id: 'e1', device_id: 'dev2' },
+          { work_date: '2026-01-10', employee_id: 'e2', device_id: 'dev3' },
+        ],
+      })
+    );
+    const r = D.computeDay('2026-01-10', ctx);
+    expect(r.poolSales).toBe(49800);
+    expect(r.poolHours).toBe(17.25);
+  });
+
+  it('手で入れた車は「手入力」と分かる（画面で見分けが付く）', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [shift('s2', 'dev2', '2026-01-10', 25700)],
+        edits: [{ shift_id: 's2', hours: 9 }],
+        manualDays: [{ work_date: '2026-01-10', device_id: 'dev3', sales_yen: 24100, hours: 8.25 }],
+        workHours: [],
+      })
+    );
+    const inp = D.dayInput('2026-01-10', ctx);
+    const byDev = {};
+    inp.cars.forEach((c) => (byDev[c.device_id] = c));
+    expect(byDev['dev2'].fromManual).toBe(false); // メーター
+    expect(byDev['dev3'].fromManual).toBe(true); // 手入力
+  });
+
+  it('つかさ車も手で入れられる', () => {
+    const ctx = D.buildCtx(
+      Object.assign({}, base, {
+        shifts: [],
+        manualDays: [{ work_date: '2026-01-29', device_id: 'devT', sales_yen: 12800, hours: 6.25 }],
+        workHours: [],
+      })
+    );
+    const r = D.computeDay('2026-01-29', ctx);
+    expect(r.owner.sales).toBe(12800);
+    expect(r.ownerShare).toBeCloseTo(12160, 6); // 実物の1/29と同じ
+  });
+
+  it('壊れた手入力でも落ちない', () => {
+    expect(() => D.buildCtx({ manualDays: 'これは配列じゃない' })).not.toThrow();
+    expect(() => D.buildCtx({ manualDays: [null, {}, { work_date: 'x' }] })).not.toThrow();
+    const ctx = D.buildCtx({ manualDays: [{ work_date: '2026-01-10', device_id: 'dev2' }] });
+    const r = D.computeDay('2026-01-10', ctx);
+    expect(isFinite(r.poolSales)).toBe(true);
+    expect(isFinite(r.hourly)).toBe(true);
+  });
+});
