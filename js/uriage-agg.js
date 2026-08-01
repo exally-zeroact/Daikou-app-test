@@ -65,6 +65,22 @@
     }
   }
 
+  // ★売上から引く額（1件ぶん）★
+  //   売上表も給料も★必ずこれを通す★。別々に書くと片方だけ直して金額が食い違う。
+  function deductOf(edit, settings) {
+    try {
+      const st = normSettings(settings);
+      const e = edit || {};
+      return (
+        (st.deduct_toll ? n(e.toll_yen) : 0) +
+        (st.deduct_bridge ? n(e.bridge_yen) : 0) +
+        (st.deduct_other ? n(e.other_yen) : 0)
+      );
+    } catch (_) {
+      return 0;
+    }
+  }
+
   // 車ごとにまとめる
   //   shifts   … dk_shifts の行
   //   edits    … dk_shift_edits の行（手入力: 高速代・橋代・その他）
@@ -127,11 +143,11 @@
         // 空車 = 総走行 − 実車（マイナスにはしない）
         r.empty_distance_m = Math.max(0, r.total_distance_m - r.actual_total_m);
         r.expense_yen = r.toll_yen + r.bridge_yen + r.other_yen; // 手入力した実費ぜんぶ
-        // ★売上から引く分＝会社が「引く」と選んだ項目だけ★
-        r.deduct_yen =
-          (st.deduct_toll ? r.toll_yen : 0) +
-          (st.deduct_bridge ? r.bridge_yen : 0) +
-          (st.deduct_other ? r.other_yen : 0);
+        // ★売上から引く分＝会社が「引く」と選んだ項目だけ★（給料と同じ関数を通す）
+        r.deduct_yen = deductOf(
+          { toll_yen: r.toll_yen, bridge_yen: r.bridge_yen, other_yen: r.other_yen },
+          st
+        );
         r.net_fare_yen = r.fare_total_yen - r.deduct_yen; // ★これが売上★
         return r;
       });
@@ -175,6 +191,7 @@
     byDevice: byDevice,
     total: total,
     normSettings: normSettings,
+    deductOf: deductOf,
     DEFAULT_DEDUCT: DEFAULT_DEDUCT,
   };
 

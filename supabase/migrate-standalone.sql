@@ -184,17 +184,143 @@ create policy dk_trips_owner_sel on dk_trips
   );
 
 -- ---------------------------------------------------------------------------
--- 6) 確認: ここまでが正しく入ったかを目で見る
---    期待: 4つの表が rls_enabled = true で並び、ポリシーが5本(select 4 / delete 1)出る。
+-- 6) 事務所の画面が使う表（売上表 / 給料）
+--    ★repo規約: dk_ 表を足したら必ず同じコミットでここにも追記する★
+--    共有本番へは supabase/apply-shared-*.sql（足すだけ版）を使うこと。
+--    ここは「新しい空のプロジェクトに引っ越す」ための1枚。
+-- ---------------------------------------------------------------------------
+
+-- 6-1) 勤務ごとの手入力（高速代・橋代・その他・車の時数）
+create table if not exists dk_shift_edits (
+  shift_id    uuid primary key references dk_shifts(shift_id) on delete cascade,
+  company_id  uuid not null references dk_companies(company_id) on delete cascade,
+  toll_yen    int default 0,
+  bridge_yen  int default 0,
+  other_yen   int default 0,
+  other_label text default '',
+  note        text default '',
+  hours       double precision,   -- 車の時数（NULL=未入力→勤務の実時間から自動）
+  updated_at  timestamptz default now()
+);
+alter table dk_shift_edits add column if not exists hours double precision;
+create index if not exists dk_shift_edits_company_idx on dk_shift_edits (company_id);
+
+-- 6-2) 車の呼び名
+create table if not exists dk_device_labels (
+  company_id uuid not null references dk_companies(company_id) on delete cascade,
+  device_id  text not null,
+  label      text default '',
+  updated_at timestamptz default now(),
+  primary key (company_id, device_id)
+);
+
+-- 6-3) 売上から何を引くか
+create table if not exists dk_sales_settings (
+  company_id    uuid primary key references dk_companies(company_id) on delete cascade,
+  deduct_toll   boolean not null default true,
+  deduct_bridge boolean not null default true,
+  deduct_other  boolean not null default false,
+  other_label   text default 'その他',
+  updated_at    timestamptz default now()
+);
+
+-- 6-4) 従業員
+create table if not exists dk_employees (
+  employee_id uuid primary key default gen_random_uuid(),
+  company_id  uuid not null references dk_companies(company_id) on delete cascade,
+  name        text not null,
+  role        text not null default '2種',
+  active      boolean not null default true,
+  sort_order  int default 0,
+  note        text default '',
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now()
+);
+create index if not exists dk_employees_company_idx
+  on dk_employees (company_id, active, sort_order, name);
+
+-- 6-5) 誰がどの車に乗ったか（日ごと）
+create table if not exists dk_work_hours (
+  company_id  uuid not null references dk_companies(company_id) on delete cascade,
+  work_date   date not null,
+  employee_id uuid not null references dk_employees(employee_id) on delete cascade,
+  device_id   text default '',
+  hours       double precision not null default 0,  -- 0=乗った車の時数を使う
+  updated_at  timestamptz default now(),
+  primary key (company_id, work_date, employee_id)
+);
+create index if not exists dk_work_hours_date_idx on dk_work_hours (company_id, work_date);
+
+-- 6-6) 給料の決め方
+create table if not exists dk_payroll_settings (
+  company_id                 uuid primary key references dk_companies(company_id) on delete cascade,
+  pool_mode                  text not null default 'others_total',
+  deduct_reserve_before_rate boolean not null default true,
+  reserve_pool_rate          double precision not null default 0.05,
+  reserve_owner_rate         double precision not null default 0.05,
+  period_start_day           int not null default 21,
+  period_end_mode            text not null default 'month_end',
+  period_days                int not null default 11,
+  owner_device_id            text default '',
+  roles                      jsonb not null default
+    '{"2種":{"rate":0.35,"floor":1150},"1種":{"rate":0.30,"floor":1000}}'::jsonb,
+  updated_at                 timestamptz default now()
+);
+
+-- 6-7) RLS: 会社は自分の分だけ 読める / 足せる / 直せる
+alter table dk_shift_edits      enable row level security;
+alter table dk_device_labels    enable row level security;
+alter table dk_sales_settings   enable row level security;
+alter table dk_employees        enable row level security;
+alter table dk_work_hours       enable row level security;
+alter table dk_payroll_settings enable row level security;
+
+do $$
+declare
+  t text;
+  c text;
+begin
+  foreach t in array array[
+    'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
+    'dk_employees', 'dk_work_hours', 'dk_payroll_settings'
+  ] loop
+    foreach c in array array['select', 'insert', 'update'] loop
+      execute format('drop policy if exists %I on %I', t || '_owner_' || left(c, 3), t);
+      if c = 'insert' then
+        execute format(
+          'create policy %I on %I for insert with check '
+          '(company_id in (select company_id from dk_companies where owner_id = auth.uid()))',
+          t || '_owner_ins', t);
+      else
+        execute format(
+          'create policy %I on %I for %s using '
+          '(company_id in (select company_id from dk_companies where owner_id = auth.uid()))',
+          t || '_owner_' || left(c, 3), t, c);
+      end if;
+    end loop;
+  end loop;
+  -- 時数だけは消せる（乗る人を間違えた日を取り消せるように）
+  execute 'drop policy if exists dk_work_hours_owner_del on dk_work_hours';
+  execute 'create policy dk_work_hours_owner_del on dk_work_hours for delete using '
+       || '(company_id in (select company_id from dk_companies where owner_id = auth.uid()))';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 7) 確認: ここまでが正しく入ったかを目で見る
+--    期待: 10個の表が rls_enabled = true で並ぶ。
 -- ---------------------------------------------------------------------------
 select tablename, rowsecurity as rls_enabled
   from pg_tables
  where schemaname = 'public'
-   and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips')
+   and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips',
+                     'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
+                     'dk_employees', 'dk_work_hours', 'dk_payroll_settings')
  order by tablename;
 
 select tablename, policyname, cmd
   from pg_policies
  where schemaname = 'public'
-   and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips')
+   and tablename in ('dk_companies', 'dk_company_devices', 'dk_shifts', 'dk_trips',
+                     'dk_shift_edits', 'dk_device_labels', 'dk_sales_settings',
+                     'dk_employees', 'dk_work_hours', 'dk_payroll_settings')
  order by tablename, policyname;

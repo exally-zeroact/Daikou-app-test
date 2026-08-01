@@ -8,8 +8,24 @@
 --
 --   ▼司さんの実物（代行計算表2026.xlsb）を再現するために要る物
 --     売上・経費は既に dk_shifts / dk_shift_edits にある（売上表で作った物をそのまま使う）。
---     足りないのは「誰が」「何時間」働いたか と、係数などの設定だけ。
+--     足りないのは「誰が」「どの車に乗ったか」と、車の時数、係数などの設定だけ。
+--
+--   ▼★実物の『計算』シートを読んで分かったこと（設計を1つ直した）★
+--     人ごとの時数は入力ではなく **=[@時数2] のような式** だった。
+--     ＝★人の時数は「その日その人が乗った車の時数」★（日によって乗る車が変わる）。
+--     さらに 時数合計 = ★車の時数の合計★（人で足すと1台2人ぶん倍になり給料が狂う）。
+--     → 車の時数を入れる場所が要る。1台の1日 ＝ 1件の勤務(dk_shifts)なので
+--       dk_shift_edits（勤務ごとの手入力）に hours を足すのが一番素直。
 -- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 0) 車の時数（勤務ごと・手入力）★足すだけ（既存の列・データには触らない）★
+--    NULL = 未入力 → 画面はメーターが記録した実働時間から自動で出す（0.25刻み）
+-- ---------------------------------------------------------------------------
+alter table dk_shift_edits add column if not exists hours double precision;
+
+comment on column dk_shift_edits.hours is
+  '車の時数（手入力）。NULL なら勤務の実時間から自動。給料の時数合計はこの値を足した物。';
 
 -- ---------------------------------------------------------------------------
 -- 1) 従業員マスタ
@@ -58,7 +74,9 @@ create table if not exists dk_payroll_settings (
   reserve_pool_rate          double precision not null default 0.05,
   reserve_owner_rate         double precision not null default 0.05,
   period_start_day           int not null default 21,              -- 給与期間の開始日（司さん=21日）
-  period_days                int not null default 11,              -- 1枚に出す日数（司さん=11日）
+  -- ★実物の給料1〜8を全部読んだ結果: 21日〜その月の末日（1月11日/2月8日/4月10日と長さが変わる）★
+  period_end_mode            text not null default 'month_end',    -- month_end | days
+  period_days                int not null default 11,              -- period_end_mode='days' のときの日数
   owner_device_id            text default '',                      -- 自分の車（母数から外す）
   roles                      jsonb not null default
     '{"2種":{"rate":0.35,"floor":1150},"1種":{"rate":0.30,"floor":1000}}'::jsonb,
@@ -101,3 +119,8 @@ select tablename, rowsecurity as rls_enabled
  where schemaname = 'public'
    and tablename in ('dk_employees', 'dk_work_hours', 'dk_payroll_settings')
  order by tablename;
+
+-- 車の時数の列が足せたか
+select column_name, data_type
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'dk_shift_edits' and column_name = 'hours';

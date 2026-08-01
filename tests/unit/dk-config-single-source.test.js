@@ -21,7 +21,16 @@ const CONFIG_REL = 'js/dk-config.js';
 const CONFIG_PATH = path.join(ROOT, CONFIG_REL);
 
 // 走査対象: ルートの画面HTML + js/*.js (ベンダ minified と dk-config 自身は除く)
-const HTML_FILES = ['index.html', 'login.html', 'dashboard.html', 'manage.html', 'company.html'];
+const HTML_FILES = [
+  'index.html',
+  'login.html',
+  'dashboard.html',
+  'manage.html',
+  'company.html',
+  // 事務所の画面(売上表 / 給料)も同じ土台に乗っているので、ここも見張る
+  'uriage.html',
+  'kyuryo.html',
+];
 
 // DKConfig を参照していなければならない消費側(= 接続先を使う画面/モジュール)
 const CONSUMERS = [
@@ -29,6 +38,8 @@ const CONSUMERS = [
   'login.html',
   'dashboard.html',
   'manage.html',
+  'uriage.html',
+  'kyuryo.html',
   'js/license.js',
   'js/license-activate.js',
 ];
@@ -87,11 +98,15 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('接続先を使う画面/モジュールは必ず DKConfig を参照している', () => {
+  it('接続先を使う画面/モジュールは必ず DKConfig から接続先をもらっている', () => {
+    // 直に DKConfig を見るか、DKConfig を内側で使う DKSession 越しに使うか、のどちらか。
+    // どちらでも「接続先の出どころは dk-config.js 1箇所」という約束は守られる。
     const missing = [];
     for (const rel of CONSUMERS) {
       const src = read(rel);
-      if (!/DKConfig/.test(src)) missing.push(rel);
+      const direct = /DKConfig/.test(src);
+      const viaSession = /js\/dk-config\.js/.test(src) && /DKSession\./.test(src);
+      if (!direct && !viaSession) missing.push(rel);
     }
     expect(missing).toEqual([]);
   });
