@@ -117,6 +117,35 @@ describe('★メーターから事務所へ戻れる（司さん「どのURLも�
     // 会社URLはドライバーのスマホを使えるようにする物。ここを変えると有効化が壊れる。
     expect(IDX).not.toMatch(/\?c=[^'"]*['"]\s*\)?\s*;?\s*location\.replace/);
     const DASH2 = read('dashboard.html');
-    expect(DASH2).toContain("'/?c=' + COMPANY.url_token");
+    expect(DASH2).toContain("'/?c=' +");
+    expect(DASH2).toContain('COMPANY.url_token');
+  });
+});
+
+describe('★事務所を別の住所で開いても、ドライバーに配る会社URLは壊れない★', () => {
+  // 司さん「管理画面用のURLつくれや」→ 事務所は daikome-jimusho.vercel.app からも開ける。
+  // その時 location.origin を使うと、ドライバーが「メーターの無い住所」へ飛ばされて有効化できない。
+  it('会社URLは DKConfig.APP_BASE から組み立てる（location.origin ではない）', () => {
+    const i = DASH.indexOf('会社URL(ドライバーに配る物)');
+    expect(i).toBeGreaterThan(-1);
+    const around = DASH.slice(i, i + 400);
+    expect(around).toContain('APP_BASE');
+    expect(around).not.toMatch(/^\s*currentUrl = location\.origin/m);
+  });
+
+  it('APP_BASE はメーターの住所を指している', () => {
+    const cfg = read('js/dk-config.js');
+    expect(cfg).toMatch(/APP_BASE\s*=\s*'https:\/\/daikou-app-test\.vercel\.app'/);
+  });
+
+  it('★事務所の入れ物に sw.js / manifest.json / index.html を混ぜない★', async () => {
+    const m = await import('../../scripts/office-bundle.mjs');
+    m.OFFICE_FORBIDDEN.forEach((f) => expect(m.OFFICE_FILES).not.toContain(f));
+    expect(m.OFFICE_FORBIDDEN).toContain('sw.js');
+  });
+
+  it('事務所の入れ物に挙げたファイルは全部ある', async () => {
+    const m = await import('../../scripts/office-bundle.mjs');
+    m.OFFICE_FILES.forEach((f) => expect(fs.existsSync(path.join(ROOT, f))).toBe(true));
   });
 });

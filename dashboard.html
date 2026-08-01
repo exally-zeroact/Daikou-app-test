@@ -685,7 +685,14 @@
           openTab(loadTab());
           $('coName').textContent = COMPANY.name || '(会社名なし)';
           show('statusOff', COMPANY.status === 'off');
-          currentUrl = location.origin + '/?c=' + COMPANY.url_token;
+          // ★会社URL(ドライバーに配る物)は必ず「メーターの住所」を使う★
+          //   事務所は別の住所(daikome-jimusho)からも開ける。そこで location.origin を使うと
+          //   ドライバーが「メーターの無い住所」へ飛ばされて有効化できなくなる。
+          //   DKConfig.APP_BASE が唯一の正。
+          currentUrl =
+            ((window.DKConfig && window.DKConfig.APP_BASE) || location.origin) +
+            '/?c=' +
+            COMPANY.url_token;
           $('coUrl').textContent = currentUrl;
 
           loadDevices().then(function (devs) {
