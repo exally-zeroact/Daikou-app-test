@@ -74,6 +74,36 @@ node scripts/check-hosts.mjs --side prod
 **事務所 → メーター → 事務所 → …** の無限ループになる。
 `/office/` は送り返されない入口。事務所はそちらを取りに行く。
 
+## `vercel.json` に説明を書けない
+
+**`_comment` を足すとデプロイが丸ごと失敗する。**
+
+```
+The `vercel.json` schema validation failed with the following message:
+should NOT have additional property `_comment`
+```
+
+（2026-08-02 に実際に踏んだ。本番配信は直前の正常版のままだったので実害は無かったが、
+変更が乗らないまま「push したから直った」と思い込む一歩手前だった。）
+
+なので説明はこの README に書く。`vercel.json` は素の設定だけ。
+知らないキーが混ざっていないかは `tests/unit/dk-config-app-base-host.test.js` が見る。
+
+## 栓の順番
+
+`rewrites` の最初の2本は「事務所に出してはいけない物」を止める栓。
+
+| 塞ぐ物         | 塞がないとどうなる                             |
+| -------------- | ---------------------------------------------- |
+| `/sw.js`       | 事務所のURLにサービスワーカーが入れるようになる |
+| `/index.html`  | 事務所のURLでメーター本体が出る                 |
+
+どちらも司さんが見た「どのURLもメーターに化ける」の元。
+実在しない `/_not-here` へ向けて 404 にしている。
+
+**順番が命。** 一番下の総当たり `/:path*` より上に無いと効かない。
+（この穴は `scripts/check-hosts.mjs` が実物を叩いて見つけた。設定を書いた時点では気づけていない）
+
 ## 変える手順
 
 1. この `vercel.json` を直す

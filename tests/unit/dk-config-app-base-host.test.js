@@ -151,9 +151,19 @@ describe('★vercel.json の行き先も同じ側であること★', () => {
     });
   });
 
+  // 事務所の rewrite は2種類ある:
+  //   ・メーターへ見に行く物 (destination が https://…)
+  //   ・★出してはいけない物を404にする栓★ (destination が / で始まる＝事務所内の実在しない所)
+  function officeRewrites() {
+    return readJson('office-host', 'vercel.json').rewrites;
+  }
+  const toMeter = (r) => /^https:/.test(r.destination);
+
   it('★事務所→メーターの proxy 先が このrepoのメーターである★', () => {
     const want = EXPECTED_APP_BASE[repoName()];
-    readJson('office-host', 'vercel.json').rewrites.forEach((r) => {
+    const seen = officeRewrites().filter(toMeter);
+    expect(seen.length, 'メーターを見に行く行が1つも無い').toBeGreaterThan(0);
+    seen.forEach((r) => {
       expect(r.destination.startsWith(want), `${r.source} → ${r.destination}`).toBe(true);
     });
   });
@@ -161,12 +171,30 @@ describe('★vercel.json の行き先も同じ側であること★', () => {
   it('★無限ループにならない: 事務所は308される道を通らない★', () => {
     // 事務所が /dashboard.html を素直に取りに行くと 308 で自分へ返され、永久に回る。
     const redirected = readJson('vercel.json').redirects.map((r) => r.source);
-    readJson('office-host', 'vercel.json').rewrites.forEach((r) => {
-      const p = new URL(r.destination).pathname;
-      expect(
-        redirected.includes(p),
-        `事務所が ${p} を取りに行っている＝308で送り返されて無限ループ`
-      ).toBe(false);
+    officeRewrites()
+      .filter(toMeter)
+      .forEach((r) => {
+        const p = new URL(r.destination).pathname;
+        expect(
+          redirected.includes(p),
+          `事務所が ${p} を取りに行っている＝308で送り返されて無限ループ`
+        ).toBe(false);
+      });
+  });
+
+  // ★この穴は scripts/check-hosts.mjs が実物を叩いて見つけた (2026-08-02)★
+  //   総当たり /:path* がメーターを丸ごと見せるので、栓をしないと
+  //   事務所のURLで sw.js が取れる(＝事務所にサービスワーカーが入る)し、
+  //   /index.html でメーター本体が出る。どちらも「どのURLもメーターに化ける」の元。
+  it('★事務所で sw.js と index.html が取れないように栓がしてある★', () => {
+    const rw = officeRewrites();
+    ['/sw.js', '/index.html'].forEach((p) => {
+      const i = rw.findIndex((r) => r.source === p);
+      expect(i, `${p} の栓が無い`).toBeGreaterThan(-1);
+      expect(/^https:/.test(rw[i].destination), `${p} をメーターへ通している`).toBe(false);
+      // ★順番が命★ 総当たりより上に無いと効かない
+      const catchAll = rw.findIndex((r) => /:path\*/.test(r.source));
+      expect(i, `${p} の栓が総当たりより下にある＝効かない`).toBeLessThan(catchAll);
     });
   });
 
@@ -175,9 +203,50 @@ describe('★vercel.json の行き先も同じ側であること★', () => {
     expect(rw.some((r) => r.source.startsWith('/office/'))).toBe(true);
   });
 
-  it('★事務所の設定に sw.js を置いていない★', () => {
-    const src = fs.readFileSync(path.join(ROOT, 'office-host', 'vercel.json'), 'utf8');
-    expect(src).not.toMatch(/"source"\s*:\s*"\/sw\.js"/);
+  // ★2026-08-02 実際に踏んだ★
+  //   説明のつもりで vercel.json に "_comment" を足したら、Vercel が
+  //     「should NOT have additional property `_comment`」でデプロイを丸ごと失敗させた。
+  //   本番配信は直前の正常版のままだったので実害は無かったが、
+  //   ★変更が乗っていないのに「push したから直った」と思い込む★一歩手前だった。
+  //   説明は office-host/README.md に書く。ここは知らないキーが混ざっていないかを見る。
+  it('★vercel.json に Vercel が知らないキーを足さない（デプロイが丸ごと失敗する）★', () => {
+    const ALLOWED = new Set([
+      'rewrites',
+      'redirects',
+      'headers',
+      'cleanUrls',
+      'trailingSlash',
+      'functions',
+      'crons',
+      'regions',
+      'framework',
+      'buildCommand',
+      'outputDirectory',
+      'installCommand',
+      'devCommand',
+      'ignoreCommand',
+      'public',
+      'images',
+      'git',
+    ]);
+    ['vercel.json', 'office-host/vercel.json'].forEach((rel) => {
+      const obj = JSON.parse(fs.readFileSync(path.join(ROOT, ...rel.split('/')), 'utf8'));
+      Object.keys(obj).forEach((k) => {
+        expect(ALLOWED.has(k), `${rel} の "${k}" は Vercel が知らないキー`).toBe(true);
+      });
+    });
+  });
+
+  // ★期待を1回直した (2026-08-02)★
+  //   旧: 「office-host/vercel.json に /sw.js の行が1つも無いこと」
+  //   新: 「/sw.js の行は在ってよい。ただし★栓としてだけ★（メーターへ通してはいけない）」
+  //   理由: 総当たり /:path* があるので、行が無いと逆に sw.js が素通りする。
+  //         『書かない』ではなく『塞ぐ』が正しい。実物を叩いて分かった。
+  it('★事務所で sw.js がメーターへ素通りしない★', () => {
+    const rw = readJson('office-host', 'vercel.json').rewrites;
+    const sw = rw.find((r) => r.source === '/sw.js');
+    expect(sw, '/sw.js の栓が無い＝総当たりで素通りする').toBeTruthy();
+    expect(/^https:/.test(sw.destination), 'sw.js をメーターへ通している').toBe(false);
   });
 });
 

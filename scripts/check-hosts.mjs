@@ -84,6 +84,22 @@ async function checkHost(host, spec) {
     out.ng.push('★事務所に sw.js が居る（どのURLもメーターに化ける事故が戻る）★');
   }
 
+  // ★事務所のURLでメーター本体が出ないこと (2026-08-02 追加)★
+  //   事務所はメーターを丸ごと proxy しているので、栓をしないと /index.html が素通りする。
+  //   司さんが見た「どのURLもここにしかいかんけど」と見た目が同じ事故になる。
+  if (spec.role === 'office') {
+    const idx = await head(base + '/index.html');
+    out.indexHtml = idx.status;
+    if (idx.status === 200) {
+      out.ng.push('★事務所の /index.html でメーター本体が出る（栓が無い）★');
+    }
+    // 事務所のトップは事務所の画面であること（メーターが出ていたら中身が入れ替わっている）
+    const top = await text(base + '/');
+    if (top.body && !/事務所|売上表|月次集計/.test(top.body)) {
+      out.ng.push('★事務所のトップが事務所の画面でない（メーターが出ている可能性）★');
+    }
+  }
+
   // メーターの /dashboard.html は事務所へ送る（事務所側は proxy 先なので対象外）
   if (spec.role === 'meter') {
     const dash = await head(base + '/dashboard.html');
