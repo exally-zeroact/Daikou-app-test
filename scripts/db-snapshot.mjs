@@ -29,13 +29,27 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const EXPECT = {
   // 第1段階（①〜③）: 請求書アプリに1社足し、スマホ1台を有効化し、代行を1件流す
   // ★手順1（2026-08-02・司さんが自分で通す版）★
-  //   請求書アプリは触らない・会社(ZERO代行)は8/1に登録済み
-  //   ＝増えるのは「端末1台」と「勤務1件」と「代行1〜2件」だけ
+  //
+  //   ★どちらを使うかは「通す前の控えを見てから」決める。推測で先に固定しない★
+  //     会社が既に有る → step1            （【1】②の登録画面は出ない）
+  //     会社がまだ無い → step1_new_company （【1】②で登録する＝dk_companies +1 が正しい通り方）
+  //   決め打ちすると、正しく通ったのに赤 という誤判定になる（両方向で起こりうる）。
+  //   確かめ方: dk_companies を owner のメールで引く（scripts/db-snapshot.mjs --whose <email>）
+  //
+  //   共通: 請求書アプリは触らない ＝ companies / meisai は ±0
   step1: {
     dk_company_devices: [1, 1], // QRで有効化するスマホ1台
     dk_shifts: [1, 1], // 業務開始〜終了 1晩
     dk_trips: [1, 2], // 代行1件（走り直したら2件）
-    // ★companies / dk_companies / meisai は ±0★（手順1では触らない）
+    // ★companies / dk_companies / meisai は ±0★
+  },
+
+  // 会社がまだ無かった場合（司さんが【1】②で登録する）
+  step1_new_company: {
+    dk_companies: [1, 1], // ★ここだけ違う★
+    dk_company_devices: [1, 1],
+    dk_shifts: [1, 1],
+    dk_trips: [1, 2],
   },
 
   //   ★テスト用アカウントで通す（2026-08-02）★ので dk_companies も1件増える
@@ -189,7 +203,25 @@ async function takeSnapshot() {
   const snap = {};
   rows.forEach((r) => (snap[r.t] = parseInt(r.c, 10) || 0));
   exactRows.forEach((r) => (snap[r.t] = parseInt(r.c, 10) || 0));
-  return { ref, at: new Date().toISOString(), tables: snap };
+
+  // ★どちらの想定を使うかを「控えた時の実際の状態」から決められるようにする★
+  //   （会社が有るか無いかを覚えておかないと、後で決め打ちになる）
+  let owners = [];
+  try {
+    const q3 = `select u.email, c.name, c.seat_limit,
+        (select count(*)::int from dk_company_devices d where d.company_id=c.company_id) as devices
+       from dk_companies c join auth.users u on u.id = c.owner_id order by u.email`;
+    const r3 = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q3 }),
+    });
+    if (r3.ok) owners = await r3.json();
+  } catch (_) {
+    /* 取れなくても控え自体は使える */
+  }
+
+  return { ref, at: new Date().toISOString(), tables: snap, companies: owners };
 }
 
 async function main() {
@@ -207,6 +239,14 @@ async function main() {
     ['meisai', 'companies', 'dk_shifts', 'dk_trips', 'dk_company_devices'].forEach((t) => {
       if (snap.tables[t] !== undefined) console.log(`  ${t.padEnd(20)} ${snap.tables[t]}件`);
     });
+    if (snap.companies && snap.companies.length) {
+      console.log('\n― 会社（誰の物か）―  ★どの想定を使うかはここで決める★');
+      snap.companies.forEach((c) =>
+        console.log(`  ${String(c.email).padEnd(34)} ${c.name} / 有効化済 ${c.devices}台`)
+      );
+      console.log('  → 通す人の会社が上に有れば --expect step1（dk_companies ±0）');
+      console.log('     無ければ --expect step1_new_company（登録するので +1）');
+    }
     console.log('→ ' + snapPath(name));
     return;
   }

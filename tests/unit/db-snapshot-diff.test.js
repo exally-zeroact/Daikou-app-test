@@ -194,3 +194,35 @@ describe('★手順1（司さんが自分で通す版）の想定★', () => {
     expect(D.diff(BEFORE, after, D.EXPECT.step1).ok).toBe(false);
   });
 });
+
+describe('★会社が「有る/無い」で想定を変える（決め打ちしない）★', () => {
+  // 指示役の指摘: 「会社は既にある」で固定すると、万一まだ無くて司さんが登録した時に
+  // ★正しい通り方なのに赤★ になる。控えを見てから選ぶ。
+  const RUN = { dk_company_devices: 19, dk_shifts: 1, dk_trips: 1 };
+
+  it('会社が有る時: dk_companies が増えなければ通る', () => {
+    expect(D.diff(BEFORE, Object.assign({}, BEFORE, RUN), D.EXPECT.step1).ok).toBe(true);
+  });
+
+  it('★会社が有るのに増えたら止める★', () => {
+    const after = Object.assign({}, BEFORE, RUN, { dk_companies: 11 });
+    expect(D.diff(BEFORE, after, D.EXPECT.step1).ok).toBe(false);
+  });
+
+  it('会社が無かった時: dk_companies +1 でも通る（正しい通り方）', () => {
+    const after = Object.assign({}, BEFORE, RUN, { dk_companies: 11 });
+    expect(D.diff(BEFORE, after, D.EXPECT.step1_new_company).ok).toBe(true);
+  });
+
+  it('★会社を作る想定なのに作られていなければ止める★', () => {
+    const after = Object.assign({}, BEFORE, RUN);
+    expect(D.diff(BEFORE, after, D.EXPECT.step1_new_company).ok).toBe(false);
+  });
+
+  it('どちらの想定でも 請求先と明細は ±0 のまま', () => {
+    ['step1', 'step1_new_company'].forEach((k) => {
+      const after = Object.assign({}, BEFORE, RUN, { dk_companies: 11, meisai: 1100 });
+      expect(D.diff(BEFORE, after, D.EXPECT[k]).violations.join()).toContain('meisai');
+    });
+  });
+});
