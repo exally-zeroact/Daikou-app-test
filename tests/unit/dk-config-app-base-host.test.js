@@ -28,6 +28,13 @@ const EXPECTED_APP_BASE = {
   'Daikou-app': 'https://daikou-app.vercel.app', // ★本番★
 };
 
+// repo名 → その側の事務所ホスト（2026-08-02 追加）
+//   ★ここが混ざると、本番の事務所がテストのメーターを見る＝QRが反対側を指す★
+const EXPECTED_OFFICE_BASE = {
+  'Daikou-app-test': 'https://daikome-jimusho-test.vercel.app',
+  'Daikou-app': 'https://daikome-jimusho.vercel.app',
+};
+
 // ★同期でコピーされない所から素性を取る★
 function repoName() {
   if (process.env.GITHUB_REPOSITORY) {
@@ -44,6 +51,16 @@ function appBaseInConfig() {
   const src = fs.readFileSync(path.join(ROOT, 'js', 'dk-config.js'), 'utf8');
   const m = src.match(/const\s+APP_BASE\s*=\s*'([^']+)'/);
   return m ? m[1] : null;
+}
+
+function officeBaseInConfig() {
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'dk-config.js'), 'utf8');
+  const m = src.match(/const\s+OFFICE_BASE\s*=\s*'([^']+)'/);
+  return m ? m[1] : null;
+}
+
+function readJson(...p) {
+  return JSON.parse(fs.readFileSync(path.join(ROOT, ...p), 'utf8'));
 }
 
 describe('★APP_BASE は そのrepoのホストと一致していなければならない★', () => {
@@ -83,6 +100,117 @@ describe('★APP_BASE は そのrepoのホストと一致していなければ�
     const name = repoName();
     if (name !== 'Daikou-app-test') return;
     expect(appBaseInConfig()).toBe('https://daikou-app-test.vercel.app');
+  });
+});
+
+// ============================================================
+// ★ここから ホスト単位のガード (2026-08-02 追加)★
+//
+//   それまで縛れていたのは js/dk-config.js の APP_BASE 1つだけだった。
+//   ところが「どのメーターを見せるか」は他に2箇所ある:
+//     ・vercel.json の 308 の行き先（メーター → 事務所）
+//     ・office-host/vercel.json の proxy 先（事務所 → メーター）
+//   どれか1つでも反対側を指すと、★QRが反対側のメーターを指したまま出荷される★。
+//   3つとも同じ「側」であることを、repoの素性(git remote)から機械で縛る。
+// ============================================================
+describe('★事務所ホストも repo の側と一致していなければならない★', () => {
+  it('OFFICE_BASE が dk-config.js にある', () => {
+    expect(officeBaseInConfig()).toMatch(/^https:\/\//);
+  });
+
+  it('★このrepoの OFFICE_BASE が正しい事務所を指している★', () => {
+    const name = repoName();
+    const want = EXPECTED_OFFICE_BASE[name];
+    if (!want) throw new Error('知らないrepoです: ' + name + ' → EXPECTED_OFFICE_BASE に足すこと');
+    expect(officeBaseInConfig()).toBe(want);
+  });
+
+  it('★APP_BASE と OFFICE_BASE が同じ側である★（テストと本番が混ざっていない）', () => {
+    const appIsTest = /daikou-app-test/.test(appBaseInConfig());
+    const officeIsTest = /jimusho-test/.test(officeBaseInConfig());
+    expect(officeIsTest, 'メーターと事務所で側が違う').toBe(appIsTest);
+  });
+});
+
+describe('★vercel.json の行き先も同じ側であること★', () => {
+  it('メーターの4画面が事務所へ 308 で送られている', () => {
+    const v = readJson('vercel.json');
+    const paths = (v.redirects || []).map((r) => r.source);
+    ['/dashboard.html', '/kyuryo.html', '/uriage.html', '/shukei.html'].forEach((p) => {
+      expect(paths, p + ' の308が無い').toContain(p);
+    });
+    (v.redirects || []).forEach((r) => {
+      expect(r.permanent, r.source + ' が308でない').toBe(true);
+    });
+  });
+
+  it('★308の行き先が このrepoの事務所である★', () => {
+    const want = EXPECTED_OFFICE_BASE[repoName()];
+    readJson('vercel.json').redirects.forEach((r) => {
+      expect(r.destination.startsWith(want), `${r.source} → ${r.destination}`).toBe(true);
+    });
+  });
+
+  it('★事務所→メーターの proxy 先が このrepoのメーターである★', () => {
+    const want = EXPECTED_APP_BASE[repoName()];
+    readJson('office-host', 'vercel.json').rewrites.forEach((r) => {
+      expect(r.destination.startsWith(want), `${r.source} → ${r.destination}`).toBe(true);
+    });
+  });
+
+  it('★無限ループにならない: 事務所は308される道を通らない★', () => {
+    // 事務所が /dashboard.html を素直に取りに行くと 308 で自分へ返され、永久に回る。
+    const redirected = readJson('vercel.json').redirects.map((r) => r.source);
+    readJson('office-host', 'vercel.json').rewrites.forEach((r) => {
+      const p = new URL(r.destination).pathname;
+      expect(
+        redirected.includes(p),
+        `事務所が ${p} を取りに行っている＝308で送り返されて無限ループ`
+      ).toBe(false);
+    });
+  });
+
+  it('メーター側に /office/ の入口がある（事務所はここを取りに来る）', () => {
+    const rw = readJson('vercel.json').rewrites || [];
+    expect(rw.some((r) => r.source.startsWith('/office/'))).toBe(true);
+  });
+
+  it('★事務所の設定に sw.js を置いていない★', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'office-host', 'vercel.json'), 'utf8');
+    expect(src).not.toMatch(/"source"\s*:\s*"\/sw\.js"/);
+  });
+});
+
+describe('★事務所の画面をメーターのSWが預からないこと★', () => {
+  it('sw.js に OFFICE_PATHS があり、4画面を含む', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const m = src.match(/const\s+OFFICE_PATHS\s*=\s*(\/.+\/)\s*;/);
+    expect(m, 'OFFICE_PATHS が無い').toBeTruthy();
+    // eslint-disable-next-line no-eval
+    const re = eval(m[1]);
+    ['/dashboard.html', '/kyuryo.html', '/uriage.html', '/shukei.html'].forEach((p) => {
+      expect(re.test(p), p + ' が OFFICE_PATHS に入っていない').toBe(true);
+    });
+    // メーター本体は絶対に含めない（含めたら圏外で業務が止まる）
+    ['/', '/index.html', '/sw.js'].forEach((p) => {
+      expect(re.test(p), '★' + p + ' を含めてはいけない（圏外運用が壊れる）★').toBe(false);
+    });
+  });
+
+  it('fetch ハンドラが OFFICE_PATHS を network-only にしている', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const i = src.indexOf('OFFICE_PATHS.test');
+    expect(i).toBeGreaterThan(-1);
+    // navigationHandler(cache-first) より前で捕まえていないと意味がない
+    expect(i).toBeLessThan(src.indexOf("req.mode === 'navigate'"));
+  });
+
+  it('メーター内の事務所リンクが OFFICE_BASE 直行になっている', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const i = src.indexOf('data-office-link="1"');
+    expect(i).toBeGreaterThan(-1);
+    const around = src.slice(i, i + 400);
+    expect(around).toContain('OFFICE_BASE');
   });
 });
 

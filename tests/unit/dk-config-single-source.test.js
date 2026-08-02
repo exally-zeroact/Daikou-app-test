@@ -54,6 +54,16 @@ function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8');
 }
 
+// ★repo によって「在る画面」が違う（本番には廃止予定の manage.html が無い）★
+//   無い物で落ちるのは道具の不備。★在る物は必ず見る★が、無い物は見ない。
+//   ただし「全部無くて素通り」を防ぐため、下で最低限の本数を要求する。
+function exists(rel) {
+  return fs.existsSync(path.join(ROOT, rel));
+}
+function presentOnly(list) {
+  return list.filter(exists);
+}
+
 function listJsFiles() {
   const dir = path.join(ROOT, 'js');
   return fs
@@ -84,7 +94,7 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
 
   it('★本命: dk-config.js 以外に SupabaseプロジェクトURL の直書きが1つも無い', () => {
     const offenders = [];
-    for (const rel of [...HTML_FILES, ...listJsFiles()]) {
+    for (const rel of [...presentOnly(HTML_FILES), ...listJsFiles()]) {
       const src = read(rel);
       if (RE_SB_URL.test(src)) offenders.push(rel);
     }
@@ -93,7 +103,7 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
 
   it('★本命: dk-config.js 以外に anonキー(JWT) の直書きが1つも無い', () => {
     const offenders = [];
-    for (const rel of [...HTML_FILES, ...listJsFiles()]) {
+    for (const rel of [...presentOnly(HTML_FILES), ...listJsFiles()]) {
       const src = read(rel);
       if (RE_ANON_JWT.test(src)) offenders.push(rel);
     }
@@ -104,7 +114,7 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
     // 直に DKConfig を見るか、DKConfig を内側で使う DKSession 越しに使うか、のどちらか。
     // どちらでも「接続先の出どころは dk-config.js 1箇所」という約束は守られる。
     const missing = [];
-    for (const rel of CONSUMERS) {
+    for (const rel of presentOnly(CONSUMERS)) {
       const src = read(rel);
       const direct = /DKConfig/.test(src);
       const viaSession = /js\/dk-config\.js/.test(src) && /DKSession\./.test(src);
@@ -124,7 +134,7 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
       expect(posConfig).toBeLessThan(posDep);
     }
     // DKConfig を使う単体HTMLも script を読み込んでいること
-    for (const rel of ['login.html', 'dashboard.html', 'manage.html']) {
+    for (const rel of presentOnly(['login.html', 'dashboard.html', 'manage.html'])) {
       expect(read(rel)).toMatch(/src=["']js\/dk-config\.js["']/);
     }
   });
@@ -136,6 +146,9 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
 
   it('Edge Function はアプリURLをハードコードせず環境変数(DK_APP_BASE)から取る', () => {
     const fnDir = path.join(ROOT, 'supabase', 'functions');
+    // ★本番repoには Edge Function のソースを置いていない（共有倉庫へデプロイ済）★
+    //   無い物で落ちるのは道具の不備。在る時だけ見る。
+    if (!fs.existsSync(fnDir)) return;
     const fns = fs.readdirSync(fnDir).filter((d) => {
       return fs.existsSync(path.join(fnDir, d, 'index.ts'));
     });
@@ -150,5 +163,19 @@ describe('dk-config = Supabase接続先の単一真実源', () => {
       //   (fallback として ?? '...' があるのは許容。env を読んでいれば移設時に切替可能)
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('★この道具自体が空振りしていないこと★', () => {
+  // 「在る物だけ見る」にした副作用で、全部無ければ何も見ずに緑になってしまう。
+  // それを防ぐため、最低限の本数が実在することを要求する。
+  it('見張るべき画面が少なくとも4枚は実在する', () => {
+    expect(presentOnly(HTML_FILES).length).toBeGreaterThanOrEqual(4);
+  });
+  it('接続先を使う側が少なくとも4つは実在する', () => {
+    expect(presentOnly(CONSUMERS).length).toBeGreaterThanOrEqual(4);
+  });
+  it('dk-config.js は必ず在る', () => {
+    expect(exists(CONFIG_REL)).toBe(true);
   });
 });

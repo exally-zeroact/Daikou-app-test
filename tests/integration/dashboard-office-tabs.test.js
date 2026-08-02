@@ -104,8 +104,20 @@ describe('★メーターから事務所へ戻れる（司さん「どのURLも�
 
   it('設定のなかに事務所へ行く行がある', () => {
     expect(IDX).toContain('data-office-link="1"');
-    expect(IDX).toContain("location.href = 'dashboard.html'");
     expect(IDX).toContain('事務所をひらく');
+  });
+
+  // ★2026-08-02 期待値を変えた★
+  //   旧: location.href = 'dashboard.html'（メーターの中の住所）
+  //   新: OFFICE_BASE（事務所ホストへ直行）
+  //   理由: メーター側の /dashboard.html はサービスワーカーが預かってしまい、
+  //         旧SWが残っている端末では 308 も新しい画面も届かない。
+  //         最初から別ホストへ飛ばせば SW を一度も踏まない。
+  it('★行き先が事務所ホスト(OFFICE_BASE)である★（メーター内の住所ではない）', () => {
+    const i = IDX.indexOf('data-office-link="1"');
+    const around = IDX.slice(i, i + 400);
+    expect(around).toContain('OFFICE_BASE');
+    expect(around).toMatch(/location\.href\s*=/);
   });
 
   it('社長用だと分かるように書いてある（ドライバーが迷わない）', () => {
