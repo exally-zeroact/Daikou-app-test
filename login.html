@@ -193,12 +193,28 @@
           errEl.style.display = 'block';
         }
 
+        // ★前に入れたメールを覚えておく（入り直しを1タップで済ませる）★
+        //   iPhoneは7日触らないと保存を消すので、消える時は一緒に消える。
+        //   それでも「同じ端末で使い続ける限り打ち直さなくていい」効果はある。
+        var EMAIL_KEY = 'dk_last_email';
+        try {
+          var last = localStorage.getItem(EMAIL_KEY);
+          if (last) document.getElementById('email').value = last;
+        } catch (_) {
+          /* ignore */
+        }
+
         btn.addEventListener('click', function () {
           errEl.style.display = 'none';
           var email = document.getElementById('email').value.trim();
           if (!email || email.indexOf('@') < 1) {
             showErr('メールアドレスを正しく入れてください');
             return;
+          }
+          try {
+            localStorage.setItem(EMAIL_KEY, email);
+          } catch (_) {
+            /* ignore */
           }
           btn.disabled = true;
           btn.textContent = '送信中…';

@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>ダイコメ 事務所</title>
     <meta name="robots" content="noindex" />
+    <!-- ★ホーム画面に追加できるようにする（2026-08-02）★
+         iPhoneのSafariは「7日そのサイトを触らないと保存を消す」決まりがあり、
+         ログインが消えて毎回入り直しになる。★ホーム画面に追加したアプリはこの対象外★
+         （出典: WebKit公式 "Full Third-Party Cookie Blocking and More"）。 -->
+    <link rel="manifest" href="/office-manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="ダイコメ事務所" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>"
@@ -44,6 +53,35 @@
       body.frame-mode .wrap {
         max-width: none;
         padding-bottom: 0;
+      }
+
+      .a2hs {
+        background: #fff8e6;
+        border: 1px solid #ffe0a3;
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin: 12px 0 0;
+      }
+
+      .a2hs-t {
+        font-weight: 800;
+        font-size: 14px;
+        margin-bottom: 4px;
+      }
+
+      .a2hs-d {
+        font-size: 12.5px;
+        color: #6b5836;
+        line-height: 1.7;
+      }
+
+      .a2hs-x {
+        margin-top: 8px;
+        background: #fff;
+        border: 1px solid #ffe0a3;
+        color: #8a6d3b;
+        padding: 5px 14px;
+        font-size: 12.5px;
       }
 
       .otabs {
@@ -374,6 +412,18 @@
         <button class="logout" id="logout" type="button">ログアウト</button>
       </div>
 
+      <!-- ★ホーム画面に追加のすすめ（ログインが消えないように）★ -->
+      <div class="a2hs" id="a2hs" style="display: none">
+        <div class="a2hs-t">📱 ホーム画面に追加してください</div>
+        <div class="a2hs-d">
+          そのままだと
+          <b>iPhoneが7日でログインを消します</b>（毎回ログインし直しになります）。<br />
+          ホーム画面に追加すると<b>消えなくなります</b>。<br />
+          下の <b>［共有］</b> → <b>「ホーム画面に追加」</b> を押してください。
+        </div>
+        <button class="a2hs-x" id="a2hsClose" type="button">閉じる</button>
+      </div>
+
       <!-- ★事務所の入口をここ1つにまとめる（会社が登録できてから出す）★ -->
       <div class="otabs" id="otabs" style="display: none">
         <button class="otab on" data-otab="dash" type="button">会社の設定</button>
@@ -491,6 +541,24 @@
         };
         var SEIKYU_URL = 'https://exally-test.vercel.app/daikou-seikyu.html';
         var curTab = 'dash';
+
+        // ★ホーム画面に追加のすすめを出すか★
+        //   iPhone/iPad の Safari で開いていて、まだホーム画面アプリになっていない時だけ。
+        //   （ホーム画面アプリで開いていれば もう消えないので出さない）
+        function maybeShowA2HS() {
+          try {
+            var ua = navigator.userAgent || '';
+            var isIOS = /iPhone|iPad|iPod/.test(ua);
+            var standalone =
+              (window.navigator && window.navigator.standalone === true) ||
+              (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+            if (!isIOS || standalone) return;
+            if (localStorage.getItem('dk_a2hs_closed') === '1') return;
+            show('a2hs', true);
+          } catch (_) {
+            /* 出せなくても業務に影響しない */
+          }
+        }
 
         function loadTab() {
           try {
@@ -638,6 +706,7 @@
           show('register', false);
           show('main', true);
           show('otabs', true); // ★会社が登録できてから事務所のタブを出す★
+          maybeShowA2HS();
           openTab(loadTab());
           $('coName').textContent = COMPANY.name || '(会社名なし)';
           show('statusOff', COMPANY.status === 'off');
@@ -754,6 +823,15 @@
 
         // ---------- ボタン ----------
         function bindStaticButtons() {
+          $('a2hsClose').addEventListener('click', function () {
+            try {
+              localStorage.setItem('dk_a2hs_closed', '1');
+            } catch (_) {
+              /* ignore */
+            }
+            show('a2hs', false);
+          });
+
           $('logout').addEventListener('click', function () {
             clearSess();
             goLogin();

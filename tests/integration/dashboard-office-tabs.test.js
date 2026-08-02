@@ -180,3 +180,47 @@ describe('★ログインは1つの実装だけ（毎回ログインの再発防
     expect(sess).toContain('dk_dash_refresh');
   });
 });
+
+describe('★iPhoneがログインを7日で消すのを避ける（ホーム画面アプリ）★', () => {
+  // 出典: WebKit公式 "Full Third-Party Cookie Blocking and More"
+  //   Safari は7日そのサイトを触らないと script-writable storage を消す。
+  //   ★ホーム画面に追加したWebアプリは独自のカウンタを持ち、対象外★
+  it('ホーム画面アプリにするための札が入っている', () => {
+    expect(DASH).toContain('rel="manifest"');
+    expect(DASH).toContain('office-manifest.json');
+    expect(DASH).toContain('apple-mobile-web-app-capable');
+    expect(DASH).toContain('apple-touch-icon');
+  });
+
+  it('事務所用のマニフェストがあり、開くと事務所になる', () => {
+    const m = JSON.parse(read('office-manifest.json'));
+    expect(m.start_url).toBe('/dashboard.html');
+    expect(m.display).toBe('standalone');
+    expect(m.icons.length).toBeGreaterThan(0);
+    m.icons.forEach((i) => {
+      expect(fs.existsSync(path.join(ROOT, i.src.replace(/^\//, '')))).toBe(true);
+    });
+  });
+
+  it('★事務所のマニフェストはサービスワーカーを呼ばない★（あの事故を戻さない）', () => {
+    const raw = read('office-manifest.json');
+    expect(raw).not.toContain('sw.js');
+    expect(raw).not.toContain('serviceworker');
+  });
+
+  it('すすめの案内は iPhone の Safari で、まだアプリになっていない時だけ', () => {
+    expect(DASH).toContain('function maybeShowA2HS');
+    expect(DASH).toContain('/iPhone|iPad|iPod/');
+    expect(DASH).toContain('navigator.standalone');
+    expect(DASH).toContain("matchMedia('(display-mode: standalone)')");
+  });
+
+  it('一度閉じたら出し続けない（しつこくしない）', () => {
+    expect(DASH).toContain('dk_a2hs_closed');
+  });
+
+  it('ログインのメールを覚える（入り直しを1タップに）', () => {
+    const login = read('login.html');
+    expect(login).toContain('dk_last_email');
+  });
+});
