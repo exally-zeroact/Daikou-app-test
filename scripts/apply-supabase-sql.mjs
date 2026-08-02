@@ -25,31 +25,10 @@ import { guard } from './sql-guard.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ─── 鍵 ─────────────────────────────────────────────
-function readToken() {
-  const tmp = process.env.TEMP || process.env.TMP || os.tmpdir();
-  const candidates = [
-    process.env.SUPABASE_ACCESS_TOKEN ? null : undefined, // 環境変数は下で見る
-    path.join(tmp, 'daikome-db-token.json'),
-    path.join(tmp, 'nomiya-db-url-prod.json'),
-    path.join(tmp, 'nomiya-db-url.json'),
-  ].filter((x) => typeof x === 'string');
-
-  if (process.env.SUPABASE_ACCESS_TOKEN) {
-    return { token: process.env.SUPABASE_ACCESS_TOKEN, from: '環境変数 SUPABASE_ACCESS_TOKEN' };
-  }
-  for (const f of candidates) {
-    try {
-      if (!fs.existsSync(f)) continue;
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (j && typeof j.token === 'string' && j.token.startsWith('sbp_')) {
-        return { token: j.token, from: path.basename(f) };
-      }
-    } catch (_) {
-      /* 次を見る */
-    }
-  }
-  return null;
-}
+// ★探し場所は scripts/db-token.mjs 1箇所だけ (2026-08-02)★
+//   道具ごとに書くとズレる。実際にズレて、鍵が有るのに「無い」と誤診断した。
+export { readToken } from './db-token.mjs';
+import { readToken } from './db-token.mjs';
 
 // ─── 向き先（このrepoの dk-config.js が唯一の正）───────────
 function readProjectRef() {

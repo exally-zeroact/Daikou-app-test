@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { readToken as readTokenShared } from './db-token.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -131,23 +132,11 @@ function snapPath(name) {
   return path.join(tmp, 'daikome-snapshot-' + String(name).replace(/[^\w-]/g, '') + '.json');
 }
 
+// ★探し場所は scripts/db-token.mjs 1箇所だけ (2026-08-02)★
+//   道具ごとに書くとズレる。実際にズレて、鍵が有るのに「無い」と誤診断した。
 function readToken() {
-  const tmp = process.env.TEMP || process.env.TMP || os.tmpdir();
-  if (process.env.SUPABASE_ACCESS_TOKEN) return process.env.SUPABASE_ACCESS_TOKEN;
-  for (const f of [
-    path.join(tmp, 'daikome-db-token.json'),
-    path.join(tmp, 'nomiya-db-url-prod.json'),
-    path.join(tmp, 'nomiya-db-url.json'),
-  ]) {
-    try {
-      if (!fs.existsSync(f)) continue;
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (j && typeof j.token === 'string' && j.token.startsWith('sbp_')) return j.token;
-    } catch (_) {
-      /* 次を見る */
-    }
-  }
-  return null;
+  const found = readTokenShared();
+  return found ? found.token : null;
 }
 
 function projectRef() {
