@@ -156,3 +156,41 @@ describe('想定の書き方', () => {
     );
   });
 });
+
+describe('★手順1（司さんが自分で通す版）の想定★', () => {
+  // 請求書アプリは触らない・会社は登録済み ＝ 端末1台 + 勤務1件 + 代行1〜2件だけ
+  it('想定どおりなら通る', () => {
+    const after = Object.assign({}, BEFORE, {
+      dk_company_devices: 19,
+      dk_shifts: 1,
+      dk_trips: 1,
+    });
+    expect(D.diff(BEFORE, after, D.EXPECT.step1).ok).toBe(true);
+  });
+
+  it('★請求先(companies)が増えたら止める（手順1では触らないはず）★', () => {
+    const after = Object.assign({}, BEFORE, {
+      dk_company_devices: 19,
+      dk_shifts: 1,
+      dk_trips: 1,
+      companies: 25,
+    });
+    const r = D.diff(BEFORE, after, D.EXPECT.step1);
+    expect(r.ok).toBe(false);
+    expect(r.violations.join()).toContain('companies');
+  });
+
+  it('★meisai が増えたら止める（自動投入は既定オフのはず）★', () => {
+    const after = Object.assign({}, BEFORE, { dk_shifts: 1, meisai: 1100 });
+    expect(D.diff(BEFORE, after, D.EXPECT.step1).ok).toBe(false);
+  });
+
+  it('★端末が2台増えたら止める（1台だけのはず）★', () => {
+    const after = Object.assign({}, BEFORE, {
+      dk_company_devices: 20,
+      dk_shifts: 1,
+      dk_trips: 1,
+    });
+    expect(D.diff(BEFORE, after, D.EXPECT.step1).ok).toBe(false);
+  });
+});

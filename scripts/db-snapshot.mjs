@@ -28,6 +28,16 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 //   [最小, 最大]。ここに書いていない表は ★±0 でなければ違反★
 export const EXPECT = {
   // 第1段階（①〜③）: 請求書アプリに1社足し、スマホ1台を有効化し、代行を1件流す
+  // ★手順1（2026-08-02・司さんが自分で通す版）★
+  //   請求書アプリは触らない・会社(ZERO代行)は8/1に登録済み
+  //   ＝増えるのは「端末1台」と「勤務1件」と「代行1〜2件」だけ
+  step1: {
+    dk_company_devices: [1, 1], // QRで有効化するスマホ1台
+    dk_shifts: [1, 1], // 業務開始〜終了 1晩
+    dk_trips: [1, 2], // 代行1件（走り直したら2件）
+    // ★companies / dk_companies / meisai は ±0★（手順1では触らない）
+  },
+
   //   ★テスト用アカウントで通す（2026-08-02）★ので dk_companies も1件増える
   e2e_stage1: {
     dk_shifts: [1, 1],
