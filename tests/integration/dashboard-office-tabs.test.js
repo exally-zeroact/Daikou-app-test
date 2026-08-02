@@ -146,19 +146,41 @@ describe('★事務所を別の住所で開いても、ドライバーに配る�
   });
 
   it('APP_BASE はメーターの住所を指している', () => {
+    // ★どのメーターかは repo ごとに違う★ → tests/unit/dk-config-app-base-host.test.js が
+    //   git の remote から素性を取って判定する。ここは「メーターの住所であること」だけ見る。
     const cfg = read('js/dk-config.js');
-    expect(cfg).toMatch(/APP_BASE\s*=\s*'https:\/\/daikou-app-test\.vercel\.app'/);
+    expect(cfg).toMatch(/APP_BASE\s*=\s*'https:\/\/daikou-app(-test)?\.vercel\.app'/);
   });
 
-  it('★事務所の入れ物に sw.js / manifest.json / index.html を混ぜない★', async () => {
-    const m = await import('../../scripts/office-bundle.mjs');
-    m.OFFICE_FORBIDDEN.forEach((f) => expect(m.OFFICE_FILES).not.toContain(f));
-    expect(m.OFFICE_FORBIDDEN).toContain('sw.js');
+  // ★2026-08-02 作り直し★
+  //   旧: scripts/office-bundle.mjs（事務所へ「ファイルを写す」方式の一覧）を見ていた。
+  //   その方式はやめた。事務所は★画面を1枚も持たず★メーターを proxy するだけになったので、
+  //   写すファイルの一覧そのものが無くなった（＝office-bundle.mjs は削除）。
+  //   正は office-host/vercel.json の1つだけ。二重に持つと必ず片方が古くなる。
+  it('★事務所は画面を持たない（proxyだけ）★', () => {
+    const oh = JSON.parse(read('office-host/vercel.json'));
+    expect(Array.isArray(oh.rewrites)).toBe(true);
+    // 事務所に置くファイルの一覧のような物を持っていないこと
+    expect(oh.builds).toBeUndefined();
+    expect(
+      fs.existsSync(path.join(ROOT, 'scripts', 'office-bundle.mjs')),
+      '古い正が残っている'
+    ).toBe(false);
   });
 
-  it('事務所の入れ物に挙げたファイルは全部ある', async () => {
-    const m = await import('../../scripts/office-bundle.mjs');
-    m.OFFICE_FILES.forEach((f) => expect(fs.existsSync(path.join(ROOT, f))).toBe(true));
+  it('★事務所に sw.js / index.html を出さない栓がある★', () => {
+    const rw = JSON.parse(read('office-host/vercel.json')).rewrites;
+    ['/sw.js', '/index.html'].forEach((p) => {
+      const r = rw.find((x) => x.source === p);
+      expect(r, `${p} の栓が無い`).toBeTruthy();
+      expect(/^https:/.test(r.destination), `${p} をメーターへ通している`).toBe(false);
+    });
+  });
+
+  it('事務所が見せる4画面が repo に実在する', () => {
+    ['dashboard.html', 'kyuryo.html', 'uriage.html', 'shukei.html', 'login.html'].forEach((f) => {
+      expect(fs.existsSync(path.join(ROOT, f)), f).toBe(true);
+    });
   });
 });
 
