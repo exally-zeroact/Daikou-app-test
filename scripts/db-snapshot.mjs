@@ -28,11 +28,13 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 //   [最小, 最大]。ここに書いていない表は ★±0 でなければ違反★
 export const EXPECT = {
   // 第1段階（①〜③）: 請求書アプリに1社足し、スマホ1台を有効化し、代行を1件流す
+  //   ★テスト用アカウントで通す（2026-08-02）★ので dk_companies も1件増える
   e2e_stage1: {
     dk_shifts: [1, 1],
     dk_trips: [1, 2],
-    companies: [1, 1],
-    dk_company_devices: [1, 1],
+    companies: [1, 1], // 請求先「テスト建設（消してよい）」
+    dk_companies: [1, 1], // ダイコメの会社「テスト代行（消してよい）」
+    dk_company_devices: [1, 1], // 予備の端末1台
     meisai: [0, 0], // ★第1段階では絶対に増えない（フラグがオフ）★
   },
   // 第2段階①: フラグを立てて1件流す → meisai が1行だけ増える

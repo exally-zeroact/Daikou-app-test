@@ -20,7 +20,8 @@ const BEFORE = {
   dk_shifts: 0,
   dk_trips: 0,
   companies: 24,
-  dk_company_devices: 0,
+  dk_companies: 10,
+  dk_company_devices: 18,
   meisai: 1099,
   pay_slips: 500,
   dk_employees: 0,
@@ -32,7 +33,8 @@ describe('★想定どおりに動いた時だけ OK★', () => {
       dk_shifts: 1,
       dk_trips: 1,
       companies: 25,
-      dk_company_devices: 1,
+      dk_companies: 11,
+      dk_company_devices: 19,
     });
     const r = D.diff(BEFORE, after, D.EXPECT.e2e_stage1);
     expect(r.ok).toBe(true);
@@ -44,7 +46,8 @@ describe('★想定どおりに動いた時だけ OK★', () => {
       dk_shifts: 1,
       dk_trips: 2,
       companies: 25,
-      dk_company_devices: 1,
+      dk_companies: 11,
+      dk_company_devices: 19,
     });
     expect(D.diff(BEFORE, after, D.EXPECT.e2e_stage1).ok).toBe(true);
   });
@@ -60,7 +63,8 @@ describe('★想定外が1行でも動いたら止める★', () => {
       dk_shifts: 1,
       dk_trips: 1,
       companies: 25,
-      dk_company_devices: 1,
+      dk_companies: 11,
+      dk_company_devices: 19,
       meisai: 1100,
     });
     const r = D.diff(BEFORE, after, D.EXPECT.e2e_stage1);
@@ -87,7 +91,8 @@ describe('★想定外が1行でも動いたら止める★', () => {
       dk_shifts: 1,
       dk_trips: 3,
       companies: 25,
-      dk_company_devices: 1,
+      dk_companies: 11,
+      dk_company_devices: 19,
     });
     expect(D.diff(BEFORE, after, D.EXPECT.e2e_stage1).ok).toBe(false);
   });
