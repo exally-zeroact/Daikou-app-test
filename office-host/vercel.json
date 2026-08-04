@@ -17,6 +17,10 @@
       "destination": "https://daikou-app-test.vercel.app/icon-512.png"
     },
     {
+      "source": "/js/car-name.js",
+      "destination": "https://daikou-app-test.vercel.app/js/car-name.js"
+    },
+    {
       "source": "/js/daiko-payroll.js",
       "destination": "https://daikou-app-test.vercel.app/js/daiko-payroll.js"
     },

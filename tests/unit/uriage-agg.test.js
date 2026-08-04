@@ -77,15 +77,32 @@ describe('車ごとにまとめる', () => {
     expect(rows[0].empty_distance_m).toBe(8000);
   });
 
-  it('車の名前が付いていれば使う・無ければ端末IDの短縮を出す', () => {
+  // ★2026-08-04 期待値を変えた★
+  //   旧: 名前が無ければ端末IDの短縮（abcdefgh…）を出す
+  //   新: ★「車1」「車2」★を出す
+  //   理由: 司さん「売上1の横の英語のやつ邪魔でしょうがない」。
+  //   短縮しても英語の羅列であることに変わりないので、短縮形も名前として認めない。
+  it('車の名前が付いていれば使う・無ければ「車1」を出す（UUIDは出さない）', () => {
     const rows = Agg.byDevice(
       [shift({ device_id: 'abcdefgh12345678' })],
       [],
       [{ device_id: 'abcdefgh12345678', label: '1号車' }]
     );
     expect(rows[0].label).toBe('1号車');
+
     const rows2 = Agg.byDevice([shift({ device_id: 'abcdefgh12345678' })], [], []);
-    expect(rows2[0].label).toBe('abcdefgh…');
+    expect(rows2[0].label, '★端末IDが画面に出ている★').toBe('車1');
+    expect(rows2[0].label).not.toMatch(/^[0-9a-f]{8}/);
+  });
+
+  it('★名前が無い車が複数あっても、それぞれ違う名前になる★', () => {
+    const rows = Agg.byDevice(
+      [shift({ device_id: 'aaaaaaaa11111111' }), shift({ device_id: 'bbbbbbbb22222222' })],
+      [],
+      []
+    );
+    const names = rows.map((r) => r.label).sort();
+    expect(names).toEqual(['車1', '車2']);
   });
 });
 
