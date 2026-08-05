@@ -23,10 +23,12 @@
   'use strict';
 
   // ▼倉庫(Supabaseプロジェクト) --------------------------------------------
-  //   現在: Exally 共有プロジェクト。★独立時はこの2つを新プロジェクトの値に差し替える★
-  const SB_URL = 'https://tnfwipbgfgjaymlszeid.supabase.co';
+  //   ★このrepoはテスト用。テストDB(DB-test)を見る★
+  //   ★本番(Daikou-app)の倉庫を絶対にここに書かないこと。テストが業務データを壊す★
+  //   ★独立時はこの2つを新プロジェクトの値に差し替える★
+  const SB_URL = 'https://khawdrnvssdenumbiwfg.supabase.co';
   const ANON_KEY =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZndpcGJnZmdqYXltbHN6ZWlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1Nzk4MzQsImV4cCI6MjA5NzE1NTgzNH0.zhKPLSlW4zxsdjsXNvqDHvtP3wBqp-EKaxbjqLGW_ek';
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtoYXdkcm52c3NkZW51bWJpd2ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUwMTQ2NzEsImV4cCI6MjEwMDU5MDY3MX0.VoI2cLXCiZp48qOJEDXL1thxKnIHJ5t1Cl6iVsfYHFY';
 
   // ▼ダイコメ自身の公開URL(末尾スラッシュなし) -------------------------------
   //   会社URL = APP_BASE + '/?c=' + url_token。本番ドメイン確定時はここを差し替える。
