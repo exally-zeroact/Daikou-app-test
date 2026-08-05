@@ -25,8 +25,13 @@ const CM = require(path.join(ROOT, 'js', 'customer-master.js'));
 const B = require(path.join(ROOT, 'js', 'business.js'));
 const TE = require(path.join(ROOT, 'js', 'trip-edit.js'));
 
+// ★Edge Function はテストrepoにしか置いていない★（本番repoでは飛ばす・他のテストと同じ作法）
+const FN_DIR = path.join(ROOT, 'supabase', 'functions');
+const HAS_FN = fs.existsSync(path.join(FN_DIR, 'dk-sync-jobs', 'meisai-row.js'));
+
 describe('★分け方が事務所から端末へ届くこと★', () => {
   it('サーバが分け方を返している（Edge Function）', () => {
+    if (!HAS_FN) return;
     const fn = read('supabase/functions/dk-customers/index.ts');
     expect(fn, '会社設定を読んでいない').toContain("select('id, name, config')");
     expect(fn, '分け方を返していない').toContain('note_groups');
@@ -128,11 +133,13 @@ describe('★事務所まで運ばれること★', () => {
   });
 
   it('サーバが倉庫に入れている', () => {
+    if (!HAS_FN) return;
     const fn = read('supabase/functions/dk-sync-jobs/index.ts');
     expect(fn).toContain('customer_note: str(t.customer_note)');
   });
 
   it('★請求書の備考に入る★', () => {
+    if (!HAS_FN) return;
     const row = read('supabase/functions/dk-sync-jobs/meisai-row.js');
     expect(row, '備考が空のまま上がる').toContain(
       "note: typeof t.customer_note === 'string' ? t.customer_note : ''"
@@ -140,8 +147,10 @@ describe('★事務所まで運ばれること★', () => {
   });
 });
 
-describe('★請求書の備考を、消さずに直せること★', () => {
-  const M = require('../../supabase/functions/dk-sync-jobs/meisai-row.js');
+describe.skipIf(!HAS_FN)('★請求書の備考を、消さずに直せること★', () => {
+  // ★本番repoには Edge Function を置いていないので、読み込み自体を条件にする★
+  //   (describe.skipIf でも中身は一度読まれるため、require をここで包む)
+  const M = HAS_FN ? require(path.join(FN_DIR, 'dk-sync-jobs', 'meisai-row.js')) : null;
 
   const rows = (note) =>
     M.buildMeisaiRows({
