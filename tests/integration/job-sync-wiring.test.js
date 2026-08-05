@@ -100,10 +100,34 @@ describe('job-sync の Edge Function', () => {
   });
 
   it('★請求書アプリの明細に二重登録しない鍵(dk_ref)を持つ★', () => {
-    expect(fn).toMatch(/dk_ref/);
-    // 既存行は insert のみ。meisai を update/delete しない(事務所が書いた備考を消さない)
-    expect(fn).not.toMatch(/from\('meisai'\)\s*\.\s*update/);
-    expect(fn).not.toMatch(/from\('meisai'\)\s*\.\s*delete/);
+    const row = fs.readFileSync(
+      path.join(ROOT, 'supabase', 'functions', 'dk-sync-jobs', 'meisai-row.js'),
+      'utf8'
+    );
+    expect(fn + row).toMatch(/dk_ref/);
+    // ★明細を消すことは絶対に無い★
+    expect(fn, '★司さんの明細を消している★').not.toMatch(/from\('meisai'\)\s*\.\s*delete/);
+  });
+
+  // ★2026-08-05 見方を変えた★
+  //   旧: 「meisai を update しない」= 既存行には一切触らない、という見方だった。
+  //   ところが司さんの指示で★メーターの履歴から金額や請求先を後から直せる★ようにしたので、
+  //   直した内容が請求書アプリにも届かないと「直したのに古いまま」になる。
+  //   ⇒ update は認める。★守るのは「司さんが後から書いた列を消さない」こと★。
+  //     そこを直接見る（文字列で update を禁止するのではなく、触る列を数える）。
+  it('★直す時に触るのは 金額/距離/請求先/日付/行き先 だけ★', async () => {
+    const M = await import(
+      'file://' +
+        path
+          .join(ROOT, 'supabase', 'functions', 'dk-sync-jobs', 'meisai-row.js')
+          .replace(/\\/g, '/')
+    );
+    expect(M.UPDATABLE.slice().sort()).toEqual(
+      ['amount', 'company', 'date', 'destination', 'distance'].sort()
+    );
+    ['note', 'people', 'name'].forEach((c) => {
+      expect(M.UPDATABLE, '★司さんが書いた ' + c + ' を上書きしている★').not.toContain(c);
+    });
   });
 
   it('請求書アプリへの流し込みは請求書払いの代行だけ(現金は入れない)', () => {

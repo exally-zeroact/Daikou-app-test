@@ -70,4 +70,48 @@ function buildMeisaiRows(opts) {
     }));
 }
 
-export { MEISAI_COLUMNS, businessDate, refOf, buildMeisaiRows };
+// ============================================================
+// ★直した代行を請求書アプリにも届ける★ 2026-08-05
+//
+//   司さん「その業務押したら追加料金や値引きや請求書などちゃんと編集できな」
+//   メーターの履歴で金額や請求先を直すと、その業務は送り直される。
+//   ところが★既に入っている行は飛ばす★作りだったので、
+//   ★請求書アプリだけ古い金額のまま残る★。それを塞ぐ。
+//
+//   ▼直す時に触る列は限る
+//     金額 / 距離 / 請求先 / 日付 / 行き先 だけ。
+//     ★備考(note)・人数(people)・名前(name) は司さんが後から書いた物なので絶対に触らない★
+//   ▼中身が同じなら何もしない（無駄な書き込みをしない）
+// ============================================================
+const UPDATABLE = ['company', 'date', 'destination', 'amount', 'distance'];
+
+// rows = これから入れたい行 / existing = 既に入っている行 [{id, extra, company, date, ...}]
+function planMeisaiWrite(rows, existing) {
+  const byRef = new Map();
+  (Array.isArray(existing) ? existing : []).forEach((e) => {
+    const ref = e && e.extra && e.extra.dk_ref;
+    if (ref) byRef.set(String(ref), e);
+  });
+
+  const inserts = [];
+  const updates = [];
+  (Array.isArray(rows) ? rows : []).forEach((r) => {
+    const cur = byRef.get(String(r.extra.dk_ref));
+    if (!cur) return inserts.push(r);
+    const patch = {};
+    UPDATABLE.forEach((c) => {
+      const a = cur[c] === undefined ? null : cur[c];
+      const b = r[c] === undefined ? null : r[c];
+      if (String(a) !== String(b)) patch[c] = b;
+    });
+    // 正確な距離も更新する（extra は自分の物なので、司さんの書いた列とは別）
+    const curM = cur.extra ? cur.extra.dk_distance_m : undefined;
+    if (String(curM === undefined ? null : curM) !== String(r.extra.dk_distance_m)) {
+      patch.extra = Object.assign({}, cur.extra, { dk_distance_m: r.extra.dk_distance_m });
+    }
+    if (Object.keys(patch).length) updates.push({ id: cur.id, patch: patch });
+  });
+  return { inserts, updates };
+}
+
+export { MEISAI_COLUMNS, businessDate, refOf, buildMeisaiRows, planMeisaiWrite, UPDATABLE };

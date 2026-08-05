@@ -14,7 +14,7 @@
 //     ・値は一切いじらない。メーターが確定した距離・料金をそのまま保存する。
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // ★請求書アプリに入れる行を作る所（テストが同じ物を触れるよう外出し）★
-import { buildMeisaiRows, businessDate } from './meisai-row.js';
+import { buildMeisaiRows, businessDate, planMeisaiWrite } from './meisai-row.js';
 
 const MAX_SHIFTS = 50; // 1リクエストの勤務上限
 const MAX_TRIPS = 300; // 勤務1件あたりの代行上限
@@ -201,20 +201,17 @@ async function pushToInvoiceApp(
     const refOf = (t: Record<string, unknown>) => `${deviceId}:${shiftStart}:${t.seq}`;
     const refs = invoiceTrips.map(refOf);
 
-    // 既に入っている分を調べる(入っている行には触らない)
+    // 既に入っている分を調べる
+    //   ★2026-08-05 「飛ばす」から「中身が違えば直す」に変えた★
+    //     メーターの履歴で金額や請求先を後から直せるようにしたため、
+    //     飛ばすだけだと★請求書アプリだけ古い金額のまま残る★。
+    //     直す時に触るのは金額/距離/請求先/日付/行き先だけ。
+    //     ★備考・人数・名前は司さんが書いた物なので絶対に触らない★
     const { data: exist } = await sb
       .from('meisai')
-      .select('extra')
+      .select('id, extra, company, date, destination, amount, distance')
       .eq('user_id', ownerId)
       .in('extra->>dk_ref', refs);
-    const done = new Set(
-      (exist || [])
-        .map((r: Record<string, unknown>) => {
-          const e = r.extra as Record<string, unknown> | null;
-          return e && typeof e.dk_ref === 'string' ? e.dk_ref : null;
-        })
-        .filter(Boolean) as string[]
-    );
 
     // 行を作るのは meisai-row.js（★テストが同じ物を触れるように外に出してある★）
     //
@@ -235,13 +232,21 @@ async function pushToInvoiceApp(
       deviceId,
       shiftStartMs: shiftStart as number,
       trips: invoiceTrips,
-      done,
     });
     if (!bizDate) return 'skip:業務開始の日付が読めない';
-    if (!rows.length) return 'skip:既に入っている(' + refs.length + '件)';
-    const { error: mErr } = await sb.from('meisai').insert(rows);
-    if (mErr) return 'error:' + String(mErr.message || mErr).slice(0, 120);
-    return 'ok:' + rows.length + '件入れた';
+    if (!rows.length) return 'skip:入れる代行が0件';
+
+    const plan = planMeisaiWrite(rows, exist || []);
+    if (plan.inserts.length) {
+      const { error: iErr } = await sb.from('meisai').insert(plan.inserts);
+      if (iErr) return 'error:' + String(iErr.message || iErr).slice(0, 120);
+    }
+    for (const u of plan.updates) {
+      const { error: uErr } = await sb.from('meisai').update(u.patch).eq('id', u.id);
+      if (uErr) return 'error:直し ' + String(uErr.message || uErr).slice(0, 100);
+    }
+    if (!plan.inserts.length && !plan.updates.length) return 'skip:変わっていない';
+    return 'ok:' + plan.inserts.length + '件入れた/' + plan.updates.length + '件直した';
   } catch (e) {
     // 請求書側で何が起きても、ダイコメの実績受け取りは止めない
     return 'error:' + String((e as Error)?.message || e).slice(0, 120);

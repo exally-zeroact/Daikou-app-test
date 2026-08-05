@@ -20,6 +20,7 @@ import {
   buildMeisaiRows,
   businessDate,
   refOf,
+  planMeisaiWrite,
 } from '../../supabase/functions/dk-sync-jobs/meisai-row.js';
 
 const OWNER = '9607d66a-e756-4fcd-9920-511d870fa28d';
@@ -183,6 +184,91 @@ describe('★入れてはいけない物を入れないこと★', () => {
   });
 });
 
+// ============================================================
+// ★あとから直した代行が、請求書アプリにも届くこと★ 2026-08-05
+//
+//   司さん「その業務押したら追加料金や値引きや請求書などちゃんと編集できな」
+//   メーターで直すと業務が送り直される。ところが★既に入っている行は飛ばす★
+//   作りだったので、請求書アプリだけ古い金額のまま残っていた。
+// ============================================================
+describe('★直した代行が請求書アプリにも届くこと★', () => {
+  const REF = DEV + ':1785835513046:1';
+  const rows = () => build([REAL[0]]); // 2200円 / 5km
+
+  const existing = (over) =>
+    Object.assign(
+      {
+        id: 'row-1',
+        extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362 },
+        company: 'Lounge Chouchou',
+        date: '2026-08-04',
+        destination: '今治市北浜町',
+        amount: 2200,
+        distance: 5,
+      },
+      over || {}
+    );
+
+  it('まだ無ければ入れる', () => {
+    const p = planMeisaiWrite(rows(), []);
+    expect(p.inserts.length).toBe(1);
+    expect(p.updates.length).toBe(0);
+  });
+
+  it('★同じ中身なら何もしない★（無駄に書かない）', () => {
+    const p = planMeisaiWrite(rows(), [existing()]);
+    expect(p.inserts.length).toBe(0);
+    expect(p.updates.length, '変わっていないのに書き込んでいる').toBe(0);
+  });
+
+  it('★値引きして金額が変わったら直す★', () => {
+    const p = planMeisaiWrite(rows(), [existing({ amount: 9999 })]);
+    expect(p.inserts.length).toBe(0);
+    expect(p.updates.length).toBe(1);
+    expect(p.updates[0].id).toBe('row-1');
+    expect(p.updates[0].patch.amount, '★古い金額のまま残る★').toBe(2200);
+  });
+
+  it('★請求先を付け替えたら直す★', () => {
+    const p = planMeisaiWrite(rows(), [existing({ company: 'よその会社' })]);
+    expect(p.updates[0].patch.company).toBe('Lounge Chouchou');
+  });
+
+  it('★司さんが後から書いた 備考・人数・名前 は絶対に触らない★', () => {
+    const p = planMeisaiWrite(rows(), [existing({ amount: 9999 })]);
+    const patch = p.updates[0].patch;
+    ['note', 'people', 'name'].forEach((c) => {
+      expect(Object.prototype.hasOwnProperty.call(patch, c), '★' + c + ' を書き換えている★').toBe(
+        false
+      );
+    });
+  });
+
+  it('★変わった列だけ直す★（全部上書きしない）', () => {
+    const p = planMeisaiWrite(rows(), [existing({ amount: 9999 })]);
+    expect(Object.keys(p.updates[0].patch).sort()).toEqual(['amount']);
+  });
+
+  it('正確な距離が変わったら extra も直す（他の自由項目は残す）', () => {
+    const cur = existing();
+    cur.extra = { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 1, dk_from: '今治市富田新港' };
+    const p = planMeisaiWrite(rows(), [cur]);
+    expect(p.updates[0].patch.extra.dk_distance_m).toBe(5362);
+    expect(p.updates[0].patch.extra.dk_from, '★自由項目を消している★').toBe('今治市富田新港');
+  });
+
+  it('よその代行の行に手を出さない', () => {
+    const p = planMeisaiWrite(rows(), [existing({ id: 'x', extra: { dk_ref: 'よそ:1:1' } })]);
+    expect(p.inserts.length).toBe(1);
+    expect(p.updates.length).toBe(0);
+  });
+
+  it('壊れた入力でも落ちない', () => {
+    expect(() => planMeisaiWrite(null, null)).not.toThrow();
+    expect(() => planMeisaiWrite(rows(), [null, {}, { extra: null }])).not.toThrow();
+  });
+});
+
 describe('★立てても黙って落ちる、を二度とやらないこと★', () => {
   const fs = require('fs');
   const path = require('path');
@@ -197,10 +283,12 @@ describe('★立てても黙って落ちる、を二度とやらないこと★'
     expect(SRC, '返事に meisai が入っていない').toContain('accepted, meisai');
   });
 
-  it('★insert の失敗を捨てていない★', () => {
+  it('★入れる時・直す時の失敗を捨てていない★', () => {
     expect(SRC, 'insert のエラーを受け取っていない').toContain(
-      "const { error: mErr } = await sb.from('meisai').insert(rows)"
+      "const { error: iErr } = await sb.from('meisai').insert(plan.inserts)"
     );
+    expect(SRC, '直す時のエラーを受け取っていない').toMatch(/const \{ error: uErr \}/);
+    expect(SRC, '直した結果を返していない').toContain('件直した');
   });
 
   it('★行を作る所を関数の中に書き戻していない★（外に出ていないとテストできない）', () => {
