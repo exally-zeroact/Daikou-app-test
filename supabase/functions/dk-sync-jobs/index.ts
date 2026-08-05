@@ -13,6 +13,8 @@
 //     ・★未払い(status='off')でもデータは受け取る★。データを人質にしない(締めは別の層でやる)。
 //     ・値は一切いじらない。メーターが確定した距離・料金をそのまま保存する。
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// ★請求書アプリに入れる行を作る所（テストが同じ物を触れるよう外出し）★
+import { buildMeisaiRows, businessDate } from './meisai-row.js';
 
 const MAX_SHIFTS = 50; // 1リクエストの勤務上限
 const MAX_TRIPS = 300; // 勤務1件あたりの代行上限
@@ -92,6 +94,7 @@ Deno.serve(async (req: Request) => {
   if (!dev) return json({ ok: false, reason: 'unknown_device' }, 403);
 
   const accepted: number[] = [];
+  const meisai: string[] = []; // 請求書アプリへ入れた/入れなかった理由
 
   for (const raw of shifts) {
     const s = raw as Record<string, unknown>;
@@ -155,7 +158,11 @@ Deno.serve(async (req: Request) => {
       //   ・重複しない鍵 dk_ref = 端末:勤務開始:何件目 (再送で trip_id が変わっても変わらない)
       //   ・★既に入っている行には一切触らない★=事務所が後から書いた備考/人数を絶対に消さない
       //   ・失敗しても勤務の受け取りは取り消さない(明細は次回の再送で入る)
-      await pushToInvoiceApp(sb, co.owner_id as string | null, device_id, s, trips);
+      //   ★2026-08-05 「なぜ入れなかったか」を返すようにした★
+      //     入らない理由が7通りあるのに、全部 return で黙って抜けていたので
+      //     ★立てたのに入らない時に、どこで止まったか分からなかった★（実際に踏んだ）。
+      //     返事に出しておけば、事務所からでも1回叩けば理由が読める。
+      meisai.push(await pushToInvoiceApp(sb, co.owner_id as string | null, device_id, s, trips));
 
       accepted.push(s.start_time as number);
     } catch (_) {
@@ -164,7 +171,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  return json({ ok: true, accepted });
+  return json({ ok: true, accepted, meisai });
 });
 
 // 代行請求書アプリの `meisai` に、請求書払いの代行を1件1行で入れる。
@@ -177,18 +184,18 @@ async function pushToInvoiceApp(
   deviceId: string,
   shift: Record<string, unknown>,
   trips: Record<string, unknown>[]
-): Promise<void> {
+): Promise<string> {
   try {
     // ★★既定オフ (2026-08-01)★★
     //   代行請求書アプリは既に実務で使われていて、明細が1000件超入っている。
     //   司さんは今そこへ「手入力」している。自動投入を同時に走らせると★二重になる★。
     //   よって Edge Function secret `DK_MEISAI_AUTOPUSH=1` を明示的に立てるまで何もしない。
     //   (手入力から自動に切り替える、と決めた時に立てる)
-    if (Deno.env.get('DK_MEISAI_AUTOPUSH') !== '1') return;
+    if (Deno.env.get('DK_MEISAI_AUTOPUSH') !== '1') return 'off:自動投入が立っていない';
 
-    if (!ownerId) return; // 会社がまだアカウント登録していない = 請求書アプリ側に置き場が無い
+    if (!ownerId) return 'skip:会社がアカウント登録していない'; // 請求書アプリ側に置き場が無い
     const invoiceTrips = trips.filter((t) => t.payment_type === 'invoice' && t.customer_name);
-    if (!invoiceTrips.length) return;
+    if (!invoiceTrips.length) return 'skip:請求書払いの代行が0件';
 
     const shiftStart = isNum(shift.start_time) ? shift.start_time : 0;
     const refOf = (t: Record<string, unknown>) => `${deviceId}:${shiftStart}:${t.seq}`;
@@ -209,6 +216,8 @@ async function pushToInvoiceApp(
         .filter(Boolean) as string[]
     );
 
+    // 行を作るのは meisai-row.js（★テストが同じ物を触れるように外に出してある★）
+    //
     // ★請求書の日付は「その晩の仕事の日」= 業務開始の日（日本時間）★ 2026-08-05
     //
     //   ★直した穴（司さんの指摘）★
@@ -220,40 +229,21 @@ async function pushToInvoiceApp(
     //         しかも UTC 切りなので、日本時間 朝9時より前は前日の日付になる。
     //     新: ★業務開始(shift.start_time)の日★を日本時間で切って全件に使う。
     //         給料・売上表も同じ切り方（業務開始の日）なので、★3つとも揃う★。
-    const bizDate = (() => {
-      try {
-        if (!shiftStart) return null;
-        const d = new Date(shiftStart + 9 * 60 * 60 * 1000); // 日本時間へ
-        const p = (n: number) => String(n).padStart(2, '0');
-        return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-      } catch (_) {
-        return null;
-      }
-    })();
-
-    const rows = invoiceTrips
-      .filter((t) => !done.has(refOf(t)))
-      .map((t) => {
-        return {
-          user_id: ownerId,
-          company: String(t.customer_name || ''), // 請求先(companies.name と同じ文字列)
-          date: bizDate, // ★業務開始の日（日本時間）＝同じ晩は同じ日付★
-          destination: String(t.end_address || ''), // 行き先 = 到着地
-          amount: t.fare_yen, // ★メーター確定の料金をそのまま★
-          distance:
-            typeof t.distance_m === 'number' ? Math.round((t.distance_m / 1000) * 10) / 10 : null, // km(小数1桁)
-          name: '',
-          note: '',
-          extra: {
-            dk_ref: refOf(t), // ★二重登録を防ぐ鍵★
-            dk_from: String(t.start_address || ''), // 出発地(請求書アプリの標準列に無いので自由項目へ)
-            dk_source: 'daikome',
-          },
-        };
-      });
-    if (!rows.length) return;
-    await sb.from('meisai').insert(rows);
-  } catch (_) {
+    const bizDate = businessDate(shiftStart as number);
+    const rows = buildMeisaiRows({
+      ownerId,
+      deviceId,
+      shiftStartMs: shiftStart as number,
+      trips: invoiceTrips,
+      done,
+    });
+    if (!bizDate) return 'skip:業務開始の日付が読めない';
+    if (!rows.length) return 'skip:既に入っている(' + refs.length + '件)';
+    const { error: mErr } = await sb.from('meisai').insert(rows);
+    if (mErr) return 'error:' + String(mErr.message || mErr).slice(0, 120);
+    return 'ok:' + rows.length + '件入れた';
+  } catch (e) {
     // 請求書側で何が起きても、ダイコメの実績受け取りは止めない
+    return 'error:' + String((e as Error)?.message || e).slice(0, 120);
   }
 }

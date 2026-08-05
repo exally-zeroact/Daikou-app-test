@@ -1,0 +1,210 @@
+// ============================================================
+// ★請求書アプリへの自動投入が本当に入ること★ 2026-08-05
+//
+//   ★何が起きたか（司さん「①やれっていよろがぼけなんのために作ったんだ」）★
+//     自動投入の flag を立てた。関数は 200 を返した。★なのに1件も入らなかった。★
+//     理由: distance に 5.4 を入れていたが、請求書アプリの distance は★整数の列★。
+//           Postgres が弾き、Edge Function の catch が握り潰していた。
+//     ＝★作った時から一度も動いたことがなかった。立てるまで誰も気づけなかった。★
+//
+//   ★なぜテストが無かったか★
+//     行を作る所が Edge Function の中に埋まっていて、外から触れなかった。
+//     ⇒ meisai-row.js に出して、★本物のDBの列の型★と突き合わせる。
+//
+//   ★列の型は実測（本番 tnfwipbgfgjaymlszeid・2026-08-05）★
+//     amount integer / distance integer / people integer / date date / extra jsonb
+// ============================================================
+import { describe, it, expect } from 'vitest';
+import {
+  MEISAI_COLUMNS,
+  buildMeisaiRows,
+  businessDate,
+  refOf,
+} from '../../supabase/functions/dk-sync-jobs/meisai-row.js';
+
+const OWNER = '9607d66a-e756-4fcd-9920-511d870fa28d';
+const DEV = 'f3527369-9df3-47c4-93a8-b6e532a4ce92';
+
+// 司さんの実データそのまま（8/3・8/4 の請求書払い）
+const REAL = [
+  {
+    seq: 1,
+    distance_m: 5362,
+    fare_yen: 2200,
+    payment_type: 'invoice',
+    customer_name: 'Lounge Chouchou',
+    start_address: '今治市富田新港',
+    end_address: '今治市北浜町',
+  },
+  {
+    seq: 5,
+    distance_m: 2134,
+    fare_yen: 1400,
+    payment_type: 'invoice',
+    customer_name: 'エスプリ アマン',
+    start_address: '今治市旭町',
+    end_address: '今治市東鳥生町',
+  },
+];
+const build = (trips, opts) =>
+  buildMeisaiRows({
+    ownerId: OWNER,
+    deviceId: DEV,
+    shiftStartMs: 1785835513046,
+    trips,
+    ...(opts || {}),
+  });
+
+// ★これが本丸★ 列の型と、作った値が合っているか
+function checkAgainstSchema(row) {
+  const bad = [];
+  Object.keys(row).forEach((col) => {
+    const type = MEISAI_COLUMNS[col];
+    const v = row[col];
+    if (!type) return bad.push(col + ': ★請求書アプリに無い列★');
+    if (v === null) return;
+    if (type === 'integer' && !Number.isInteger(v))
+      bad.push(col + ': 整数の列に ' + JSON.stringify(v));
+    if (type === 'text' && typeof v !== 'string')
+      bad.push(col + ': 文字の列に ' + JSON.stringify(v));
+    if (type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(String(v)))
+      bad.push(col + ': 日付の形でない ' + JSON.stringify(v));
+    if (type === 'jsonb' && (typeof v !== 'object' || Array.isArray(v)))
+      bad.push(col + ': jsonb でない');
+    if (type === 'uuid' && !/^[0-9a-f-]{36}$/i.test(String(v))) bad.push(col + ': uuid でない');
+  });
+  return bad;
+}
+
+describe('★請求書アプリの列に、そのまま入る値になっていること★', () => {
+  it('司さんの実データ2件が、列の型と全部合う', () => {
+    build(REAL).forEach((r) => expect(checkAgainstSchema(r), JSON.stringify(r)).toEqual([]));
+  });
+
+  it('★distance は整数★（5.4 を入れて落ちていた・これが本当の原因）', () => {
+    const rows = build([
+      { seq: 1, distance_m: 5432, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
+    ]);
+    expect(
+      Number.isInteger(rows[0].distance),
+      '★整数でない＝Postgres に弾かれて1件も入らない★'
+    ).toBe(true);
+    expect(rows[0].distance).toBe(5);
+  });
+
+  it('★どんな距離でも整数になる★（端数で落ちる組み合わせを残さない）', () => {
+    for (let m = 0; m <= 60000; m += 137) {
+      const rows = build([
+        { seq: 1, distance_m: m, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
+      ]);
+      expect(Number.isInteger(rows[0].distance), m + 'm で ' + rows[0].distance).toBe(true);
+    }
+  });
+
+  it('料金も整数（小数の料金が来ても落ちない）', () => {
+    const rows = build([
+      { seq: 1, distance_m: 5000, fare_yen: 2200.4, payment_type: 'invoice', customer_name: 'A' },
+    ]);
+    expect(Number.isInteger(rows[0].amount)).toBe(true);
+    expect(rows[0].amount).toBe(2200);
+  });
+
+  it('★丸めて消える距離は extra に実測mで残る★（請求書アプリの表は変えない）', () => {
+    const rows = build(REAL);
+    expect(rows[0].extra.dk_distance_m).toBe(5362);
+    expect(rows[1].extra.dk_distance_m).toBe(2134);
+  });
+});
+
+describe('★入れる中身が正しいこと★', () => {
+  it('請求先・行き先・出発地・料金がそのまま', () => {
+    const [a] = build(REAL);
+    expect(a.company).toBe('Lounge Chouchou'); // companies.name と同じ文字列
+    expect(a.destination).toBe('今治市北浜町');
+    expect(a.extra.dk_from).toBe('今治市富田新港');
+    expect(a.amount).toBe(2200); // ★メーター確定の料金をいじらない★
+  });
+
+  it('★日付は業務開始の日（日本時間）★＝同じ晩は同じ日付', () => {
+    // 8/4 15:44 開始の勤務。日をまたいだ代行も同じ 8/4 になること
+    expect(businessDate(1785835513046)).toBe('2026-08-04');
+    build(REAL).forEach((r) => expect(r.date).toBe('2026-08-04'));
+  });
+
+  it('日本時間の朝（UTCだと前日）でもずれない', () => {
+    expect(businessDate(Date.UTC(2026, 7, 5, 0, 30))).toBe('2026-08-05'); // 日本 9:30
+    expect(businessDate(Date.UTC(2026, 7, 4, 15, 30))).toBe('2026-08-05'); // 日本 0:30
+  });
+});
+
+describe('★入れてはいけない物を入れないこと★', () => {
+  it('現金の代行は入れない', () => {
+    expect(
+      build([
+        { seq: 1, distance_m: 5000, fare_yen: 2000, payment_type: 'cash', customer_name: 'A' },
+      ])
+    ).toEqual([]);
+  });
+
+  it('請求先が決まっていない代行は入れない', () => {
+    expect(
+      build([
+        { seq: 1, distance_m: 5000, fare_yen: 2000, payment_type: 'invoice', customer_name: '' },
+      ])
+    ).toEqual([]);
+  });
+
+  it('★既に入っている物は二度入れない★（司さんの手入力と二重にしない）', () => {
+    const done = new Set([refOf(DEV, 1785835513046, 1)]);
+    const rows = build(REAL, { done });
+    expect(rows.length).toBe(1);
+    expect(rows[0].extra.dk_ref).toBe(refOf(DEV, 1785835513046, 5));
+  });
+
+  it('鍵は送り直しでも変わらない（端末:勤務開始:何件目）', () => {
+    const a = build(REAL)[0].extra.dk_ref;
+    const b = build(REAL)[0].extra.dk_ref;
+    expect(a).toBe(b);
+    expect(a).toBe(DEV + ':1785835513046:1');
+  });
+
+  it('業務開始が読めない時は1件も作らない', () => {
+    expect(
+      buildMeisaiRows({ ownerId: OWNER, deviceId: DEV, shiftStartMs: 0, trips: REAL })
+    ).toEqual([]);
+    expect(
+      buildMeisaiRows({ ownerId: OWNER, deviceId: DEV, shiftStartMs: NaN, trips: REAL })
+    ).toEqual([]);
+  });
+
+  it('壊れた入力でも落ちない', () => {
+    expect(() => buildMeisaiRows({})).not.toThrow();
+    expect(() => buildMeisaiRows({ trips: [null, undefined, {}] })).not.toThrow();
+  });
+});
+
+describe('★立てても黙って落ちる、を二度とやらないこと★', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const SRC = fs.readFileSync(
+    path.resolve(__dirname, '..', '..', 'supabase', 'functions', 'dk-sync-jobs', 'index.ts'),
+    'utf8'
+  );
+
+  it('★入れられなかった理由を返している★（今回これが無くて原因が分からなかった）', () => {
+    expect(SRC, '理由を返していない').toMatch(/return\s+'error:'/);
+    expect(SRC, '入れた件数を返していない').toMatch(/return\s+'ok:'/);
+    expect(SRC, '返事に meisai が入っていない').toContain('accepted, meisai');
+  });
+
+  it('★insert の失敗を捨てていない★', () => {
+    expect(SRC, 'insert のエラーを受け取っていない').toContain(
+      "const { error: mErr } = await sb.from('meisai').insert(rows)"
+    );
+  });
+
+  it('★行を作る所を関数の中に書き戻していない★（外に出ていないとテストできない）', () => {
+    expect(SRC).toContain("from './meisai-row.js'");
+    expect(SRC, '関数の中で行を組み立て直している').not.toMatch(/dk_source:\s*'daikome'/);
+  });
+});
