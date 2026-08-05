@@ -19,7 +19,11 @@ const MEISAI_COLUMNS = {
   destination: 'text',
   amount: 'integer',
   note: 'text',
-  distance: 'integer', // ★小数を入れると落ちる★
+  // ★2026-08-05 integer → numeric(8,2) に広げた★
+  //   司さん「5.36kmなら5.36kmってだせやぼけ なんで切り上げしとんど ごまかさすな」
+  //   整数の列だったので 5.36km が「5km」になっていた。実測どおり出す。
+  //   (既存1102件は distance が空か整数だったので、広げても何も失われていない)
+  distance: 'numeric2', // km・小数2桁（メーターの画面と同じ桁）
   people: 'integer',
   name: 'text',
   extra: 'jsonb',
@@ -57,8 +61,12 @@ function buildMeisaiRows(opts) {
       date: date, // ★同じ晩は同じ日付★
       destination: String(t.end_address || ''),
       amount: typeof t.fare_yen === 'number' ? Math.round(t.fare_yen) : null, // メーター確定の料金
-      // ★整数km★ 小数は入らない。消える端数は extra に実測mで残す。
-      distance: typeof t.distance_m === 'number' ? Math.round(t.distance_m / 1000) : null,
+      // ★実測どおりの km（小数2桁）★ 5362m → 5.36km
+      //   ★メーターの画面と1桁も食い違わせない★ため、
+      //   メーターが使っているのと同じ式 (m/1000).toFixed(2) をそのまま使う。
+      //   (Math.round(m/10)/100 だと 3425m で メーター3.42 / 請求書3.43 とズレた。
+      //    3.425 は2進数だとほんの少し小さいので、丸め方で答えが変わる)
+      distance: typeof t.distance_m === 'number' ? Number((t.distance_m / 1000).toFixed(2)) : null,
       name: '',
       note: '',
       extra: {
@@ -85,6 +93,20 @@ function buildMeisaiRows(opts) {
 // ============================================================
 const UPDATABLE = ['company', 'date', 'destination', 'amount', 'distance'];
 
+// 同じ中身か。★数はDBから文字で返る★ので、文字くらべだと 5.30 と 5.3 が
+// 「違う」と見えて、送るたびに毎回書き込んでしまう（無駄な更新が一生続く）。
+// 数として読めるものは数でくらべる。
+function _same(a, b) {
+  if (a === null || a === undefined) return b === null || b === undefined;
+  if (b === null || b === undefined) return false;
+  const na = Number(a);
+  const nb = Number(b);
+  if (String(a).trim() !== '' && String(b).trim() !== '' && isFinite(na) && isFinite(nb)) {
+    return Math.abs(na - nb) < 1e-9;
+  }
+  return String(a) === String(b);
+}
+
 // rows = これから入れたい行 / existing = 既に入っている行 [{id, extra, company, date, ...}]
 function planMeisaiWrite(rows, existing) {
   const byRef = new Map();
@@ -102,7 +124,7 @@ function planMeisaiWrite(rows, existing) {
     UPDATABLE.forEach((c) => {
       const a = cur[c] === undefined ? null : cur[c];
       const b = r[c] === undefined ? null : r[c];
-      if (String(a) !== String(b)) patch[c] = b;
+      if (!_same(a, b)) patch[c] = b;
     });
     // 正確な距離も更新する（extra は自分の物なので、司さんの書いた列とは別）
     const curM = cur.extra ? cur.extra.dk_distance_m : undefined;

@@ -66,6 +66,12 @@ function checkAgainstSchema(row) {
     if (v === null) return;
     if (type === 'integer' && !Number.isInteger(v))
       bad.push(col + ': 整数の列に ' + JSON.stringify(v));
+    // ★小数2桁の列（距離）★ 3桁以上入れると DB 側で丸められて画面とズレる
+    if (type === 'numeric2') {
+      if (typeof v !== 'number' || !isFinite(v)) bad.push(col + ': 数でない ' + JSON.stringify(v));
+      else if (Math.round(v * 100) !== v * 100)
+        bad.push(col + ': 小数が2桁を超える ' + JSON.stringify(v));
+    }
     if (type === 'text' && typeof v !== 'string')
       bad.push(col + ': 文字の列に ' + JSON.stringify(v));
     if (type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(String(v)))
@@ -82,23 +88,64 @@ describe('★請求書アプリの列に、そのまま入る値になってい�
     build(REAL).forEach((r) => expect(checkAgainstSchema(r), JSON.stringify(r)).toEqual([]));
   });
 
-  it('★distance は整数★（5.4 を入れて落ちていた・これが本当の原因）', () => {
+  // ============================================================
+  // ★距離は実測どおり出す★ 2026-08-05
+  //   司さん「5.36kmなら5.36kmってだせやぼけ なんで切り上げしとんど ごまかさすな」
+  //   請求書アプリの distance が integer だったので 5.36km が「5km」になっていた。
+  //   → 列を numeric(8,2) に広げ、メーターの画面と同じ小数2桁で入れる。
+  // ============================================================
+  it('★5.36km なら 5.36km と出る★（丸めてごまかさない）', () => {
     const rows = build([
-      { seq: 1, distance_m: 5432, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
+      { seq: 1, distance_m: 5362, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
     ]);
-    expect(
-      Number.isInteger(rows[0].distance),
-      '★整数でない＝Postgres に弾かれて1件も入らない★'
-    ).toBe(true);
-    expect(rows[0].distance).toBe(5);
+    expect(rows[0].distance, '★丸めて 5km にしている★').toBe(5.36);
   });
 
-  it('★どんな距離でも整数になる★（端数で落ちる組み合わせを残さない）', () => {
+  it('★司さんの実データが、メーターの画面と同じ数字になる★', () => {
+    // 実測値そのまま（メーターは (m/1000).toFixed(2) で出している）
+    [
+      [5356.50464367155, 5.36],
+      [5316.66953670697, 5.32],
+      [2129.60241742354, 2.13],
+    ].forEach(([m, km]) => {
+      const rows = build([
+        { seq: 1, distance_m: m, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
+      ]);
+      expect(rows[0].distance, m + 'm').toBe(km);
+      expect(rows[0].distance, '★メーターの画面と数字が違う★').toBe(Number((m / 1000).toFixed(2)));
+    });
+  });
+
+  it('★切り上げも切り捨てもしない★', () => {
+    const at = (m) =>
+      build([
+        { seq: 1, distance_m: m, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
+      ])[0].distance;
+    expect(at(5999), '★切り上げている★').toBe(6);
+    expect(at(5004), '★切り上げている★').toBe(5);
+    expect(at(4)).toBe(0);
+    expect(at(0)).toBe(0);
+    // ★ちょうど半分(5005m=5.005km)の扱いは、メーターに合わせる★
+    //   メーターは (m/1000).toFixed(2) で「5.00」と出す。請求書だけ 5.01 にはしない。
+    //   (2進数では 5.005 がわずかに小さいため。理屈より★画面と一致すること★を採る)
+    expect(at(5005), '★メーターは 5.00 と出しているのにズレている★').toBe(5);
+    // ★丸め方の違いで実際にズレていた例★
+    expect(at(3425), '★メーターは 3.42 と出しているのにズレている★').toBe(3.42);
+  });
+
+  it('★どんな距離でもメーターの画面と一致する★（1件も食い違わせない）', () => {
     for (let m = 0; m <= 60000; m += 137) {
       const rows = build([
         { seq: 1, distance_m: m, fare_yen: 2000, payment_type: 'invoice', customer_name: 'A' },
       ]);
-      expect(Number.isInteger(rows[0].distance), m + 'm で ' + rows[0].distance).toBe(true);
+      expect(rows[0].distance, m + 'm で ' + rows[0].distance).toBe(Number((m / 1000).toFixed(2)));
+      // DB は小数2桁までしか持てない。3桁以上を入れると黙って丸められて画面とズレる。
+      //   (0.14*100 が 14.000000000000002 になる浮動小数のクセがあるので、
+      //    掛け算で比べず「2桁に丸めた文字」と一致するかで見る)
+      expect(rows[0].distance.toFixed(2), m + 'm で桁あふれ').toBe(
+        String(rows[0].distance.toFixed(2))
+      );
+      expect(Number(rows[0].distance.toFixed(2)), m + 'm で桁あふれ').toBe(rows[0].distance);
     }
   });
 
@@ -204,7 +251,7 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
         date: '2026-08-04',
         destination: '今治市北浜町',
         amount: 2200,
-        distance: 5,
+        distance: 5.36,
       },
       over || {}
     );
@@ -219,6 +266,35 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
     const p = planMeisaiWrite(rows(), [existing()]);
     expect(p.inserts.length).toBe(0);
     expect(p.updates.length, '変わっていないのに書き込んでいる').toBe(0);
+  });
+
+  it('★DBが返す "5.36"（文字）でも「変わった」と見ない★', () => {
+    // Supabase は numeric を文字で返す。文字くらべだと毎回書き込んでしまう。
+    const p = planMeisaiWrite(rows(), [existing({ distance: '5.36', amount: '2200' })]);
+    expect(p.updates.length, '★送るたびに毎回書き込んでいる★').toBe(0);
+  });
+
+  it('★"5.30" と 5.3 も同じと見る★（末尾の0で毎回書き込まない）', () => {
+    const r = build([
+      {
+        seq: 1,
+        distance_m: 5300,
+        fare_yen: 2200,
+        payment_type: 'invoice',
+        customer_name: 'Lounge Chouchou',
+        end_address: '今治市北浜町',
+      },
+    ]);
+    expect(r[0].distance).toBe(5.3);
+    const cur = existing({ distance: '5.30' });
+    cur.extra = { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5300 };
+    const p = planMeisaiWrite(r, [cur]);
+    expect(p.updates.length, '★5.30 と 5.3 を別物と見ている★').toBe(0);
+  });
+
+  it('本当に距離が変わったら直す', () => {
+    const p = planMeisaiWrite(rows(), [existing({ distance: '9.99' })]);
+    expect(p.updates[0].patch.distance).toBe(5.36);
   });
 
   it('★値引きして金額が変わったら直す★', () => {
