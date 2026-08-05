@@ -209,14 +209,35 @@ async function pushToInvoiceApp(
         .filter(Boolean) as string[]
     );
 
+    // ★請求書の日付は「その晩の仕事の日」= 業務開始の日（日本時間）★ 2026-08-05
+    //
+    //   ★直した穴（司さんの指摘）★
+    //     旧: 代行1件ごとの started_at を UTC のまま slice していた。
+    //         代行は夜の仕事なので★深夜0時をまたぐと、同じ晩なのに日付が変わる★。
+    //         実データで実際に起きていた:
+    //           8/4 23:34 の代行 → 8/4  ／  8/5 00:38 の代行 → ★8/5★
+    //         ＝★同じ晩の仕事が請求書では2日に分かれる★。
+    //         しかも UTC 切りなので、日本時間 朝9時より前は前日の日付になる。
+    //     新: ★業務開始(shift.start_time)の日★を日本時間で切って全件に使う。
+    //         給料・売上表も同じ切り方（業務開始の日）なので、★3つとも揃う★。
+    const bizDate = (() => {
+      try {
+        if (!shiftStart) return null;
+        const d = new Date(shiftStart + 9 * 60 * 60 * 1000); // 日本時間へ
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+      } catch (_) {
+        return null;
+      }
+    })();
+
     const rows = invoiceTrips
       .filter((t) => !done.has(refOf(t)))
       .map((t) => {
-        const started = t.started_at ? String(t.started_at) : null;
         return {
           user_id: ownerId,
           company: String(t.customer_name || ''), // 請求先(companies.name と同じ文字列)
-          date: started ? started.slice(0, 10) : null, // YYYY-MM-DD
+          date: bizDate, // ★業務開始の日（日本時間）＝同じ晩は同じ日付★
           destination: String(t.end_address || ''), // 行き先 = 到着地
           amount: t.fare_yen, // ★メーター確定の料金をそのまま★
           distance:
