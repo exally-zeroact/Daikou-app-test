@@ -77,7 +77,7 @@ Deno.serve(async (req: Request) => {
   // 代行請求書アプリの請求先マスタ
   const { data: rows, error: cErr } = await sb
     .from('companies')
-    .select('id, name')
+    .select('id, name, config')
     .eq('user_id', co.owner_id)
     .is('deleted_at', null)
     .order('name')
@@ -85,9 +85,33 @@ Deno.serve(async (req: Request) => {
   // マスタがまだ無い/読めない場合も業務を止めない(空で返す)
   if (cErr) return json({ ok: true, customers: [] });
 
+  // ★誰が乗ったかを選ばせる会社か (2026-08-05・司さん指摘)★
+  //   藤原建設株式会社 は請求書を「会長／社長／専務」で分けて小計を出す設定
+  //   (companies.config.noteGroups)。ところがメーターに★誰が乗ったかを選ぶ所が無く★、
+  //   自動投入するとその会社の行だけ備考が空で上がり、仕分けから外れていた。
+  //   ⇒ 分け方をそのまま端末へ配って、請求先を選んだら続けて名前も選ばせる。
+  //     (会社が増えても・分け方が変わっても、事務所の設定を直すだけで済む)
+  const groupsOf = (cfg: unknown): string[] => {
+    try {
+      const g = (cfg as Record<string, unknown> | null)?.noteGroups;
+      if (!Array.isArray(g)) return [];
+      return g
+        .map((x) => (typeof x === 'string' ? x.trim() : ''))
+        .filter((x) => x)
+        .slice(0, 20);
+    } catch {
+      return [];
+    }
+  };
+
   const customers = (rows || [])
     .filter((r) => r && r.name)
-    .map((r) => ({ id: String(r.id), name: String(r.name) }));
+    .map((r) => {
+      const groups = groupsOf(r.config);
+      const c: Record<string, unknown> = { id: String(r.id), name: String(r.name) };
+      if (groups.length) c.note_groups = groups; // 使わない会社には付けない(端末を軽く保つ)
+      return c;
+    });
 
   return json({ ok: true, customers });
 });

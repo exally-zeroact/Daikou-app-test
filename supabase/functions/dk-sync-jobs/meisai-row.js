@@ -11,6 +11,34 @@
 //     この表とずれた値を作ったらテストが赤になる。
 // ============================================================
 
+// ============================================================
+// ★倉庫(dk_trips)の列★ 実測 2026-08-05（本番 tnfwipbgfgjaymlszeid）
+//
+//   ★同じ穴を2回踏んだので表にした★
+//     1回目: meisai.distance が整数の列なのに 5.4 を入れて、★1件も入らなかった★
+//     2回目: dk_trips に customer_note の列が無いのに書きに行き、
+//            ★勤務ごと受け取られず accepted:[] になった★（＝実績が丸ごと上がらない）
+//   どちらも「入れ先の形を見ずに書いた」。列を足したら★必ずここにも足す★。
+// ============================================================
+const DK_TRIPS_COLUMNS = [
+  'trip_id',
+  'shift_id',
+  'company_id',
+  'seq',
+  'distance_m',
+  'fare_yen',
+  'customer_id',
+  'customer_name',
+  'customer_note', // 誰が乗ったか(会長/社長/専務など) 2026-08-05 追加
+  'payment_type',
+  'started_at',
+  'ended_at',
+  'start_address',
+  'end_address',
+  'waypoints',
+  'created_at',
+];
+
 // 実測: information_schema.columns（本番 tnfwipbgfgjaymlszeid）
 const MEISAI_COLUMNS = {
   user_id: 'uuid',
@@ -68,7 +96,10 @@ function buildMeisaiRows(opts) {
       //    3.425 は2進数だとほんの少し小さいので、丸め方で答えが変わる)
       distance: typeof t.distance_m === 'number' ? Number((t.distance_m / 1000).toFixed(2)) : null,
       name: '',
-      note: '',
+      // ★誰が乗ったか(会長/社長/専務など) 2026-08-05★
+      //   藤原建設は請求書を備考で分けて小計を出す。ここが空だと★その行だけ仕分けから外れる★。
+      //   分け方を使わない会社では今までどおり空(司さんが後から書く場所を奪わない)。
+      note: typeof t.customer_note === 'string' ? t.customer_note : '',
       extra: {
         dk_ref: refOf(deviceId, shiftStart, t.seq), // 二重登録を防ぐ鍵
         dk_from: String(t.start_address || ''), // 出発地（標準の列に無い）
@@ -126,6 +157,13 @@ function planMeisaiWrite(rows, existing) {
       const b = r[c] === undefined ? null : r[c];
       if (!_same(a, b)) patch[c] = b;
     });
+    // ★備考だけは特別扱い (2026-08-05)★
+    //   ふつうは司さんが後から書く欄なので絶対に触らない。
+    //   ただし「会長/社長/専務」で分ける会社は★メーターが誰かを持っている★ので、
+    //   運転手が後から直したらそれを通す。★メーター側が空の時は絶対に触らない★
+    //   （空で上書きすると司さんが書いた備考を消してしまう）。
+    const newNote = typeof r.note === 'string' ? r.note : '';
+    if (newNote && !_same(cur.note === undefined ? null : cur.note, newNote)) patch.note = newNote;
     // 正確な距離も更新する（extra は自分の物なので、司さんの書いた列とは別）
     const curM = cur.extra ? cur.extra.dk_distance_m : undefined;
     if (String(curM === undefined ? null : curM) !== String(r.extra.dk_distance_m)) {
@@ -136,4 +174,12 @@ function planMeisaiWrite(rows, existing) {
   return { inserts, updates };
 }
 
-export { MEISAI_COLUMNS, businessDate, refOf, buildMeisaiRows, planMeisaiWrite, UPDATABLE };
+export {
+  MEISAI_COLUMNS,
+  DK_TRIPS_COLUMNS,
+  businessDate,
+  refOf,
+  buildMeisaiRows,
+  planMeisaiWrite,
+  UPDATABLE,
+};

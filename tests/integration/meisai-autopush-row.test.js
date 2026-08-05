@@ -345,6 +345,49 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
   });
 });
 
+// ============================================================
+// ★無い列に書きに行かないこと★ 2026-08-05
+//
+//   ★同じ穴を2回踏んだ★
+//     1回目: meisai.distance が整数なのに 5.4 を入れて★1件も入らなかった★
+//     2回目: dk_trips に customer_note が無いのに書きに行き、
+//            ★勤務ごと受け取られず accepted:[] ＝実績が丸ごと上がらなくなった★
+//            （本番に入れていたら全端末の実績が止まっていた）
+//   ⇒ 関数が書きに行く列を、実測した列の表と突き合わせる。
+// ============================================================
+describe('★倉庫に無い列へ書きに行かないこと★', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const SRC = fs.readFileSync(
+    path.resolve(__dirname, '..', '..', 'supabase', 'functions', 'dk-sync-jobs', 'index.ts'),
+    'utf8'
+  );
+  const M = require('../../supabase/functions/dk-sync-jobs/meisai-row.js');
+
+  it('★dk_trips に入れる列が、全部 実在する列★', () => {
+    // .map((t, i) => ({ ... })) の中で dk_trips に入れる形を作っている
+    const i = SRC.indexOf('shift_id: shiftRow.shift_id');
+    expect(i, 'dk_trips に入れる所が見つからない').toBeGreaterThan(-1);
+    const block = SRC.slice(i, SRC.indexOf("await sb.from('dk_trips').delete()", i));
+    const keys = [];
+    const re = /^\s{10}([a-z_]+):/gm;
+    let m;
+    while ((m = re.exec(block))) keys.push(m[1]);
+    expect(keys.length, '列を1つも読み取れていない').toBeGreaterThan(5);
+    const missing = keys.filter((k) => M.DK_TRIPS_COLUMNS.indexOf(k) < 0);
+    expect(missing, '★倉庫に無い列へ書いている＝勤務ごと受け取られなくなる★').toEqual([]);
+  });
+
+  it('★「誰が乗ったか」の列が実在する★（無いと実績が丸ごと上がらない）', () => {
+    expect(M.DK_TRIPS_COLUMNS, 'dk_trips に customer_note が無い').toContain('customer_note');
+  });
+
+  it('列の表が実物とずれていないこと（足したらここにも足す）', () => {
+    // 実測(2026-08-05)。DBに列を足したのにここを直し忘れると、この本数で気づける。
+    expect(M.DK_TRIPS_COLUMNS.length).toBe(16);
+  });
+});
+
 describe('★立てても黙って落ちる、を二度とやらないこと★', () => {
   const fs = require('fs');
   const path = require('path');

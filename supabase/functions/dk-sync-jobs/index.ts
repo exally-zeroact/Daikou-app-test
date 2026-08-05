@@ -138,6 +138,8 @@ Deno.serve(async (req: Request) => {
           // 掛け先(請求書払い)。変な支払区分は現金に倒す。
           customer_id: typeof t.customer_id === 'string' && t.customer_id ? t.customer_id : null,
           customer_name: str(t.customer_name),
+          // ★誰が乗ったか(会長/社長/専務など)★ 請求書の備考に入り、そこで小計が分かれる
+          customer_note: str(t.customer_note),
           payment_type: t.customer_id && t.payment_type === 'invoice' ? 'invoice' : 'cash',
           started_at: toIso(t.start_time),
           ended_at: toIso(t.end_time),
