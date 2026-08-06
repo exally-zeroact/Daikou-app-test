@@ -56,7 +56,10 @@ describe('★他のアプリの管理画面と同じ形であること★', () =
   it('しぼり込み・更新・件数がある（他の2つと同じ）', () => {
     expect(HTML).toContain('id="q"');
     expect(HTML).toContain('id="refresh"');
-    expect(JS, '件数を出していない').toMatch(/全部で ' \+ rows\.length/);
+    // 整形で改行が入るので、文字と数の出どころを別々に見る（書き方に縛られない）
+    expect(JS, '★件数を出していない★').toContain('全部で ');
+    expect(JS, '★件数の元が rows でない★').toContain('rows.length');
+    expect(JS, '★止めている会社の数を出していない★').toContain('止めている会社 ');
   });
 
   it('★人の追加・削除は入れていない★（他の2つにも無い）', () => {
