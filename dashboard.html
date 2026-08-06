@@ -494,40 +494,6 @@
           <div class="desc">機種変・入れ替えの時は「外す」で席を空けられます。</div>
           <div id="devList"></div>
         </div>
-
-        <!-- ★使える人 (2026-08-06・司さん「おれが権限持つようしろ」)★
-             今までは会社を作った人1人しか事務所に入れなかった。
-             ここで社長が「誰を入れるか」を決める。★足す/外すは社長だけ★。 -->
-        <div class="card" id="memberCard" style="display: none">
-          <h2>この事務所を使える人</h2>
-          <div class="desc">
-            ここに足した人だけが、この画面（売上表・給料・月次集計）を開けます。<br />
-            外すとすぐ入れなくなります。<b>あなた（社長）は外せません。</b>
-          </div>
-          <div id="memberList"></div>
-          <div class="row" style="margin-top: 12px">
-            <input
-              id="memberMail"
-              type="email"
-              inputmode="email"
-              autocomplete="off"
-              placeholder="メールアドレス"
-              style="
-                flex: 1 1 200px;
-                min-width: 0;
-                border: 1.5px solid var(--line);
-                border-radius: 8px;
-                padding: 9px 11px;
-                font-size: 16px;
-                font-family: inherit;
-              "
-            />
-            <button class="btn" id="memberAdd">足す</button>
-          </div>
-          <div class="desc" style="margin-top: 8px">
-            相手はこのメールアドレスで<b>ログイン画面から入ります</b>（合言葉は本人が決めます）。
-          </div>
-        </div>
       </div>
 
       <div class="foot" id="foot" style="display: none">
@@ -738,133 +704,6 @@
             });
         }
 
-        // ─── 使える人 (2026-08-06・司さん「おれが権限持つようしろ」) ───
-        //   ★足す/外すは社長だけ★（棚の鍵でも縛ってある。画面はそれに合わせるだけ）
-        //   ★社長は自分を外せない★（誰も入れなくなるのを防ぐ）
-        var MY_EMAIL = '';
-
-        function loadMembers() {
-          return api(
-            '/dk_members?select=email,role,active&company_id=eq.' +
-              encodeURIComponent(COMPANY.company_id) +
-              '&order=role.asc,email.asc'
-          )
-            .then(function (r) {
-              return r.ok ? r.json() : [];
-            })
-            .catch(function () {
-              return [];
-            });
-        }
-
-        function renderMembers() {
-          var card = $('memberCard');
-          if (!card) return;
-          loadMembers().then(function (ms) {
-            ms = Array.isArray(ms) ? ms : [];
-            // ★社長でなければ、この箱ごと出さない★（触れない物を見せない）
-            var iAmOwner = ms.some(function (m) {
-              return m.role === 'owner' && String(m.email).toLowerCase() === MY_EMAIL;
-            });
-            card.style.display = iAmOwner ? '' : 'none';
-            if (!iAmOwner) return;
-
-            var list = $('memberList');
-            list.innerHTML = '';
-            if (!ms.length) {
-              list.innerHTML = '<div class="empty">まだ誰もいません</div>';
-              return;
-            }
-            ms.forEach(function (m) {
-              var wrap = document.createElement('div');
-              wrap.className = 'dev';
-              var left = document.createElement('div');
-              var isOwner = m.role === 'owner';
-              left.innerHTML =
-                '<div class="id"></div><div class="sub">' +
-                (isOwner ? '社長（外せません）' : m.active ? '使えます' : '外してあります') +
-                '</div>';
-              left.querySelector('.id').textContent = m.email;
-              wrap.appendChild(left);
-              if (!isOwner) {
-                var btn = document.createElement('button');
-                btn.className = 'rm';
-                btn.textContent = m.active ? '外す' : 'もどす';
-                btn.onclick = function () {
-                  if (m.active && !confirm(m.email + ' を外しますか？（すぐ入れなくなります）'))
-                    return;
-                  btn.disabled = true;
-                  btn.textContent = '…';
-                  api(
-                    '/dk_members?company_id=eq.' +
-                      encodeURIComponent(COMPANY.company_id) +
-                      '&email=eq.' +
-                      encodeURIComponent(m.email),
-                    {
-                      method: 'PATCH',
-                      headers: { Prefer: 'return=minimal' },
-                      body: JSON.stringify({ active: !m.active }),
-                    }
-                  )
-                    .then(function (r) {
-                      if (!r.ok) {
-                        btn.disabled = false;
-                        btn.textContent = m.active ? '外す' : 'もどす';
-                        alert('変えられませんでした');
-                        return;
-                      }
-                      renderMembers();
-                    })
-                    .catch(function () {
-                      btn.disabled = false;
-                      btn.textContent = m.active ? '外す' : 'もどす';
-                      alert('ネットに繋がる所で、もう一度お試しください。');
-                    });
-                };
-                wrap.appendChild(btn);
-              }
-              list.appendChild(wrap);
-            });
-          });
-        }
-
-        function bindMemberAdd() {
-          var b = $('memberAdd');
-          if (!b) return;
-          b.addEventListener('click', function () {
-            var el = $('memberMail');
-            var mail = String(el.value || '')
-              .trim()
-              .toLowerCase();
-            // ★打ち間違いをここで止める★（.cpm のような1文字違いで別の空部屋に行く事故があった）
-            if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(mail)) {
-              alert('メールアドレスを確かめてください');
-              return;
-            }
-            b.disabled = true;
-            api('/dk_members', {
-              method: 'POST',
-              headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-              body: JSON.stringify({
-                company_id: COMPANY.company_id,
-                email: mail,
-                role: 'staff',
-                active: true,
-              }),
-            })
-              .then(function (r) {
-                b.disabled = false;
-                if (!r.ok) return alert('足せませんでした');
-                el.value = '';
-                renderMembers();
-              })
-              .catch(function () {
-                b.disabled = false;
-                alert('ネットに繋がる所で、もう一度お試しください。');
-              });
-          });
-        }
-
         // ★車の名前 (2026-08-05・司さん「訳分からんやつ消せ」)★
         //   ここは端末IDの先頭8文字(7e1919ef…)をそのまま出していた最後の画面。
         //   名前は売上表で付ける(dk_device_labels)。付いていなければ「車1・車2」。
@@ -910,8 +749,6 @@
             '/?c=' +
             COMPANY.url_token;
           $('coUrl').textContent = currentUrl;
-
-          renderMembers(); // ★使える人 (2026-08-06)★ 社長の時だけ出る
 
           loadDevices().then(function (devs) {
             devs = Array.isArray(devs) ? devs : [];
@@ -1120,7 +957,6 @@
         // ---------- 起動 ----------
         function start() {
           bindStaticButtons();
-          bindMemberAdd(); // ★使える人を足すボタン (2026-08-06)★
           DKSession.ensure().then(function (valid) {
             if (!valid) return goLogin(); // 本当にログインが要る時だけ
             SESS = valid;
@@ -1133,8 +969,6 @@
                   return loadCompany();
                 }
                 if (!u || !u.id) return goLogin();
-                // ★誰が開いているか（社長かどうかの判断に使う）2026-08-06★
-                MY_EMAIL = String(u.email || '').toLowerCase();
                 $('whoMail').textContent = u.email || '';
                 show('who', true);
                 show('foot', true);
