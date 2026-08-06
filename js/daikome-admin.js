@@ -143,19 +143,36 @@
     b.disabled = true;
     b.textContent = '送信中…';
     // ★戻り先はこの画面★（ここでそのままパスワードを決めてもらう）
+    //
+    //   ★2026-08-07 ここで事故った★ 司さん「メール開いたらこれ（localhost）」
+    //     Supabase は★許可リストに載っていない戻り先を黙って捨てて★、
+    //     既定の戻り先(SITE_URL)へ流す。テスト側の倉庫は SITE_URL が
+    //     http://localhost:3000 だったので、メールのリンクが localhost に飛んだ。
+    //   ⇒ scripts/auth-redirect-allow.mjs で★本番とテストの両方★に
+    //     ダイコメの4ホストを足した（SITE_URL は触っていない）。
+    //     道具が本番しか見ていなかったのが元の穴。
+    // ★「パスワードを決める」ための正しい道 (2026-08-07)★
+    //   はじめは signInWithOtp を使ったが、この倉庫は★OTPでの新規作成を止めてある★ため
+    //   422(otp_disabled) で送れなかった。
+    //   ここでやりたいのは「登録済みの運営が★パスワードを決め直す★」ことなので、
+    //   ★パスワード再設定(recover)★ が正しい。新しいアカウントは作らない
+    //   ＝運営の画面に誰でも入れる形にしない。
     sb.auth
-      .signInWithOtp({
-        email: mail,
-        options: {
-          emailRedirectTo: location.origin + '/daikome-admin.html',
-          shouldCreateUser: true,
-        },
+      .resetPasswordForEmail(mail, {
+        redirectTo: location.origin + '/daikome-admin.html',
       })
       .then(function (r) {
         b.disabled = false;
         b.textContent = 'メールを送る';
         if (r.error) {
-          $('msg2').textContent = '送れませんでした。時間をおいてお試しください。';
+          // ★何が起きたかを分けて出す★（「送れません」だけだと原因が分からない）
+          const m = String(r.error.message || '');
+          // ★何が起きたかを分けて出す★（「送れません」だけだと何をすればいいか分からない）
+          $('msg2').textContent = /rate limit|after \d+ ?s|429/i.test(m)
+            ? '続けて送れません。1分ほど待ってから、もう一度押してください。'
+            : /not allowed|otp_disabled|Signups|not found|invalid/i.test(m)
+              ? 'このアドレスは登録されていません。運営に使うアドレスを確かめてください。'
+              : '送れませんでした。時間をおいてお試しください。';
           return;
         }
         $('sentTo').textContent = mail;

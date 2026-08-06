@@ -208,7 +208,30 @@ describe('★はじめて入る道があること★', () => {
   });
 
   it('戻り先はこの画面（別の場所に飛ばさない）', () => {
-    expect(JS).toMatch(/emailRedirectTo[\s\S]{0,80}daikome-admin\.html/);
+    expect(JS, '★戻り先を指していない＝既定の場所に流される★').toMatch(
+      /redirectTo:[\s\S]{0,80}daikome-admin\.html/
+    );
+  });
+
+  // ★2026-08-07 司さん「メール開いたらこれ（localhost）」★
+  //   Supabase は★許可リストに無い戻り先を黙って捨てて★既定(SITE_URL)へ流す。
+  //   テスト側の倉庫は SITE_URL が http://localhost:3000 で、そこへ飛んでいた。
+  //   道具(auth-redirect-allow.mjs)が★本番しか見ていなかった★のが元の穴。
+  it('★戻り先の許可リストを、本番とテストの両方に当てられること★', () => {
+    const tool = fs.readFileSync(path.join(ROOT, 'scripts', 'auth-redirect-allow.mjs'), 'utf8');
+    expect(tool, '★片方の倉庫しか見ていない★').toMatch(/PROJECTS\s*=\s*\{[\s\S]{0,200}test:/);
+    expect(tool, 'テスト側の倉庫を知らない').toContain('khawdrnvssdenumbiwfg');
+    expect(tool, '★SITE_URL を触っている★').not.toMatch(/site_url\s*:/);
+  });
+
+  it('★新しいアカウントをここで作らない★（運営の画面）', () => {
+    expect(JS, '★誰でも運営として登録できてしまう★').not.toMatch(/shouldCreateUser:\s*true/);
+    expect(JS, 'パスワード再設定の道になっていない').toContain('resetPasswordForEmail');
+  });
+
+  it('送れなかった理由を分けて出す（何をすればいいか分かる）', () => {
+    expect(JS, '続けて送った時の案内が無い').toMatch(/1分ほど待って/);
+    expect(JS, '登録されていない時の案内が無い').toMatch(/登録されていません/);
   });
 });
 
