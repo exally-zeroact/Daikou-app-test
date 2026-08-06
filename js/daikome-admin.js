@@ -20,11 +20,32 @@
 (function () {
   'use strict';
 
-  const cfg = window.DKConfig;
-  const sb = window.supabase.createClient(cfg.SB_URL, cfg.ANON_KEY);
   const $ = function (id) {
     return document.getElementById(id);
   };
+
+  // ★部品が読めなかった時に、黙って止まらないこと★ 2026-08-07
+  //   ログインの部品は外(CDN)から読んでいる。電波が悪い/塞がれていると読めず、
+  //   ★ログインを押しても何も起きない★（司さんが「押しても反応しない」と言う形）。
+  //   何が足りないかを画面に出して、押せば読み直せるようにする。
+  const cfg = window.DKConfig;
+  if (!cfg || !window.supabase || !window.supabase.createClient) {
+    const m = $('msg');
+    if (m) {
+      m.textContent = !window.supabase
+        ? 'ログインの部品が読めませんでした。電波の良い所で画面を読み直してください。'
+        : '設定が読めませんでした。画面を読み直してください。';
+    }
+    const b = $('signin');
+    if (b) {
+      b.textContent = '読み直す';
+      b.onclick = function () {
+        location.reload();
+      };
+    }
+    return; // ここで止める（この先は動かせない）
+  }
+  const sb = window.supabase.createClient(cfg.SB_URL, cfg.ANON_KEY);
 
   let rows = []; // 会社ぜんぶ
   let curEmail = '';
