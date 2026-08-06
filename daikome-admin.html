@@ -293,13 +293,63 @@
 
     <!-- ログイン -->
     <div class="wrap" id="login">
-      <div class="card">
+      <div class="card" id="loginCard">
         <h1>ダイコメ 管理</h1>
         <p class="lead">運営のアカウントで入ってください。</p>
         <input id="email" type="email" placeholder="メールアドレス" autocomplete="username" />
         <input id="pw" type="password" placeholder="パスワード" autocomplete="current-password" />
         <div class="msg" id="msg"></div>
         <button class="btn" id="signin">ログイン</button>
+        <!-- ★新しく入る道 (2026-08-07・司さん「新規ではいるボタン作れ」)★
+             事務所のログイン画面(login.html)と同じ形。
+             ★パスワードは司さんが自分で決める★（私が決めない）。 -->
+        <div style="text-align: center; margin-top: 14px">
+          <a href="#" id="toSetPw" style="color: var(--blue); font-size: 14px; font-weight: 700"
+            >はじめて／パスワードを忘れた</a
+          >
+        </div>
+      </div>
+
+      <!-- パスワードを決めるためのメールを送る -->
+      <div class="card hide" id="sendCard">
+        <h1>はじめて入る／パスワードを決める</h1>
+        <p class="lead">
+          メールアドレスを入れて「メールを送る」を押してください。<br />
+          届いたリンクを押すと、<b>自分でパスワードを決める画面</b>になります。<br />
+          <b>決めるのは1回だけ</b>です。次からはそのパスワードで入れます。
+        </p>
+        <input id="email2" type="email" placeholder="メールアドレス" autocomplete="username" />
+        <div class="msg" id="msg2"></div>
+        <button class="btn" id="sendBtn">メールを送る</button>
+        <div style="text-align: center; margin-top: 14px">
+          <a href="#" id="toLogin" style="color: var(--blue); font-size: 14px; font-weight: 700"
+            >ログインに戻る</a
+          >
+        </div>
+      </div>
+
+      <!-- 送ったあと -->
+      <div class="card hide" id="sentCard">
+        <h1>メールを送りました</h1>
+        <p class="lead">
+          <b id="sentTo"></b> に送りました。<br />
+          メールを開いてリンクを押すと、<b>パスワードを決める画面</b>になります。
+        </p>
+      </div>
+
+      <!-- 決める -->
+      <div class="card hide" id="setPwCard">
+        <h1>パスワードを決める</h1>
+        <p class="lead">これから使うパスワードを入れてください（6文字以上）。</p>
+        <input
+          id="pw1"
+          type="password"
+          placeholder="新しいパスワード"
+          autocomplete="new-password"
+        />
+        <input id="pw2" type="password" placeholder="もう一度" autocomplete="new-password" />
+        <div class="msg" id="msg3"></div>
+        <button class="btn" id="savePwBtn">決めて、はじめる</button>
       </div>
     </div>
 

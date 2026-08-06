@@ -44,8 +44,14 @@ describe('★他のアプリの管理画面と同じ形であること★', () =
   });
 
   it('メール＋パスワードで入る（やり方を増やしていない）', () => {
-    expect(JS).toContain('signInWithPassword');
-    expect(JS, '★魔法のリンクや二段階を足している★').not.toMatch(/signInWithOtp|magiclink/i);
+    expect(JS, '★パスワードで入る形になっていない★').toContain('signInWithPassword');
+    // ★2026-08-07 見方を正した★
+    //   司さん「新規ではいるボタン作れ」で、はじめての人向けに
+    //   ★1回だけメールを送ってパスワードを決めてもらう★道を足した。
+    //   事務所のログイン(login.html)と同じ形。これは「入り方が増えた」のではなく
+    //   ★パスワードを決める道★。毎回メールで入る形（魔法のリンク）にはしていない。
+    expect(JS, '★毎回メールで入る形になっている★').not.toMatch(/magiclink/i);
+    expect(JS, 'パスワードを決める道が無い').toContain('updateUser({ password:');
   });
 
   it('権限が無ければ はっきり断る', () => {
@@ -131,7 +137,10 @@ describe('★押す物は「使う/止める」と「席数」であること★
     expect(JS, '★「使う」ボタンが無い★').toContain('>使う<');
     expect(JS, '★「止める」ボタンが無い★').toContain('>止める<');
     expect(JS).toMatch(/function setStatus/);
-    expect(JS, '★他アプリのプラン(体験/有料)を持ち込んでいる★').not.toMatch(/体験|お試し|有料/);
+    // 押すボタンにプランの言葉を持ち込んでいないこと（案内文の「お試しください」は別）
+    expect(JS, '★他アプリのプラン(体験/有料)を押すボタンにしている★').not.toMatch(
+      />体験<|>お試し<|>有料<|>無料<|>停止</
+    );
   });
 
   it('席数を変えられる', () => {
@@ -167,6 +176,42 @@ describe('★押す物は「使う/止める」と「席数」であること★
 //     ★運営でない人が登録 → 403★
 //     作った会社は消して置き土産ゼロ
 // ============================================================
+// ============================================================
+// ★はじめて入る道があること★ 2026-08-07
+//   司さん「新規ではいるボタン作れ」
+//   ログイン画面に★入る道が1つも無く★、パスワードを知らないと詰んでいた。
+//   事務所のログイン(login.html)と同じ形にした。★決めるのは本人★。
+// ============================================================
+describe('★はじめて入る道があること★', () => {
+  it('ログイン画面に「はじめて／パスワードを忘れた」がある', () => {
+    expect(HTML, '★入る道が無い★').toContain('id="toSetPw"');
+    expect(HTML).toContain('はじめて／パスワードを忘れた');
+  });
+
+  it('メールを送る → 決める、まで画面がそろっている', () => {
+    ['id="sendCard"', 'id="sentCard"', 'id="setPwCard"', 'id="pw1"', 'id="pw2"'].forEach(
+      function (s) {
+        expect(HTML, s + ' が無い').toContain(s);
+      }
+    );
+    expect(HTML, 'ログインに戻れない').toContain('id="toLogin"');
+  });
+
+  it('★決めるのは本人★（こちらでパスワードを決めていない）', () => {
+    expect(JS, '本人が決める所が無い').toContain('updateUser({ password:');
+    expect(JS, '★短いパスワードを通している★').toMatch(/p1\.length < 6/);
+    expect(JS, '打ち間違い（2つ違う）を見ていない').toMatch(/p1 !== p2/);
+  });
+
+  it('メールのリンクから戻ったら、そのまま決める画面になる', () => {
+    expect(JS).toMatch(/access_token=[\s\S]{0,120}setPwCard/);
+  });
+
+  it('戻り先はこの画面（別の場所に飛ばさない）', () => {
+    expect(JS).toMatch(/emailRedirectTo[\s\S]{0,80}daikome-admin\.html/);
+  });
+});
+
 describe('★運営が新しい会社を登録できること★', () => {
   it('登録の欄がある（会社名・連絡先・台数）', () => {
     ['id="newName"', 'id="newContact"', 'id="newSeat"', 'id="newAdd"'].forEach(function (s) {

@@ -56,6 +56,16 @@
     });
     $('topbar').classList.toggle('hide', id === 'login');
   }
+
+  // ★ログイン画面の中で出し分ける (2026-08-07・司さん「新規ではいるボタン作れ」)★
+  //   事務所のログイン(login.html)と同じ形。
+  //   ★パスワードは本人が決める★（こちらで決めない）。
+  function card(which) {
+    ['loginCard', 'sendCard', 'sentCard', 'setPwCard'].forEach(function (id) {
+      const el = $(id);
+      if (el) el.classList.toggle('hide', id !== which);
+    });
+  }
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -107,6 +117,78 @@
       location.reload();
     });
   };
+
+  // ── ★はじめて入る／パスワードを忘れた★ 2026-08-07 ──
+  //   司さん「新規ではいるボタン作れ」
+  //   事務所のログイン(login.html)と同じ流れ。★決めるのは本人★。
+  $('toSetPw').onclick = function (e) {
+    e.preventDefault();
+    $('email2').value = $('email').value.trim();
+    $('msg2').textContent = '';
+    card('sendCard');
+  };
+  $('toLogin').onclick = function (e) {
+    e.preventDefault();
+    card('loginCard');
+  };
+
+  $('sendBtn').onclick = function () {
+    const mail = String($('email2').value || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(mail)) {
+      $('msg2').textContent = 'メールアドレスを確かめてください';
+      return;
+    }
+    $('msg2').textContent = '';
+    const b = $('sendBtn');
+    b.disabled = true;
+    b.textContent = '送信中…';
+    // ★戻り先はこの画面★（ここでそのままパスワードを決めてもらう）
+    sb.auth
+      .signInWithOtp({
+        email: mail,
+        options: {
+          emailRedirectTo: location.origin + '/daikome-admin.html',
+          shouldCreateUser: true,
+        },
+      })
+      .then(function (r) {
+        b.disabled = false;
+        b.textContent = 'メールを送る';
+        if (r.error) {
+          $('msg2').textContent = '送れませんでした。時間をおいてお試しください。';
+          return;
+        }
+        $('sentTo').textContent = mail;
+        card('sentCard');
+      });
+  };
+
+  $('savePwBtn').onclick = function () {
+    const p1 = $('pw1').value;
+    const p2 = $('pw2').value;
+    if (!p1 || p1.length < 6) {
+      $('msg3').textContent = 'パスワードは6文字以上にしてください';
+      return;
+    }
+    if (p1 !== p2) {
+      $('msg3').textContent = '2つのパスワードが違います';
+      return;
+    }
+    $('msg3').textContent = '';
+    const b = $('savePwBtn');
+    b.disabled = true;
+    b.textContent = '保存中…';
+    sb.auth.updateUser({ password: p1 }).then(function (r) {
+      b.disabled = false;
+      b.textContent = '決めて、はじめる';
+      if (r.error) {
+        $('msg3').textContent = '時間が経ちすぎました。もう一度メールを送ってください。';
+        return;
+      }
+      toast('パスワードを決めました');
+      boot();
+    });
+  };
   $('refresh').onclick = function () {
     loadList();
   };
@@ -114,10 +196,18 @@
 
   // ── 起動: ログインを見る → ★ダイコメの運営か判定★ ──
   function boot() {
+    // ★メールのリンクから戻ってきた時は、そのままパスワードを決めてもらう★ 2026-08-07
+    //   （司さん「新規ではいるボタン作れ」。決めるのは本人）
+    if (/access_token=/.test(location.hash || '')) {
+      show('login');
+      card('setPwCard');
+      return;
+    }
     sb.auth.getUser().then(function (r) {
       const u = r.data && r.data.user;
       if (!u) {
         show('login');
+        card('loginCard');
         return;
       }
       curEmail = u.email || '';
