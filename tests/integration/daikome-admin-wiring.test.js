@@ -68,8 +68,12 @@ describe('★他のアプリの管理画面と同じ形であること★', () =
     expect(JS, '★止めている会社の数を出していない★').toContain('止めている会社 ');
   });
 
+  // ★2026-08-07 直した★ 元は signUp も禁じていたが、それは行き過ぎだった。
+  //   signUp は「自分のアカウントを自分で作る」＝他のアプリのログインと同じ普通の道で、
+  //   ★他人を足す/消す★ではない。禁じるのは「運営が他人を操作する」道だけにする。
   it('★人の追加・削除は入れていない★（他の2つにも無い）', () => {
-    expect(JS, '★勝手に機能を足している★').not.toMatch(/admin\/users|signUp|招待|delete\(\)/);
+    expect(JS, '★勝手に機能を足している★').not.toMatch(/admin\/users|招待|inviteUser|delete\(\)/);
+    expect(JS, '★サービス鍵を置いている★').not.toMatch(/service_role|SERVICE_KEY/);
   });
 });
 
@@ -183,9 +187,9 @@ describe('★押す物は「使う/止める」と「席数」であること★
 //   事務所のログイン(login.html)と同じ形にした。★決めるのは本人★。
 // ============================================================
 describe('★はじめて入る道があること★', () => {
-  it('ログイン画面に「はじめて／パスワードを忘れた」がある', () => {
+  it('ログイン画面に「パスワードを忘れた」がある', () => {
     expect(HTML, '★入る道が無い★').toContain('id="toSetPw"');
-    expect(HTML).toContain('はじめて／パスワードを忘れた');
+    expect(HTML).toContain('パスワードを忘れた');
   });
 
   it('メールを送る → 決める、まで画面がそろっている', () => {
@@ -224,9 +228,39 @@ describe('★はじめて入る道があること★', () => {
     expect(tool, '★SITE_URL を触っている★').not.toMatch(/site_url\s*:/);
   });
 
-  it('★新しいアカウントをここで作らない★（運営の画面）', () => {
-    expect(JS, '★誰でも運営として登録できてしまう★').not.toMatch(/shouldCreateUser:\s*true/);
+  // ★2026-08-07 司さん「他のアプリでユーザーがやるように、なんで同じ構造にせんのど」★
+  //   給料・飲み屋・アマかせが使う js/exally-login.js は
+  //   ★メール+パスワードを打って「新規登録」を押すだけ★。メールのリンクは使わない。
+  //   ここも同じ形にする（届くのを待たない／localhost に飛ぶ事故も起きない）。
+  it('★他のアプリと同じ「新規登録」ボタンがある★', () => {
+    expect(HTML, '★新規登録ボタンが無い★').toMatch(/id="signup"/);
+    expect(HTML, '押し方の説明が無い').toMatch(/はじめての方は/);
+    expect(JS, '★新規登録が繋がっていない★').toMatch(/\$\('signup'\)\.onclick/);
+    expect(JS, 'signUp を呼んでいない').toMatch(/sb\.auth\s*\.?\s*signUp\(/);
+  });
+
+  it('★新規登録の直後にそのまま入れる★（メール確認が要らない設定のとき）', () => {
+    expect(JS, '登録しただけで放り出している').toMatch(/data\.session[\s\S]{0,120}boot\(\)/);
+    expect(JS, '確認が要る設定のときの入り直しが無い').toMatch(
+      /signUp\([\s\S]{0,1400}signInWithPassword/
+    );
+  });
+
+  it('既に登録済みの時に、何をすればいいか出す', () => {
+    expect(JS, '「登録済み」で行き止まりになる').toMatch(/already registered/i);
+    expect(JS, 'ログインを押せと言っていない').toMatch(/登録済みです[\s\S]{0,80}ログイン/);
+  });
+
+  it('パスワードを忘れた時の道も残っている', () => {
     expect(JS, 'パスワード再設定の道になっていない').toContain('resetPasswordForEmail');
+    expect(HTML, '忘れた時の入口が無い').toMatch(/id="toSetPw"/);
+  });
+
+  // ★運営かどうかは dk_admins で決まる★
+  //   新規登録は「ただの利用者」を作るだけ。ここが緩むと誰でも管理画面に入れる。
+  it('★登録しただけの人は入れない（dk_admins を見ている）★', () => {
+    expect(JS, '★運営かどうかを見ていない★').toMatch(/from\('dk_admins'\)/);
+    expect(JS, '権限なしの画面へ行っていない').toMatch(/show\('denied'\)/);
   });
 
   it('送れなかった理由を分けて出す（何をすればいいか分かる）', () => {

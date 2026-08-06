@@ -112,6 +112,60 @@
   $('pw').addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') $('signin').click();
   });
+
+  // ── ★新規登録★ 2026-08-07 ──
+  //   司さん「他のアプリでユーザーがやるように、なんで同じ構造にせんのど」
+  //
+  //   ★他のアプリ(js/exally-login.js)と一字一句 同じ流れ★
+  //     メールとパスワードを自分で打つ → 新規登録 → メール確認が要らない設定なので
+  //     そのまま入る。要る設定でも、すぐ後ろでログインし直して入る。
+  //   ★メールのリンクは使わない★ = 届くのを待たない／localhost に飛ぶ事故も起きない。
+  //
+  //   ★誰でも運営になれる訳ではない★
+  //     ここで作られるのは「ただの利用者」。運営かどうかは dk_admins で判定するので、
+  //     入っていない人は「権限がありません」で止まる（他のアプリの管理画面と同じ）。
+  $('signup').onclick = function () {
+    const e = $('email').value.trim();
+    const p = $('pw').value;
+    if (!e || p.length < 6) {
+      $('msg').textContent = 'メールと、6文字以上のパスワードを入れてください';
+      return;
+    }
+    $('msg').textContent = '登録中…';
+    const b = $('signup');
+    b.disabled = true;
+    sb.auth.signUp({ email: e, password: p }).then(function (r) {
+      if (r.error) {
+        b.disabled = false;
+        const m = String(r.error.message || '');
+        // ★既に登録済みの時に「エラー」で終わらせない★
+        //   このアドレスは他のアプリでも使っている＝既に有る事の方が多い。
+        //   何をすればいいかを書く。
+        $('msg').textContent = /already registered|already been registered|User already/i.test(m)
+          ? 'このアドレスは登録済みです。パスワードを入れて「ログイン」を押してください。分からない時は下の「パスワードを忘れた」から。'
+          : /weak|at least/i.test(m)
+            ? 'パスワードは6文字以上にしてください'
+            : m;
+        return;
+      }
+      // メール確認オフのときは、登録の直後にそのまま入れる
+      if (r.data && r.data.session) {
+        b.disabled = false;
+        $('msg').textContent = '';
+        boot();
+        return;
+      }
+      sb.auth.signInWithPassword({ email: e, password: p }).then(function (li) {
+        b.disabled = false;
+        if (li.error) {
+          $('msg').textContent = '登録できました。そのままログインしてください';
+          return;
+        }
+        $('msg').textContent = '';
+        boot();
+      });
+    });
+  };
   $('logout').onclick = function () {
     sb.auth.signOut().then(function () {
       location.reload();

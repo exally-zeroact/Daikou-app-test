@@ -144,6 +144,26 @@
         width: 100%;
       }
 
+      /* ★他のアプリのログインと同じ「もう1つのボタン」★ 2026-08-07
+         司さん「他のアプリでユーザーがやるように、なんで同じ構造にせんのど」
+         js/exally-login.js の login-btn-sub と同じ見え方（白地・枠あり）。 */
+      .btn-sub {
+        background: #fff;
+        color: var(--blue-d);
+        border: 1.5px solid var(--blue-d);
+        padding: 11px 18px;
+        font-size: 15px;
+        width: 100%;
+      }
+
+      .login-mid {
+        font-size: 13px;
+        color: var(--muted);
+        line-height: 1.7;
+        text-align: center;
+        margin: 16px 0 8px;
+      }
+
       .out,
       .refresh {
         background: #fff;
@@ -300,23 +320,30 @@
         <input id="pw" type="password" placeholder="パスワード" autocomplete="current-password" />
         <div class="msg" id="msg"></div>
         <button class="btn" id="signin">ログイン</button>
-        <!-- ★新しく入る道 (2026-08-07・司さん「新規ではいるボタン作れ」)★
-             事務所のログイン画面(login.html)と同じ形。
+        <!-- ★他のアプリのログインと同じ形★ 2026-08-07
+             司さん「他のアプリでユーザーがやるように、なんで同じ構造にせんのど」
+             js/exally-login.js（給料・飲み屋・アマかせが使っている物）と同じ:
+               メールとパスワードを自分で打つ → ★新規登録★ を押す → そのまま入る。
+             ★メールのリンクは使わない★（届くのを待たない・localhost に飛ぶ事故も起きない）
              ★パスワードは司さんが自分で決める★（私が決めない）。 -->
+        <div class="login-mid">
+          はじめての方は、メールとパスワードを<br />入力してから新規登録ボタンを押して下さい
+        </div>
+        <button class="btn-sub" id="signup">新規登録</button>
+        <!-- 既に登録済みで、パスワードだけ分からない時の逃げ道（メールで直す） -->
         <div style="text-align: center; margin-top: 14px">
           <a href="#" id="toSetPw" style="color: var(--blue); font-size: 14px; font-weight: 700"
-            >はじめて／パスワードを忘れた</a
+            >パスワードを忘れた</a
           >
         </div>
       </div>
 
       <!-- パスワードを決めるためのメールを送る -->
       <div class="card hide" id="sendCard">
-        <h1>はじめて入る／パスワードを決める</h1>
+        <h1>パスワードを決め直す</h1>
         <p class="lead">
           メールアドレスを入れて「メールを送る」を押してください。<br />
-          届いたリンクを押すと、<b>自分でパスワードを決める画面</b>になります。<br />
-          <b>決めるのは1回だけ</b>です。次からはそのパスワードで入れます。
+          届いたリンクを押すと、<b>自分でパスワードを決める画面</b>になります。
         </p>
         <input id="email2" type="email" placeholder="メールアドレス" autocomplete="username" />
         <div class="msg" id="msg2"></div>
