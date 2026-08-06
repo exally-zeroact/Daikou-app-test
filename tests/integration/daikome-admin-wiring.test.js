@@ -125,8 +125,13 @@ describe('★押す物は「使う/止める」と「席数」であること★
   });
 
   it('★押した瞬間に画面を変え、失敗したら戻す★（待たせない）', () => {
-    expect(JS).toMatch(/var before = r\.status;[\s\S]{0,200}r\.status = before;/);
-    expect(JS).toMatch(/var before = r\.seat;[\s\S]{0,240}r\.seat = before;/);
+    // var/let/const は整形の道具が変えるので、どれでも通るようにする
+    expect(JS, '★状態: 失敗しても戻していない★').toMatch(
+      /(var|let|const) before = r\.status;[\s\S]{0,220}r\.status = before;/
+    );
+    expect(JS, '★席数: 失敗しても戻していない★').toMatch(
+      /(var|let|const) before = r\.seat;[\s\S]{0,260}r\.seat = before;/
+    );
   });
 
   it('★止めた/使えるようにした を言葉で出す★', () => {
