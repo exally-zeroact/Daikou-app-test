@@ -88,6 +88,14 @@ drop policy if exists dk_companies_admin_write on daikome.dk_companies;
 create policy dk_companies_admin_write on daikome.dk_companies
   for update using (daikome.is_dk_admin()) with check (daikome.is_dk_admin());
 
+-- ★運営が新しいお客さん（会社）を登録できる★ 2026-08-07
+--   司さん「おれが新規で登録してやるんやろが」
+--   今までは★お客さん自身が事務所から登録する★形しか無かった。
+--   売るのは司さんなので、司さんの側から登録して★会社URL(QR)を渡せる★ようにする。
+drop policy if exists dk_companies_admin_insert on daikome.dk_companies;
+create policy dk_companies_admin_insert on daikome.dk_companies
+  for insert with check (daikome.is_dk_admin());
+
 -- 端末の数を出すため（管理者は全部の端末を数えられる）
 drop policy if exists dk_company_devices_admin_read on daikome.dk_company_devices;
 create policy dk_company_devices_admin_read on daikome.dk_company_devices

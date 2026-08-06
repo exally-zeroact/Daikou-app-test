@@ -240,6 +240,79 @@
     });
   }
 
+  // ── ★新しいお客さん（会社）を登録する★ 2026-08-07 ──
+  //   司さん「おれが新規で登録してやるんやろが」
+  //   今まではお客さん自身が事務所から登録する形しか無かった。
+  //   ここで登録して、★その会社に渡す会社URL★を出す。
+  //   ・url_token は毎回ちがう物を作る（人が推せない長さ）
+  //   ・持ち主(owner_id)は空のまま。お客さんが自分で事務所に登録した時に埋まる。
+  //     ★運転手はQRで有効化するだけなので、持ち主が空でもメーターは今日から使える。★
+  function newToken() {
+    const b = new Uint8Array(16);
+    (window.crypto || window.msCrypto).getRandomValues(b);
+    let s = '';
+    for (let i = 0; i < b.length; i++) s += ('0' + b[i].toString(16)).slice(-2);
+    return s;
+  }
+
+  $('newAdd').onclick = function () {
+    const name = String($('newName').value || '').trim();
+    const contact = String($('newContact').value || '').trim();
+    const seat = Math.max(1, parseInt($('newSeat').value, 10) || 1);
+    if (!name) {
+      $('newMsg').textContent = '会社名を入れてください';
+      return;
+    }
+    // ★打ち間違いをその場で止める★（空は許す＝あとで入れられる）
+    if (contact && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(contact)) {
+      $('newMsg').textContent = 'メールアドレスを確かめてください';
+      return;
+    }
+    $('newMsg').textContent = '';
+    $('newAdd').disabled = true;
+    const token = newToken();
+    sb.from('dk_companies')
+      .insert({
+        name: name,
+        url_token: token,
+        status: 'on',
+        seat_limit: seat,
+        contact: contact,
+      })
+      .select('company_id,url_token')
+      .then(function (res) {
+        $('newAdd').disabled = false;
+        if (res.error || !res.data || !res.data.length) {
+          $('newMsg').textContent = '登録できませんでした';
+          return;
+        }
+        const url = (cfg.APP_BASE || location.origin) + '/?c=' + res.data[0].url_token;
+        $('newUrl').textContent = url;
+        $('newDone').classList.remove('hide');
+        $('newName').value = '';
+        $('newContact').value = '';
+        toast('✅ ' + name + ' を登録しました');
+        loadList();
+      });
+  };
+
+  $('newCopy').onclick = function () {
+    const txt = $('newUrl').textContent || '';
+    if (!txt) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(
+        function () {
+          toast('コピーしました');
+        },
+        function () {
+          toast('長押しでコピーしてください');
+        }
+      );
+    } else {
+      toast('長押しでコピーしてください');
+    }
+  };
+
   // ── 使う / 止める ──
   //   ★押した瞬間に画面を変え、失敗したら戻す★（待たせない）
   function setStatus(id, next) {

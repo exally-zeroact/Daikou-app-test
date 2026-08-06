@@ -312,6 +312,40 @@
 
     <!-- 一覧 -->
     <div class="wrap hide" id="panel">
+      <!-- ★新しいお客さんを登録する (2026-08-07・司さん「おれが新規で登録してやるんやろが」)★
+           今まではお客さん自身が事務所から登録する形しか無かった。
+           売るのは司さんなので、司さんの側から登録して会社URL(QR)を渡せるようにする。 -->
+      <div class="card">
+        <h1 style="font-size: 16px; color: var(--blue-d)">新しい会社を登録する</h1>
+        <p class="lead">登録すると、その会社に渡す<b>会社URL</b>が出ます。</p>
+        <input id="newName" placeholder="会社名（例：〇〇代行）" />
+        <input id="newContact" type="email" placeholder="連絡先メール（あとで変えられます）" />
+        <div class="seat" style="margin-bottom: 10px">
+          使う台数 <input id="newSeat" type="number" inputmode="numeric" min="1" value="2" /> 台
+        </div>
+        <div class="msg" id="newMsg"></div>
+        <button class="btn" id="newAdd">登録する</button>
+        <!-- 登録できたら、渡すURLをここに出す -->
+        <div id="newDone" class="hide" style="margin-top: 14px">
+          <div class="co-sub" style="font-weight: 800; color: var(--ok)">登録できました</div>
+          <div class="co-sub">この住所を、その会社に渡してください。</div>
+          <div
+            id="newUrl"
+            style="
+              background: var(--bg);
+              border: 1.5px solid var(--line);
+              border-radius: 10px;
+              padding: 11px 12px;
+              font-size: 13px;
+              word-break: break-all;
+              user-select: all;
+              margin-top: 8px;
+            "
+          ></div>
+          <button class="refresh" id="newCopy" style="margin-top: 8px">コピー</button>
+        </div>
+      </div>
+
       <div class="tools">
         <input id="q" placeholder="会社名・メールでしぼる" />
         <button class="refresh" id="refresh">更新</button>
