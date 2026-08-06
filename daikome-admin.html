@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>ダイコメ 管理</title>
+    <meta name="robots" content="noindex" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>"
+    />
+    <!-- ============================================================
+         ★ダイコメ 管理画面（運営＝司さん専用）★ 2026-08-07
+
+           司さん「ダイコメの管理アプリを（Exally系の）ように作って
+                   そこでおれが権限持つようしろ」
+
+           ★他のアプリ（Kyually / Castally）の管理画面と同じ形にした★
+             ・司さんだけが入れる（ダイコメ自身の dk_admins に居るか）
+             ・お客さん（会社）の一覧
+             ・★押して切り替えるだけ★
+             ・人の追加・削除は無い（他の2つにも無い）
+
+           ★ダイコメで押す物は「プラン」ではなく 使う/止める と 席数★
+             dk_companies の status / seat_limit は★元からある★。
+             新しい仕組みは足していない。並べて押せるようにしただけ。
+         ============================================================ -->
+    <style>
+      :root {
+        --blue: #007aff;
+        --blue-d: #0a5fd0;
+        --ink: #14243d;
+        --muted: #5a6b82;
+        --bg: #f2f7ff;
+        --line: #dbe7f7;
+        --danger: #e0483d;
+        --ok: #1a8a4a;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', system-ui, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+        line-height: 1.7;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #fff;
+        border-bottom: 1px solid var(--line);
+        padding: 12px 16px;
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+
+      .bar b {
+        font-size: 17px;
+        color: var(--blue-d);
+      }
+
+      .bar small {
+        font-size: 11px;
+        font-weight: 700;
+        color: #fff;
+        background: var(--blue);
+        border-radius: 999px;
+        padding: 2px 10px;
+      }
+
+      .sp {
+        flex: 1;
+      }
+
+      .who {
+        font-size: 12px;
+        color: var(--muted);
+        word-break: break-all;
+      }
+
+      .wrap {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 18px 16px 60px;
+      }
+
+      .card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px 18px;
+        margin-bottom: 14px;
+      }
+
+      h1 {
+        font-size: 20px;
+        margin-bottom: 4px;
+      }
+
+      p.lead {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+
+      input {
+        width: 100%;
+        border: 1.5px solid var(--line);
+        border-radius: 10px;
+        padding: 11px 12px;
+        font-size: 16px;
+        font-family: inherit;
+        color: var(--ink);
+        margin-bottom: 10px;
+      }
+
+      input:focus {
+        outline: none;
+        border-color: var(--blue);
+      }
+
+      button {
+        font-family: inherit;
+        cursor: pointer;
+        border: none;
+        border-radius: 10px;
+        font-weight: 700;
+      }
+
+      .btn {
+        background: var(--blue-d);
+        color: #fff;
+        padding: 11px 18px;
+        font-size: 15px;
+        width: 100%;
+      }
+
+      .out,
+      .refresh {
+        background: #fff;
+        color: var(--blue-d);
+        border: 1.5px solid var(--line);
+        padding: 6px 14px;
+        font-size: 12.5px;
+      }
+
+      .msg {
+        font-size: 13px;
+        color: var(--danger);
+        min-height: 20px;
+      }
+
+      .tools {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
+
+      .tools input {
+        flex: 1 1 180px;
+        min-width: 0;
+        margin: 0;
+      }
+
+      .stat {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+
+      /* 1社ぶん */
+      .co {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px 16px;
+        margin-bottom: 10px;
+      }
+
+      .co-name {
+        font-size: 16px;
+        font-weight: 800;
+        word-break: break-all;
+      }
+
+      .co-sub {
+        font-size: 12px;
+        color: var(--muted);
+        word-break: break-all;
+        margin-top: 2px;
+      }
+
+      .co-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .seg {
+        display: flex;
+        gap: 6px;
+      }
+
+      .pill {
+        border: 1.5px solid var(--line);
+        background: #fff;
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 6px 16px;
+        font-size: 13px;
+      }
+
+      .pill.on {
+        background: var(--ok);
+        border-color: var(--ok);
+        color: #fff;
+      }
+
+      .pill.off.on {
+        background: var(--danger);
+        border-color: var(--danger);
+      }
+
+      .seat {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .seat input {
+        width: 4.5em;
+        margin: 0;
+        padding: 6px 8px;
+        font-size: 15px;
+        text-align: right;
+      }
+
+      .empty {
+        color: var(--muted);
+        font-size: 14px;
+        text-align: center;
+        padding: 20px 0;
+      }
+
+      .hide {
+        display: none !important;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 24px;
+        transform: translateX(-50%) translateY(20px);
+        background: #1c1c1e;
+        color: #fff;
+        border-radius: 10px;
+        padding: 11px 18px;
+        font-size: 14px;
+        font-weight: 700;
+        opacity: 0;
+        transition: 0.2s;
+        pointer-events: none;
+        max-width: 90vw;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar hide" id="topbar">
+      <b>ダイコメ 管理</b><small>運営</small><span class="sp"></span>
+      <span class="who" id="who"></span>
+      <button class="out" id="logout">ログアウト</button>
+    </div>
+
+    <!-- ログイン -->
+    <div class="wrap" id="login">
+      <div class="card">
+        <h1>ダイコメ 管理</h1>
+        <p class="lead">運営のアカウントで入ってください。</p>
+        <input id="email" type="email" placeholder="メールアドレス" autocomplete="username" />
+        <input id="pw" type="password" placeholder="合言葉" autocomplete="current-password" />
+        <div class="msg" id="msg"></div>
+        <button class="btn" id="signin">ログイン</button>
+      </div>
+    </div>
+
+    <!-- 権限なし -->
+    <div class="wrap hide" id="denied">
+      <div class="card empty">
+        このアカウントは<b>ダイコメの運営ではありません</b>。<br />運営のアカウントで入り直してください。
+      </div>
+    </div>
+
+    <!-- 一覧 -->
+    <div class="wrap hide" id="panel">
+      <div class="tools">
+        <input id="q" placeholder="会社名・メールでしぼる" />
+        <button class="refresh" id="refresh">更新</button>
+      </div>
+      <div class="stat" id="stat"></div>
+      <div id="list"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/dk-config.js"></script>
+    <script src="js/daikome-admin.js"></script>
+  </body>
+</html>
