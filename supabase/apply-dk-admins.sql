@@ -55,12 +55,25 @@ $$;
 revoke all on function daikome.is_dk_admin() from public;
 grant execute on function daikome.is_dk_admin() to authenticated;
 
--- ★司さんを管理者に入れる★（この人が入れないと管理画面の意味が無い）
-insert into daikome.dk_admins (account_id, email, note)
-select u.id, u.email, 'ダイコメの運営'
-from auth.users u
-where lower(u.email) = 'zeroact24.729@outlook.com'
-on conflict (account_id) do update set email = excluded.email;
+-- ★管理者を登録する（アドレスは司さんが決める）★
+--
+--   ★2026-08-07 司さん「アドレスも勝手に決めるなや」★
+--     私がここに司さんのアドレスを★直接書き込んで、自動で登録していた★。
+--     誰を運営にするかは司さんが決めることで、私が決めることではない。
+--     Kyually(payslip-app/supabase/schema.sql) も★コメントのまま★にしてある。
+--     同じにする。
+--
+--   ▼登録するとき（1行を書き換えて実行）
+--     insert into daikome.dk_admins (account_id, email, note)
+--     select u.id, u.email, 'ダイコメの運営'
+--     from auth.users u
+--     where lower(u.email) = 'ここに運営のログインメール'
+--     on conflict (account_id) do update set email = excluded.email;
+--
+--   ▼外すとき
+--     delete from daikome.dk_admins where lower(email) = 'そのアドレス';
+--
+--   ★1人も登録していないと、管理画面は誰も開けません（それが既定）★
 
 -- ─────────────────────────────────────────
 -- ★管理者は 全部の会社を見られる／状態と席数を変えられる★

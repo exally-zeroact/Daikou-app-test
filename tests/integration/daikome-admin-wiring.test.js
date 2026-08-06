@@ -81,8 +81,21 @@ describe('★ダイコメ自身に持たせること（最後は別アプリ）�
     expect(JS, 'ダイコメ自身の管理者表を見ていない').toContain("from('dk_admins')");
   });
 
-  it('★司さんを管理者に入れている★（入れないと誰も開けない）', () => {
-    expect(SQL).toMatch(/insert into daikome\.dk_admins[\s\S]{0,200}zeroact24\.729@outlook\.com/);
+  // ★2026-08-07 司さん「アドレスも勝手に決めるなや」★
+  //   私が司さんのアドレスを SQL に直接書き込んで自動登録していた。
+  //   誰を運営にするかは司さんが決めること。Kyually も コメントのままにしてある。
+  it('★アドレスを直接書き込んでいない★（誰を運営にするかは司さんが決める）', () => {
+    const code = SQL.split('\n')
+      .filter((l) => !l.trim().startsWith('--'))
+      .join('\n');
+    const mails = code.match(/[\w.+-]+@[\w-]+\.[\w.]+/g) || [];
+    expect(mails, '★実行される所にアドレスが書いてある★ ' + mails.join(', ')).toEqual([]);
+    expect(code, '★勝手に管理者を登録している★').not.toMatch(/insert into daikome\.dk_admins/i);
+  });
+
+  it('登録のやり方は手順として残してある（コメント）', () => {
+    expect(SQL, '登録の手順が書いていない').toContain('ここに運営のログインメール');
+    expect(SQL, '外し方が書いていない').toContain('delete from daikome.dk_admins');
   });
 
   it('★管理者の一覧は漏らさない★（自分の行だけ読める）', () => {
