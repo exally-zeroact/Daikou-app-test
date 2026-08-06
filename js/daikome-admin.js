@@ -63,14 +63,14 @@
     const e = $('email').value.trim();
     const p = $('pw').value;
     if (!e || !p) {
-      $('msg').textContent = 'メールと合言葉を入れてください';
+      $('msg').textContent = 'メールとパスワードを入れてください';
       return;
     }
     $('msg').textContent = 'ログイン中…';
     sb.auth.signInWithPassword({ email: e, password: p }).then(function (r) {
       if (r.error) {
         $('msg').textContent = /Invalid/.test(r.error.message)
-          ? 'メールか合言葉が違います'
+          ? 'メールかパスワードが違います'
           : r.error.message;
       } else {
         $('msg').textContent = '';

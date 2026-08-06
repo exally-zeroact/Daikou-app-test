@@ -43,7 +43,7 @@ describe('★他のアプリの管理画面と同じ形であること★', () =
     expect(JS).toMatch(/\['login', 'denied', 'panel'\]/);
   });
 
-  it('メール＋合言葉で入る（やり方を増やしていない）', () => {
+  it('メール＋パスワードで入る（やり方を増やしていない）', () => {
     expect(JS).toContain('signInWithPassword');
     expect(JS, '★魔法のリンクや二段階を足している★').not.toMatch(/signInWithOtp|magiclink/i);
   });
