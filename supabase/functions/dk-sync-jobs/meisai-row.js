@@ -57,6 +57,41 @@ const MEISAI_COLUMNS = {
   extra: 'jsonb',
 };
 
+// ★行き先の書き方（司さんの手入力と同じ形）★ 2026-08-09
+//
+//   司さん「今治市は除けて町までつける、市外だけ松山市とかつける」
+//   ・地元の市は ★市名を落として 町名だけ★
+//   ・市外は ★市名を付けたまま★
+//   ・出発〜経由〜到着 を「〜」でつなぐ
+//   ・同じ所が続く時はまとめる／取れていない所は とばす（★勝手に埋めない★）
+//
+//   ★地元の市★ は今は既定「今治市」。会社ごとに変えられるよう opts.homeCity で渡せる。
+//   （会社の設定に持たせるのが本筋。倉庫に列を足す時に移す）
+const HOME_CITY_DEFAULT = '今治市';
+
+// 1つの地点の書き方
+function placeText(addr, homeCity) {
+  const s = String(addr == null ? '' : addr).trim();
+  if (!s) return '';
+  const home = String(homeCity || HOME_CITY_DEFAULT);
+  if (!home || !s.startsWith(home)) return s; // 市外はそのまま
+  const rest = s.slice(home.length).trim();
+  // ★町名が取れていない時は落とさない★（「付近」だけにしない）
+  if (!rest || rest === '付近') return s;
+  return rest;
+}
+
+// 1件の代行の 行き先の文字
+function routeText(trip, homeCity) {
+  if (!trip) return '';
+  const ways = Array.isArray(trip.waypoints) ? trip.waypoints : [];
+  const raw = [trip.start_address]
+    .concat(ways.map((w) => (w && w.address) || w))
+    .concat([trip.end_address]);
+  const parts = raw.map((a) => placeText(a, homeCity)).filter((x) => !!x);
+  const out = parts.filter((p, i) => i === 0 || p !== parts[i - 1]); // 同じ所が続けばまとめる
+  return out.join('〜');
+}
 // 業務開始の日（日本時間）— 給料・売上表と同じ切り方
 function businessDate(shiftStartMs) {
   if (!shiftStartMs || !isFinite(shiftStartMs)) return null;
@@ -76,6 +111,7 @@ function buildMeisaiRows(opts) {
   const shiftStart = opts.shiftStartMs;
   const trips = Array.isArray(opts.trips) ? opts.trips : [];
   const done = opts.done instanceof Set ? opts.done : new Set(opts.done || []);
+  const homeCity = opts.homeCity || HOME_CITY_DEFAULT; // ★地元の市（既定 今治市）★
 
   const date = businessDate(shiftStart);
   if (!date) return [];
@@ -87,7 +123,9 @@ function buildMeisaiRows(opts) {
       user_id: ownerId,
       company: String(t.customer_name || ''), // 請求先（companies.name と同じ文字列）
       date: date, // ★同じ晩は同じ日付★
-      destination: String(t.end_address || ''),
+      // ★2026-08-09: 到着地だけ → 出発〜経由〜到着 に（司さんの手入力と同じ形）★
+      //   地元の市は市名を落とし、市外だけ市名を付ける。取れていない所はとばす。
+      destination: routeText(t, homeCity),
       amount: typeof t.fare_yen === 'number' ? Math.round(t.fare_yen) : null, // メーター確定の料金
       // ★実測どおりの km（小数2桁）★ 5362m → 5.36km
       //   ★メーターの画面と1桁も食い違わせない★ため、
@@ -176,6 +214,8 @@ function planMeisaiWrite(rows, existing) {
 
 export {
   MEISAI_COLUMNS,
+  placeText,
+  routeText,
   DK_TRIPS_COLUMNS,
   businessDate,
   refOf,

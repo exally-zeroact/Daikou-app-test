@@ -168,7 +168,10 @@ describe('★入れる中身が正しいこと★', () => {
   it('請求先・行き先・出発地・料金がそのまま', () => {
     const [a] = build(REAL);
     expect(a.company).toBe('Lounge Chouchou'); // companies.name と同じ文字列
-    expect(a.destination).toBe('今治市北浜町');
+    // ★2026-08-09 仕様変更★: 行き先は 到着地だけ → ★出発〜経由〜到着★ に。
+    //   司さん「今治市は除けて町までつける、市外だけ松山市とかつける」
+    //   ＝ 地元(今治市)は市名を落とす。出発地は今までどおり extra にも残る。
+    expect(a.destination).toBe('富田新港〜北浜町');
     expect(a.extra.dk_from).toBe('今治市富田新港');
     expect(a.amount).toBe(2200); // ★メーター確定の料金をいじらない★
   });
@@ -249,7 +252,8 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
         extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362 },
         company: 'Lounge Chouchou',
         date: '2026-08-04',
-        destination: '今治市北浜町',
+        // ★2026-08-09: 行き先は つないだ形（地元の市は落とす）★
+        destination: '富田新港〜北浜町',
         amount: 2200,
         distance: 5.36,
       },
@@ -282,6 +286,9 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
         fare_yen: 2200,
         payment_type: 'invoice',
         customer_name: 'Lounge Chouchou',
+        // ★2026-08-09: 行き先が つないだ形になったので、比べる相手と同じ道のりにする★
+        //   （このテストが見ているのは 数の比べ方であって 行き先ではない）
+        start_address: '今治市富田新港',
         end_address: '今治市北浜町',
       },
     ]);
