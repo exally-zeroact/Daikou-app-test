@@ -862,11 +862,23 @@
               //   前は「配列が返らなければ goLogin()」＝通信が一瞬こけただけでログアウトしていた。
               //   ログインが切れたと言えるのは、サーバーが 401/403 と言った時だけ。
               if (r.ok) return r.json();
+              // ★自分が誰か分からない時は 会社を一切出さない (2026-08-08)★
+              //   絞りが外れて全社が返ると、検証ゴミが選択画面に並び、
+              //   そこで1つ選ぶと覚えてしまい 元の事故に戻るため。
+              if (r.noUid) return 'unknown';
               if (DKSession.isAuthError(r)) return 'auth';
               return 'net';
             })
             .then(function (cos) {
               if (cos === 'auth') return goLogin();
+              if (cos === 'unknown') {
+                // ★空でも0でも登録画面でもない。まだ分からない、と出す★
+                show('loading', true);
+                show('main', false);
+                show('register', false);
+                $('loading').textContent = '読み込み中…';
+                return;
+              }
               if (cos === 'net' || !Array.isArray(cos)) {
                 show('loading', true);
                 $('loading').textContent =

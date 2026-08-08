@@ -308,16 +308,25 @@
 
   // ★自分が持ち主の会社だけ★ を ★必ず同じ順★ で取る問い合わせ文。
   //   limit=1 は使わない（何件あるか分からなくなり、2件目の存在に気づけないため）。
+  //   ★2026-08-08 追記: uid が読めない時は「問い合わせ自体をしない」★
+  //     絞りだけ外して取ると、dk_admins に入っている人には ★全社が返る★。
+  //     検証ゴミが選択画面に並び、そこで1つ選ぶと覚えてしまい ★元の事故に戻る★。
+  //     ＝「取れなかった」を「0件」や「全部」として扱わない。まだ分からない、と言う。
   function myCompaniesQuery(sess, select) {
-    const cols = select || 'company_id,name,url_token,seat_limit,status';
     const uid = uidOf(sess);
-    let q = 'dk_companies?select=' + cols + '&order=created_at.asc';
-    if (uid) q += '&owner_id=eq.' + encodeURIComponent(uid);
-    return q;
+    if (!uid) return null; // ★誰か分からないなら聞きに行かない★
+    const cols = select || 'company_id,name,url_token,seat_limit,status';
+    return (
+      'dk_companies?select=' + cols + '&order=created_at.asc&owner_id=eq.' + encodeURIComponent(uid)
+    );
   }
 
+  // 返り値は fetch の結果と同じ形。ただし uid が無い時は
+  // ★通信に行かず { ok:false, noUid:true } を返す★（呼ぶ側は「読み込み中」のままにする）。
   function myCompanies(sess, select) {
-    return rest(sess, myCompaniesQuery(sess, select));
+    const q = myCompaniesQuery(sess, select);
+    if (!q) return Promise.resolve({ ok: false, noUid: true, status: 0 });
+    return rest(sess, q);
   }
 
   // ★黙って先頭を選ばない★

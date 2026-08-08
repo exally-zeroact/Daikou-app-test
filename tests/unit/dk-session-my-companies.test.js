@@ -40,10 +40,32 @@ describe('★自分の会社だけを、決まった順で取る★', () => {
     expect(q, '★limit=1 は使わない（何件あるか分からなくなる）★').not.toContain('limit=1');
   });
 
-  it('ログインが読めない時は しぼれないので 並び順だけ付ける', () => {
-    const q = DK.myCompaniesQuery({ access_token: 'こわれている' });
-    expect(q).toContain('order=created_at');
-    expect(q).not.toContain('owner_id=eq.');
+  it('★自分のidが読めない時は 問い合わせ自体をしない★（絞りが外れて全社が返るのを防ぐ）', () => {
+    // ★2026-08-08 仕様変更★
+    //   旧: uid が無ければ「並び順だけ付けて全社取る」形だった。
+    //       司さんは dk_admins に入っているので ★11社が返り、検証ゴミが選択画面に並ぶ★。
+    //       そこで1つ選ぶと覚えてしまい ★元の事故に戻る★。
+    //   新: uid が無いなら ★問い合わせをしない★（画面は「読み込み中」のまま）。
+    //       空でも0でも登録画面でもない。
+    expect(DK.myCompaniesQuery({ access_token: 'こわれている' })).toBe(null);
+    expect(DK.myCompaniesQuery(null)).toBe(null);
+  });
+
+  it('★自分のidが読めない時は 通信に行かず「まだ分からない」と返す★', async () => {
+    let called = 0;
+    const orig = globalThis.fetch;
+    globalThis.fetch = () => {
+      called++;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    };
+    try {
+      const r = await DK.myCompanies({ access_token: 'こわれている' });
+      expect(called, '★通信に行ってしまった＝全社が返る道が残っている★').toBe(0);
+      expect(r.ok).toBe(false);
+      expect(r.noUid, '★「まだ分からない」と言えていない★').toBe(true);
+    } finally {
+      globalThis.fetch = orig;
+    }
   });
 });
 
