@@ -803,8 +803,9 @@
               .catch(function () {
                 DEVLOAD.failed++;
               })
-              .then(function (rows) {
-                window.__dkLabels = Array.isArray(rows) ? rows : []; // ★並べ替えで使う★
+              .then(function (labels) {
+                // ★並べ替えで使う（この画面で 決めた順に並べるため）★
+                window.__dkLabels = Array.isArray(labels) ? labels : [];
                 try {
                   return window.CarName ? window.CarName.nameMap(ids, labels) : {};
                 } catch (_) {
