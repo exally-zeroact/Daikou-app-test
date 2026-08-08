@@ -341,6 +341,8 @@
 
         var SESS = null;
         var COMPANY = null;
+        // ★1回の読み込みで「何本 取れなかったか」を覚える箱★
+        var LOAD = DKSession.newLoadState();
         var MONTH = new Date();
         var ROWS = [];
         var OPEN = {}; // 展開中の車
@@ -468,14 +470,14 @@
           // ★1つ失敗しても画面を殺さない★
           //   手入力(dk_shift_edits)や車名(dk_device_labels)がまだ無くても、
           //   メーターの数字だけは必ず出す。
+          // ★2026-08-09: 取れなかったことを 数える★
+          //   旧: 通信が失敗しても黙って空配列 → 画面には 0 と出ていた。
+          //   新: 空は返すが ★失敗は必ず数える★。画面の上に出して 数字は「—」にする。
           function soft(path) {
-            return DKSession.rest(SESS, path)
-              .then(function (x) {
-                return x.ok ? x.json() : [];
-              })
-              .catch(function () {
-                return [];
-              });
+            return DKSession.softList(SESS, path, LOAD);
+          }
+          function afterLoad(retry) {
+            DKSession.showUnknownBar(LOAD, retry);
           }
 
           Promise.all([
@@ -528,6 +530,7 @@
         function recalc() {
           var edits = Object.keys(window.__editsById || {}).map(function (k) {
             return window.__editsById[k];
+            afterLoad(load); // ★取れなかった物があれば 画面の上に出す★
           });
           ROWS = UriageAgg.byDevice(RAW.shifts, edits, RAW.labels, SETTINGS);
         }

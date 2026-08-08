@@ -694,18 +694,26 @@
           }
         }
 
+        // ★取れなかった回数を覚える箱（使用台数を 0 と書かないため）★
+        var DEVLOAD = DKSession.newLoadState();
         function loadDevices() {
-          return api(
-            '/dk_company_devices?select=device_id,vin,last_seen&company_id=eq.' +
-              encodeURIComponent(COMPANY.company_id) +
-              '&order=last_seen.desc.nullslast'
-          )
-            .then(function (r) {
-              return r.ok ? r.json() : [];
-            })
-            .catch(function () {
-              return [];
-            });
+          DEVLOAD.failed = 0;
+          return (
+            api(
+              '/dk_company_devices?select=device_id,vin,last_seen&company_id=eq.' +
+                encodeURIComponent(COMPANY.company_id) +
+                '&order=last_seen.desc.nullslast'
+            )
+              // ★2026-08-09: 取れなかったことを数える（0台と区別する）★
+              .then(function (r) {
+                if (r && r.ok) return r.json();
+                DEVLOAD.failed++;
+                return [];
+              })
+              .catch(function () {
+                DEVLOAD.failed++;
+              })
+          );
         }
 
         // ★車の名前 (2026-08-05・司さん「訳分からんやつ消せ」)★
@@ -716,23 +724,28 @@
           var ids = (devs || []).map(function (d) {
             return d && d.device_id;
           });
-          return api(
-            '/dk_device_labels?select=device_id,label&company_id=eq.' +
-              encodeURIComponent(COMPANY.company_id)
-          )
-            .then(function (r) {
-              return r.ok ? r.json() : [];
-            })
-            .catch(function () {
-              return [];
-            })
-            .then(function (labels) {
-              try {
-                return window.CarName ? window.CarName.nameMap(ids, labels) : {};
-              } catch (_) {
-                return {};
-              }
-            });
+          return (
+            api(
+              '/dk_device_labels?select=device_id,label&company_id=eq.' +
+                encodeURIComponent(COMPANY.company_id)
+            )
+              // ★2026-08-09: 取れなかったことを数える（0台と区別する）★
+              .then(function (r) {
+                if (r && r.ok) return r.json();
+                DEVLOAD.failed++;
+                return [];
+              })
+              .catch(function () {
+                DEVLOAD.failed++;
+              })
+              .then(function (labels) {
+                try {
+                  return window.CarName ? window.CarName.nameMap(ids, labels) : {};
+                } catch (_) {
+                  return {};
+                }
+              })
+          );
         }
 
         function renderDashboard() {
@@ -758,8 +771,12 @@
             devs = Array.isArray(devs) ? devs : [];
             var used = devs.length;
             var max = COMPANY.seat_limit || 0;
-            $('seatUsed').textContent = used;
+            // ★取れていない時は 0 ではなく「—」を出す（本当に0台と区別する）★
+            $('seatUsed').textContent = DKSession.numOrUnknown(used, DEVLOAD);
             $('seatMax').textContent = max;
+            DKSession.showUnknownBar(DEVLOAD, function () {
+              loadCompany();
+            });
             $('seatBar').style.width =
               (max ? Math.min(100, Math.round((used / max) * 100)) : 0) + '%';
 
