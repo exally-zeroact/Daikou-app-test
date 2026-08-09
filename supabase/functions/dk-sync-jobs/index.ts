@@ -78,7 +78,10 @@ Deno.serve(async (req: Request) => {
   // 会社を引く(service_role = RLSバイパス)。owner_id は請求書アプリへの橋渡しに使う。
   const { data: co, error: coErr } = await sb
     .from('dk_companies')
-    .select('company_id, owner_id')
+    // ★2026-08-09: 地元の市(home_city)も取る★
+    //   請求書の行き先を「今治市は落として町名だけ／市外は市名を付ける」で書くため。
+    //   空なら meisai-row.js の既定（今治市）が効く。
+    .select('company_id, owner_id, home_city')
     .eq('url_token', url_token)
     .maybeSingle();
   if (coErr) return json({ ok: false, reason: 'db_error' }, 500);
@@ -164,7 +167,16 @@ Deno.serve(async (req: Request) => {
       //     入らない理由が7通りあるのに、全部 return で黙って抜けていたので
       //     ★立てたのに入らない時に、どこで止まったか分からなかった★（実際に踏んだ）。
       //     返事に出しておけば、事務所からでも1回叩けば理由が読める。
-      meisai.push(await pushToInvoiceApp(sb, co.owner_id as string | null, device_id, s, trips));
+      meisai.push(
+        await pushToInvoiceApp(
+          sb,
+          co.owner_id as string | null,
+          device_id,
+          s,
+          trips,
+          (co.home_city as string | null) || null // ★地元の市★
+        )
+      );
 
       accepted.push(s.start_time as number);
     } catch (_) {
@@ -185,7 +197,8 @@ async function pushToInvoiceApp(
   ownerId: string | null,
   deviceId: string,
   shift: Record<string, unknown>,
-  trips: Record<string, unknown>[]
+  trips: Record<string, unknown>[],
+  homeCity?: string | null // ★地元の市（空なら既定 今治市）★
 ): Promise<string> {
   try {
     // ★★既定オフ (2026-08-01)★★
@@ -234,6 +247,7 @@ async function pushToInvoiceApp(
       deviceId,
       shiftStartMs: shiftStart as number,
       trips: invoiceTrips,
+      homeCity: homeCity || undefined, // ★会社ごとの地元の市★
     });
     if (!bizDate) return 'skip:業務開始の日付が読めない';
     if (!rows.length) return 'skip:入れる代行が0件';
