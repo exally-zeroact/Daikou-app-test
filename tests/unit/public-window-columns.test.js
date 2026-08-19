@@ -117,19 +117,11 @@ function collectUses() {
   return uses;
 }
 
-// ★まだ倉庫に当てていない計画の分★
-//   dk-reissue / dk-company-manage は supabase/migrate-standalone.sql（「独立」の計画）の物。
-//   admin_token は ★倉庫のどの部屋にも まだ無い★（2026-08-09 に数えて確認）。
-//   呼ぶ画面も1つも無い＝今は動いていない。
-//   ★逃がしっぱなしにしない★ため、下の試験で「本当に誰も呼んでいないか」を毎回数える。
-//   画面から呼び始めた時点でこの逃がしは赤くなり、倉庫と窓の両方に足す必要が出る。
-const NOT_YET_APPLIED = {
-  'supabase/functions/dk-reissue/index.ts': {
-    cols: ['admin_token'],
-    fn: 'dk-reissue',
-    why: 'migrate-standalone.sql（未適用）の列。呼ぶ画面が無い。',
-  },
-};
+// ★まだ倉庫に当てていない計画の分★（今は0件）
+//   2026-08-09 まで dk-reissue / dk-company-manage（秘密リンク方式の残骸）を逃がしていたが、
+//   ★2026-08-19 に その2本ごと消した★（呼ぶ側を数えたら 0件／本番repoには画面すら無かった）。
+//   逃がしを増やす時は ★呼ぶ画面が本当に無いか★を下の試験が毎回 数える。
+const NOT_YET_APPLIED = {};
 
 const WINDOWS = readWindows();
 const USES = collectUses();

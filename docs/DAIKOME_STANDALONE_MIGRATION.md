@@ -206,5 +206,5 @@ node scripts/verify-standalone-migration.js --company=<会社のurl_token>
 
 - 本番リポジトリ（`Daikou-app`）への反映 … 見た目が変わるので、**テストURLで司さんが見てOKを出してから**
 - 古い倉庫の `dk_*` テーブル削除 … 指示があるまで残す
-- 秘密リンク方式の残骸（`manage.html` / `dk-company-manage` / `dk-reissue`）… アカウント方式に置き換え済で未デプロイ。
+- 秘密リンク方式の残骸（`manage.html` / `dk-company-manage` / `dk-reissue`）… アカウント方式に置き換え済。★2026-08-19 に消した★（呼ぶ側0件・本番repoには画面も無し・一度も配られていなかった）。
   接続先だけは1箇所化に揃えてあるので害はありません。消すかどうかは司さんの判断で。
