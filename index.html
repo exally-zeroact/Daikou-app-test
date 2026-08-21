@@ -3918,6 +3918,44 @@
     </script>
   </head>
   <body ontouchstart="" onclick="wakeScreen()">
+    <!-- ★テスト用の帯★ 2026-08-21（司さんの端末に テスト版が入っていた事故）
+         ★本番(Daikou-app)には この帯を入れない★＝テスト線だけに在る印。
+         版の字（設定→アプリ バージョン）を読まなくても 一目で分かるようにする。
+         見張り: tests/unit/test-band.test.js（テスト線に在る／本番に無い） -->
+    <div
+      id="testBand"
+      style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 99999;
+        background: #c0392b;
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 700;
+        text-align: center;
+        padding: 3px 6px;
+        letter-spacing: 1px;
+        font-family: 'Noto Sans JP', sans-serif;
+      "
+    >
+      テスト用（本番ではありません）
+      <a
+        href="https://daikou-app.vercel.app/"
+        style="
+          display: inline-block;
+          margin-left: 8px;
+          padding: 1px 8px;
+          background: #ffffff;
+          color: #c0392b;
+          border-radius: 999px;
+          text-decoration: none;
+          font-weight: 700;
+        "
+        >本番を開く</a
+      >
+    </div>
     <!-- ★iPhone/iPad 未対応ゲートは将来(リリース前)に再導入。決定F=Android専用だが、
          今は司さんのiPhone確認を妨げないため未実装(2026-06-27・司さん「今はまだするな」)。 -->
     <!-- S1 (2026-05-10): 複数タブ guard・閲覧専用モードバナー -->
@@ -12534,11 +12572,22 @@
         //   司さん指示「CACHE_NAME どこ？」 で・設定画面に SW CACHE_NAME を表示。
         //   sw.js の message handler ({ type: 'GET_CACHE_NAME' }) に MessageChannel で問合せ。
         //   SW 未登録 (= 開発環境 / 初回 install 直後) は「(SW 未登録)」 表示で fallback。
+        // ★どのアプリを開いているか（本番／テスト用）を 版と一緒に出す★ 2026-08-21
+        //   ホーム画面アプリ(PWA)は ★アドレスバーが出ない★＝司さんが自分で確かめる道が無かった。
+        //   ⇒ ★アプリの中に出す★（判定は location.host＝中の設定を信じない）
+        function _envLabel() {
+          const h = location.host || '';
+          if (/-test\./.test(h) || /-test$/.test(h)) return '★テスト用★';
+          return '本番';
+        }
+        function _withEnv(v) {
+          return v + '  /  ' + _envLabel() + '  /  ' + (location.host || '');
+        }
         function _loadAppVersion() {
           const el = document.getElementById('_st_appVersionLine');
           if (!el) return;
           if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
-            el.textContent = '(SW 未登録)';
+            el.textContent = _withEnv('(SW 未登録)');
             return;
           }
           let received = false;
@@ -12547,18 +12596,18 @@
             ch.port1.onmessage = function (ev) {
               received = true;
               if (ev && ev.data && ev.data.type === 'CACHE_NAME' && ev.data.value) {
-                el.textContent = ev.data.value;
+                el.textContent = _withEnv(ev.data.value);
                 window.DK_SW_CACHE = ev.data.value; // ★自己診断trace用にビルド名を保持
               } else {
-                el.textContent = '(取得失敗)';
+                el.textContent = _withEnv('(取得失敗)');
               }
             };
             navigator.serviceWorker.controller.postMessage({ type: 'GET_CACHE_NAME' }, [ch.port2]);
             setTimeout(function () {
-              if (!received) el.textContent = '(応答なし)';
+              if (!received) el.textContent = _withEnv('(応答なし)');
             }, 2000);
           } catch (_) {
-            el.textContent = '(取得失敗)';
+            el.textContent = _withEnv('(取得失敗)');
           }
         }
 

@@ -1,15 +1,19 @@
 {
-  "name": "ダイコメ",
-  "short_name": "ダイコメ",
-  "description": "運転代行向け料金メーターアプリ",
+  "name": "【テスト用】ダイコメ",
+  "short_name": "【テスト】ダイコメ",
+  "description": "★テスト用★ 本番ではありません（本番は https://daikou-app.vercel.app/）",
   "id": "/?source=pwa",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "browser",
   "background_color": "#007AFF",
   "theme_color": "#007AFF",
   "lang": "ja",
-  "categories": ["business", "productivity", "utilities"],
+  "categories": [
+    "business",
+    "productivity",
+    "utilities"
+  ],
   "prefer_related_applications": false,
   "related_applications": [],
   "icons": [
