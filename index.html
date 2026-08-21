@@ -3946,6 +3946,10 @@
       <a
         href="https://daikou-app.vercel.app/"
         style="
+          /* ★帯は pointer-events:none（下の画面を押せるように）なので、
+             ここで auto に戻さないと このボタンは ★永久に押せない★。
+             2026-08-21 司さん「本番を開く押しても開かんかった」 */
+          pointer-events: auto;
           display: inline-block;
           margin-left: 8px;
           padding: 1px 8px;

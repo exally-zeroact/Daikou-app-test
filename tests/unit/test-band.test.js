@@ -74,4 +74,34 @@ describe('★テスト用のアプリだと 一目で分かる★', () => {
     expect(band, '★本番へ移るボタンが無い★').toContain('https://daikou-app.vercel.app/');
     expect(band, '★押す物だと分からない★').toContain('本番を開く');
   });
+
+  // ============================================================
+  // ★2026-08-21 司さん「本番を開く押しても開かんかった」★
+  //   帯は pointer-events:none（帯の下の画面を押せるようにする為）。
+  //   その中の <a> で ★auto に戻していないと、ボタンは DOM に在るのに 永久に押せない★。
+  //   ★事務所(dashboard.html)には auto が入っていて、メーター(index.html)には入っていなかった★。
+  //   ＝「在る事」だけ数えていた この試験が ★押せない物を緑で通していた★。
+  //   ⇒ ★押せるか（pointer-events）まで数える★。
+  // ============================================================
+  it('★帯の中のボタンは 実際に押せる（pointer-events を auto に戻している）★', () => {
+    const targets = [
+      ['index.html', 'https://daikou-app.vercel.app/'],
+      ['dashboard.html', 'https://daikome-jimusho.vercel.app/'],
+    ];
+    for (const [file, href] of targets) {
+      const h = read(file);
+      const i = h.indexOf('id="testBand"');
+      expect(i, `★${file} に帯が無い★`).toBeGreaterThan(-1);
+      // 帯の開始タグ〜閉じ </div> までを取り出す（帯の中だけを見る）
+      const band = h.slice(Math.max(0, i - 400), i + 2000);
+      expect(band, `★${file} の帯が pointer-events:none ではない（作りが変わった）★`).toMatch(
+        /pointer-events:\s*none/
+      );
+      const a = band.slice(band.indexOf(href));
+      const style = a.slice(0, a.indexOf('</a'));
+      expect(style, `★${file} の「本番を開く」が 押せない（帯の pointer-events:none のまま）★`).toMatch(
+        /pointer-events:\s*auto/
+      );
+    }
+  });
 });
