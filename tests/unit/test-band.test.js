@@ -72,7 +72,9 @@ describe('★テスト用のアプリだと 一目で分かる★', () => {
     const i = h.indexOf('id="testBand"');
     const band = h.slice(i, i + 1500);
     expect(band, '★本番へ移るボタンが無い★').toContain('https://daikou-app.vercel.app/');
-    expect(band, '★押す物だと分からない★').toContain('本番を開く');
+    // ★2026-08-22 ボタンは「本番へ引っ越す」に変わった（較正Kごと運ぶ・今回限り）★
+    //   ★撤去期限 2026-09-30★（tests/unit/migrate-removal-deadline.test.js）
+    expect(band, '★押す物だと分からない★').toMatch(/本番を開く|本番へ引っ越す/);
   });
 
   // ============================================================

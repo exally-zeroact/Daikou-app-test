@@ -3945,6 +3945,7 @@
       テスト用（本番ではありません）
       <a
         href="https://daikou-app.vercel.app/"
+        onclick="if (window.DKMigrateStart) { event.preventDefault(); window.DKMigrateStart(); }"
         style="
           /* ★帯は pointer-events:none（下の画面を押せるように）なので、
              ここで auto に戻さないと このボタンは ★永久に押せない★。
@@ -3959,7 +3960,7 @@
           text-decoration: none;
           font-weight: 700;
         "
-        >本番を開く</a
+        >本番へ引っ越す</a
       >
     </div>
     <!-- ★iPhone/iPad 未対応ゲートは将来(リリース前)に再導入。決定F=Android専用だが、
@@ -5856,6 +5857,10 @@
     <script src="js/k-calib.js"></script>
     <!-- ★車レジストリ (多台＋車別K永続・2026-06-26)★: 設定の車一覧/追加/削除・業務開始の車選択が使う。 -->
     <script src="js/veh-registry.js"></script>
+    <!-- ★今回限りの引っ越し（2026-08-22・撤去期限 2026-09-30）★
+         テスト版に入ってしまった端末の 較正K・車・端末ID・履歴を 本番へそのまま運ぶ。
+         見張り: tests/unit/migrate-removal-deadline.test.js（期限を過ぎたら赤） -->
+    <script src="js/dk-migrate.js"></script>
     <!-- ★1km自動較正K (autoCalibK・確定方式2026-06-26 / 2026-07-03 永続OFFキー廃止)★:
          ★素で常時ON★=普通に開けば新方式(OBD∫v×学習K)で動く・URLパラメータ不要。
          ?autocalibk=off は ★このセッションのみ★ 旧方式(永続しない)。on は不要(素でON)。
