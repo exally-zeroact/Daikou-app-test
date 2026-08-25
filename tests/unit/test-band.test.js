@@ -67,14 +67,21 @@ describe('★テスト用のアプリだと 一目で分かる★', () => {
     expect(o.name).toContain('テスト用');
   });
 
-  it('★帯から1タップで本番へ移れる★（端末に入ってしまった人が自分で戻れる）', () => {
-    const h = read('index.html');
+  it('★引っ越しのボタンは 帯に残さない★（2026-08-25 司さん）', () => {
+    // ★司さん★「なんでユーザーは本番前提やのに 本番へ引っ越すとか出てくるんど」
+    //   引っ越しは ★2026-08-21 の1回きり★で ★もう済んでいる★（2026-08-25 に数えた）
+    //     本番の倉庫 … 3台とも 08/25 に触っている（1466 14:52 / 4987 14:49 / 1173 14:50）
+    //     テストの倉庫 … 端末 0台 ／ 打刻は 08/02 が最後
+    //   ★済んだ物を残すと 押せてしまう★。決めた事は ★消すまで動き続ける★（26日 動かした前歴）。
+    // ★コメントの字を数えない★（2026-08-25 実測：説明のコメントを拾って 嘘の赤を出した）
+    //   見るのは ★客に見える所と 実際に動く所★ だけ。
+    const h = read('index.html').replace(/<!--[\s\S]*?-->/g, '');
+    expect(h, '★引っ越しのボタンが残っている★').not.toContain('本番へ引っ越す');
+    expect(h, '★引っ越しの部品を まだ読んでいる★').not.toContain('js/dk-migrate.js');
+    expect(h, '★引っ越しの呼び出しが残っている★').not.toContain('DKMigrateStart');
+    // 帯そのものは残す（テスト線の目印）
     const i = h.indexOf('id="testBand"');
-    const band = h.slice(i, i + 1500);
-    expect(band, '★本番へ移るボタンが無い★').toContain('https://daikou-app.vercel.app/');
-    // ★2026-08-22 ボタンは「本番へ引っ越す」に変わった（較正Kごと運ぶ・今回限り）★
-    //   ★撤去期限 2026-09-30★（tests/unit/migrate-removal-deadline.test.js）
-    expect(band, '★押す物だと分からない★').toMatch(/本番を開く|本番へ引っ越す/);
+    expect(i, '★帯まで消してしまっている★').toBeGreaterThan(-1);
   });
 
   // ============================================================
@@ -86,10 +93,9 @@ describe('★テスト用のアプリだと 一目で分かる★', () => {
   //   ⇒ ★押せるか（pointer-events）まで数える★。
   // ============================================================
   it('★帯の中のボタンは 実際に押せる（pointer-events を auto に戻している）★', () => {
-    const targets = [
-      ['index.html', 'https://daikou-app.vercel.app/'],
-      ['dashboard.html', 'https://daikome-jimusho.vercel.app/'],
-    ];
+    // 2026-08-25：index.html の帯からは ★押す物を外した★（引っ越しが済んだ為）。
+    //   押す物が在るのは 事務所の画面だけ。
+    const targets = [['dashboard.html', 'https://daikome-jimusho.vercel.app/']];
     for (const [file, href] of targets) {
       const h = read(file);
       const i = h.indexOf('id="testBand"');
