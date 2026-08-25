@@ -839,6 +839,16 @@
                   <input type="checkbox" id="resFirst" style="width: 17px; height: 17px" />
                 </td>
               </tr>
+              <!-- ★給料明細に 車ごとの売上を載せるか★ 2026-08-25（司さん）
+                   「売り上げ（車ごと）を載せないような選べるようにするのを決めるところが欲しい」
+                   ★決めるのは社長・会社ごと★（dk_payroll_settings に持つ＝新しい棚を作らない）
+                   ★既定は 載せる＝今までと同じ見た目★ -->
+              <tr>
+                <td>給料明細に 車ごとの売上を載せる</td>
+                <td style="text-align: left">
+                  <input type="checkbox" id="showCarSales" style="width: 17px; height: 17px" />
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -1232,7 +1242,70 @@
         }
 
         // ── 明細（実物の給料1〜8と同じ並び）──────────────
+        // ★載せるかどうかは ここ1か所で決める★（画面と設定で食い違わない）2026-08-25
+        //   倉庫にまだ列が無い会社は ★載せる（今までと同じ）★。
+        function showCarSalesNow() {
+          return !(SET && SET.show_car_sales === false);
+        }
+        // ============================================================
+        // ★1人ぶんだけを 紙だけの新しい窓で刷る★ 2026-08-25（司さん）
+        //   「給料は1人ごとにPDFとして送るようにする」
+        //   ・★本体の画面を汚さない★＝新しい窓に その人の1枚だけを描く（決まり）
+        //   ・★窓の名前を そのままファイル名にする★＝「PDFで保存」した時の既定の名前
+        //       例）給料明細_2026-08_白石正人
+        //   ・スマホは その紙を そのまま共有（LINE・メール）で送れる
+        // ============================================================
+        function printOne(ei) {
+          var box = document.getElementById('slip-' + ei);
+          var emp = REP && REP.employees ? REP.employees[ei] : null;
+          if (!box || !emp) {
+            showErr('その人の明細が見つかりません。');
+            return;
+          }
+          // ★中身から作った名前を先に出す★（保存する時の既定のファイル名になる）
+          var ym =
+            String(YM.year) + '-' + String(YM.month).padStart(2, '0');
+          var title = '給料明細_' + ym + '_' + String(emp.name || '');
+          var css = '';
+          document.querySelectorAll('style').forEach(function (st) {
+            css += st.textContent;
+          });
+          var w = window.open('', '_blank');
+          if (!w) {
+            showErr('新しい窓が開けませんでした（ブラウザに止められました）。もう一度 押してください。');
+            return;
+          }
+          w.document.open();
+          w.document.write(
+            '<!doctype html><html lang="ja"><head><meta charset="utf-8">' +
+              '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+              '<title>' +
+              esc(title) +
+              '</title><style>' +
+              css +
+              '</style></head><body><div class="wrap">' +
+              box.outerHTML +
+              '</div></body></html>'
+          );
+          w.document.close();
+          // ★この窓の中の「この人のPDF」ボタンは 紙に出さない（noprint）ので消えている★
+          w.focus();
+          w.onload = function () {
+            w.print();
+          };
+          // onload が来ない端末の保険
+          setTimeout(function () {
+            try {
+              w.print();
+            } catch (_) {
+              /* もう刷っている */
+            }
+          }, 700);
+        }
+        window.printOne = printOne;
+
         function renderSlips() {
+          var SHOW_CAR_SALES = showCarSalesNow();
           var box = $('slips');
           if (!REP || !REP.employees.length) {
             box.innerHTML =
@@ -1241,9 +1314,9 @@
           }
           var cars = REP.cars;
           var html = '';
-          REP.employees.forEach(function (e) {
+          REP.employees.forEach(function (e, ei) {
             html +=
-              '<div class="slip"><div class="shead">' +
+              '<div class="slip" id="slip-' + ei + '"><div class="shead">' +
               '<div><div class="title">給料明細</div>' +
               '<div>' +
               esc(PERIOD.label) +
@@ -1258,6 +1331,10 @@
               '<div class="who">' +
               esc(e.name) +
               '　殿</div>' +
+              // ★この人だけのPDF★ 2026-08-25（司さん「給料は1人ごとにPDFとして送る」）
+              '<button class="btn btn-ghost noprint" style="margin-top:6px" onclick="printOne(' +
+              ei +
+              ')">この人のPDF</button>' +
               '</div><div class="scroller"><table><tbody>';
 
             function row(label, get, cls) {
@@ -1281,11 +1358,14 @@
             html += row('時間', function (c) {
               return c.hours === null ? '' : hrs(c.hours);
             });
-            cars.forEach(function (car, i) {
-              html += row('売上' + (i + 1) + '（' + car.label + '）', function (c) {
-                return c.carSales[i] === null ? '' : yen(c.carSales[i]);
+            // ★車ごとの売上を載せるか（社長が決める・既定は載せる）★ 2026-08-25
+            if (SHOW_CAR_SALES) {
+              cars.forEach(function (car, i) {
+                html += row('売上' + (i + 1) + '（' + car.label + '）', function (c) {
+                  return c.carSales[i] === null ? '' : yen(c.carSales[i]);
+                });
               });
-            });
+            }
             html += row('時間（全台）', function (c) {
               return c.poolHours === null ? '' : hrs(c.poolHours);
             });
@@ -1950,6 +2030,8 @@
           $('resPool').value = Math.round(st.reservePoolRate * 1000) / 10;
           $('resOwner').value = Math.round(st.reserveOwnerRate * 1000) / 10;
           $('resFirst').checked = !!st.deductReserveBeforeRate;
+          // ★既定は 載せる（true）★＝倉庫にまだ無い会社も 今までと同じ見た目
+          $('showCarSales').checked = !(SET && SET.show_car_sales === false);
           $('pStart').value = st.periodStartDay;
           $('pMode').value = st.periodEndMode;
           $('pDays').value = st.periodDays;
@@ -2119,6 +2201,7 @@
             period_end_mode: $('pMode').value,
             period_days: num($('pDays').value) || 11,
             owner_device_id: $('ownerDev').value || '',
+            show_car_sales: $('showCarSales').checked, // ★車ごとの売上を載せるか★ 2026-08-25
             roles: st.roles,
             updated_at: new Date().toISOString(),
           };
