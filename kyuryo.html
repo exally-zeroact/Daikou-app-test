@@ -675,12 +675,79 @@
         white-space: nowrap;
       }
 
+      /* ★1期は 10〜11日ぶん在る★（2026-08-25 司さん「なんで2日分しか載せてないんど」）
+           横に並べると 375px では ★2日ぶんしか見えない★（実測：表 715px / 箱 324px）。
+           ⇒ ★紙は 今まで通り 横（実物の給料明細と同じ並び）★
+             ★スマホの画面だけ 1日1行の縦★＝10日 ぜんぶ見える。
+           出し分けは CSS だけ。字の作り方は JS の1本（F）で共通。 */
+      .slip .tate {
+        display: none;
+      }
+
+      .slip .tate .d {
+        border-bottom: 1px solid var(--line);
+        padding: 7px 2px;
+      }
+
+      .slip .tate .d:last-child {
+        border-bottom: none;
+      }
+
+      .slip .tate .dh {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .slip .tate .dh b {
+        min-width: 5.5em;
+      }
+
+      .slip .tate .dn {
+        color: var(--muted);
+        font-weight: 400;
+      }
+
+      .slip .tate .dl {
+        font-size: 13px;
+
+        /* ★横の表と同じ字の色（新しい色を足さない）★ */
+        color: var(--ink);
+        padding-left: 5.5em;
+      }
+
+      .slip .tate .d.off .dh {
+        color: var(--muted);
+        font-weight: 400;
+      }
+
+      @media (max-width: 480px) {
+        .slip .yoko {
+          display: none;
+        }
+
+        .slip .tate {
+          display: block;
+        }
+      }
+
       @media print {
         body {
           background: #fff;
         }
 
         .noprint {
+          display: none !important;
+        }
+
+        /* ★紙は いつも 横（実物の給料明細と同じ並び）★ */
+        .slip .yoko {
+          display: block !important;
+        }
+
+        .slip .tate {
           display: none !important;
         }
 
@@ -1375,10 +1442,31 @@
               '<button class="btn ghost noprint" style="margin-top:6px" onclick="printOne(' +
               ei +
               ')">この人のPDF</button>' +
-              '</div><div class="scroller"><table><tbody>';
+              '</div>';
 
-            function row(label, get, cls) {
-              var s = '<tr' + (cls ? ' class="' + cls + '"' : '') + '><th>' + esc(label) + '</th>';
+            // ★字の作り方は ここ1本★（横＝紙 と 縦＝スマホ画面 で 二度書かない）
+            //   2026-08-25：司さん「なんで2日分しか載せてないんど」
+            //   実物は 1期＝10〜11日ぶん。横に並べると スマホでは ★2日ぶんしか見えない★。
+            var F = {
+              pay: function (c) {
+                return c.pay === null ? '' : yen(c.pay);
+              },
+              hours: function (c) {
+                return c.hours === null ? '' : hrs(c.hours);
+              },
+              car: function (c, i) {
+                return c.carSales[i] === null ? '' : yen(c.carSales[i]);
+              },
+              pool: function (c) {
+                return c.poolHours === null ? '' : hrs(c.poolHours);
+              },
+            };
+
+            // ───────── 横（今まで通り・★紙はこれ★）─────────
+            html += '<div class="yoko scroller"><table><tbody>';
+
+            function row(label, get) {
+              var s = '<tr><th>' + esc(label) + '</th>';
               e.cells.forEach(function (c) {
                 s += '<td>' + get(c) + '</td>';
               });
@@ -1392,25 +1480,55 @@
             });
             html += '</tr>';
 
-            html += row('金額', function (c) {
-              return c.pay === null ? '' : yen(c.pay);
-            });
-            html += row('時間', function (c) {
-              return c.hours === null ? '' : hrs(c.hours);
-            });
+            html += row('金額', F.pay);
+            html += row('時間', F.hours);
             // ★車ごとの売上を載せるか（社長が決める・既定は載せる）★ 2026-08-25
             if (SHOW_CAR_SALES) {
               cars.forEach(function (car, i) {
                 html += row('売上' + (i + 1) + '（' + car.label + '）', function (c) {
-                  return c.carSales[i] === null ? '' : yen(c.carSales[i]);
+                  return F.car(c, i);
                 });
               });
             }
-            html += row('時間（全台）', function (c) {
-              return c.poolHours === null ? '' : hrs(c.poolHours);
-            });
+            html += row('時間（全台）', F.pool);
 
-            html += '</tbody></table></div></div>';
+            html += '</tbody></table></div>';
+
+            // ───────── 縦（★スマホの画面だけ★・1日1行で 全部の日が見える）─────────
+            //   紙は ★1バイトも変えない★。出し分けは CSS（@media）だけ。
+            html += '<div class="tate">';
+            e.cells.forEach(function (c) {
+              var pay = F.pay(c);
+              var hh = F.hours(c);
+              var yasumi = pay === '' && hh === '';
+              html +=
+                '<div class="d' +
+                (yasumi ? ' off' : '') +
+                '"><div class="dh"><b>' +
+                mdw(c.date) +
+                '</b>' +
+                (yasumi
+                  ? '<span class="dn">—</span>'
+                  : '<span>¥' + pay + '</span><span>' + hh + ' 時間</span>') +
+                '</div>';
+              if (!yasumi) {
+                // ★その日 売上が在った車だけ★（空の車を6行 並べても読めない）
+                if (SHOW_CAR_SALES) {
+                  var uri = [];
+                  cars.forEach(function (car, i) {
+                    var v = F.car(c, i);
+                    if (v !== '') uri.push(esc(car.label) + ' ' + v);
+                  });
+                  if (uri.length) html += '<div class="dl">売上　' + uri.join('　／　') + '</div>';
+                }
+                var po = F.pool(c);
+                if (po !== '') html += '<div class="dl">時間（全台）　' + po + '</div>';
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+
+            html += '</div>';
           });
 
           // つかさの取り分（会社に残る分）
