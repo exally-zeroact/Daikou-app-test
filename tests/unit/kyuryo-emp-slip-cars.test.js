@@ -118,4 +118,20 @@ describe('★名前を 真ん中に★', () => {
     expect(who, '★名前が 題より前に在る★').toBeGreaterThan(title);
     expect(sums, '★合計が 名前より前に在る（名前が右端に飛ぶ）★').toBeGreaterThan(who);
   });
+
+  it('★名前は「給料明細」の すぐ右★（真ん中に浮かせない）', () => {
+    // ★1度 間違えた★ 2026-08-25：space-between にしたら 名前が真ん中に浮き、
+    //   司さんに「赤丸の所って言わんかった？」と 2度 言わせた。
+    //   ⇒ 端から順に詰めて（flex-start）、★合計だけ 右端に寄せる★。
+    const i = HTML.indexOf('\n      .slip .shead {');
+    const shead = HTML.slice(i, HTML.indexOf('}', i));
+    expect(shead, '★名前が 真ん中に浮きます★').toContain('justify-content: flex-start');
+    expect(shead, '★端から詰める形になっていない★').not.toContain('space-between');
+    const j = HTML.indexOf('\n      .slip .sums {');
+    const sums = HTML.slice(j, HTML.indexOf('}', j));
+    expect(sums, '★合計が 右端に寄りません★').toContain('margin-left: auto');
+    // ★同じ名前を 2か所に書かない★（どちらが効くか 分からなくなる）
+    const n = (HTML.match(/\n {6}\.slip \.sums \{/g) || []).length;
+    expect(n, `★.slip .sums を ${n} か所で書いている★`).toBe(1);
+  });
 });

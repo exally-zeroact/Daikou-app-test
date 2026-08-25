@@ -644,10 +644,14 @@
         background: #fff;
       }
 
+      /* ★名前は「給料明細」の すぐ右★ 2026-08-25（司さん「赤丸の所に名前もってきて」）
+           1度目は 真ん中に浮かせてしまい ★また離れていた★（司さん「赤丸の所って言わんかった？」）。
+           ⇒ 端から順に詰めて（flex-start）、★合計だけ 右端に寄せる★。
+           これで 左から「給料明細 → 名前」が くっついて並ぶ。 */
       .slip .shead {
         display: flex;
         align-items: baseline;
-        justify-content: space-between;
+        justify-content: flex-start;
         gap: 12px;
         flex-wrap: wrap;
         margin-bottom: 8px;
@@ -668,6 +672,7 @@
          色は付けない（色は 押せる物と 選ばれている物だけ）。
          ★大きさと 太さと 薄い枠★ で目立たせる。紙にも そのまま出る。 */
       .slip .sums {
+        margin-left: auto; /* ★合計だけ 右端（名前は 題のすぐ右に残す）★ */
         font-size: 13px;
         font-weight: 700;
         color: var(--muted);
