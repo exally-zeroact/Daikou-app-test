@@ -656,11 +656,17 @@
       }
 
       /* ── 明細 ────────────────────────────── */
+
+      /* ★余白は 字の大きさを ものさしにする★ 2026-08-25（司さん
+           「もう少し上に余白作ってバランス考えろ 売上が1.2.3.4と増えても
+             自動で余白のバランス考えろ」）
+         px で決め打ちにすると 行が増えた時／字を大きくした時に 詰まって見える。
+         ★em（字の大きさ）で決める★と、中身が増えても 見た目の間の取り方が変わらない。 */
       .slip {
         border: 1px solid var(--line);
         border-radius: 12px;
-        padding: 14px;
-        margin-bottom: 14px;
+        padding: 1.7em 1.5em 1.5em;
+        margin-bottom: 1.1em;
         background: #fff;
       }
 
@@ -675,7 +681,7 @@
         align-items: baseline;
         gap: 12px;
         flex-wrap: wrap;
-        margin-bottom: 8px;
+        margin-bottom: 1.1em;
       }
 
       .slip .sh-l,
@@ -844,10 +850,12 @@
           padding: 0;
         }
 
+        /* ★紙も 上に余白★（今までは 上0＝いきなり字が始まっていた）
+             ここも em なので 売上の行が増えても 間の取り方は変わらない。 */
         .slip {
           break-inside: avoid;
           border: none;
-          padding: 0 0 18px;
+          padding: 1.4em 0 2em;
         }
       }
     </style>
@@ -1675,21 +1683,11 @@
                 (yasumi
                   ? '<span class="dn">—</span>'
                   : '<span>¥' + pay + '</span><span>' + hh + ' 時間</span>') +
-                '</div>';
-              if (!yasumi) {
-                // ★その日 売上が在った車だけ★（空の車を6行 並べても読めない）
-                if (SHOW_CAR_SALES) {
-                  var uri = [];
-                  cars.forEach(function (x) {
-                    var v = F.car(c, x.i);
-                    if (v !== '') uri.push(esc(x.car.label) + ' ' + v);
-                  });
-                  if (uri.length) html += '<div class="dl">売上　' + uri.join('　／　') + '</div>';
-                }
-                var po = F.pool(c);
-                if (po !== '') html += '<div class="dl">時間（全台）　' + po + '</div>';
-              }
-              html += '</div>';
+                '</div></div>';
+              // ★スマホの一覧は 金額と時間だけ★ 2026-08-25（司さん
+              //   「この一覧の所は 赤丸の部分除けて 金額と時間だけにして スマートにしろ」）
+              //   売上・時間（全台）は ★紙（PDF）には 今までどおり出る★。
+              //   ＝この画面は「いくら・何時間」を ざっと見る所、紙が 渡す物。
             });
             html += '</div>';
 

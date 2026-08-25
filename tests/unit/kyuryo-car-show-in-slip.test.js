@@ -85,10 +85,10 @@ describe('★車を1台ずつ 明細に出す/出さない★', () => {
     const block = HTML.slice(i, i + 500);
     // 元の並びの何番目か（i）を 一緒に持つ＝carSales の取り違えが起きない
     expect(block, '★元の何番目かを 持っていない（数字が ずれる）★').toContain('out.push({ car: car, i: i })');
-    // 横（紙）も 縦（スマホ）も 出す車だけを まわす
+    // 2026-08-25：司さんの指示で ★スマホの一覧は 金額と時間だけ★ になったので、
+    //   売上を出すのは ★紙（横）だけ★。ここも 横だけを見る。
     expect(HTML, '★横で 振り直していない★').toContain("'売上' + (n + 1) + '（' + x.car.label");
     expect(HTML, '★横で 元の番号のまま 数字を取っている★').toContain('return F.car(c, x.i);');
-    expect(HTML, '★縦で 元の番号のまま 数字を取っている★').toContain('var v = F.car(c, x.i);');
   });
 
   it('★給料明細だけの決まり★（売上表・月次集計は今までどおり）', () => {
