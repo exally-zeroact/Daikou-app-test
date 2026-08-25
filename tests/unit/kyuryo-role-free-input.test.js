@@ -92,10 +92,33 @@ describe('★決まりの無い役割は 赤く知らせる★', () => {
 });
 
 describe('★合計は 名前と右端の 真ん中★', () => {
-  it('右端に寄せきらない（司さん「右に移動なんか言うてなかろが」）', () => {
+  // ★2回 間違えた★
+  //   1回目 … 右端に寄せた（司さん「右に移動なんか言うてなかろが」）
+  //   2回目 … 余った所の真ん中にした → ★右に寄って見える★（司さん「中心にって言わんかったか？」）
+  //   ⇒ 左のかたまりと 右のかたまりを ★同じ幅★にして 合計を 行の真ん中に置く。
+  //   実測（1000px）… 行 33〜967（真ん中500）／合計 363〜637（真ん中500）＝★差 0px★
+  it('左右のかたまりが 同じ幅（合計が 行の真ん中に来る）', () => {
+    const i = HTML.indexOf('\n      .slip .sh-l,');
+    expect(i, '★左右のかたまりが 無い★').toBeGreaterThan(-1);
+    const css = HTML.slice(i, HTML.indexOf('}', i));
+    expect(css, '★同じ幅になっていない（合計が 真ん中に来ない）★').toContain('flex: 1 1 0');
+  });
+
+  it('★合計は 余白で押し出さない★（auto 余白に戻さない）', () => {
     const i = HTML.indexOf('\n      .slip .sums {');
     const css = HTML.slice(i, HTML.indexOf('}', i));
-    expect(css, '★左に寄っている★').toContain('margin-left: auto');
-    expect(css, '★右端に寄せきっている（真ん中に来ない）★').toContain('margin-right: auto');
+    expect(css, '★余った所の真ん中に戻っている（右に寄って見える）★').not.toContain(
+      'margin-left: auto'
+    );
+    expect(css, '★合計が 伸び縮みする★').toContain('flex: 0 0 auto');
+  });
+
+  it('★紙でも 真ん中がずれない★（ボタンが消えても 右のかたまりは残す）', () => {
+    // 右のかたまり自体に noprint を付けると 紙で右側が消えて 合計が右へずれる
+    expect(HTML, '★右のかたまりごと 紙から消している★').not.toContain('<div class="sh-r noprint">');
+    expect(HTML, '★右のかたまりが 無い★').toContain('<div class="sh-r">');
+    expect(HTML, '★ボタンだけを 紙から消していない★').toContain(
+      '<button class="btn ghost noprint" onclick="printOne('
+    );
   });
 });

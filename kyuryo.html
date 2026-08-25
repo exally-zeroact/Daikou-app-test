@@ -664,17 +664,44 @@
         background: #fff;
       }
 
-      /* ★名前は「給料明細」の すぐ右★ 2026-08-25（司さん「赤丸の所に名前もってきて」）
-           1度目は 真ん中に浮かせてしまい ★また離れていた★（司さん「赤丸の所って言わんかった？」）。
-           ⇒ 端から順に詰めて（flex-start）、★合計だけ 右端に寄せる★。
-           これで 左から「給料明細 → 名前」が くっついて並ぶ。 */
+      /* ★見出しの並び★ 2026-08-25
+           司さん「赤丸の所に名前もってきて」→ 名前は「給料明細」のすぐ右
+           司さん「金額は赤丸の中心ぐらいに」→ 合計は ★行の真ん中★
+         ★左のかたまりと 右のかたまりを 同じ幅にして 合計を 真ん中に置く★
+         （1度目：余った所の真ん中にしたら ★右に寄って見えた★＝直っていなかった）
+         ★右のかたまりは 紙でも残す★＝ボタンが消えても 真ん中がずれない。 */
       .slip .shead {
         display: flex;
         align-items: baseline;
-        justify-content: flex-start;
         gap: 12px;
         flex-wrap: wrap;
         margin-bottom: 8px;
+      }
+
+      .slip .sh-l,
+      .slip .sh-r {
+        flex: 1 1 0;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+
+      .slip .sh-r {
+        justify-content: flex-end;
+      }
+
+      /* ★狭い画面は 上下に並べる★（横に3つ 並べると どれも読めない） */
+      @media (max-width: 640px) {
+        .slip .sh-l,
+        .slip .sh-r,
+        .slip .sums {
+          flex: 1 1 100%;
+        }
+
+        .slip .sh-r {
+          justify-content: flex-start;
+        }
       }
 
       .slip .title {
@@ -692,11 +719,7 @@
          色は付けない（色は 押せる物と 選ばれている物だけ）。
          ★大きさと 太さと 薄い枠★ で目立たせる。紙にも そのまま出る。 */
       .slip .sums {
-        /* ★合計は 名前と 行の右端の 真ん中★ 2026-08-25
-             司さん「金額は赤丸の中心ぐらいに持ってこいや 右に移動なんか言うてなかろが」
-             左右に同じだけ余白を取る＝★余った所の 真ん中★に座る。 */
-        margin-left: auto;
-        margin-right: auto;
+        flex: 0 0 auto;
         font-size: 13px;
         font-weight: 700;
         color: var(--muted);
@@ -1555,27 +1578,35 @@
             var cars = slipCars(REP.cars, e.employee_id);
             html +=
               '<div class="slip" id="slip-' + ei + '"><div class="shead">' +
+              // ★左のかたまり★（題＋期間＋名前）
+              //   ★名前は「給料明細」のすぐ右★ 2026-08-25（司さん「赤丸の所に名前もってきて」）
+              '<div class="sh-l">' +
               '<div><div class="title">給料明細</div>' +
               '<div>' +
               esc(PERIOD.label) +
               '　' +
               esc(PERIOD.rangeLabel) +
               '</div></div>' +
-              // ★名前は 真ん中★ 2026-08-25（司さん「目が散るから 赤丸の所に名前もってきて」）
-              //   前は 右端に離れていて「誰の・いくら」を目が行ったり来たりしていた。
-              //   ★給料明細 → 名前 → 合計★ の順に並べて 一息で読めるようにする。
               '<div class="who">' +
               esc(e.name) +
               '　殿</div>' +
+              '</div>' +
+              // ★合計は 行の 真ん中★ 2026-08-25（司さん「金額は赤丸の中心ぐらいに」）
+              //   左のかたまりと 右のかたまりを ★同じ幅★にして 合計を真ん中に置く。
+              //   （余った所の真ん中では ★右に寄って見える★＝1度 それで直っていなかった）
               '<div class="sums">合計<span class="big">¥' +
               yen(e.totalPay) +
               '</span><span class="mid">' +
               hrs(e.totalHours) +
               ' 時間</span></div>' +
+              // ★右のかたまり★（幅合わせ＋この人のPDF）
+              //   ★紙でもボタンが消えるだけで この箱は残す★＝紙でも真ん中がずれない
+              '<div class="sh-r">' +
               // ★この人だけのPDF★ 2026-08-25（司さん「給料は1人ごとにPDFとして送る」）
-              '<button class="btn ghost noprint" style="margin-top:6px" onclick="printOne(' +
+              '<button class="btn ghost noprint" onclick="printOne(' +
               ei +
               ')">この人のPDF</button>' +
+              '</div>' +
               '</div>';
 
             // ★字の作り方は ここ1本★（横＝紙 と 縦＝スマホ画面 で 二度書かない）

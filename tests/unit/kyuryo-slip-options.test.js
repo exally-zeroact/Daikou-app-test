@@ -77,8 +77,11 @@ describe('★①1人ごとにPDF★', () => {
     //   ＝名前が無いので 見た目は当たらず ★真っ青な大きいボタン★ が明細ごとに並んだ。
     //   それでも「その字が在るか」だけを見ていた この試験は ★緑のまま★ だった。
     //   ⇒ 字が在るかではなく ★その名前が CSS に在るか★ を見る。
-    const cls = (HTML.match(/<button class="([^"]*)" style="margin-top:6px" onclick="printOne\(/) ||
-      [])[1];
+    // ★見た目の細かい所（style）に ぶら下がらない★
+    //   2026-08-25：ボタンを右の箱へ移した時に inline の style を外したら、
+    //   この試験だけ「ボタンが見つからない」と ★嘘の赤★ を出した。
+    //   見たいのは ★class の中身★なので、押した先（printOne）で探す。
+    const cls = (HTML.match(/<button class="([^"]*)"[^>]*onclick="printOne\(/) || [])[1];
     expect(cls, '★1人ごとのPDFのボタンが見つからない★').toBeTruthy();
     for (const c of cls.split(/\s+/).filter(Boolean)) {
       if (c === 'noprint' || c === 'btn') continue;
