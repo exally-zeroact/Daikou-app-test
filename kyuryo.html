@@ -649,13 +649,35 @@
         font-weight: 800;
       }
 
+      /* ★合計は 給料明細で 一番 見たい所★（2026-08-25 司さん
+           「給料明細なんやけん 赤丸の所は 大きく 見やすく 目立つようにしろよ」）
+         色は付けない（色は 押せる物と 選ばれている物だけ）。
+         ★大きさと 太さと 薄い枠★ で目立たせる。紙にも そのまま出る。 */
       .slip .sums {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 700;
+        color: var(--muted);
+        background: #f7fbff;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 7px 16px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        white-space: nowrap;
       }
 
-      .slip .sums span {
-        margin-left: 14px;
+      .slip .sums .big {
+        font-size: 26px;
+        font-weight: 800;
+        color: var(--ink);
+        letter-spacing: -0.5px;
+      }
+
+      .slip .sums .mid {
+        font-size: 17px;
+        font-weight: 800;
+        color: var(--ink);
       }
 
       .slip table {
@@ -867,7 +889,10 @@
           <div class="note" style="margin: 0 0 10px">
             ここで付けた名前が<b>給料明細の「売上1・売上2」</b>や売上表に出ます。<br />
             <b>並び</b>の数字が小さい車から順に「売上1・売上2…」になります。
-            <b>空欄なら今までどおり</b>です。
+            <b>空欄なら今までどおり</b>です。<br />
+            <!-- ★1台ずつ 出す/出さない (2026-08-25・司さん「個別で見せる見せないも選べたら最高」)★ -->
+            <b>明細に出す</b>のチェックを外した車は、給料明細に<b>その車の売上を出しません</b>。
+            （売上表・月次集計は今までどおりです）
           </div>
           <div class="scroller">
             <table>
@@ -876,6 +901,7 @@
                   <th>今の呼び方</th>
                   <th>名前<span class="th-sub">空欄=車1・車2…</span></th>
                   <th>並び<span class="th-sub">小さい順</span></th>
+                  <th>明細に出す<span class="th-sub">外すと出ません</span></th>
                 </tr>
               </thead>
               <tbody id="carBody" class="car-body"></tbody>
@@ -1411,6 +1437,30 @@
         }
         window.printOne = printOne;
 
+        // ★どの車を 給料明細に出すか★ 2026-08-25（司さん「個別で見せる見せないも選べたら最高」）
+        //   ・持ち場は ★車の棚（dk_device_labels.show_in_slip）★＝新しい棚を作らない
+        //   ・★空（まだ決めていない）＝出す★＝今までと同じ見た目
+        //   ・決めるのは 社長・会社ごと（「車の名前と並び」の表で1台ずつ）
+        //   ・判定は ★ここ1か所★（設定の画面と 明細で 食い違わない）
+        function carShowsInSlip(deviceId) {
+          var hit = null;
+          (RAW.labels || []).forEach(function (l) {
+            if (l && l.device_id === deviceId) hit = l;
+          });
+          return !(hit && hit.show_in_slip === false);
+        }
+
+        // ★明細に出す車だけを 並び順のまま 取り出す★
+        //   元の並びの何番目か（i）も一緒に持つ＝売上の数字を取り違えない。
+        //   出す物だけで「売上1・売上2…」と番号を振り直す（間が抜けない）。
+        function slipCars(cars) {
+          var out = [];
+          (cars || []).forEach(function (car, i) {
+            if (carShowsInSlip(car.device_id)) out.push({ car: car, i: i });
+          });
+          return out;
+        }
+
         function renderSlips() {
           var SHOW_CAR_SALES = showCarSalesNow();
           var box = $('slips');
@@ -1419,7 +1469,7 @@
               '<div class="card"><div class="msg">まず「従業員」で人を登録してください。</div></div>';
             return;
           }
-          var cars = REP.cars;
+          var cars = slipCars(REP.cars); // ★出すと決めた車だけ★
           var html = '';
           REP.employees.forEach(function (e, ei) {
             html +=
@@ -1430,9 +1480,9 @@
               '　' +
               esc(PERIOD.rangeLabel) +
               '</div></div>' +
-              '<div class="sums">合計 <span>¥' +
+              '<div class="sums">合計<span class="big">¥' +
               yen(e.totalPay) +
-              '</span> <span>' +
+              '</span><span class="mid">' +
               hrs(e.totalHours) +
               ' 時間</span></div>' +
               '<div class="who">' +
@@ -1484,9 +1534,9 @@
             html += row('時間', F.hours);
             // ★車ごとの売上を載せるか（社長が決める・既定は載せる）★ 2026-08-25
             if (SHOW_CAR_SALES) {
-              cars.forEach(function (car, i) {
-                html += row('売上' + (i + 1) + '（' + car.label + '）', function (c) {
-                  return F.car(c, i);
+              cars.forEach(function (x, n) {
+                html += row('売上' + (n + 1) + '（' + x.car.label + '）', function (c) {
+                  return F.car(c, x.i);
                 });
               });
             }
@@ -1515,9 +1565,9 @@
                 // ★その日 売上が在った車だけ★（空の車を6行 並べても読めない）
                 if (SHOW_CAR_SALES) {
                   var uri = [];
-                  cars.forEach(function (car, i) {
-                    var v = F.car(c, i);
-                    if (v !== '') uri.push(esc(car.label) + ' ' + v);
+                  cars.forEach(function (x) {
+                    var v = F.car(c, x.i);
+                    if (v !== '') uri.push(esc(x.car.label) + ' ' + v);
                   });
                   if (uri.length) html += '<div class="dl">売上　' + uri.join('　／　') + '</div>';
                 }
@@ -2272,7 +2322,15 @@
                 esc(d) +
                 '" data-f="sort_order" inputmode="numeric" value="' +
                 (cur.sort_order === null || cur.sort_order === undefined ? '' : cur.sort_order) +
-                '"></td></tr>'
+                '"></td>' +
+                // ★1台ずつ 明細に出す/出さない (2026-08-25)★ 決めていなければ出す（今までどおり）
+                '<td data-l="明細に出す"><input type="checkbox" style="width:17px;height:17px" data-car="' +
+                esc(d) +
+                '" data-f="show_in_slip"' +
+                // ★出す/出さないの判定は carShowsInSlip 1か所★
+                //   ここで もう一度 決めると 設定の画面と 明細が 食い違う。
+                (carShowsInSlip(d) ? ' checked' : '') +
+                '></td></tr>'
               );
             })
             .join('');
@@ -2284,12 +2342,15 @@
           Array.prototype.forEach.call(document.querySelectorAll('[data-car]'), function (i) {
             i.onchange = function () {
               var f = i.getAttribute('data-f');
-              var v =
-                f === 'sort_order'
-                  ? String(i.value).trim() === ''
-                    ? null // ★空欄なら今までどおり★
-                    : num(i.value)
-                  : String(i.value).trim();
+              var v;
+              if (i.type === 'checkbox') {
+                // ★チェックは value ではなく checked★（value を読むと いつも "on" になる）
+                v = i.checked;
+              } else if (f === 'sort_order') {
+                v = String(i.value).trim() === '' ? null : num(i.value); // ★空欄なら今までどおり★
+              } else {
+                v = String(i.value).trim();
+              }
               saveCar(i.getAttribute('data-car'), f, v);
             };
           });

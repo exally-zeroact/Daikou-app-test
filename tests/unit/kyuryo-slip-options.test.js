@@ -44,7 +44,9 @@ describe('★②車ごとの売上を 載せる/載せない★', () => {
     const i = HTML.indexOf('if (SHOW_CAR_SALES) {');
     expect(i, '★出し分けていない★').toBeGreaterThan(-1);
     const block = HTML.slice(i, i + 500);
-    expect(block, '★売上の行が中に入っていない★').toContain("'売上' + (i + 1)");
+    // 2026-08-25：1台ずつ 出す/出さない を足したので 番号は
+    // ★出す車だけで振り直す★（i ではなく n）＝売上2・売上3 が抜けない。
+    expect(block, '★売上の行が中に入っていない★').toContain("'売上' + (n + 1)");
   });
 
   it('★「時間（全台）」は そのまま出す★（司さんが言ったのは 売上だけ）', () => {
