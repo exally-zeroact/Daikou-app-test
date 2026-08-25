@@ -66,8 +66,34 @@ describe('★①1人ごとにPDF★', () => {
     // ★「この人のPDF」は 説明のコメントにも出てくる★ ので、
     //   ボタンの字そのものを見る（コメントを数えて 緑にしない）。
     expect(HTML, '★ボタンが紙に出てしまう★').toContain(
-      '<button class="btn btn-ghost noprint"'
+      '<button class="btn ghost noprint"'
     );
+  });
+
+  it('★付けた見た目の名前が CSS に本当に在る★（2026-08-25 実測で踏んだ）', () => {
+    // ★踏んだ事★ 2026-08-25：`btn-ghost` と書いたが この画面の CSS は `.btn.ghost`。
+    //   ＝名前が無いので 見た目は当たらず ★真っ青な大きいボタン★ が明細ごとに並んだ。
+    //   それでも「その字が在るか」だけを見ていた この試験は ★緑のまま★ だった。
+    //   ⇒ 字が在るかではなく ★その名前が CSS に在るか★ を見る。
+    const cls = (HTML.match(/<button class="([^"]*)" style="margin-top:6px" onclick="printOne\(/) ||
+      [])[1];
+    expect(cls, '★1人ごとのPDFのボタンが見つからない★').toBeTruthy();
+    for (const c of cls.split(/\s+/).filter(Boolean)) {
+      if (c === 'noprint' || c === 'btn') continue;
+      expect(HTML, `★"${c}" という見た目は CSS に在りません（当たらないので 見た目が変わります）★`)
+        .toMatch(new RegExp('\\.' + c + '(?![\\w-])'));
+    }
+  });
+
+  it('★紙だけの窓に 押す物を持ち込まない★（2026-08-25 実測で踏んだ）', () => {
+    // ★踏んだ事★ noprint は「紙に出ない」だけ。★その窓の画面には ボタンが残って見えていた★。
+    //   そこで押しても printOne は居ないので 何も起きない＝押せる見た目の飾りになる。
+    expect(HTML, '★写しを取っていない（本体の画面から消してしまう）★').toContain(
+      'box.cloneNode(true)'
+    );
+    expect(HTML, '★押す物を取り除いていない★').toContain("clone.querySelectorAll('.noprint')");
+    expect(HTML, '★取り除く前の物を そのまま書き出している★').not.toContain('box.outerHTML');
+    expect(HTML, '★写しを書き出していない★').toContain('clone.outerHTML');
   });
 
   it('★紙だけの新しい窓で刷る（本体の画面を汚さない）★', () => {
