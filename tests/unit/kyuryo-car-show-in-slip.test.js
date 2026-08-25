@@ -76,7 +76,8 @@ describe('★車を1台ずつ 明細に出す/出さない★', () => {
   it('★判定は1か所★（設定の画面と 明細で 食い違わない）', () => {
     const n = (HTML.match(/show_in_slip === false/g) || []).length;
     expect(n, `★同じ判定を ${n} か所で書いている★`).toBe(1);
-    expect(HTML, '★明細が その判定を通していない★').toContain('slipCars(REP.cars)');
+    // 2026-08-25：人ごとの指定を足したので 人の id も渡す形になった
+    expect(HTML, '★明細が その判定を通していない★').toContain('slipCars(REP.cars, e.employee_id)');
   });
 
   it('★番号は 出す車だけで振り直す・数字は取り違えない★', () => {
