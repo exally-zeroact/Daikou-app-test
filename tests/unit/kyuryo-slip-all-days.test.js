@@ -135,7 +135,33 @@ describe('★余白は 字の大きさを ものさしにする★', () => {
     expect(css, '★見出しの下の間が px の決め打ちに戻っている★').toMatch(/margin-bottom:[^;]*em/);
   });
 
-  it('★紙にも 上の余白が在る★（今までは 上0＝いきなり字が始まっていた）', () => {
+  it('★紙の一番上にも 余白が在る★（司さん「上に余白ってゆわんかったか？」）', () => {
+    // ★1度目は 箱の中しか広げていなかった★＝紙の頭は 詰まったままだった。
+    //   実測（1000px）… 直す前 紙の頭→字 50px ／ 直した後 ★83px★（箱の上まで 54px）
+    //   ★本体の画面は 1文字も変えない★（22px のまま）ので 紙の窓だけに 印を付ける。
+    expect(HTML, '★紙の窓に 目印が無い（本体の画面まで変わる）★').toContain(
+      '<body class="paper">'
+    );
+    const i = HTML.indexOf('\n      .paper .wrap {');
+    expect(i, '★紙の窓の 上の余白が無い★').toBeGreaterThan(-1);
+    const css = HTML.slice(i, HTML.indexOf('}', i));
+    expect(css, '★上の余白が em になっていない★').toMatch(/padding-top:[^;]*em/);
+    // 刷る時（本物の紙）にも 上の余白
+    const pr = HTML.slice(HTML.indexOf('@media print {'));
+    const j = pr.indexOf('.paper .wrap {');
+    expect(j, '★刷る時に 上の余白が無い★').toBeGreaterThan(-1);
+    expect(pr.slice(j, pr.indexOf('}', j)), '★刷る時の余白が em でない★').toMatch(
+      /padding-top:[^;]*em/
+    );
+  });
+
+  it('★本体の画面の上は 変えない★（紙の窓だけ）', () => {
+    const i = HTML.indexOf('\n      .wrap {');
+    const css = HTML.slice(i, HTML.indexOf('}', i));
+    expect(css, '★本体の画面の上の余白まで 変えている★').toContain('padding: 22px 18px 60px');
+  });
+
+  it('★箱の中にも 上の余白が在る★（今までは 上0＝いきなり字が始まっていた）', () => {
     const pr = HTML.slice(HTML.indexOf('@media print {'));
     const i = pr.indexOf('.slip {');
     const css = pr.slice(i, pr.indexOf('}', i));

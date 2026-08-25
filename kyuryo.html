@@ -40,6 +40,14 @@
         padding: 22px 18px 60px;
       }
 
+      /* ★紙だけの窓は 上を広く空ける★ 2026-08-25（司さん「上に余白ってゆわんかったか？」）
+           1度目は ★箱の中★の余白しか広げていなかった＝紙の一番上が 詰まったままだった。
+           ここは ★printOne が作る窓だけ★（body.paper）＝本体の画面は 1文字も変えない。
+           ★em（字の大きさ）で決める★ので 中身が増えても 上の空き方は変わらない。 */
+      .paper .wrap {
+        padding-top: 3.4em;
+      }
+
       .top {
         display: flex;
         align-items: center;
@@ -850,6 +858,11 @@
           padding: 0;
         }
 
+        /* ★刷る時も 紙の頭に間を作る★（上0だと 端から字が始まって見える） */
+        .paper .wrap {
+          padding-top: 2.2em;
+        }
+
         /* ★紙も 上に余白★（今までは 上0＝いきなり字が始まっていた）
              ここも em なので 売上の行が増えても 間の取り方は変わらない。 */
         .slip {
@@ -1502,7 +1515,7 @@
               esc(title) +
               '</title><style>' +
               css +
-              '</style></head><body><div class="wrap">' +
+              '</style></head><body class="paper"><div class="wrap">' +
               clone.outerHTML +
               '</div></body></html>'
           );
