@@ -470,6 +470,26 @@
         overflow-x: auto;
       }
 
+      /* ★役割は 打っても 選んでもいい (2026-08-25)★ */
+      .rolein {
+        min-width: 7em;
+      }
+
+      /* ★決まりの無い役割＝給料が黙って0円になる★ その場で赤く知らせる */
+      .rolewarn {
+        margin-top: 5px;
+        padding: 6px 8px;
+        border: 1px solid var(--danger);
+        border-radius: 8px;
+        background: #fdf1f0;
+        color: var(--danger);
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.5;
+        max-width: 22em;
+        white-space: normal;
+      }
+
       /* ★その人だけの車のチェック (2026-08-25)★ 1台ずつ 名前つきで並べる */
       .empcars {
         min-width: 12em;
@@ -672,7 +692,11 @@
          色は付けない（色は 押せる物と 選ばれている物だけ）。
          ★大きさと 太さと 薄い枠★ で目立たせる。紙にも そのまま出る。 */
       .slip .sums {
-        margin-left: auto; /* ★合計だけ 右端（名前は 題のすぐ右に残す）★ */
+        /* ★合計は 名前と 行の右端の 真ん中★ 2026-08-25
+             司さん「金額は赤丸の中心ぐらいに持ってこいや 右に移動なんか言うてなかろが」
+             左右に同じだけ余白を取る＝★余った所の 真ん中★に座る。 */
+        margin-left: auto;
+        margin-right: auto;
         font-size: 13px;
         font-weight: 700;
         color: var(--muted);
@@ -2122,30 +2146,20 @@
               '" data-f="name" value="' +
               esc(e.name) +
               '"></td>' +
-              '<td data-l="役割"><select data-emp="' +
+              // ★役割は 選んでも 打ってもいい★ 2026-08-25（司さん
+              //   「乙の所が 自由に入力してカスタムできるようにしたらええやないか」）
+              //   前は select だけ＝「給料の設定」で足すまで 新しい役割を書けなかった。
+              //   ★決まりに無い役割は 給料が 黙って0円になる★ ので、その時は赤く知らせる。
+              '<td data-l="役割"><input class="txt rolein" list="roleList" data-emp="' +
               esc(e.employee_id) +
-              '" data-f="role">' +
-              roles
-                .map(function (r) {
-                  return (
-                    '<option value="' +
-                    esc(r) +
-                    '"' +
-                    (r === e.role ? ' selected' : '') +
-                    '>' +
-                    esc(r) +
-                    '</option>'
-                  );
-                })
-                .join('') +
-              (roles.indexOf(e.role) < 0 && e.role
-                ? '<option value="' +
-                  esc(e.role) +
-                  '" selected>' +
-                  esc(e.role) +
-                  '（無い役割）</option>'
-                : '') +
-              '</select></td>' +
+              '" data-f="role" value="' +
+              esc(e.role || '') +
+              '" placeholder="役割を打つ／選ぶ">' +
+              (function () {
+                var w = _roleWarn(e);
+                return w ? '<div class="rolewarn">' + w + '</div>' : '';
+              })() +
+              '</td>' +
               // ★人ごとの歩合・最低保証 (2026-08-05・A案)★
               //   空欄＝役割どおり。役割の値を薄く出しておく＝何もしなければどうなるか見える。
               '<td data-l="歩合"><input class="hrs" data-emp="' +
@@ -2180,6 +2194,15 @@
           if (!RAW.employees.length) {
             html = '<tr><td colspan="7" class="empty">まだ誰も登録されていません。</td></tr>';
           }
+          // ★打つ時の候補★（決まりが在る役割を出す・打ちたければ そのまま打てる）
+          html +=
+            '<datalist id="roleList">' +
+            roles
+              .map(function (r) {
+                return '<option value="' + esc(r) + '"></option>';
+              })
+              .join('') +
+            '</datalist>';
           $('empBody').innerHTML = html;
           Array.prototype.forEach.call(document.querySelectorAll('[data-emp]'), function (i) {
             i.onchange = function () {
@@ -2233,6 +2256,57 @@
             }
           );
           return out.length ? out : null;
+        }
+
+        // ★決まりの無い役割を打つと 何が起きるか★ 2026-08-25
+        //   engine（daiko-payroll.js）は st.roles[役割] が無いと
+        //   ★歩合0・最低保証0★ を使う。エラーは出ない＝★黙って金額が小さくなる★。
+        //   ただし その人に打ってある物は そちらが勝つので、起きる事は3通り。
+        //
+        //   ★言葉は 実測して決めた★（2026-08-25）
+        //     はじめ「0円になります」と1つだけ出したが、最低保証だけ打ってある人は
+        //     ★0円ではなく 11,400円（1200 x 9.50時間）★だった＝★注意が嘘をついていた★。
+        //     押して見つけたので 3通りに書き分ける。
+        function _roleWarn(e) {
+          var role = String((e && e.role) || '').trim();
+          if (!role) return null; // まだ何も打っていない人には出さない
+          var st;
+          try {
+            st = PayrollDaily.normSettings(SET);
+          } catch (_) {
+            return null;
+          }
+          if (st.roles && st.roles[role]) return null; // 決まりが在る＝何も起きない
+          var has = function (v) {
+            return v !== null && v !== undefined && v !== '' && isFinite(parseFloat(v));
+          };
+          var r = has(e.pay_rate);
+          var f = has(e.pay_floor);
+          if (r && f) return null; // その人だけで足りている＝役割は使われない
+          if (!r && !f) {
+            return (
+              '★この役割の決まりがありません★<br>このままだと この人の給料は <b>0円</b> になります。<br>' +
+              '「給料の設定 → 役割ごとの決まり」で <b>' +
+              esc(role) +
+              '</b> を足すか、この人の<b>歩合と最低保証</b>を打ってください。'
+            );
+          }
+          if (r) {
+            return (
+              '★この役割の決まりがありません★<br><b>最低保証が 0円</b>として計算されます' +
+              '（打ってある歩合だけで出ます）。<br>' +
+              '「給料の設定 → 役割ごとの決まり」で <b>' +
+              esc(role) +
+              '</b> を足すか、この人の<b>最低保証</b>を打ってください。'
+            );
+          }
+          return (
+            '★この役割の決まりがありません★<br><b>歩合が 0</b>として計算されます' +
+            '（打ってある最低保証だけで出ます）。<br>' +
+            '「給料の設定 → 役割ごとの決まり」で <b>' +
+            esc(role) +
+            '</b> を足すか、この人の<b>歩合</b>を打ってください。'
+          );
         }
 
         // 役割の値（打たなかった時にどうなるかを薄く見せる）
@@ -2302,6 +2376,10 @@
                 return num(a.sort_order) - num(b.sort_order);
               });
               recalc();
+              // ★役割を打ち替えたら その場で 出し直す★ 2026-08-25
+              //   決まりの無い役割を打った時の ★赤い注意★ を すぐ出す為。
+              //   （打ち終わって 欄から離れた時に来るので 字が消える事は無い）
+              if (field === 'role') renderEmp();
               flash('empSaved', '保存しました');
             })
             .catch(function () {
