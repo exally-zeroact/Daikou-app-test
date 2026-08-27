@@ -186,7 +186,7 @@ const INCLINE_THRESHOLD = 6; // 急勾配閾値 (%)
 // 戻り値は確定的（OSM タグから直接読み取れた）の場合のみ非ゼロ
 function parseInclineRaw(raw) {
   if (raw == null) return 0;
-  let v = String(raw).trim();
+  const v = String(raw).trim();
   if (!v) return 0;
   if (/°$/.test(v)) {
     const deg = parseFloat(v);
@@ -213,7 +213,8 @@ function classifyPct(pct) {
 //   優先順位: OSM raw が確定値 → それ
 //             それ以外 → DEM 計算結果
 //             どちらも不明 → 0
-function classifyInclineCombined(raw, computedInclineCode) {
+// ★2026-08-28: 今は 呼ばれていません（消さずに 残します）。決まりどおり 名前を _ で始めます。
+function _classifyInclineCombined(raw, computedInclineCode) {
   const r = parseInclineRaw(raw);
   if (r !== 0) return r;
   return computedInclineCode || 0;
@@ -269,7 +270,7 @@ function parseLayer(raw) {
 //   OSM raw: "30", "30 km/h", "30 mph", "JP:urban", "signals" 等
 function parseMaxspeed(raw) {
   if (raw == null) return 0;
-  let v = String(raw).trim().toLowerCase();
+  const v = String(raw).trim().toLowerCase();
   if (!v) return 0;
   // JP / DE / city zone 等の symbolic は不明扱い
   if (/^(none|signals|variable|jp|de|fr)/.test(v)) return 0;
@@ -487,7 +488,7 @@ function computeInclineFromDem(simplified) {
 
 // ─── メイン処理 ──────────────────────────────────────────────────
 console.log(`  → 入力: ${INPUT}`);
-let raw = fs.readFileSync(INPUT, 'utf8');
+const raw = fs.readFileSync(INPUT, 'utf8');
 let geo = JSON.parse(raw);
 if (!geo.features) throw new Error('Invalid GeoJSON');
 
@@ -731,7 +732,9 @@ for (const pref of targetPrefs) {
   const GRID_INT = 1000;
   const grid = {};
 
-  function addCellsAlongSegment(cells, A, B) {
+  // ★2026-08-28: 中の関数宣言をやめて 変数にしました（呼ぶのは 定義より後の758行だけなので
+  //   意味は 1つも変わりません）。lint の no-inner-declarations に当たらない書き方です。
+  const addCellsAlongSegment = function (cells, A, B) {
     const dy = B[0] - A[0];
     const dx = B[1] - A[1];
     const dist = Math.sqrt(dy * dy + dx * dx);
@@ -746,7 +749,7 @@ for (const pref of targetPrefs) {
       const gx = Math.floor(lng / GRID_INT);
       cells.add(gy + '_' + gx);
     }
-  }
+  };
 
   entries.forEach(([, points], idx) => {
     const cellsForRoad = new Set();
@@ -799,7 +802,8 @@ for (const pref of targetPrefs) {
   // AKID[A-Za-z0-9]{32,} を文字列リテラル境界で分割して回避
   // (ファイルは厳密 JSON ではなく JS だが window.X = {...} で eval される)
   let secretSplits = 0;
-  while (true) {
+  // ★for(;;) は while(true) と 同じ意味★（lint の「いつも真」に当たらない書き方）
+  for (;;) {
     const m = outBody.match(/AKID[A-Za-z0-9]{32,}/);
     if (!m) break;
     outBody = outBody.slice(0, m.index + 3) + '" + "' + outBody.slice(m.index + 3);
