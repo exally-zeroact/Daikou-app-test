@@ -95,12 +95,6 @@ function main() {
     console.error('  ⇒「実物が無い」は「異常なし」ではありません。');
     process.exit(1);
   }
-  if (false) {
-    console.error('[display] trace not found: ' + TRACE_PATH + ' (skip・実機 trace 未配置)');
-    // trace 未配置の環境 (= 一部 CI) では skip 扱い (= exit 0)。実機 trace のある
-    // 環境 / ローカルでは必ず実行され invariant を検証する。
-    process.exit(0);
-  }
   const raw = JSON.parse(fs.readFileSync(TRACE_PATH, 'utf8'));
   const samples = Array.isArray(raw) ? raw : raw.samples || raw.trace || [];
   const seg = pickMainTrip(samples);
