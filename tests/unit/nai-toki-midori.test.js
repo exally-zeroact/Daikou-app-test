@@ -72,12 +72,13 @@ function kazoeru(dir, deta) {
 //   この日 ★11本 直しました★（24本 → 16本 …【A】必ず在る物6・【B】距離の見張り2・【C】言い換え3）
 //   ※【C】3本は 数えなくなった側（未測定と 言うようになった）
 // ★2026-08-28 実測 … 残り 11本★（この日 24本 → 11本）
-//   ★内訳★ … ★直す物 0本／★対象外 11本（理由つき）★★
+//   ★内訳★ … ★直す物 0本／★対象外 12本（理由つき）★★（2026-08-28 夜 帯の試験を 1本 追加）
 //   ⇒ ★「対象外」は 見逃しではありません★。1本ずつ ★なぜ そのままで よいか★ を 下に 書いています。
 //     ・数え方が 行だけを見る（前後の 締めを 見ない）ので ★安全な物も 引っかかります★
 //     ・★安全にした物も 行の形は 残る★（例：0件なら 赤 を 別の行に 足した）
 //   ⇒ ★対象外に 移す時は 必ず 1行の理由を 書く★（黙って 名簿から 消さない）
 const NOKORI = [
+  'tests/e2e/env-badge.spec.js',
   'tests/integration/adaptive-mode-distance.test.js',
   'tests/integration/meisai-autopush-row.test.js',
   'tests/integration/overcount-zero-routing.test.js',
@@ -93,6 +94,10 @@ const NOKORI = [
 
 // ★対象外＝そのままで よい物と その理由★（★11本とも 理由が 要ります★）
 const RIYUU = {
+  'tests/e2e/env-badge.spec.js':
+    '★材料の話では ない★ … 実物の dk-session.js を 読んで その後ろに 上書きを 足しているだけ' +
+    '（readFileSync の 後ろに return が 在るのを 数え方が 拾っただけ）。' +
+    '無ければ この試験自体が 落ちる（＝黙って 緑にならない）。',
   'tests/integration/adaptive-mode-distance.test.js':
     '★2026-08-28 に 安全にした★ … 真値が 無い trip は 飛ばすが ★1回も 比べなければ 赤★（0件でも緑 を 断った・壊して確認済）',
   'tests/integration/overcount-zero-routing.test.js':

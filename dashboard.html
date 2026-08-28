@@ -406,11 +406,8 @@
     </style>
   </head>
   <body>
-    <!-- ★テスト用の帯★ 2026-08-21（本番には入れない） -->
-    <div style="position:fixed;top:0;left:0;right:0;z-index:99999;pointer-events:none;opacity:.95;background:#c0392b;color:#fff;font-size:12px;font-weight:700;text-align:center;padding:3px 6px;font-family:'Noto Sans JP',sans-serif" id="testBand">
-      テスト用（本番ではありません）
-      <a href="https://daikome-jimusho.vercel.app/" style="pointer-events:auto;display:inline-block;margin-left:8px;padding:1px 8px;background:#fff;color:#c0392b;border-radius:999px;text-decoration:none;font-weight:700">本番を開く</a>
-    </div>
+    <!-- ★テスト環境の帯は js/dk-env-badge.js が 名札(DKConfig.ENV)だけで 決めます★ 2026-08-28
+         （前は ここに 直書きし、本番では 手で 消していました＝写し忘れ1回で 事故） -->
     <div class="wrap">
       <div class="top">
         <div class="logo">🚗 ダイコメ</div>
@@ -552,6 +549,8 @@
 
     <script src="js/qrcode.min.js"></script>
     <script src="js/dk-config.js"></script>
+    <!-- ★テスト環境の帯★ 名札(DKConfig.ENV)だけで 決まる。本番では 何も出ない。 -->
+    <script src="js/dk-env-badge.js" data-modoru="office"></script>
     <!-- ★車の名前を決める所は1箇所だけ (2026-08-05)★
          端末IDの先頭8文字(7e1919ef…)を出していたのを、名前 or 「車1・車2」にする。 -->
     <script src="js/car-name.js"></script>
@@ -590,7 +589,9 @@
           { host: 'daikou-app-test.vercel.app', meter: 'https://daikou-app-test.vercel.app' },
         ];
         function expectedMeterFor(host) {
-          var h = String(host == null ? '' : host).toLowerCase().trim();
+          var h = String(host == null ? '' : host)
+            .toLowerCase()
+            .trim();
           for (var i = 0; i < HOST_PAIRS.length; i++) {
             if (HOST_PAIRS[i].host === h) return HOST_PAIRS[i].meter;
           }
@@ -598,7 +599,9 @@
         }
         function checkQrTarget(host, appBase) {
           var want = expectedMeterFor(host);
-          var got = String(appBase == null ? '' : appBase).trim().replace(/\/+$/, '');
+          var got = String(appBase == null ? '' : appBase)
+            .trim()
+            .replace(/\/+$/, '');
           if (!want) return { known: false, ok: true, want: null, got: got };
           return { known: true, ok: got === want, want: want, got: got };
         }
