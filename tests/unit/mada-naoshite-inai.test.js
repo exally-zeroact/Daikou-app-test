@@ -61,7 +61,6 @@ describe('★まだ直していない（赤で正しい）の組★', () => {
 
   it('★1本ずつ「実測・なぜ赤で正しいか・直す物・お金への影響」が 書いてある★', () => {
     const tarinai = [];
-    let hirotta = 0; // ★何本 拾えたか（0本なら 何も見ていない）★
     Object.keys(MADA).forEach((f) => {
       ['実測', 'なぜ赤で正しいか', '直す物', 'お金への影響'].forEach((k) => {
         if (!MADA[f][k] || String(MADA[f][k]).trim().length < 5) tarinai.push(f + ' の ' + k);
@@ -300,7 +299,6 @@ describe('★非ブロック指定（soft）の棚卸し★', () => {
 
   it('★1本ずつ「なぜsoft・いつ外すか・実測・お金への影響」が 書いてある★', () => {
     const tarinai = [];
-    let hirotta = 0; // ★何本 拾えたか（0本なら 何も見ていない）★
     Object.keys(SOFT).forEach((n) => {
       ['なぜsoft', 'いつ外すか', '実測', 'お金への影響'].forEach((k) => {
         if (!SOFT[n][k] || String(SOFT[n][k]).trim().length < 10) tarinai.push(n + ' の ' + k);
@@ -462,7 +460,6 @@ describe('★距離に乗る赤（別に数える）★', () => {
 
   it('★1本ずつ「何が・門・実測・向き・線の根拠・裏取り・誰待ち」が 書いてある★', () => {
     const tarinai = [];
-    let hirotta = 0; // ★何本 拾えたか（0本なら 何も見ていない）★
     Object.keys(KYORI_AKA).forEach((f) => {
       [
         '何が起きるか',
