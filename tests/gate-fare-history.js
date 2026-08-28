@@ -30,7 +30,9 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const HONTAI = path.join(ROOT, 'js', 'fare-history.js');
 
-// ★今の既定（js/meter.js:223 と 同じ）★ ＝「決めた値段」ではありません
+// ★今の既定（js/meter.js:223 と 同じ）★ ＝★司さんの 基本設定★
+//   出どころ … zeroact-memory/projects/daikome/memory.md
+//   「★calcFare … 1000m以下 ¥1,300 ／ 以降 420mごと +¥100★」（2026-08-29 訂正）
 const KITEI = {
   version: 2,
   base_fare: 1300,
