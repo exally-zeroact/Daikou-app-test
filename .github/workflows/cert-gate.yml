@@ -125,16 +125,24 @@ jobs:
           #   ⇒ 1本ずつ「なぜ soft か・いつ外すか」を tests/unit/mada-naoshite-inai.test.js の
           #     SOFT に書き、★本数を 機械が数えます★（増やしたら 赤）。
           #
-          # ── ① 実物が無くて 落ちている（＝本体の話ではない・★未測定★）──
+          # ── ① 2026-08-29 … ★この組は 空になりました★（実物を運び／材料を向け直した）
+          #     ＝★soft 4本は 全部「赤で正しい」＝中身が 赤★（未測定 0本）
+          #     ★CI では 4本とも「pass」と 出ます。中身は ログを 読むしか ありません★
           - name: device-spread
             cmd: npm run test:gate-spread
-            # ★soft の理由★ tests/gate-realdevice-spread.js が ★repo に無い★
-            #   ＝MODULE_NOT_FOUND で落ちるのを soft が隠していました（CI 33146596665）。
-            #   実物は ★手元の別の木★に在ります（19,628B・未commit。場所は
-            #   tests/unit/mada-naoshite-inai.test.js の SOFT に書いてあります）。
-            # ★いつ外すか★ そのファイルを運んだ日（＝司さんの一言で push した時）に外す。
+            # ★2026-08-29 … 未測定 → ★本当に赤★ に 変わりました★
+            #   それまでは tests/gate-realdevice-spread.js が ★repo に無く★
+            #   MODULE_NOT_FOUND を soft が ✓ に 見せていた（CI 33146596665）。
+            #   ★実物を 運びました★ ⇒ 本当に 回ります。
+            #   見ているのは ★同じ走行を 3台で測った距離の開きが 運賃刻み(420m)を割らないか★
+            #   ＝★司さんの核心「同社で 運賃割れ＝アウト」★
+            #   実測(2026-08-29 手元 298.7秒): (A)3台収束 ★FAIL spread=790.2m(7.76%)★／
+            #        (B)過大ゼロ PASS(−0.91%)／(C)creep ★FAIL 23.86m★／(D)seam=NO
+            #   ★当時 679.9m → 今 790.2m＝開きが 広がっている★
+            # ★いつ外すか★ seam（穴の継ぎ目の連続化）が 入った日。
+            #   ★お金に関わる（運賃割れ）★ので 直すのは 指示役の指示があってから。
             timeout: 15
-            soft: true # ★未測定★（実物が無い・本体未修正ではない）
+            soft: true # ★赤で正しい★（本体未修正・試験が先）
           - name: tunnel-continuity
             cmd: npm run test:gate-tunnel
             # ★2026-08-28 … 未測定 → ★本当に赤★ に変わりました★
