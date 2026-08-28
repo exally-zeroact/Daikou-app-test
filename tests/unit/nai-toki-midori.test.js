@@ -71,12 +71,15 @@ function kazoeru(dir, deta) {
 //   scripts-no-shebang が 外れて ★15本★。★機械の数が 正★です。
 //   この日 ★11本 直しました★（24本 → 16本 …【A】必ず在る物6・【B】距離の見張り2・【C】言い換え3）
 //   ※【C】3本は 数えなくなった側（未測定と 言うようになった）
+// ★2026-08-28 実測 … 残り 11本★（この日 24本 → 11本）
+//   ★内訳★ … ★直す物 0本／★対象外 11本（理由つき）★★
+//   ⇒ ★「対象外」は 見逃しではありません★。1本ずつ ★なぜ そのままで よいか★ を 下に 書いています。
+//     ・数え方が 行だけを見る（前後の 締めを 見ない）ので ★安全な物も 引っかかります★
+//     ・★安全にした物も 行の形は 残る★（例：0件なら 赤 を 別の行に 足した）
+//   ⇒ ★対象外に 移す時は 必ず 1行の理由を 書く★（黙って 名簿から 消さない）
 const NOKORI = [
   'tests/integration/adaptive-mode-distance.test.js',
-  'tests/integration/address-chiban-build.test.js',
-  'tests/integration/address-street-build.test.js',
   'tests/integration/meisai-autopush-row.test.js',
-  'tests/integration/note-group-wiring.test.js',
   'tests/integration/overcount-zero-routing.test.js',
   'tests/integration/smoothed-distance-parity-creep.test.js',
   'tests/kp-segment-score.js',
@@ -86,8 +89,31 @@ const NOKORI = [
   'tests/tier4-google.js',
   'tests/truedist-kp-gate.js',
   'tests/unit/dk-config-single-source.test.js',
-  'tests/unit/office-allow-list.test.js',
 ];
+
+// ★対象外＝そのままで よい物と その理由★（★11本とも 理由が 要ります★）
+const RIYUU = {
+  'tests/integration/adaptive-mode-distance.test.js':
+    '★2026-08-28 に 安全にした★ … 真値が 無い trip は 飛ばすが ★1回も 比べなければ 赤★（0件でも緑 を 断った・壊して確認済）',
+  'tests/integration/overcount-zero-routing.test.js':
+    '★2026-08-28 に 安全にした★ … 同上（比べた回数が 0 なら 赤・壊して確認済）',
+  'tests/lib/snap.drift-guard.test.js':
+    '★2026-08-28 に 安全にした★ … snap 出来ない点は 飛ばすが ★全部 飛ばしたら 赤★（壊して確認済）',
+  'tests/unit/dk-config-single-source.test.js':
+    '★2026-08-28 に 未測定と 言うようにした★ … Edge Function は repo によって 在る/無い（本番repoには 置いていない）',
+  'tests/integration/meisai-autopush-row.test.js':
+    '★材料の話ではない★ … 列の値が null なら 型を見ない、という ★1行1行の 当たり前の飛ばし★（欠けた材料の話ではない）',
+  'tests/integration/smoothed-distance-parity-creep.test.js':
+    '★読めなければ 落ちる★ … catch で fails に 積んでから continue（＝黙って 緑にならない）',
+  'tests/kp-segment-score.js':
+    '★材料の話ではない★ … OBD の付いていない点を 飛ばす（1点ずつの 選別）。結果は obdKm=null で はっきり返す',
+  'tests/truedist-kp-gate.js': '★材料の話ではない★ … 同上（OBD の無い点を 飛ばす）',
+  'tests/replay-mm-worker/scoring.js':
+    '★採点の道具（見張りではない）★ … 比べられない層を 飛ばし、0件なら ★null を返す★（呼ぶ側が 判断する）',
+  'tests/tier1-osrm.js':
+    '★外のサービスが要る＝未測定の組★（頭で ★未測定★ と 出している・別の行が 引っかかっただけ）',
+  'tests/tier4-google.js': '★外の鍵が要る＝未測定の組★（同上）',
+};
 
 describe('★「無い時に緑」を 機械が 数える★', () => {
   const ima = kazoeru(path.join(ROOT, 'tests'), []).sort();
@@ -109,6 +135,13 @@ describe('★「無い時に緑」を 機械が 数える★', () => {
       fueta: [],
       hetta: [],
     });
+  });
+
+  it('★1本ずつ 理由が 書いてある★（黙って 名簿に 置かない）', () => {
+    const nai = NOKORI.filter((f) => !RIYUU[f] || String(RIYUU[f]).trim().length < 10);
+    expect(nai, '★理由が 書けていない物が あります★（なぜ そのままで よいか を 1行で）').toEqual(
+      []
+    );
   });
 
   it('★名簿の物は 実物が 在る★（消えた物の名前を 残さない）', () => {

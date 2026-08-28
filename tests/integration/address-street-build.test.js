@@ -262,7 +262,9 @@ describe('build-address.js --street: 実 ehime data 最近傍 verify', () => {
 
   it('★ 司さん GPS (34.06467, 133.0015) → 「今治市松本町一丁目6」が・20m 以内で hit', () => {
     if (!fs.existsSync(REAL_PATH)) {
-      console.warn('data/addresses-street-ehime.js 未生成・skip');
+      // ★2026-08-28: ここも「skip」で 緑で終わっていました（同じ形が 2か所ありました）。
+      console.warn('★未測定★ data/addresses-street-ehime.js が 在りません（build を回していない）');
+      console.warn('  MISOKUTEI=1 reason=build-output-not-in-repo');
       return;
     }
     const win = {};

@@ -486,7 +486,11 @@ describe('build-address.js --chiban: 実 ehime data 司さん GPS hit verify', (
     { timeout: 60000 },
     () => {
       if (!fs.existsSync(REAL_PATH)) {
-        console.warn('data/addresses-chiban-ehime.js 未生成・skip');
+        // ★2026-08-28: ここも「skip」で 緑で終わっていました（同じ形が 2か所ありました）。
+        console.warn(
+          '★未測定★ data/addresses-chiban-ehime.js が 在りません（build を回していない）'
+        );
+        console.warn('  MISOKUTEI=1 reason=build-output-not-in-repo');
         return;
       }
       const win = {};

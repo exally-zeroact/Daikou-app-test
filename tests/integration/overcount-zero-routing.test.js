@@ -101,6 +101,8 @@ describe('過大ゼロ routing de-bias (実機fixture・愛媛)', () => {
 
   it('★全業務で過大ゼロ(eng ≤ tire) かつ 過小なし(≥ -4%)', () => {
     const violations = [];
+    // ★2026-08-28: 真値(tire)が 1つも 無くても 緑でした＝★0件でも緑★。
+    let kurabetaKaisu = 0;
     for (const c of CASES) {
       const t = tripsOf(c.f);
       if (!t) {
@@ -110,6 +112,7 @@ describe('過大ゼロ routing de-bias (実機fixture・愛媛)', () => {
       t.trips.forEach((tr, i) => {
         const tv = c.tire[i];
         if (tv == null) return;
+        kurabetaKaisu++;
         const seg = t.all.slice(tr.s, tr.e + 1);
         const eng = computeDistance(seg, dec, { enableRouting: true }).distance_m / 1000;
         const pct = (eng / tv - 1) * 100;
@@ -122,6 +125,9 @@ describe('過大ゼロ routing de-bias (実機fixture・愛媛)', () => {
         if (pct < -4) violations.push(`${c.f} trip${i + 1} 過小 ${pct.toFixed(2)}% (捨てすぎ)`);
       });
     }
+    // ★2026-08-28: 真値が 1つも 無くても 緑でした＝★0件でも緑★
+    if (kurabetaKaisu === 0)
+      throw new Error('★1回も 真値と 比べていません（0件を 合格と 読ませない）★');
     if (violations.length) throw new Error('過大/過小 違反:\n  ' + violations.join('\n  '));
   }, 30000);
 
