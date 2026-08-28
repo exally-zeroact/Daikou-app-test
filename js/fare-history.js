@@ -36,7 +36,7 @@
 (function (global) {
   'use strict';
 
-  var MAX_KEN = 20; // ★直近 何件 持つか★
+  const MAX_KEN = 20; // ★直近 何件 持つか★
 
   function utsushi(o) {
     return o == null ? o : JSON.parse(JSON.stringify(o));
@@ -45,7 +45,7 @@
   // ★はじめの状態を 作る★
   //   { config: 今の料金表, records: 記録の配列, soukouchuu: 走行中か }
   function hajime(moto) {
-    var m = moto || {};
+    const m = moto || {};
     return {
       config: utsushi(m.config) || null,
       records: Array.isArray(m.records) ? utsushi(m.records) : [],
@@ -69,7 +69,7 @@
 
   // ★20件を 超えたら 古い物から 落とす。落ちた分を 数える★
   function kezuru(s) {
-    var koeta = s.records.length - MAX_KEN;
+    const koeta = s.records.length - MAX_KEN;
     if (koeta > 0) {
       s.records = s.records.slice(koeta);
       s.ochita += koeta;
@@ -80,8 +80,8 @@
   // ★料金表を 変える★（記録が 1件 増える）
   //   { config: 新しい料金表, dare: 誰が, itsu: いつ }
   function kaeru(s, hikisuu) {
-    var moto = hajime(s);
-    var h = hikisuu || {};
+    const moto = hajime(s);
+    const h = hikisuu || {};
     // ★走行中は 変えない★（今ある決まりを そのまま 使う）
     if (moto.soukouchuu) return moto;
     if (h.config == null) return moto;
@@ -98,11 +98,11 @@
 
   // ★1つ前に 戻す★（戻した事も 記録に 残る）
   function modosu(s, hikisuu) {
-    var moto = hajime(s);
-    var h = hikisuu || {};
+    const moto = hajime(s);
+    const h = hikisuu || {};
     if (moto.soukouchuu) return moto; // ★走行中は 戻せない★
     if (!moto.records.length) return moto; // 戻る先が 無い
-    var saigo = moto.records[moto.records.length - 1];
+    const saigo = moto.records[moto.records.length - 1];
     if (saigo.mae == null) return moto;
     moto.records.push({
       itsu: h.itsu != null ? h.itsu : null,
@@ -130,7 +130,7 @@
     });
   }
 
-  var api = {
+  const api = {
     MAX_KEN: MAX_KEN,
     hajime: hajime,
     ima: ima,
