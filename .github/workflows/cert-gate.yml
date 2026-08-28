@@ -171,6 +171,18 @@ jobs:
             #   ※★多く取っているとは 言えません★（真値と比べた所は −1.36%/−1.51%）。
             timeout: 15
             soft: true # ★赤で正しい★（本体未修正・★距離に乗る★組）
+          - name: fare-history
+            cmd: npm run test:gate-fare-history
+            # ★soft の理由★ ★赤で正しい★（★試験を 先に 書いた・本体 js/fare-history.js は まだ 無い★）
+            #   今 料金を保存する所は ★上書き1件だけ★（js/firebase.js:346）＝★戻せません★。
+            #   C1 で 社長が変えられるようにする＝★戻せない物を触らせる★ので ★戻す道を先に作る★。
+            #   実測(2026-08-29): ★9本 見て 9本とも 赤★（本体が 無い＝正しい赤）
+            # ★いつ外すか★ js/fare-history.js を 作って 9本 全部 緑になった日。
+            #   ★線を 緩めて 緑にするのは 不可★
+            # ★実測は 1秒未満だが、うちの決まりで timeout は ★10分以上★
+            #   （tests/unit/workflows-no-silent-cancel.test.js が 縛っている）
+            timeout: 10
+            soft: true # ★赤で正しい★（試験が先・本体未実装）
           - name: gnss-degraded
             cmd: npm run test:gate-gnss-degraded
             # ★soft の理由★ ★本当に赤★（2026-08-28 実測 18.9秒）
