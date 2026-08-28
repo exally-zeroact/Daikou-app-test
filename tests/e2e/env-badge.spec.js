@@ -103,18 +103,30 @@ test.describe('★テスト環境の帯（実物の画面）★', () => {
     await nafudaWo(page, 'test');
     await loginZumi(page);
     await page.goto('/dashboard.html');
-    const a = page.locator('#dkEnvBadge a');
-    await expect(a, '★戻り先の ボタンが 無い★').toHaveCount(1);
-    // ★DOM に 在るだけでは 押せません★（帯は pointer-events:none）
-    const pe = await a.evaluate((e) => getComputedStyle(e).pointerEvents);
-    expect(pe, '★ボタンが 押せない（pointer-events が auto に 戻っていない）★').toBe('auto');
-    // ★実際に 当たり判定が 在るか（真ん中の点に 居るのが 自分か）★
-    const atari = await a.evaluate((e) => {
-      const r = e.getBoundingClientRect();
-      const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return !!(t && (t === e || e.contains(t)));
+    await expect(page.locator('#dkEnvBadge'), '★帯が 出ていない★').toHaveCount(1, {
+      timeout: 15000,
     });
-    expect(atari, '★ボタンの上に 別の物が 乗っていて 押せない★').toBe(true);
+    // ★1回で 読み切る★（locator ごしに 何度も 触ると、画面が 途中で 移った時に
+    //   ★待ち続けて 時間切れ★になりました・2026-08-28 実際に 出た）
+    const r = await page.evaluate(() => {
+      const band = document.getElementById('dkEnvBadge');
+      const a = band && band.querySelector('a');
+      if (!a) return { aru: false };
+      const st = getComputedStyle(a);
+      const rc = a.getBoundingClientRect();
+      const ue = document.elementFromPoint(rc.left + rc.width / 2, rc.top + rc.height / 2);
+      return {
+        aru: true,
+        pe: st.pointerEvents,
+        atari: !!(ue && (ue === a || a.contains(ue))),
+        haba: rc.width,
+      };
+    });
+    expect(r.aru, '★戻り先の ボタンが 無い★').toBe(true);
+    // ★DOM に 在るだけでは 押せません★（帯は pointer-events:none）
+    expect(r.pe, '★ボタンが 押せない（pointer-events が auto に 戻っていない）★').toBe('auto');
+    expect(r.atari, '★ボタンの上に 別の物が 乗っていて 押せない★').toBe(true);
+    expect(r.haba, '★ボタンの幅が 0＝見えていない★').toBeGreaterThan(10);
   });
 
   test('⑤メーターの帯には 押す物を 出さない（2026-08-25 司さん）', async ({ page }) => {
