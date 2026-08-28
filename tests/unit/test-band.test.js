@@ -25,20 +25,14 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
+// ★2026-08-28 … 帯は ★js/dk-env-badge.js（名札で決まる1本）★へ 移しました★
+//   前は ★HTMLに 直書き＋本番では 手で消す★形で、★写し忘れ1回で 本番に「テスト用」が出ます★。
+//   しかも この試験は ★テスト線にしか 無く★、本番側に「出ていない事」を見る物が ★0本★でした。
+//   ⇒ 帯そのものの見張りは ★tests/unit/env-badge.test.js（両repoで 同じ物が回る）★へ 移動。
+//   ⇒ ここには ★帯以外（ホーム画面の名前・入れられない事・引っ越しの後始末）★だけ 残します。
 describe('★テスト用のアプリだと 一目で分かる★', () => {
-  it('画面の一番上に「テスト用」の帯が在る', () => {
-    const h = read('index.html');
-    expect(h, '★テスト用の帯が無い（本番と見分けが付かない）★').toContain('id="testBand"');
-    expect(h).toContain('テスト用（本番ではありません）');
-  });
-
-  it('★帯は body のすぐ後ろ＝どの画面を開いても最初に見える★', () => {
-    const h = read('index.html');
-    const body = h.indexOf('<body');
-    const band = h.indexOf('id="testBand"');
-    expect(band, '★帯が body より前に在る★').toBeGreaterThan(body);
-    expect(band - body, '★帯が body から離れすぎ（別の物が先に出る）★').toBeLessThan(1200);
-  });
+  // ★「帯が在る」「body のすぐ後ろ」は tests/unit/env-badge.test.js へ 移しました（2026-08-28）
+  //   ＝HTMLの直書きを 見る試験だったので、直書きを やめた今 ここには 置けません。
 
   it('ホーム画面アプリの名前が【テスト用】で始まる（メーター・事務所とも）', () => {
     const m = JSON.parse(read('manifest.json'));
@@ -79,37 +73,14 @@ describe('★テスト用のアプリだと 一目で分かる★', () => {
     expect(h, '★引っ越しのボタンが残っている★').not.toContain('本番へ引っ越す');
     expect(h, '★引っ越しの部品を まだ読んでいる★').not.toContain('js/dk-migrate.js');
     expect(h, '★引っ越しの呼び出しが残っている★').not.toContain('DKMigrateStart');
-    // 帯そのものは残す（テスト線の目印）
-    const i = h.indexOf('id="testBand"');
-    expect(i, '★帯まで消してしまっている★').toBeGreaterThan(-1);
+    // ★2026-08-28: 帯は js/dk-env-badge.js へ 移りました（HTMLに 直書きしない）
+    //   「帯が 出るか」は tests/unit/env-badge.test.js と tests/e2e/env-badge.spec.js が 見ます。
+    expect(h, '★帯を HTML に 直書きしている（本番で 手で消す形に 戻っている）★').not.toContain(
+      'id="testBand"'
+    );
   });
 
-  // ============================================================
-  // ★2026-08-21 司さん「本番を開く押しても開かんかった」★
-  //   帯は pointer-events:none（帯の下の画面を押せるようにする為）。
-  //   その中の <a> で ★auto に戻していないと、ボタンは DOM に在るのに 永久に押せない★。
-  //   ★事務所(dashboard.html)には auto が入っていて、メーター(index.html)には入っていなかった★。
-  //   ＝「在る事」だけ数えていた この試験が ★押せない物を緑で通していた★。
-  //   ⇒ ★押せるか（pointer-events）まで数える★。
-  // ============================================================
-  it('★帯の中のボタンは 実際に押せる（pointer-events を auto に戻している）★', () => {
-    // 2026-08-25：index.html の帯からは ★押す物を外した★（引っ越しが済んだ為）。
-    //   押す物が在るのは 事務所の画面だけ。
-    const targets = [['dashboard.html', 'https://daikome-jimusho.vercel.app/']];
-    for (const [file, href] of targets) {
-      const h = read(file);
-      const i = h.indexOf('id="testBand"');
-      expect(i, `★${file} に帯が無い★`).toBeGreaterThan(-1);
-      // 帯の開始タグ〜閉じ </div> までを取り出す（帯の中だけを見る）
-      const band = h.slice(Math.max(0, i - 400), i + 2000);
-      expect(band, `★${file} の帯が pointer-events:none ではない（作りが変わった）★`).toMatch(
-        /pointer-events:\s*none/
-      );
-      const a = band.slice(band.indexOf(href));
-      const style = a.slice(0, a.indexOf('</a'));
-      expect(style, `★${file} の「本番を開く」が 押せない（帯の pointer-events:none のまま）★`).toMatch(
-        /pointer-events:\s*auto/
-      );
-    }
-  });
+  // ★「帯のボタンが 実際に押せるか」は ★実物の画面★で 測る形へ 移しました（2026-08-28）
+  //   → tests/e2e/env-badge.spec.js ④（pointer-events だけでなく
+  //     ★真ん中の点に 居るのが 自分か★＝上に別の物が 乗っていないかまで 見ます）
 });

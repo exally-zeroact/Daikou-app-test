@@ -118,23 +118,59 @@ jobs:
           - name: cert-3env
             cmd: npm run test:gate-cert3env
             timeout: 15
-          # ── 可視化only（★現状REDが分かっている・本体未修正まで非ブロック★）──
+          # ══ 非ブロック指定（soft）の棚卸し ══ 2026-08-28（指示役の裁定③）★実際に回して 数え直した★
+          #   soft は continue-on-error ＝ ★赤でも ✓ が出ます★。
+          #   前は 4本とも「本体未修正」と書いてありましたが ★2本は嘘★でした
+          #   （本体ではなく ★実物（ファイル・材料）が 無くて 落ちていた★）。
+          #   ⇒ 1本ずつ「なぜ soft か・いつ外すか」を tests/unit/mada-naoshite-inai.test.js の
+          #     SOFT に書き、★本数を 機械が数えます★（増やしたら 赤）。
+          #
+          # ── ① 実物が無くて 落ちている（＝本体の話ではない・★未測定★）──
           - name: device-spread
             cmd: npm run test:gate-spread
+            # ★soft の理由★ tests/gate-realdevice-spread.js が ★repo に無い★
+            #   ＝MODULE_NOT_FOUND で落ちるのを soft が隠していました（CI 33146596665）。
+            #   実物は ★手元の別の木★に在ります（19,628B・未commit。場所は
+            #   tests/unit/mada-naoshite-inai.test.js の SOFT に書いてあります）。
+            # ★いつ外すか★ そのファイルを運んだ日（＝司さんの一言で push した時）に外す。
             timeout: 15
-            soft: true # ⑤seam未実装
+            soft: true # ★未測定★（実物が無い・本体未修正ではない）
           - name: tunnel-continuity
             cmd: npm run test:gate-tunnel
+            # ★2026-08-28 … 未測定 → ★本当に赤★ に変わりました★
+            #   前は full（shimanami-*.json）を見ていて 両repoに 1本も無く throw していた。
+            #   ★実物が在る .slim（実機走行の間引き）へ 向け直したので 本当に測れます★。
+            #   実測: iPhoneSE で ★1フレーム 296.54m（上限 30.8m）★＝穴(dt=12秒の本物のトンネル)の出口で
+            #        一括計上。Android/iPhone13 は 違反0。★材料が切り貼りでない事も確認済★。
+            # ★いつ外すか★ 穴の出口で 一括計上しない実装が 入った日（bg-freeze と 同じ直し）。
+            #   ★距離に乗る★ので 直すのは 指示役の指示があってから（distance_m 不可侵）。
+            #   ※★多く取っているとは 言えません★（真値と比べた所は −1.36%/−1.51%）。
             timeout: 15
-            soft: true # ④トンネル本体未修正
+            soft: true # ★赤で正しい★（本体未修正・★距離に乗る★組）
+          # ── ② 本当に赤（実エンジンが動いて 落ちている）──
           - name: bg-freeze
             cmd: npm run test:gate-bg-freeze
+            # ★soft の理由★ ★本当に赤★（2026-08-28 実測 3.3秒）
+            #   (A)ドン無し=FAIL … 画面復帰の ★1フレームで 180.00m★（予算 9.50m）
+            #   (B)順序不変=PASS / (C)過大ゼロ=PASS（184.50m ≤ 理想 189.50m）
+            #   試験が先に在り 本体（coast枝のtick予算）が 未修正＝★赤で正しい★。
+            # ★いつ外すか★ pipeline-distance.js の coast を tick 予算でクランプした日。
+            #   ★距離に乗る★ので 直すのは 指示役の指示があってから（distance_m 不可侵）。
+            #   ※★多く取っているとは 言えません★（真値と比べた所は −1.36%/−1.51%）。
             timeout: 15
-            soft: true # lifecycle本体未修正
+            soft: true # ★赤で正しい★（本体未修正・★距離に乗る★組）
           - name: gnss-degraded
             cmd: npm run test:gate-gnss-degraded
+            # ★soft の理由★ ★本当に赤★（2026-08-28 実測 18.9秒）
+            #   実機3台の走行に 生弦+10%膨張を注入 → 平滑後が 真値(ノイズ無し)を超えた:
+            #     android +0.49% OK ／ ★iphonese +0.85% NG★ ／ ★iphone13-noisy +0.83% NG★（許容 0.5%）
+            #   ★これは「試験が先」ではありません★＝この見張りは PASS する前提で書かれています。
+            #   ⇒ ★合わせるべき線に 届いていない★状態。
+            # ★いつ外すか★ ①線(ε=0.5%)が正しいか ②実機の劣化で再現するか を測って 決着した日。
+            #   ★実機の劣化GPSでの再現＝未測定★（今 赤なのは ★合成ノイズ★の上での話）。
+            #   実機3台の実走行そのものでは 過大ゼロ・タイヤ計比 −0.93%（2026-08-28 実測）。
             timeout: 15
-            soft: true # 本体未修正
+            soft: true # ★赤・①の物差しのみ★（②代行では 天井の中・決着待ち）
 
     steps:
       # ★sparse-checkout★ 3,308MB → 約65MB（js/tests/scripts/package* + roads-ehime だけ）

@@ -3918,40 +3918,7 @@
     </script>
   </head>
   <body ontouchstart="" onclick="wakeScreen()">
-    <!-- ★テスト用の帯★ 2026-08-21（司さんの端末に テスト版が入っていた事故）
-         ★本番(Daikou-app)には この帯を入れない★＝テスト線だけに在る印。
-         版の字（設定→アプリ バージョン）を読まなくても 一目で分かるようにする。
-         見張り: tests/unit/test-band.test.js（テスト線に在る／本番に無い） -->
-    <div
-      id="testBand"
-      style="
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 99999;
-        pointer-events: none;
-        opacity: 0.95;
-        background: #c0392b;
-        color: #ffffff;
-        font-size: 12px;
-        font-weight: 700;
-        text-align: center;
-        padding: 3px 6px;
-        letter-spacing: 1px;
-        font-family: 'Noto Sans JP', sans-serif;
-      "
-    >
-      <!-- ★引っ越しのボタンは外した★ 2026-08-25（司さん
-             「なんでユーザーは本番前提やのに 本番へ引っ越すとか出てくるんど」）
-           ▼理由
-             引っ越しは ★2026-08-21 の1回きり★で ★もう済んでいます★（今日 数えた）
-               本番の倉庫 … 3台とも 08/25 に触っている（1466/4987/1173）
-               テストの倉庫 … 端末 0台・打刻は 08/02 が最後
-             済んだ物を残すと ★押せてしまう★し、ユーザーは本番前提なので 意味が分からない。
-             ★決めた事は 消すまで動き続ける★（過去に26日 動かしてしまった）ので ここで消す。 -->
-      テスト用（本番ではありません）
-    </div>
+    <!-- ★テスト環境の帯は js/dk-env-badge.js が 名札(DKConfig.ENV)だけで 決めます★ 2026-08-28 -->
     <!-- ★iPhone/iPad 未対応ゲートは将来(リリース前)に再導入。決定F=Android専用だが、
          今は司さんのiPhone確認を妨げないため未実装(2026-06-27・司さん「今はまだするな」)。 -->
     <!-- S1 (2026-05-10): 複数タブ guard・閲覧専用モードバナー -->
@@ -4748,9 +4715,7 @@
         <div class="apk-modal-title">ダイコメを アプリとして入れる</div>
         <div class="apk-modal-step">
           <div class="apk-modal-step-num">1</div>
-          <div>
-            画面の下（または上）の <b>共有</b>（□から↑が出ている印）を押します。
-          </div>
+          <div>画面の下（または上）の <b>共有</b>（□から↑が出ている印）を押します。</div>
         </div>
         <div class="apk-modal-step">
           <div class="apk-modal-step-num">2</div>
@@ -5982,6 +5947,8 @@
     <!-- ★dk-config.js = Supabase接続先の単一真実源 (2026-07-31・独立/移設のため)。
          接続先を使う全モジュール(license.js / license-activate.js / 端末管理配線)より必ず先に load。 -->
     <script src="js/dk-config.js"></script>
+    <!-- ★テスト環境の帯★ 名札(DKConfig.ENV)だけで 決まる。本番では 何も出ない。 -->
+    <script src="js/dk-env-badge.js"></script>
     <!-- ★設計変更宣言 (2026-05-24・端末ライセンス台数ロック): 既存 DAIKOME_DEVICE_ID 流用・debug-trace.js 後に load -->
     <script src="js/license.js"></script>
     <!-- ★ライセンス最終方式(会社URL/QR+Ed25519署名) STEP3配線 (2026-07-27):
@@ -10740,7 +10707,8 @@
           _dkInstallPrompt = null;
           var el = document.getElementById('apkBanner');
           if (el) el.classList.remove('show');
-          if (typeof showToast === 'function') showToast('入りました。ホーム画面のダイコメから開いてください');
+          if (typeof showToast === 'function')
+            showToast('入りました。ホーム画面のダイコメから開いてください');
         } catch (_) {}
       });
       function dkInstallApp() {
