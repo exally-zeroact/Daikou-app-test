@@ -40,56 +40,15 @@ const MONOSASHI = /タクシー認定|代行モード|検定対象外|1\.0085|DM
 //     gate-route-gain / gate-realdevice-doppler-rej …「真値は 参考表示・合否に使っていない」
 //     truedist-obd-engine-gate …「独自の線＝真距離+5%（認定より緩く 代行天井より わずかに厳しい）」
 const KAITENAI = [
-  'tests/cert-3env-gate.js',
-  'tests/gate-road-distance.js',
-  'tests/replay-pipeline-distance.js',
-  'tests/sim-display-montecarlo.js',
-  'tests/sim-fullpipeline-montecarlo.js',
-  'tests/truedist-kp-gate.js',
-  'tests/verify-display-even-pace.js',
-  'tests/verify-display-smoothness.js',
-  'tests/verify-display-stop-restart.js',
-  'tests/drift-static/distance-m-update-paths-anchor.test.js',
-  'tests/e2e/fare-billing-freeze.spec.js',
-  'tests/integration/adaptive-mode-distance.test.js',
-  'tests/integration/distance-equals-display-invariant.test.js',
-  'tests/integration/gap-routing-validation.test.js',
-  'tests/integration/gps-worker-disp-gate.test.js',
-  'tests/integration/meter-batch1-bill-killers.test.js',
-  'tests/integration/meter-catchup-latch-invariant.test.js',
-  'tests/integration/meter-loadfill.test.js',
-  'tests/integration/meter-persist.test.js',
-  'tests/integration/overcount-zero-routing.test.js',
-  'tests/integration/road-distance-gate.test.js',
-  'tests/integration/smoothed-distance-parity-creep.test.js',
-  'tests/integration/smoothed-flush-on-reset.test.js',
-  'tests/integration/smoothed-gap-routing.test.js',
-  'tests/integration/smoothed-longtunnel-parity.test.js',
-  'tests/integration/smoothed-longtunnel-routefill.test.js',
-  'tests/integration/speed-src-doppler-only.test.js',
-  'tests/integration/stationary-baseline-watchdog.test.js',
-  'tests/integration/timer-continuous-advance.test.js',
-  'tests/integration/vehicle-k-meter.test.js',
-  'tests/property/display-catchup-invariants.test.js',
-  'tests/property/obd-bypass-drain-flicker.test.js',
-  'tests/property/obd-certk-overcount-zero.test.js',
-  'tests/property/obd-tireratio-overcount-zero.test.js',
-  'tests/property/pipeline-physclamp-phantom.test.js',
-  'tests/replay-mm-worker/pipeline-gate.test.js',
-  'tests/replay-mm-worker/scoring.js',
-  'tests/replay-realtrace/clocked-harness.js',
-  'tests/tools/fusion-floor-probe.js',
-  'tests/tools/measure-tighten-cap.js',
-  'tests/tools/obd-196-sweep.js',
-  'tests/tools/obd-abs-wheelspeed-analyze.js',
-  'tests/tools/obd-newtrace-analyze.js',
-  'tests/tools/tire-odometer-analysis.js',
-  'tests/unit/k-calib.test.js',
-  'tests/unit/obd-diagnostic-monitor.test.js',
-  'tests/unit/obd-doppler-ceiling.test.js',
-  'tests/unit/obd-ratchet.test.js',
-  'tests/unit/obd-tire-coldstart-k0.test.js',
-  'tests/unit/obd-wheelspeed-identify.test.js',
+  // ★2026-08-28 … ★0本になりました★（55 → 50 → 0）
+  //   ★4種類の印を つけました（1本ずつ 中身を 読んでから）★
+  //     ①タクシー認定モードの線（過大ゼロ）で判定 …………★35本★
+  //       ＝この見張りが赤にするのは distance_m ≤ 真距離 を破った時。
+  //         ★代行は 検定対象外＝ここが赤でも「代行で過大請求」とは 限らない★
+  //     ②画面の見え方の線（display ≤ distance_m）………★9本★
+  //     ③確定（凍結）後に 距離が増えないか ……………………★1本★
+  //     ④距離の採点では ない（配線・較正・採点の道具）……★5本★
+  //   ⇒★これから 増えたら 赤★（下の見張りが 数えます）
 ];
 
 function atsumeru(dir, deta) {
