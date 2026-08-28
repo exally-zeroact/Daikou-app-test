@@ -104,12 +104,22 @@ describe('★配る物に 作った時刻を 焼き付けない★', () => {
     expect(roads.length, '★道路データが 1本も無い★').toBeGreaterThan(0);
     // ★頭だけ読む★（1本 4.6MB × 47本 = 200MB を丸ごと読むと 8秒かかり、
     //   全部まとめて回した時に 他の試験とぶつかって 不安定になりました・2026-08-28 実測）
+    //   ★2026-08-29: ここが ★たまに赤★でした（同じ中身なのに まとめて回した時だけ 落ちる）。
+    //     原因 … ★readSync が 400バイト 読めない事が 在る★（1回で 全部 返るとは 限らない）。
+    //     ★読めた分だけで 判定していたので、短いと「時刻が 無い」に 見えていました★。
+    //     ⇒ ★読めるまで 読む★（0が返る＝もう無い、まで）。
     const atama = (fp) => {
       const fd = fs.openSync(fp, 'r');
       try {
         const buf = Buffer.alloc(400);
-        const n = fs.readSync(fd, buf, 0, 400, 0);
-        return buf.slice(0, n).toString('utf8');
+        let yonda = 0;
+        for (;;) {
+          const n = fs.readSync(fd, buf, yonda, 400 - yonda, yonda);
+          if (!n) break;
+          yonda += n;
+          if (yonda >= 400) break;
+        }
+        return buf.slice(0, yonda).toString('utf8');
       } finally {
         fs.closeSync(fd);
       }
