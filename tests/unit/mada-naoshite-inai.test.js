@@ -103,12 +103,22 @@ describe('★配る物に 作った時刻を 焼き付けない★', () => {
     expect(roads.length, '★道路データが 1本も無い★').toBeGreaterThan(0);
     // ★頭だけ読む★（1本 4.6MB × 47本 = 200MB を丸ごと読むと 8秒かかり、
     //   全部まとめて回した時に 他の試験とぶつかって 不安定になりました・2026-08-28 実測）
+    //   ★2026-08-29: ここが ★たまに赤★でした（同じ中身なのに まとめて回した時だけ 落ちる）。
+    //     原因 … ★readSync が 400バイト 読めない事が 在る★（1回で 全部 返るとは 限らない）。
+    //     ★読めた分だけで 判定していたので、短いと「時刻が 無い」に 見えていました★。
+    //     ⇒ ★読めるまで 読む★（0が返る＝もう無い、まで）。
     const atama = (fp) => {
       const fd = fs.openSync(fp, 'r');
       try {
         const buf = Buffer.alloc(400);
-        const n = fs.readSync(fd, buf, 0, 400, 0);
-        return buf.slice(0, n).toString('utf8');
+        let yonda = 0;
+        for (;;) {
+          const n = fs.readSync(fd, buf, yonda, 400 - yonda, yonda);
+          if (!n) break;
+          yonda += n;
+          if (yonda >= 400) break;
+        }
+        return buf.slice(0, yonda).toString('utf8');
       } finally {
         fs.closeSync(fd);
       }
@@ -195,23 +205,38 @@ describe('★外の物が要る見張りは「未測定」と言う★', () => {
 const SOFT = {
   'device-spread': {
     なぜsoft:
-      '★未測定★ tests/gate-realdevice-spread.js が repo に無く MODULE_NOT_FOUND で落ちる。' +
-      '前は「⑤seam未実装」と書いてあったが ★本体の話ではなかった★（CI 33146596665 で確認）。',
+      '★赤で正しい★（2026-08-29 に 実物を repo へ 運んだ）。それまでは ' +
+      'tests/gate-realdevice-spread.js が repo に無く MODULE_NOT_FOUND を soft が ✓ に見せていた（CI 33146596665）。' +
+      '見ているのは ★同じ走行を3台で測った距離の開きが 運賃刻み(420m)を割らないか＝運賃割れ防止★。',
     いつ外すか:
-      '★実物を運んだ日★（手元 C:/Users/zeroa/Daikou-app-test に 19,628B・未commit。push は司さんの一言）',
-    実測: '2026-08-28 … 戻り値1（MODULE_NOT_FOUND・4秒未満）',
-    お金への影響: '★未測定★（中身をまだ読んでいない＝「無し」と言えない）',
+      '★seam（穴の継ぎ目の連続化）が 入った日★。それまでは (A)(C) が 赤で 正しい（試験が先）。' +
+      '★距離の本体は 不可侵★なので 直すのは 指示役の指示があってから。',
+    実測:
+      '2026-08-29 手元 298.7秒・戻り値1 … ★3台とも 測れた★' +
+      '（Android 10,183.5m ／ iPhoneSE 9,467.2m ／ iPhone13-noisy 9,393.3m）。' +
+      '(A)3台収束 ★FAIL spread=790.2m(7.76%)★（条件420m未満）／' +
+      '(B)過大ゼロ PASS（iP13 8,313.7m vs 真値8,390＝−0.91%）／(C)creep ★FAIL 23.86m（上限5m）★／(D)seam=NO。' +
+      '★当時 679.9m → 今 790.2m＝開きが 広がっている★',
+    お金への影響:
+      '★有り（運賃割れ）★ … 同じ走行でも 台によって 運賃の段が 変わり得る。' +
+      'ただし ★多く取る／少なく取る どちらかは 未測定★（真値と比べていない）。' +
+      '(C)の creep 23.86m は ★末尾に60秒の停車を足した合成★の上での値で、実機そのままは 0.00m＝材料が違う。',
   },
   'tunnel-continuity': {
     なぜsoft:
-      '★本当に赤（実機の走行データ）★ 2026-08-28 に ★.slim へ向け直して 本当に測れるようにした★。' +
+      '★赤で正しい★（実機の走行データ） 2026-08-28 に ★.slim へ向け直して 本当に測れるようにした★。' +
       '前は full（shimanami-*.json）を見ていたが 両repoに 1本も無く throw していた（＝未測定を soft が隠していた）。',
     いつ外すか:
       '★穴の出口で 一括計上しない実装が 入った日★（bg-freeze と 同じ直し＝tick 予算）。' +
       '★距離の本体は 不可侵★なので 直すのは 指示役の指示があってから。',
     実測:
       '2026-08-28 … iPhoneSE で ★1フレーム 296.54m（上限 30.8m）★ @穴の出口（dt=12秒の本物のトンネル・' +
-      '直線で 247.60m・その間 約20.5m/s で走行）。Android/iPhone13 は 違反0。' +
+      '直線で 247.60m・その間 約20.5m/s で走行）。' +
+      '★2026-08-29 訂正：前は「Android/iPhone13 は 違反0」と 書いていましたが 嘘でした★' +
+      '（tail で 終わりだけ 見て、見ていない2台を 断言した）。' +
+      '★実測＝3台とも 違反：Android 1,492.67m @i1830（2フレーム）／' +
+      'iPhone13 1,443.78m @i865（3フレーム）／iPhoneSE 296.54m @i1578（1フレーム）★' +
+      '★手元と CI は 完全に 一致（食い違いは 在りませんでした）★。' +
       '★材料が切り貼りでない事も確認（1〜2秒で100m超 動く点=0個）★',
     お金への影響:
       '★有り（別の組で数える）★ … 一括で乗る。多く取っているかは ★未測定★（道なりなら 直線より長いのが普通）',
@@ -282,6 +307,67 @@ describe('★非ブロック指定（soft）の棚卸し★', () => {
     expect(tarinai, '★書けていない所が あります★').toEqual([]);
   });
 
+  // ★★中身の内訳も 数える★★ 2026-08-29（指示役の裁定2）
+  //   ★CI では soft は「pass」と出ます。step の結論も「success」です★
+  //   ＝★色でも step でも 見分けが つきません。ログの中身を 読むしか ありません★
+  //   ⇒ ★人が 毎回 読むのをやめ、ここで 内訳を 数えます★（人が 居なくても 残る）
+  //   ⇒ ★増えても 減っても 赤★。減った時は ★1本ずつ 目で見る★（数だけ 合わせない）
+  it('★soft の 中身の内訳が 変わっていない★（赤4・未測定0）', () => {
+    const aka = Object.keys(SOFT).filter((n) =>
+      /★赤で正しい★|★赤・/.test(String(SOFT[n]['なぜsoft']))
+    );
+    const misokutei = Object.keys(SOFT).filter((n) => /★未測定★/.test(String(SOFT[n]['なぜsoft'])));
+    expect(
+      { 赤: aka.length, 未測定: misokutei.length },
+      '★soft の 中身の内訳が 変わりました★\n' +
+        '  ・★CIが緑でも 中身は 赤です★（soft は 赤でも ✓ が出ます）\n' +
+        '  ・増えた … ★新しく soft を足したなら 理由と実測を 書いてください★\n' +
+        '  ・減った … ★1本ずつ 目で見て から この数を 直してください★（数だけ 合わせない）'
+    ).toEqual({ 赤: 4, 未測定: 0 });
+  });
+
+  it('★赤と未測定の どちらでもない soft が 無い★（言い方を 揃える）', () => {
+    const fumei = Object.keys(SOFT).filter(
+      (n) => !/★赤で正しい★|★赤・|★未測定★/.test(String(SOFT[n]['なぜsoft']))
+    );
+    expect(fumei, '★「なぜsoft」の頭に ★赤で正しい★ か ★未測定★ を 書いてください★').toEqual([]);
+  });
+
+  // ★★見ていない物を 断言していないか★★ 2026-08-29
+  //   ★私は tail で 終わりの14行だけ 見て、見ていない2台を「違反0」と 書きました★。
+  //   3台を 見る見張り（tunnel-continuity / device-spread）は
+  //   ★実測に 3台ぶん 全部の名前が 出ている事★を 機械が 確かめます。
+  //   ＝★1台だけ 見て 全体を 語る★を 止めます。
+  it('★3台を見る見張りは 実測に 3台とも 出ている★（1台だけ見て 語らない）', () => {
+    // ★名前は 表ごとに 違います★（SOFT は 'tunnel-continuity'／KYORI_AKA は 'gate-tunnel-continuity.js'）
+    //   ★2026-08-29: 片方の 書き方だけで 照合して 1本も 拾えていませんでした（＝何も見ずに 緑）★
+    //   ⇒ ★どちらの 書き方でも 当たる形★にし、★拾えた本数も 数えます★
+    const SANDAI = /tunnel-continuity|realdevice-spread|device-spread/;
+    const DEVICES = ['Android', 'iPhone13', 'iPhoneSE'];
+    const tarinai = [];
+    let hirotta = 0; // ★何本 拾えたか（0本なら 何も見ていない）★
+    [SOFT, KYORI_AKA].forEach((hyou) => {
+      Object.keys(hyou).forEach((n) => {
+        if (!SANDAI.test(n)) return;
+        hirotta++;
+        const jissoku = String(hyou[n]['実測'] || '');
+        DEVICES.forEach((d) => {
+          if (jissoku.indexOf(d) < 0) tarinai.push(n + ' の実測に ' + d + ' が 無い');
+        });
+      });
+    });
+    // ★0本なら 何も見ていない★（名前の書き方が 変わった時に 黙って緑にならない為）
+    expect(
+      hirotta,
+      '★3台を見る見張りを 1本も 拾えていません（名前の書き方が 変わった？）★'
+    ).toBeGreaterThan(1);
+    expect(
+      tarinai,
+      '★3台を見る見張りなのに 実測に 出ていない台が あります★\n' +
+        '  ＝★見ていない台を「違反0」と 書いてしまう形★（2026-08-29 に 実際に やりました）'
+    ).toEqual([]);
+  });
+
   it('★実測に 日付が 入っている★（いつ測ったか分からない物を 置かない）', () => {
     const furui = Object.keys(SOFT).filter(
       (n) => !/20\d\d-\d\d-\d\d/.test(String(SOFT[n]['実測']))
@@ -335,7 +421,9 @@ const KYORI_AKA = {
       '★見張りの線★＝dDelta ≤ max(10m, 直近確立速度×dt×1.5)。★1フレームの上限は 実装に 無い★。',
     実測:
       '2026-08-28 … ①実機 shimanami-iPhoneSE.slim(5000点) で ★1フレーム 296.54m（上限 30.8m）★' +
-      '（穴 dt=12秒・直線 247.60m・約20.5m/s で走行中）。Android/iPhone13 は 違反0。' +
+      '（穴 dt=12秒・直線 247.60m・約20.5m/s で走行中）。' +
+      '★2026-08-29 実測＝3台とも 違反（Android 1,492.67m／iPhone13 1,443.78m／iPhoneSE 296.54m）★' +
+      '★手元と CI は 一致★。前の「Android/iPhone13 は 違反0」は ★私の読み落とし★。' +
       '②★真値(DM Light)を持つ 代行実走 realtrace-0617-daiko-dm(5273点)★ でも ' +
       '★1フレーム 1,003.13m（上限 12.65m）★（穴 dt=65.44秒・直線 759.2m・約15.3m/s で走行中・reason=doppler）。' +
       '★材料は綺麗★＝5秒以内に 300m超 動く点は ★0個★（GPSのワープでは ない）。',
