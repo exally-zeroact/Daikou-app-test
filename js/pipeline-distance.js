@@ -1229,6 +1229,15 @@ function _prepareBatch(samples, decoder, opts) {
     dopplerM: 0,
     gapGuardSkippedM: 0,
     gapGuardFillM: 0,
+    // ★★捨てた分を 数える（2026-08-30・司さんの「300円ほど 少なく出た」から）★★
+    //   ★距離は 1mmも 変えません。数えるだけです★
+    //   なぜ 要るか: dt が obdMaxDtS(10秒) を 超えると その区間は 加算されません
+    //   （過大ゼロの為・わざと）。ところが ★捨てた事を 誰も 数えていませんでした★＝
+    //   エラーも 出ず 合計だけ 小さくなる＝うちの決まり
+    //   「#ERROR より『黙って 合計が 小さくなる』を 先に潰せ」の 形。
+    //   ★これが 出ていれば、実機の走行で 落ちたかが 後から 分かります★
+    dtSkippedSec: 0, // 捨てた 秒数の 合計
+    dtSkippedM: 0, // その間に 走ったはずの 距離（速度×秒）
     tunnelRouteM: 0, // ★STEP B: トンネル出口アンカー routing 充填の回収距離 (監査用・固定形状)
     stationarySkipped: 0,
   };
@@ -1328,6 +1337,9 @@ function _finishBatch(distance_m, bd, stats) {
       dopplerM: +bd.dopplerM.toFixed(2),
       gapGuardSkippedM: +(bd.gapGuardSkippedM || 0).toFixed(2),
       gapGuardFillM: +(bd.gapGuardFillM || 0).toFixed(2),
+      // ★捨てた分（距離には 入っていない）★ 2026-08-30
+      dtSkippedSec: +(bd.dtSkippedSec || 0).toFixed(2),
+      dtSkippedM: +(bd.dtSkippedM || 0).toFixed(2),
       smoothedM: +(bd.smoothedM || 0).toFixed(2),
       tunnelRouteM: +(bd.tunnelRouteM || 0).toFixed(2),
       stationarySkipped: bd.stationarySkipped,
@@ -2114,6 +2126,12 @@ function createDistanceTracker(decoder, opts) {
         }
       }
       let obdDelta = 0;
+      // ★捨てる時に 数える（距離は 変えない・2026-08-30）★
+      if (dtObd > cfg.obdMaxDtS && spd > 0) {
+        stats.dtSkipped = (stats.dtSkipped || 0) + 1;
+        bd.dtSkippedSec = (bd.dtSkippedSec || 0) + dtObd;
+        bd.dtSkippedM = (bd.dtSkippedM || 0) + spd * dtObd;
+      }
       if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) {
         // ∫(v+δ)。δ は ±0.5km/h クランプ済 = floor過小ぶんだけ持ち上げ過大暴走しない。
         // ★δ は移動中(spd≥stationarySpdMps)のみ適用★: δ は「走行中に1km/h floorで失った量子化分の回収」
@@ -2548,6 +2566,20 @@ function createDistanceTracker(decoder, opts) {
     },
     totalM: function () {
       return total;
+    },
+    // ★★「見えていなかった間」を 外から 見られるようにする(2026-08-30)★★
+    //   ★read-only＝距離には 1mmも 触りません★（calibStatus と 同じ形で 借りました）
+    //   なぜ 要るか: dt が obdMaxDtS(10秒) を 超えた区間は 加算しません（過大ゼロの為・わざと）。
+    //   ところが ★捨てた事を 誰も 数えていませんでした★＝エラーも 出ず 合計だけ 小さくなる。
+    //   ＝うちの決まり「#ERROR より『黙って 合計が 小さくなる』を 先に潰せ」の 形。
+    //   ★これを 呼べば、実機の走行で 何秒／何m 落ちたかが 分かります★（2026-08-30・司さんの
+    //   「300円ほど 少なく出た」から。60秒 見えないと 72km/h で 約1,208m＝約300円）。
+    mienakattaBun: function () {
+      return {
+        kaisuu: stats.dtSkipped || 0, // 何回 捨てたか
+        byou: +(bd.dtSkippedSec || 0).toFixed(2), // 捨てた 秒数の 合計
+        meter: +(bd.dtSkippedM || 0).toFixed(2), // その間に 走ったはずの 距離
+      };
     },
     // ★1km自動較正K の状態(見える化用・2026-06-26)★: autoCalibK時のみ {K,windows,confident,...}。
     //   read-only=距離に影響しない。worker→main へ転送し「較正中 n/3 / 較正完了 K=…」を表示する。
