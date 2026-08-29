@@ -209,29 +209,13 @@ const Meter = (() => {
   const DISP_RATE_EMA_ALPHA = 0.6; // 等速ペース rate の EMA 平滑係数 (= 直近瞬時レートの寄与・0<α≤1。0.5→0.6=速度追従を速め走行中の遅れ縮小・2026-06-24)
   const DISP_RATE_MAX_MPS = 55; // 等速ペース rate の物理上限 (= 198km/h・cold-start/glitch の瞬時値 spike を EMA から除外)
   const DISP_MAX_FRAME_DT_S = 0.4; // dtFrame 上限秒 (= タブ復帰/描画間引きの一撃飛び防止・残差は次フレーム連続収束)
-  // ★1フレームで 進む「距離」の上限★ 2026-08-29
-  //   ★司さんの契約「20/30m を 一気に 飛ばさない（10m 単位で 動く）」★
-  //   時間(dtFrame)だけ 頭打ちにしていたので、速い時は 1フレームで ★22.7m★ 進んでいた
-  //   （30m/s×0.4秒=12m／実測 22.7m ＝ その時の eff は 56.7m/s だった）。
-  //   ⇒ ★距離の側にも 上限を つける★。残りは 次のフレームで 続けて 詰める。
-  //   ★distance_m（課金の距離）は 1文字も 触りません★。動くのは ★画面の数字だけ★。
-  const DISP_MAX_FRAME_STEP_M = 10.0; // 1フレームの前進の上限 (m)
   const DISP_CLOSE_TAU_S = 1.0; // gap 収束 spring の時定数 (= lump/復帰時に gap を τ 秒で詰める。3.0→1.0=走行中の遅れを約1/3に・メーターに食らいつく・司さん要望2026-06-24。overshoot/単調/cap不変)
   // ★2026-07-03: 追従速度上限を"固定24m/s(86km/h)"から"直近走行速度×倍率(floorあり)"の可変に。
   //   固定24は高速道路/しまなみ(90-150km/h)で画面が実距離に置いていかれる原因だった(司さん実機報告・
   //   trace で内部距離は正確=表示層のみの遅れと確定)。コメント元の設計意図「直近走行速度の妥当倍率内」を
   //   正しく実装: cap = max(FLOOR, rate*MULT)。走行速度に追随するのでどんな速度でも遅れず、
   //   停車/低速の大 lump 復帰は FLOOR(=108km/h)で「ドン」を抑える。distance_m は不変(表示専用)。
-  // ★2026-08-29: 30 → 25 に 下げました★
-  //   ★止まっていた後（直近速度が 小さい）でも 30m/s＝108km/h まで 許していた★ので、
-  //   復帰の追従が ★29.70 m/s★ に 張り付き「ドン」と 動いていました
-  //   （tests/verify-display-gap-recovery.js の 線は 25m/s＝90km/h。
-  //    根拠は 同ファイル19-20行「直近走行速度 11.1m/s の ~2.2倍」）。
-  //   ★1フレームの前進にも 10m の上限を 付けた（下の DISP_MAX_FRAME_STEP_M）★ので、
-  //   下げても ★実距離に 置いていかれません★（画面まわり5本とも 緑・実測）。
-  //   ★distance_m（課金の距離）には 触れません★：verify-9677／gate-road／k-neverover は
-  //   ★下げる前も 後も 戻り値0（変わらず）★。
-  const DISP_CATCHUP_FLOOR_MPS = 25; // 追従上限の下限 (= 90km/h)
+  const DISP_CATCHUP_FLOOR_MPS = 30; // 追従上限の下限 (= 108km/h・低速/停車での lump 復帰ドン抑制)
   const DISP_CATCHUP_MULT = 1.5; // 追従上限 = 直近走行速度(rate)のこの倍率まで許容 (= 高速でも画面が食らいつく)
   void DISP_CATCHUP_TAU_S; // 等速ペース化で未使用 (= 形維持・lint 黙らせ)
 
@@ -1065,8 +1049,6 @@ const Meter = (() => {
       if (gap < DISP_LATCH_GAP_M) return tgt;
       return display;
     }
-    // ★1フレームで 進む距離の 上限★（2026-08-29・司さんの「10m 単位で 動く」契約）
-    if (step > DISP_MAX_FRAME_STEP_M) step = DISP_MAX_FRAME_STEP_M;
     if (step > gap) step = gap; // ★overshoot ゼロ★: target を超えない
     let next = display + step;
     // 残差が極小なら target に着地 (= 乖離放置せず収束させる)。
