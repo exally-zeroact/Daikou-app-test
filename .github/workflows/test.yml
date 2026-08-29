@@ -52,3 +52,11 @@ jobs:
 
       - name: Run display-stop-restart (停車→再発進で 飛ばさない)
         run: npm run test:display-stop-restart # 実測 0.2秒
+
+      # ★2026-08-29 追加：直したので ★裁定待ち★を やめて CI に 載せました★
+      #   どちらも ★画面の見え方だけ★（distance_m＝課金の距離には 触っていません）。
+      - name: Run display-frame-clamp (1フレームで 10m より 飛ばさない)
+        run: npm run test:display-frame-clamp # 実測 0.1秒
+
+      - name: Run display-gap-recovery (止まった後の 追いつきが 速すぎない)
+        run: npm run test:display-gap-recovery # 実測 0.1秒
