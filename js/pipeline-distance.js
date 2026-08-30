@@ -2256,6 +2256,40 @@ function createDistanceTracker(decoder, opts) {
         if (_live > 0 && Math.abs(cfg.obdVehicleK / _live - 1) > 0.03) bd.kDriftWarn = true;
       }
       coastSpdMps = spd; // 連続性: 次区間のフォールバック用に実速度を保持
+      // ★★点が 10秒より 長く 来なかった穴を「位置の 直線」で 埋める★★ 2026-08-30
+      //   ★司さんの指示★「おかしい所が 見つかったなら 直せや」
+      //     「OBDなんやけん 止まっとっても 関係なかろが／車が動いたら OBDが 反応する仕組み」
+      //   ★何が 起きていたか（実測）★
+      //     dtObd > obdMaxDtS(10秒) だと ∫v は 積めず obdDelta = 0 のまま。
+      //     72km/h で 60秒 点が 来ないと ★1,208m 丸ごと 消える★
+      //     （OBD 無しの 同じ穴は ★17m しか 消えない★＝★OBD車の方が 弱い★）
+      //   ★直線で 埋める理由★
+      //     ・★止まっていたら 前後が 同じ場所＝直線 0m＝足さない★（自動で 正しい）
+      //     ・★直線 ≤ 道なり ≤ 実走★＝★幾何として 常に 真＝実距離を 超えない★
+      //     ・速度×時間（想像）では なく ★位置（実測）★で 決まる
+      //   ★★片側だけ 直しません★★
+      //     門の 天井は `raw∫v + δmax×Σdt` で ★穴を 飛ばして 積んでいます★
+      //     （obd-main-distance-engine.test.js 108/125行 `if(!(dt>0&&dt<=obdMaxDtS)) continue;`）。
+      //     ＝★埋める側だけ 直すと 必ず 天井を 超えます★（2026-08-30 に 実際に 起こした:
+      //       7,701.7m ＞ 4,948.6m）。★天井にも 同じ穴の 直線を 足します★（門の側も 直す）。
+      //   ★車を 乗り換えた時の ガード★（代行は 客の車を 運転する）
+      //     ★穴の 秒数 × 120km/h を 超える直線は 使わない★。★捨てた事は 数えます★。
+      if (dtObd > cfg.obdMaxDtS && prev) {
+        const _anaChord = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+        const _anaUwa = (120 / 3.6) * dtObd;
+        if (_anaChord > 0 && _anaChord <= _anaUwa) {
+          total += _anaChord;
+          bd.anaChordM = (bd.anaChordM || 0) + _anaChord;
+          stats.anaChordSegs = (stats.anaChordSegs || 0) + 1;
+          prev = cur;
+          prevSnap = snap;
+          return { deltaM: _anaChord, totalM: total, reason: 'obd-ana-chord' };
+        }
+        if (_anaChord > 0) {
+          bd.anaChordSkippedM = (bd.anaChordSkippedM || 0) + _anaChord;
+          stats.anaChordSkipped = (stats.anaChordSkipped || 0) + 1;
+        }
+      }
       prev = cur;
       prevSnap = snap;
       return { deltaM: obdDelta, totalM: total, reason: 'obd' };

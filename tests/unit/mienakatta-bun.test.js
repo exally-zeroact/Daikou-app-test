@@ -106,22 +106,36 @@ describe('★「見えていなかった間」を 数えている★', () => {
     });
   });
 
-  it('★数えた分だけ 距離が 足りない（数と 実害が 一致している）★', () => {
+  // ★★2026-08-30: この試験の 意味が 変わりました（直したので）★★
+  //   前は「数えた分 ＝ 実際に 足りない分」でした。
+  //   ★穴を 位置の 直線で 埋めるように 直した★ので、
+  //   ★実際に 足りない分は ほぼ 0 に なりました★（60秒の穴で 1,208.3m → ★8.3m★）。
+  //   ⇒ 数えた分（mienakattaBun）は これから ★「何秒 見えていなかったか」の 記録★です。
+  //     ★お金の 実害とは 別物★に なりました。★ここを 混ぜないでください★。
+  it('★直したので 実際に 足りない分は ほぼ 0★（穴を 直線で 埋めている）', () => {
     const soko = hashiru(0).total;
-    [11, 30, 60].forEach((a) => {
+    [11, 30, 60, 120].forEach((a) => {
       const r = hashiru(a);
       const tarinai = soko - r.total; // 実際に 足りない分
+      const hashitta = SPD * a; // その間に 走った距離
       expect(
-        Math.abs(tarinai - r.mienai.meter),
+        tarinai,
         a +
-          '秒: 数えた ' +
-          r.mienai.meter +
-          'm と 実際に 足りない ' +
+          '秒 見えない間に ' +
+          hashitta.toFixed(0) +
+          'm 走ったのに ' +
           tarinai.toFixed(1) +
-          'm が 合いません\n' +
-          '  ＝数だけ 出して 実害と ずれていたら、読む人を 惑わせます'
-      ).toBeLessThan(15);
+          'm 足りません\n' +
+          '  ＝穴を 直線で 埋める直しが 効いていません（前は 丸ごと 落ちていました）'
+      ).toBeLessThan(Math.max(20, hashitta * 0.02));
     });
+  });
+
+  it('★見えていなかった時間は これからも 記録される★（お金とは 別物）', () => {
+    const r = hashiru(60);
+    expect(r.mienai.kaisuu).toBe(1);
+    expect(r.mienai.byou).toBeCloseTo(60, 1);
+    expect(r.mienai.meter, '★見込みの m は 記録として 残す★').toBeGreaterThan(0);
   });
 
   it('★60秒 見えないと 約1,200m＝約300円★（司さんの申告と 同じ桁である事）', () => {
