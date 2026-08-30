@@ -50,8 +50,27 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          # ★HEAD^ を 見るので 2つ 要る★（1つだと 門が 落ちる）
+          fetch-depth: 2
+
+      # ★★2026-08-30 直し（★自分で ループを 作った★）★★
+      #   はじめの形は ★版名を 付ける → push → その push で また 自分が 走る★
+      #   ⇒ 新しい SHA で また 別の 版名に なるので ★永久に 止まりません★
+      #   ⇒ 実際に ★2回 回りました★（e579b3c4 → e9db6ac4）。すぐ 止めました。
+      #   ⇒★止め方＝直前の コミットで sw.js が すでに 変わっているなら 何も しない★
+      #     （main 側と 同じ門。1回 付けたら それ以上 付けない）
+      - name: すでに 版名が 入っているか 見る
+        id: sumi
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -qx 'sw.js'; then
+            echo "already=yes" >> $GITHUB_OUTPUT
+            echo "★直前の コミットで sw.js が すでに 変わっています＝何も しません★"
+          else
+            echo "already=no" >> $GITHUB_OUTPUT
+          fi
 
       - name: 版名を 付ける（中身が 変わっていない時は 何も しない）
+        if: steps.sumi.outputs.already != 'yes'
         run: |
           SHORT=$(git rev-parse --short=7 HEAD)
           NEW_NAME="daikome-${SHORT}"

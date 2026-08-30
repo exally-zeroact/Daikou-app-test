@@ -61,7 +61,22 @@ describe('★本番ビルドを 1回に する（Vercel の お金）★', () =>
   it('★③ main 側の 段が 全部 その門に ぶら下がっている（付け忘れ 防止）★', () => {
     // ★門より 後に 走る 段は 3つ★（SHA取得／書き換え／commit&push）
     const kado = (src.match(/steps\.sumi\.outputs\.already != 'yes'/g) || []).length;
-    expect(kado, '★門に ぶら下がっていない 段が あります（そこが 2回目を 作ります）★').toBe(3);
+    expect(kado, '★門に ぶら下がっていない 段が あります（そこが 2回目を 作ります）★').toBe(4);
+  });
+
+  // ★★2026-08-30 追加（★自分で ループを 作った★ので 見張る）★★
+  //   はじめの形は「版名を 付ける → push → その push で また 自分が 走る」で
+  //   ★永久に 止まりませんでした（実際に 2回 回った）★。
+  it('★★⑦ PR 側にも ループ止めが 在る（自分で 自分を 呼ばない）★★', () => {
+    const i = src.indexOf('stamp-on-pr:');
+    const j = src.indexOf('update-cache-name:');
+    const naka = src.slice(i, j > i ? j : undefined);
+    expect(naka, '★PR 側に ループ止めが ありません★').toContain("grep -qx 'sw.js'");
+    expect(naka, '★ループ止めを 段に 掛けていません★').toContain(
+      "steps.sumi.outputs.already != 'yes'"
+    );
+    // ★HEAD^ を 見るので 2つ 要る★（1つだと 門が 落ちる）
+    expect(naka, '★fetch-depth が 足りません（門が 落ちます）★').toContain('fetch-depth: 2');
   });
 
   it('★④ 保険（main 側）を 消していない★', () => {
