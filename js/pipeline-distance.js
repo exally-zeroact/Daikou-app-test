@@ -2276,8 +2276,26 @@ function createDistanceTracker(decoder, opts) {
       //     ★穴の 秒数 × 120km/h を 超える直線は 使わない★。★捨てた事は 数えます★。
       if (dtObd > cfg.obdMaxDtS && prev) {
         const _anaChord = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
+        // ★★途切れが 長すぎる時は 埋めない（2026-08-30・実測で 決めた）★★
+        //   ★なぜ 要るか★
+        //     実車中でも ★10分より 長い 途切れが 9回★ 在りました（手元の 走行 22本を 数えた）。
+        //     一番 危ないのは ★22.5分 途切れて 直線 2,540m（平均 6.8km/h）＝約600円★。
+        //     ★平均 6.8km/h＝ほぼ 停まっている★＝走ったのでは なく
+        //     ★アプリが 落ちていて、その間に 少し 動いた／別の場所へ 移った★形です。
+        //     ★これを 足すと 走っていない分を 請求します★。
+        //   ★線の 引き方（実測から）★
+        //     8月の 実車 278本 … 真ん中 13.9分／★一番長い 60.2分★
+        //     手元の 途切れ … 10〜30秒 23回／30〜60秒 5回／1〜3分 10回／3〜10分 2回／★10分超 9回★
+        //     ⇒★3分を 超える 途切れは 埋めません★（3分＝72km/h なら 3.6km。
+        //       走行中に 3分も アプリが 落ちるのは 普通では ありません）
+        //     ★埋めなかった分は 数えます（黙って 落とさない）★
+        const _anaMaxSec = 180; // ★3分★（実測から。これより 長い 途切れは 埋めない）
         const _anaUwa = (120 / 3.6) * dtObd;
-        if (_anaChord > 0 && _anaChord <= _anaUwa) {
+        if (dtObd > _anaMaxSec) {
+          bd.anaTooLongM = (bd.anaTooLongM || 0) + _anaChord;
+          bd.anaTooLongSec = (bd.anaTooLongSec || 0) + dtObd;
+          stats.anaTooLong = (stats.anaTooLong || 0) + 1;
+        } else if (_anaChord > 0 && _anaChord <= _anaUwa) {
           total += _anaChord;
           bd.anaChordM = (bd.anaChordM || 0) + _anaChord;
           stats.anaChordSegs = (stats.anaChordSegs || 0) + 1;

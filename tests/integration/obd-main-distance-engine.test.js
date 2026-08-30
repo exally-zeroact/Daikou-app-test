@@ -145,6 +145,9 @@ function obdAnaChordM(samples, obdMaxDtS) {
       Math.sin(d1 / 2) * Math.sin(d1 / 2) +
       Math.cos(p.lat * r) * Math.cos(c.lat * r) * Math.sin(d2 / 2) * Math.sin(d2 / 2);
     const chord = 2 * R * Math.asin(Math.sqrt(x));
+    // ★エンジン側と 同じ 3分の 上限★（js/pipeline-distance.js の _anaMaxSec と 同じ値）
+    //   ★片側だけ 直さない★: エンジンが 埋めない物を 天井にだけ 足すと 天井が 緩みます。
+    if (dt > 180) continue;
     const uwa = (120 / 3.6) * dt;
     if (chord > 0 && chord <= uwa) m += chord;
   }
