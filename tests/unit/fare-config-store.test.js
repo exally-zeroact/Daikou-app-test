@@ -10,7 +10,7 @@
 //
 //   ★ここで 見る事★
 //     ①★Firebase を 1行も 呼んでいない★（司さんの「2度と使うな」）
-//     ②★787通りの 距離で 料金が 1円も 変わらない★（前の値と 新しい置き場の 既定が 同じ）
+//     ②★料金が 1円も 変わらない★（★段の 境目 91個を 全部 含む★・前の値と 新しい置き場の 既定が 同じ）
 //     ③★足りない所を 埋めても 在る値は 書き換えない★（勝手に 料金を 変えない）
 //     ④★倉庫に 無い会社でも 空にしない★（既定を 返す）
 //     ⑤★変えた記録が 残る／戻せる★（前は 上書き1件だけで 戻せなかった）
@@ -55,20 +55,43 @@ describe('★料金表の 引っ越し（Firebase → Supabase）★', () => {
     });
   });
 
-  it('★② 787通りの 距離で 料金が 1円も 変わらない★', () => {
+  // ★★2026-08-30: 指示役の指摘で 直しました★★
+  //   前は 50m きざみの 787通りだけでした。数えたら
+  //   ★段の 境目 91個のうち 19個しか 入っていませんでした★
+  //   （50m きざみでは 420m の 段に ほとんど 当たりません）。
+  //   ⇒★境目を 外した 787通りは、階段の 料金では 何も 保証しません★
+  //   ⇒★段の 境目 ちょうど と その ±1m を 全部 入れます★
+  it('★② 距離を 変えても 料金が 1円も 変わらない（★段の 境目を 全部 含む★）★', () => {
     const mae = HIKKOSHI_MOTO;
     const ato = S.totonoeru(null); // ★倉庫が 空の時に 使う 既定★
+
+    const kyori = new Set();
+    for (let m = 0; m <= 39300; m += 50) kyori.add(m); // 広く 浅く
+    // ★段の 境目 ちょうど と ±1m★（1000m ／ 1420m ／ 1840m …）
+    const kyokai = [];
+    for (let m = 1000; m <= 39300; m += 420) kyokai.push(m);
+    kyokai.forEach((m) => {
+      [m - 1, m, m + 1].forEach((x) => {
+        if (x >= 0) kyori.add(x);
+      });
+    });
+
     let chigau = 0;
     let mita = 0;
-    for (let m = 0; m <= 39300; m += 50) {
+    kyori.forEach((m) => {
       M.setFareConfig(mae);
       const a = M.calcFare(m);
       M.setFareConfig(ato);
       const b = M.calcFare(m);
       mita++;
       if (a !== b) chigau++;
-    }
-    expect(mita, '★何通り 見たかを 数える（0通りなら 何も 見ていない）★').toBe(787);
+    });
+
+    // ★何通り 見たか／境目を 何個 含むか を 数で 出す（0なら 何も 見ていない）★
+    expect(mita, '★見た通り数が 少なすぎます★').toBeGreaterThan(1000);
+    expect(kyokai.length, '★段の 境目が 数えられていません★').toBeGreaterThan(80);
+    const fukumu = kyokai.filter((m) => kyori.has(m)).length;
+    expect(fukumu, '★段の 境目を 全部 含んでいません★').toBe(kyokai.length);
     expect(chigau, '★料金が 変わった 距離が ' + chigau + ' 通り あります★').toBe(0);
   });
 
