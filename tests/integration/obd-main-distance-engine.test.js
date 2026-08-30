@@ -145,7 +145,13 @@ function obdAnaChordM(samples, obdMaxDtS) {
       Math.sin(d1 / 2) * Math.sin(d1 / 2) +
       Math.cos(p.lat * r) * Math.cos(c.lat * r) * Math.sin(d2 / 2) * Math.sin(d2 / 2);
     const chord = 2 * R * Math.asin(Math.sqrt(x));
-    const uwa = (120 / 3.6) * dt;
+    // ★エンジン側と 同じ 3分の 上限★（js/pipeline-distance.js の _anaMaxSec と 同じ値）
+    //   ★片側だけ 直さない★: エンジンが 埋めない物を 天井にだけ 足すと 天井が 緩みます。
+    if (dt > 180) continue;
+    // ★エンジン側と 同じ 速さの 上限★（js/pipeline-distance.js の _anaMaxKmh と 同じ値）
+    //   実測: 8月の実車277本の平均は 最速 45.6km/h／車が出した瞬間の最速は ★96km/h★
+    //   ⇒★110km/h（96の上）★。★片側だけ 緩めない★
+    const uwa = (110 / 3.6) * dt;
     if (chord > 0 && chord <= uwa) m += chord;
   }
   return m;

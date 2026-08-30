@@ -2276,8 +2276,43 @@ function createDistanceTracker(decoder, opts) {
       //     ★穴の 秒数 × 120km/h を 超える直線は 使わない★。★捨てた事は 数えます★。
       if (dtObd > cfg.obdMaxDtS && prev) {
         const _anaChord = haversineM(prev.lat, prev.lng, cur.lat, cur.lng);
-        const _anaUwa = (120 / 3.6) * dtObd;
-        if (_anaChord > 0 && _anaChord <= _anaUwa) {
+        // ★★途切れが 長すぎる時は 埋めない（2026-08-30・実測で 決めた）★★
+        //   ★なぜ 要るか★
+        //     実車中でも ★10分より 長い 途切れが 9回★ 在りました（手元の 走行 22本を 数えた）。
+        //     一番 危ないのは ★22.5分 途切れて 直線 2,540m（平均 6.8km/h）＝約600円★。
+        //     ★平均 6.8km/h＝ほぼ 停まっている★＝走ったのでは なく
+        //     ★アプリが 落ちていて、その間に 少し 動いた／別の場所へ 移った★形です。
+        //     ★これを 足すと 走っていない分を 請求します★。
+        //   ★線の 引き方（実測から）★
+        //     8月の 実車 278本 … 真ん中 13.9分／★一番長い 60.2分★
+        //     手元の 途切れ … 10〜30秒 23回／30〜60秒 5回／1〜3分 10回／3〜10分 2回／★10分超 9回★
+        //     ⇒★3分を 超える 途切れは 埋めません★（3分＝72km/h なら 3.6km。
+        //       走行中に 3分も アプリが 落ちるのは 普通では ありません）
+        //     ★埋めなかった分は 数えます（黙って 落とさない）★
+        const _anaMaxSec = 180; // ★3分★（実測から。これより 長い 途切れは 埋めない）
+        // ★★速さの 上限（2026-08-30・指示役の指摘で 実測から 引き直した）★★
+        //   ★なぜ 要るか★
+        //     天井の式にも 同じ直線を 足すので ★両側で 相殺され、門は 直線を 検査できません★。
+        //     ＝★GPS が 飛んだ時に 誰も 止められません★（都市部・トンネル出口の マルチパス）。
+        //     前の 120km/h だと ★3分 × 120km/h ＝ 6,000m まで 通っていました★。
+        //   ★実測から 引いた★（2026-08-30）
+        //     ・8月の 実車 277本の ★平均速度★ … 真ん中 20.8km/h ／ 上位1% 42.9 ／ ★最速 45.6★
+        //     ・車が 出した ★瞬間の 最速★（OBDの生値・手元の走行全部）… ★96 km/h★
+        //     ⇒★瞬間の 最速 96km/h の 上に 置く＝110km/h★
+        //       （★穴の間の 平均★なので、瞬間の 最速を 超える事は 物理的に 有り得ません）
+        //     ⇒ 3分 × 110km/h ＝ 5,500m。★それ以上 動いていたら GPS が 飛んでいます★
+        //   ★捨てた分は 数えます（黙って 落とさない）★
+        const _anaMaxKmh = 110; // ★実測の 瞬間最速 96km/h の 上★
+        const _anaUwa = (_anaMaxKmh / 3.6) * dtObd;
+        if (dtObd > _anaMaxSec) {
+          bd.anaTooLongM = (bd.anaTooLongM || 0) + _anaChord;
+          bd.anaTooLongSec = (bd.anaTooLongSec || 0) + dtObd;
+          stats.anaTooLong = (stats.anaTooLong || 0) + 1;
+        } else if (_anaChord > _anaUwa) {
+          // ★速すぎる＝位置が 飛んでいる★（走ったのでは ない）
+          bd.anaTooFastM = (bd.anaTooFastM || 0) + _anaChord;
+          stats.anaTooFast = (stats.anaTooFast || 0) + 1;
+        } else if (_anaChord > 0) {
           total += _anaChord;
           bd.anaChordM = (bd.anaChordM || 0) + _anaChord;
           stats.anaChordSegs = (stats.anaChordSegs || 0) + 1;
