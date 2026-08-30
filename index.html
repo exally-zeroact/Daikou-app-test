@@ -14534,10 +14534,22 @@
 
         // ★★いつの 料金表かを 出す（2026-08-30・監査役の指摘）★★
         //   ★言葉は 部品が 作ります★（2つの画面で 別々に 書かない＝食い違いを 作らない）
+        //   ★2026-08-30 追記（監査役の指摘）★
+        //     ★「最後に 変えたのは 誰・いつ」も ★同じ箱に 2行目★として 出す★
+        //     ★記録は 前から 持っていたのに 誰も 見ていませんでした★
+        //     ⇒★勝手に 変えても 誰にも 分からない、が 終わります★
         function itsunoFuda(v) {
           const el = $('_fare_itsuno');
           if (!el || typeof FareConfigStore === 'undefined') return;
-          el.textContent = v && v.fuda ? v.fuda : FareConfigStore.fudaMoji(v);
+          el.textContent = '';
+          const gyo1 = document.createElement('div');
+          gyo1.textContent = v && v.fuda ? v.fuda : FareConfigStore.fudaMoji(v);
+          const gyo2 = document.createElement('div');
+          gyo2.style.marginTop = '2px';
+          gyo2.style.opacity = '0.85';
+          gyo2.textContent = v && v.fudaKaeta ? v.fudaKaeta : FareConfigStore.fudaKaeta(v);
+          el.appendChild(gyo1);
+          el.appendChild(gyo2);
           const furui = !!(v && v.furusa && v.furusa.furui);
           const wakaranai = !(v && v.totta_at);
           // ★この画面は 色の 変数を 1つも 使っていません★ので、

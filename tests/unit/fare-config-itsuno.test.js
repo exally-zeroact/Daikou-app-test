@@ -186,4 +186,97 @@ describe('★いつの 料金表かを 見せる★', () => {
     const box = html.slice(i, i + 500);
     expect(/white-space:\s*normal/.test(box), '★折り返しの 指定が ありません★').toBe(true);
   });
+
+  // ============================================================
+  // ★★最後に 変えたのは 誰・いつ★★ 2026-08-30（監査役の指摘で 追加）
+  //   ★記録は 前から 持っていたのに ★誰も 見ていませんでした★★
+  //   ⇒★持っているのに 渡していない★
+  //   ★名前が 出れば 変えにくくなります★（勝手に 変えても 分からない、が 終わる）
+  // ============================================================
+  it('★⑦ 誰が 変えたかを 焼いて 返す★', async () => {
+    const t = niseSouko((url) =>
+      url.indexOf('dk-fare-config') >= 0
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: true,
+              config: { base_fare: 1500 },
+              updated_at: '2026-08-30T05:20:00Z',
+              updated_by: 'device:abcd1234efgh',
+            }),
+          }
+        : null
+    );
+    const h = yomikomu(t);
+    try {
+      t.ls['dk_license_company'] = 'tok';
+      t.ls['DAIKOME_DEVICE_ID'] = 'zzzz';
+      await h.S.torikomu();
+      const yaita = JSON.parse(t.ls['dk_fare_config_cache']);
+      expect(yaita.updated_by, '★誰が 変えたかを 焼いていません★').toBe('device:abcd1234efgh');
+      const v = h.S.yomuOffline();
+      expect(v.updated_by, '★誰が 変えたかを 返していません★').toBe('device:abcd1234efgh');
+      expect(String(v.fudaKaeta), '★画面に 出す 言葉が ありません★').toContain('最後に変えた人');
+    } finally {
+      h.modosu();
+    }
+  });
+
+  it('★⑧ 端末IDを そのまま 出さない（自分／他を 分ける）★', () => {
+    const t = niseSouko();
+    const h = yomikomu(t);
+    try {
+      const jibun = h.S.fudaKaeta(
+        { updated_by: 'device:abcd1234efgh', updated_at: '2026-08-30T05:20:00Z' },
+        'abcd1234efgh'
+      );
+      const hoka = h.S.fudaKaeta(
+        { updated_by: 'device:abcd1234efgh', updated_at: '2026-08-30T05:20:00Z' },
+        'zzzz'
+      );
+      expect(jibun, '★自分の端末だと 言っていません★').toContain('この端末');
+      expect(hoka, '★他の端末だと 言っていません★').toContain('別の端末');
+      expect(hoka, '★端末IDを そのまま 出しています★').not.toContain('abcd1234efgh');
+      expect(hoka, '★末尾4文字を 出していません★').toContain('efgh');
+      // ★事務所（メール）は そのまま 出す★
+      const mail = h.S.fudaKaeta(
+        { updated_by: 'a@example.com', updated_at: '2026-08-30T05:20:00Z' },
+        'zzzz'
+      );
+      expect(mail).toContain('a@example.com');
+    } finally {
+      h.modosu();
+    }
+  });
+
+  it('★★⑨ 分からない物を 空欄に しない（誰・いつ の 両方）★★', () => {
+    const t = niseSouko();
+    const h = yomikomu(t);
+    try {
+      expect(h.S.fudaKaeta(null)).toBe('最後に変えた人：分かりません');
+      expect(h.S.fudaKaeta({})).toBe('最後に変えた人：分かりません');
+      expect(h.S.fudaKaeta({ updated_by: '' })).toBe('最後に変えた人：分かりません');
+      expect(h.S.fudaKaeta({ updated_by: 'device:' })).toBe('最後に変えた人：分かりません');
+      // ★人だけ 分からない／日だけ 分からない★
+      expect(h.S.fudaKaeta({ updated_at: '2026-08-30T05:20:00Z' })).toContain('分かりません');
+      expect(h.S.fudaKaeta({ updated_by: 'a@example.com' })).toContain('いつかは分かりません');
+      // ★写しが 無い時も 空欄に しない★
+      expect(String(h.S.yomuOffline().fudaKaeta)).toContain('最後に変えた人');
+    } finally {
+      h.modosu();
+    }
+  });
+
+  it('★⑩ 画面に 2行目が 出る（2つで 1組）★', () => {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const i = html.indexOf('function itsunoFuda');
+    const naka = html.slice(i, i + 1400);
+    expect(naka.includes('fudaKaeta'), '★誰が 変えたかを 出していません★').toBe(true);
+    // ★同じ箱に 入っている★（2つで 1組・離さない）
+    expect(naka.includes("$('_fare_itsuno')"), '★同じ箱に 出していません★').toBe(true);
+    // ★画面で 日付を 組み立て直していない★
+    expect(/getMonth\(\)/.test(naka), '★画面が 日付を 自分で 組み立てています★').toBe(false);
+    expect(/getHours\(\)/.test(naka), '★画面が 時刻を 自分で 組み立てています★').toBe(false);
+  });
 });
