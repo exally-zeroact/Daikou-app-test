@@ -2127,10 +2127,27 @@ function createDistanceTracker(decoder, opts) {
       }
       let obdDelta = 0;
       // ★捨てる時に 数える（距離は 変えない・2026-08-30）★
-      if (dtObd > cfg.obdMaxDtS && spd > 0) {
-        stats.dtSkipped = (stats.dtSkipped || 0) + 1;
-        bd.dtSkippedSec = (bd.dtSkippedSec || 0) + dtObd;
-        bd.dtSkippedM = (bd.dtSkippedM || 0) + spd * dtObd;
+      if (dtObd > cfg.obdMaxDtS) {
+        // ★★見込みは 小さめに 取る（2026-08-30・指示役の条件2）★★
+        //   ★穴の 前後の 速度の ★小さい方★ × 秒数★で 数えます。
+        //   ★なぜ 小さい方か★
+        //     多めに 言うと「300円 損した」と 思わせて 実際は 100円、が 起きます。
+        //     ★少なめなら「思ったより 少なかった」で 済みます★＝うちの 保守側の 考え方と 同じ。
+        //   ★実測（2026-08-30・実物4本）★ 小さめ／平均／大きめ で 円は どれも 同じでした
+        //     （0610-Android 2,310.1／2,345.1／2,380.1 m … 3つとも ★500円★）。
+        //     ★効果が 無くても 保守側を 採ります★（次の 走行で 効く事が 在るので）。
+        //   ★これは 見込みです★: 実際に 落ちた分は ★もっと 多い★事が 在ります
+        //     （同じ穴を 位置の 弦で 数えると 2,826.0m＝★+515.9m★。
+        //       126秒の 途中で 80km/h 出ていて、端の 66km/h では 拾えない）。
+        //   ★距離(distance_m)は 1mmも 変わりません。数えるだけです★
+        const _mae = prev && typeof prev.spd === 'number' && prev.spd >= 0 ? prev.spd : -1;
+        const _ato = spd >= 0 ? spd : -1;
+        const _chiisai = _mae >= 0 && _ato >= 0 ? Math.min(_mae, _ato) : Math.max(_mae, _ato);
+        if (_chiisai > 0) {
+          stats.dtSkipped = (stats.dtSkipped || 0) + 1;
+          bd.dtSkippedSec = (bd.dtSkippedSec || 0) + dtObd;
+          bd.dtSkippedM = (bd.dtSkippedM || 0) + _chiisai * dtObd;
+        }
       }
       if (dtObd > 0 && dtObd <= cfg.obdMaxDtS) {
         // ∫(v+δ)。δ は ±0.5km/h クランプ済 = floor過小ぶんだけ持ち上げ過大暴走しない。
