@@ -1,6 +1,24 @@
 name: Auto Update sw.js CACHE_NAME
 
-# トリガー：sw.js とワークフロー以外の変更が main に push された時
+# ★★2026-08-30 直し：本番ビルドが 1回の 変更で 2回 走っていた★★
+#   前の形（実測）
+#     ①PRを merge → Vercel が ★1回目★ を建てる（この時 sw.js は ★まだ 古い版名★）
+#     ②この workflow が sw.js を 書き換えて もう1コミット push
+#     ③Vercel が ★2回目★ を建てる（客に 届くのは こちら）
+#   ⇒★①は 捨て玉★。clone に 1回 4分27秒 かかるので、そのぶん 丸ごと 無駄。
+#     今日 daikou-app だけで 7ビルド、うち ★3本が この 2回目★ でした。
+#
+#   ★直した形★
+#     ・PR の 枝に いる うちに sw.js を 書き換える（下の stamp-on-pr）
+#       ⇒ merge した時には ★もう 新しい版名が 入っている★＝ビルドは ★1回★
+#     ・main 側は ★残す（保険）★。ただし
+#       ★その push で sw.js が すでに 変わっているなら 何も しない★
+#       （でないと 版名を 付け直して また もう1回 建ってしまう）
+#
+#   ★保険を 消していません★: PR を 通さず main に 直に push した時は
+#   今までどおり main 側が 版名を 付けます（その時だけ 2回 建ちます）。
+#   ⇒★止まっても 客に 古い js が 配られる事は ありません★
+
 on:
   push:
     branches: [main]
@@ -8,6 +26,8 @@ on:
       - 'sw.js'
       - '.github/workflows/**'
       - 'README.md'
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 # git push に必要な権限
 permissions:
@@ -19,7 +39,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─── ★PR の 枝で 先に 版名を 付ける（これで 本番ビルドが 1回に なる）★ ───
+  stamp-on-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout（PR の 枝そのもの）
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 版名を 付ける（中身が 変わっていない時は 何も しない）
+        run: |
+          SHORT=$(git rev-parse --short=7 HEAD)
+          NEW_NAME="daikome-${SHORT}"
+          OLD_NAME=$(grep -oE "const CACHE_NAME = ['\"][^'\"]*['\"]" sw.js | head -1)
+          echo "今の版名: $OLD_NAME"
+          sed -i -E "s/(const CACHE_NAME = )['\"][^'\"]*['\"]/\1'$NEW_NAME'/" sw.js
+          if git diff --quiet sw.js; then
+            echo "★版名は すでに 同じ＝何も しません★"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sw.js
+          git commit -m "chore: 版名を 先に 付ける（daikome-${SHORT}・本番ビルドを 1回に する）"
+          # ★押せなかったら 赤にする（黙って 通さない）★
+          #   ここが 通らなくても main 側の 保険が 効くので 客への 影響は ありません。
+          git push origin HEAD:"${{ github.event.pull_request.head.ref }}"
+          echo "★版名を $NEW_NAME に しました★"
+
   update-cache-name:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       # ─── 1. リポジトリをチェックアウト ───
@@ -31,13 +84,27 @@ jobs:
           # GITHUB_TOKEN を使う（自動付与）
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # ─── ★1.5 この push で sw.js が すでに 変わっていたら 何も しない★ ───
+      #   （PR の 枝で 先に 付けてある時。ここで 付け直すと ★もう1回 建ってしまう★）
+      - name: すでに 版名が 入っているか 見る
+        id: sumi
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -qx 'sw.js'; then
+            echo "already=yes" >> $GITHUB_OUTPUT
+            echo "★この push で sw.js が すでに 変わっています＝何も しません★"
+          else
+            echo "already=no" >> $GITHUB_OUTPUT
+          fi
+
       # ─── 2. short SHA を取得 ───
       - name: Get short SHA
         id: sha
+        if: steps.sumi.outputs.already != 'yes'
         run: echo "short_sha=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
       # ─── 3. sw.js の CACHE_NAME を書き換え ───
       - name: Update CACHE_NAME in sw.js
+        if: steps.sumi.outputs.already != 'yes'
         run: |
           NEW_NAME="daikome-${{ steps.sha.outputs.short_sha }}"
           # CACHE_NAME = 'XXX' の XXX 部分を置換（シングル/ダブルクォート両対応）
@@ -48,6 +115,7 @@ jobs:
 
       # ─── 4. 変更があれば自動コミット + push ───
       - name: Commit and push if changed
+        if: steps.sumi.outputs.already != 'yes'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
