@@ -359,7 +359,8 @@
     if (!companyId) throw new Error('★会社が 決まっていません★');
     const res = await _rest(
       sess,
-      'dk_fare_config?select=config,updated_at&company_id=eq.' + encodeURIComponent(companyId)
+      'dk_fare_config?select=config,updated_at,updated_by&company_id=eq.' +
+        encodeURIComponent(companyId)
     );
     if (!res || !res.ok)
       throw new Error('★料金表を 読めませんでした★ status=' + ((res && res.status) || 0));
@@ -369,6 +370,8 @@
       config: totonoeru(raw),
       moto: raw ? 'souko' : 'kitei',
       updated_at: (Array.isArray(rows) && rows[0] && rows[0].updated_at) || null,
+      // ★誰が 変えたか★（事務所の 画面が 出す。★2026-08-31 追加★）
+      updated_by: (Array.isArray(rows) && rows[0] && rows[0].updated_by) || null,
     };
   }
 
