@@ -1507,10 +1507,34 @@
       }
       #overlayFare .tab-nav {
         display: flex;
-        background: #fff;
         border-bottom: 1.5px solid #b8d9ff;
         overflow-x: auto;
         flex-shrink: 0;
+        /* ★横に すべる 事を 見せる 影★ 2026-08-31
+           実測(390px): 窓390px / 中身587px / はみ出し197px なのに 印が 1つも 無く、
+           ★「その機能が 無い」と 思われる★状態だった。
+           仕掛け … 白い覆い(local)は 中身と 一緒に すべり、
+                    影(scroll)は 枠に 貼り付く。
+                    ⇒ ★すべれる 側にだけ 影が 出る★（JSは 使わない）
+           ※端に 着いたら その側の 影は 白い覆いに 隠れて 消える */
+        background-color: #fff;
+        background-image:
+          linear-gradient(to right, #fff, rgba(255, 255, 255, 0)),
+          linear-gradient(to left, #fff, rgba(255, 255, 255, 0)),
+          radial-gradient(farthest-side at 0% 50%, rgba(0, 86, 179, 0.55), rgba(0, 86, 179, 0)),
+          radial-gradient(farthest-side at 100% 50%, rgba(0, 86, 179, 0.55), rgba(0, 86, 179, 0));
+        background-position:
+          left center,
+          right center,
+          left center,
+          right center;
+        background-repeat: no-repeat;
+        background-size:
+          24px 100%,
+          24px 100%,
+          20px 100%,
+          20px 100%;
+        background-attachment: local, local, scroll, scroll;
       }
       #overlayFare .tab-nav::-webkit-scrollbar {
         display: none;
@@ -1879,6 +1903,23 @@
           border-bottom: none;
           overflow-y: auto;
           overflow-x: hidden;
+          /* ★横長の 時は 縦に すべる★ので 影も 縦向きに 差し替える
+             （横向きの 影を 残すと ★すべらない 側に 影が 出る★） */
+          background-image:
+            linear-gradient(to bottom, #fff, rgba(255, 255, 255, 0)),
+            linear-gradient(to top, #fff, rgba(255, 255, 255, 0)),
+            radial-gradient(farthest-side at 50% 0%, rgba(0, 86, 179, 0.55), rgba(0, 86, 179, 0)),
+            radial-gradient(farthest-side at 50% 100%, rgba(0, 86, 179, 0.55), rgba(0, 86, 179, 0));
+          background-position:
+            center top,
+            center bottom,
+            center top,
+            center bottom;
+          background-size:
+            100% 24px,
+            100% 24px,
+            100% 20px,
+            100% 20px;
         }
         #overlayFare .tab-btn {
           text-align: left;
