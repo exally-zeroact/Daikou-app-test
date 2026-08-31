@@ -4,7 +4,8 @@
 //
 //   ★何を するか★
 //     ★変える前の meter.js を 先に 複製★してあります:
-//       scratchpad/moto/meter-MOTO-2026-08-31.js（sha256 be22047223d1b995・77,019 bytes）
+//       tests/fixtures/meter-MAE-2026-08-31.js（sha256 be22047223d1b995・77,019 bytes）
+//       ★repo の 中に 置きます★＝手元にしか 無いと CI で 落ちる（2026-08-31 実際に 落ちた）
 //     ★同じ入力★を 前の物と 今の物の 両方に 入れ、★1円でも ずれたら 赤★に します。
 //     （★参照のままで 比べると 自分の 答えに 書き換わります★ので 先に 複製しました）
 //
@@ -24,7 +25,12 @@
 //   ★ここでは 距離(distance_m)に 1mmも 触っていません★（受け取って 円を 返すだけ）
 const path = require('path');
 
-const MAE_PATH = path.resolve(__dirname, '..', '..', '..', 'moto', 'meter-MOTO-2026-08-31.js');
+// ★★比べる相手は repo の 中に 置く★★ 2026-08-31
+//   ★最初 手元(scratchpad)の 複製を 見ていて CI が 赤に なりました★
+//     Error: Cannot find module '/home/runner/work/Daikou-app-test/moto/meter-MOTO-2026-08-31.js'
+//   ＝★ローカル緑 ≠ CI緑★。比べる相手が 手元にしか 無いと ★誰も 確かめられません★。
+//   ⇒ ★変える前の meter.js を そのまま fixture に 入れました★（1バイトも 変えていない）
+const MAE_PATH = path.join(__dirname, '..', 'fixtures', 'meter-MAE-2026-08-31.js');
 const IMA_PATH = path.join(__dirname, '..', '..', 'js', 'meter.js');
 
 function yomu(p) {
