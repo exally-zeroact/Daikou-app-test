@@ -412,6 +412,19 @@
           $('done').textContent = t || '';
         }
 
+        // ★倉庫に 残す「誰が 変えたか」★ 2026-08-31（指示役の 差し戻し1）
+        //   ★uid（英数字の 羅列）を そのまま 残さない★＝後で 見た人が 誰か 分からない
+        //   （司さん「訳分からんやつ消せ」と 同じ形）。
+        //   ①メールが 読めれば ★メール★（一番 分かる）
+        //   ②読めなければ ★'jimusho:<uid>'★ → 画面には「事務所の人（…下4）」と 出る
+        //   ③どちらも 読めなければ ★null★ → 画面には「分かりません」と 出る（★埋めない★）
+        function dareNoNamae() {
+          var mail = window.DKSession.mailOf ? window.DKSession.mailOf(SESS) : null;
+          if (mail) return mail;
+          var uid = window.DKSession.uidOf ? window.DKSession.uidOf(SESS) : null;
+          return uid ? 'jimusho:' + uid : null;
+        }
+
         // 画面の 入力から「基本の5つ」を 取る
         function nyuuryoku() {
           var o = {};
@@ -457,24 +470,18 @@
           }
         }
 
+        // ★「いつ・誰」の 1行は ★自分で 組まない★★ 2026-08-31（指示役の 差し戻し2）
+        //   ★元は ここで toLocaleString して「2026/08/20 11:03」と 出していました★。
+        //   メーター側は 同じ物を「8月20日 11:03」と 出しており
+        //   ★同じアプリの 中で 日付の 書き方が 2通り★に なっていました。
+        //   ⇒ ★部品側の 1か所（FareConfigStore.fudaKaeta → _hiduke）を そのまま 使います★。
+        //     「2つの 札で 別々に 書くと すぐ 食い違う」は ★私が 部品に そう 書いた★のに
+        //     ★自分で 破っていました★。
         function fuda() {
-          $('itsuno').innerHTML = '';
-          var dare = UPDATED_BY ? window.FareConfigStore.dareMoji(UPDATED_BY, null) : '';
-          var t = document.createElement('div');
-          t.innerHTML =
-            '<b>' +
-            (UPDATED_AT
-              ? new Date(UPDATED_AT).toLocaleString('ja-JP', {
-                  year: 'numeric',
-                  month: '2-digit',
-                  day: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : 'まだ 一度も 変えていません') +
-            '</b>' +
-            (dare ? '　' + dare : '');
-          $('itsuno').appendChild(t);
+          $('itsuno').textContent = window.FareConfigStore.fudaKaeta(
+            { updated_at: UPDATED_AT, updated_by: UPDATED_BY },
+            null // ★事務所なので「この端末」の 判定は しない★
+          );
         }
 
         function yomikomu() {
@@ -511,8 +518,7 @@
           $('btnSave').disabled = true;
           showDone('');
           showErr('');
-          var dare = window.DKSession.uidOf ? window.DKSession.uidOf(SESS) : null;
-          window.FareConfigStore.kaku(SESS, COMPANY.company_id, kasaneru(kihon), dare)
+          window.FareConfigStore.kaku(SESS, COMPANY.company_id, kasaneru(kihon), dareNoNamae())
             .then(function () {
               showDone('保存しました。');
               return yomikomu();
@@ -527,8 +533,7 @@
           $('btnUndo').disabled = true;
           showDone('');
           showErr('');
-          var dare = window.DKSession.uidOf ? window.DKSession.uidOf(SESS) : null;
-          window.FareConfigStore.modosu(SESS, COMPANY.company_id, dare)
+          window.FareConfigStore.modosu(SESS, COMPANY.company_id, dareNoNamae())
             .then(function (r) {
               $('btnUndo').disabled = false;
               if (!r) {

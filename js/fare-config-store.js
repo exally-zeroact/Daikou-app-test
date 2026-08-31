@@ -248,6 +248,15 @@
   function dareMoji(updatedBy, jibunNoDeviceId) {
     const raw = updatedBy == null ? '' : String(updatedBy).trim();
     if (!raw) return null;
+    // ★事務所（ログイン）から 変えた時★ 2026-08-31（指示役の 差し戻し）
+    //   ★uid を そのまま 出さない★（英数字の 羅列は 誰か 分からない）。
+    //   メールが 取れていれば メールが そのまま 入る（下の 最後の return）。
+    //   取れなかった 時だけ ここに 来る。
+    if (raw.indexOf('jimusho:') === 0) {
+      const id = raw.slice(8);
+      if (!id) return '事務所の人';
+      return '事務所の人（…' + id.slice(-4) + '）';
+    }
     if (raw.indexOf('device:') === 0) {
       const id = raw.slice(7);
       if (!id) return null;

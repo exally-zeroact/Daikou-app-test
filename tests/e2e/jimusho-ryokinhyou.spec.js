@@ -78,7 +78,16 @@ async function souko(page, opts) {
     const req = r.request();
     if (req.method() === 'GET') {
       if (opts.yomenai) return r.fulfill({ status: 500, body: '{}' });
-      const rows = opts.kara ? [] : [{ config: SOUKO, updated_at: '2026-08-20T02:03:04.000Z' }];
+      const rows = opts.kara
+        ? []
+        : [
+            {
+              config: SOUKO,
+              updated_at: '2026-08-20T02:03:04.000Z',
+              // ★倉庫に 入っている 形★（事務所から 変えた時は 'jimusho:' が 付く）
+              updated_by: 'jimusho:uid-mihari',
+            },
+          ];
       return r.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -190,4 +199,55 @@ test('★⑤ 変えていない 時は 保存を 押せない★', async ({ page
     await page.getAttribute('#btnSave', 'disabled'),
     '★変えたのに 保存が 押せません★'
   ).toBeNull();
+});
+
+// ★★⑥⑦ は 指示役の 差し戻し（2026-08-31）で 足した★★
+//   ⑥ uid（英数字の 羅列）を 画面にも 倉庫にも 出さない
+//      （司さん「訳分からんやつ消せ」と 同じ形。指示役「誰か 分かりません」）
+//   ⑦ 日付の 書き方が メーターと 同じ（部品の 1か所 _hiduke を 通す）
+//      ★元は この画面が 自分で toLocaleString して「2026/08/20 11:03」★
+//      メーター側は 「8月20日 11:03」＝★同じアプリの 中で 2通り★だった。
+//      「2つの 札で 別々に 書くと すぐ 食い違う」は ★自分で 部品に 書いた事★を 破っていた。
+
+test('★★⑥ uid を 画面にも 倉庫にも 出さない★★', async ({ page }) => {
+  await login(page); // ★証(JWT)は 見張り用の 作り物（uid-mihari）★
+  const okutta = await souko(page);
+  await hiraku(page);
+
+  const moji = await page.textContent('#itsuno');
+  expect(moji.indexOf('uid-mihari'), '★画面に uid が そのまま 出ています★').toBe(-1);
+  expect(moji, '★誰かを 言っていません★').toContain('最後に変えた人');
+
+  await page.fill('#fBase', '1500');
+  await page.waitForTimeout(150);
+  await page.click('#btnSave');
+  await page.waitForTimeout(600);
+  const hozon = okutta.filter((o) => o.body && o.body.indexOf('"config"') >= 0);
+  expect(hozon.length, '★保存が 送られていません★').toBeGreaterThan(0);
+  const dare = JSON.parse(hozon[0].body).updated_by;
+  if (dare != null) {
+    // ★裸の uid を 倉庫に 残さない★（メール か 'jimusho:' 付き の どちらか）
+    expect(
+      String(dare).indexOf('jimusho:') === 0 || String(dare).indexOf('@') > 0,
+      '★倉庫に 裸の uid を 書いています（' + dare + '）★'
+    ).toBe(true);
+  }
+});
+
+test('★★⑦ 日付の 書き方が 部品と 同じ（自分で 組んでいない）★★', async ({ page }) => {
+  await login(page);
+  await souko(page);
+  await hiraku(page);
+  const moji = await page.textContent('#itsuno');
+  expect(/[0-9]+月[0-9]+日/.test(moji), '★日本語の 日付に なっていません★').toBe(true);
+  expect(moji.indexOf('/'), '★機械の 書き方（2026/08/20）が 出ています★').toBe(-1);
+
+  // ★同じ物を 部品に 直接 聞いて 突き合わせる★（画面が 自前で 組んでいない事）
+  const buhin = await page.evaluate(() =>
+    window.FareConfigStore.fudaKaeta(
+      { updated_at: '2026-08-20T02:03:04.000Z', updated_by: 'jimusho:uid-mihari' },
+      null
+    )
+  );
+  expect(moji, '★部品が 作る 1行と 違います（自分で 組んでいます）★').toBe(buhin);
 });
