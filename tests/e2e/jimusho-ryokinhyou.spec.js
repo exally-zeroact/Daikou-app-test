@@ -125,27 +125,42 @@ test('★① 倉庫の 値が 入れる所に 出る★', async ({ page }) => {
   });
 });
 
-test('★★② お金の 計算を この画面に 書き写していない★★', async ({ page }) => {
+test('★★② お金の 計算を 写さず、メーターと 同じ ファイルを 呼ぶ★★', async ({ page }) => {
   await login(page);
   await souko(page);
   await hiraku(page);
-  const src = await page.evaluate(() => document.documentElement.innerHTML);
-  // ★2026-08-02 の 事故★… 事務所から メーターの 中身が 丸見えだった。
-  //   tests/unit/office-allow-list.test.js が「js/meter.js を 事務所に 出すな」と 止めます。
-  expect(src.indexOf('js/meter.js src') >= 0, '★メーターの 中身を 事務所に 出しています★').toBe(
-    false
-  );
+
   const yomu = await page.evaluate(() =>
     Array.prototype.slice
       .call(document.querySelectorAll('script[src]'))
       .map((e) => e.getAttribute('src'))
   );
+  // ★メーターの 中身は 事務所に 出さない★（2026-08-02 の 事故）
   expect(yomu, '★メーターの 中身を 読み込んでいます★').not.toContain('js/meter.js');
-  // ★写していない事★＝料金の 式が この画面に 無い
+  // ★計算は 借りる（写さない）★
+  expect(yomu, '★料金の 計算を 読み込んでいません★').toContain('js/fare-calc.js');
+  const src = await page.evaluate(() => document.documentElement.innerHTML);
   expect(
     /add_distance_m\s*\)?\s*[*/]/.test(src),
     '★お金の 計算を 書き写しています（2か所に なると ずれます）★'
   ).toBe(false);
+
+  // ★★見本の 金額が 部品と 1円も 違わない★★
+  const r = await page.evaluate(() => {
+    const rows = Array.prototype.slice.call(document.querySelectorAll('#mihon tr'));
+    const gamen = rows.map((tr) => tr.children[1].textContent.replace(/[^0-9]/g, ''));
+    const cfg = window.__ZENBU_FOR_TEST || null;
+    return { gamen: gamen, n: rows.length, cfg: cfg };
+  });
+  expect(r.n, '★見本の 行が ありません★').toBe(7);
+  const buhin = await page.evaluate((cfg) => {
+    const M = [500, 1000, 1001, 1420, 2000, 5000, 10000];
+    const now = new Date();
+    // ★js/fare-calc.js は const 宣言＝window には 付かない★ので 裸の名前で 呼ぶ
+    /* global FareCalc */
+    return M.map((m) => String(FareCalc.keisan(m, cfg, null, new Set(), 0, now)));
+  }, SOUKO);
+  expect(r.gamen, '★画面の 金額が 部品と 違います★').toEqual(buhin);
 });
 
 test('★★③ 保存しても 触っていない 設定が 1つも 消えない★★', async ({ page }) => {

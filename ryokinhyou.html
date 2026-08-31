@@ -19,21 +19,12 @@
         ⇒ 料金を 変える 手が ★運転する人の 端末（メーターの 設定）だけ★だった。
         ★本当の 置き場は 事務所★です。
 
-      ★★「この料金だと いくら」の 見本は まだ 付けていません★★
-        ★理由（2026-08-31 に 見張りに 止められました）★
-          ・お金の 計算を ★ここに 書き写すのは 禁止★（同じ計算が 2か所に なり、
-            片方だけ 直って ★金額が ずれる★）
-          ・かと言って メーターの js/meter.js を 事務所に 出すのも ★禁止★
-            （2026-08-02 の 事故 … 事務所から メーターの 中身が 丸見えだった。
-             tests/unit/office-allow-list.test.js が 機械で 止めています）
-        ⇒ 正しい 直し方は ★料金の 計算だけを 別ファイルに 出す★事です。
-          ★お金の 計算に 手を 入れる話なので 司さんの 一言を もらってから やります★。
-
-      ★保存する時 触っていない 設定を 消しません★
-        料金表には 割増・段階・車種・待ち時間 も 入っています。
-        この画面は ★基本の5つだけ★を 変えます。
-        読んだ 料金表を ★丸ごと 持ったまま★、その5つだけ 差し替えて 保存します。
-        ⇒ ★事務所で 保存したら 割増が 消えた★を 起こさない（試験が 見ています）。
+      ★「この料金だと いくら」の 見本★ 2026-08-31（司さん「②やれ」で 付けました）
+        ★お金の 計算は ここに 1文字も 書いていません★。
+        js/fare-calc.js（★メーターと 同じ 1か所★）を 呼んでいるだけです。
+        ・書き写す＝禁止（2か所に なると ★片方だけ 直って ずれる★）
+        ・メーターの js/meter.js を 事務所に 出す＝禁止（2026-08-02 の 事故）
+        ⇒ ★計算だけを 別ファイルに 出して、両方が それを 呼ぶ★形に しました。
     ============================================================ -->
     <style>
       :root {
@@ -344,6 +335,28 @@
         </div>
 
         <div class="card">
+          <div class="ttl">この 料金表だと いくらか（上の 数字を 変えると すぐ 変わります）</div>
+          <div class="scroller">
+            <table>
+              <thead>
+                <tr>
+                  <th>走った 距離</th>
+                  <th>今の 料金表</th>
+                  <th>直した 後</th>
+                  <th>差</th>
+                </tr>
+              </thead>
+              <tbody id="mihon"></tbody>
+            </table>
+          </div>
+          <div class="note">
+            この 金額は <b>メーターと 同じ 計算</b>で 出しています（同じ ファイルを
+            呼んでいます）。<br />
+            <b>割増（深夜・休日）が 効く 時間帯なら、その分も 入った 金額</b>です。
+          </div>
+        </div>
+
+        <div class="card">
           <div class="oshi">
             <button class="btn" id="btnSave" disabled>保存する</button>
             <button class="btn sub2" id="btnUndo">1つ前に 戻す</button>
@@ -370,6 +383,8 @@
     <script src="js/dk-env-badge.js" data-modoru="office"></script>
     <script src="js/dk-session.js"></script>
     <script src="js/fare-config-store.js"></script>
+    <!-- ★料金の 計算★（メーターと ★同じ 1か所★。写しでは ありません） -->
+    <script src="js/fare-calc.js"></script>
     <script>
       (function () {
         'use strict';
@@ -410,6 +425,29 @@
         function showDone(t) {
           $('done').style.display = t ? '' : 'none';
           $('done').textContent = t || '';
+        }
+
+        // 見本に 使う 距離（m）… 段の 境目を またぐ 所を 選んでいます
+        var MIHON_M = [500, 1000, 1001, 1420, 2000, 5000, 10000];
+
+        function yen(n) {
+          return n == null ? '—' : Number(n).toLocaleString('ja-JP') + '円';
+        }
+        function km(m) {
+          return (m / 1000).toFixed(m % 1000 === 0 ? 0 : 3) + ' km';
+        }
+
+        // ★お金の 計算は ここに 書かない★＝メーターと 同じ ファイルを 呼ぶ
+        //   ★js/fare-calc.js は `const FareCalc = ...`★＝window には 付きません（この repo の 決まり）。
+        //   同じ頁の 別 script からは ★裸の名前で 見えます★。
+        function ikura(config, m) {
+          try {
+            /* global FareCalc */
+            // 事務所なので ★車種・手動割増・待ち時間は 選んでいない★状態で 出します
+            return FareCalc.keisan(m, config, null, new Set(), 0, new Date());
+          } catch (_) {
+            return null;
+          }
         }
 
         // ★倉庫に 残す「誰が 変えたか」★ 2026-08-31（指示役の 差し戻し1）
@@ -458,6 +496,31 @@
           var warui = tashikame(kihon);
           showErr(warui);
           $('btnSave').disabled = !!warui;
+
+          var tb = $('mihon');
+          tb.innerHTML = '';
+          var ato = warui ? null : kasaneru(kihon);
+          for (var i = 0; i < MIHON_M.length; i++) {
+            var m = MIHON_M[i];
+            var a = ikura(ZENBU, m);
+            var b = ato ? ikura(ato, m) : null;
+            var sa = a != null && b != null ? b - a : null;
+            var tr = document.createElement('tr');
+            var td1 = document.createElement('td');
+            td1.textContent = km(m);
+            var td2 = document.createElement('td');
+            td2.textContent = yen(a);
+            var td3 = document.createElement('td');
+            td3.textContent = yen(b);
+            var td4 = document.createElement('td');
+            td4.textContent = sa == null ? '—' : sa === 0 ? '同じ' : (sa > 0 ? '+' : '') + yen(sa);
+            if (sa) td4.style.color = sa > 0 ? 'var(--danger)' : 'var(--ok)';
+            tr.appendChild(td1);
+            tr.appendChild(td2);
+            tr.appendChild(td3);
+            tr.appendChild(td4);
+            tb.appendChild(tr);
+          }
 
           // 元に 戻した時は 保存を 出さない
           if (!warui && IMA) {

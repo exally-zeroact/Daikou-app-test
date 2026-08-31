@@ -5947,6 +5947,9 @@
            ・後方互換用のファイル自体は data/ に残置・getNearestAddress 内の参照分岐も残置 -->
     <script src="data/addresses-coarse-jp.js" defer></script>
 
+    <!-- ★料金の 計算は 別ファイル★ 2026-08-31（事務所でも 同じ物を 使う為）
+         ★meter.js より 前に 読む★（meter.js が 裸の名前 FareCalc で 見る） -->
+    <script src="js/fare-calc.js"></script>
     <script src="js/meter.js"></script>
 
     <script src="js/firebase.js"></script>

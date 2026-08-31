@@ -37,6 +37,10 @@
       "destination": "https://daikou-app-test.vercel.app/js/dk-session.js"
     },
     {
+      "source": "/js/fare-calc.js",
+      "destination": "https://daikou-app-test.vercel.app/js/fare-calc.js"
+    },
+    {
       "source": "/js/fare-config-store.js",
       "destination": "https://daikou-app-test.vercel.app/js/fare-config-store.js"
     },
