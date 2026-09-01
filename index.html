@@ -1684,6 +1684,41 @@
         cursor: pointer;
         font-family: inherit;
       }
+      /* ★★見るだけ（司さん 2026-09-01「事務所からだけにしたんやないんか」）★★
+         ・数字は 見える（今の 料金表が 分かる）
+         ・触れない・保存は 出さない
+         ★消さずに 止める★ので、事務所が 使えない 時に 戻せます。 */
+      #overlayFare .miru-dake-obi {
+        background: #fff4e5;
+        color: #7a4b00;
+        border-bottom: 1px solid #f0d9b5;
+        padding: 10px 14px;
+        font-size: 13px;
+        line-height: 1.6;
+        flex-shrink: 0;
+      }
+
+      /* ★止めるのは ★料金表(倉庫)の 中身★だけ★
+         追加料金・値引きは ★料金表では なく 端末ごとの その場の ボタン★なので
+         ★今まで通り 触れます★（実車ごとに 運転手が 押す 物）。 */
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) input,
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) select,
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) textarea,
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) .toggle,
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) button {
+        pointer-events: none;
+        opacity: 0.55;
+      }
+
+      /* ★保存は 料金表 全体の 物なので 出さない★
+         ★「足す」「消す」は ★料金表の 札の 中だけ★ 隠す
+         （追加料金・値引きの「＋ 項目を 追加」は 今まで通り 出します） */
+      #overlayFare .btn-save,
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) .btn-del,
+      #overlayFare .tab-pane:not([data-pane='extras']):not([data-pane='discounts']) .btn-add {
+        display: none !important;
+      }
+
       #overlayFare .btn-save {
         position: fixed;
         left: 16px;
@@ -15552,6 +15587,14 @@
           ＜
         </div>
         <div class="appbar-title">FARE CONFIG</div>
+      </div>
+      <!-- ★★料金は 事務所からだけ 変えます（司さん 2026-09-01）★★
+           「てかなんでメーターの設定からまだ料金触れるんど 事務所からだけにしたんやないんか」
+           ⇒ ここは ★今の 料金表を 見るだけ★に しました。
+           ★数字は 本物★（倉庫から 取った 物）です。変える所は ★事務所の「料金表」★。
+           ★圏外でも 見られます★（焼いてある 写しを 出すので）。 -->
+      <div class="miru-dake-obi">
+        ここは <b>見るだけ</b>です。料金を 変えるのは <b>事務所の「料金表」</b>から。
       </div>
       <div class="layout">
         <!-- ★★いつの 料金表か（2026-08-30・監査役の指摘）★★
