@@ -112,9 +112,12 @@ describe('★見張りは「わざと壊して 赤に なった」記録を 残�
   });
 
   it('★③ 名簿は 増えない・黙って 減らない★', () => {
-    const mada = NOKORI.filter((f) => nashi.indexOf(f) >= 0);
+    // ★本番と テスト線で 試験の 本数が 少し 違います★（片方にしか 無い 試験が 在る）。
+    //   ★この repo に 無い 物は 数えません★（「直した」ではなく「元から 無い」ので）。
+    const aru = NOKORI.filter((f) => fs.existsSync(path.join(ROOT, f)));
+    const mada = aru.filter((f) => nashi.indexOf(f) >= 0);
     expect(
-      NOKORI.length - mada.length,
+      aru.length - mada.length,
       '★名簿の 物を 直したなら 名簿から 消してください（黙って 減らさない）★'
     ).toBe(0);
     expect(NOKORI.length, '★名簿を 増やさないでください（新しい 見張りには 記録を 書く）★').toBe(
