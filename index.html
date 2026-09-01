@@ -4447,8 +4447,12 @@
           }
         }
         function _showBanner() {
-          const el = document.getElementById('trainingConsentBanner');
-          if (el) el.style.display = 'block';
+          // ★★出しません（司さん 2026-09-01「Firebaseは使うな」）★★
+          //   この帯は ★学習データを Firebase Storage へ 上げてよいか★を 聞く 物でした。
+          //   Firebase を 外したので ★どこにも 上がりません★。
+          //   ⇒ ★上げないのに「送ります」と 聞くのは 嘘★なので 出しません。
+          //   （中の 仕掛けは 消していません＝別の 上げ先に 付け替える時に そのまま 使えます）
+          return;
         }
         function _hideBanner() {
           const el = document.getElementById('trainingConsentBanner');
@@ -5728,19 +5732,22 @@
       }
     </script>
 
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-
     <!-- Phase 2.B (2026-05-10): Firebase Storage SDK・訓練データ upload に必要 -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 
     <!-- ★設計変更宣言 (2026-05-18・㉒ Firebase Remote Config 配線完成):
          A/B 実験パラメータ (viterbi_n_ios / fare_display_mode / warmup_retry_count) を
          Firebase RC console から fetch するため SDK 追加。
          未追加だと ab-config.js は hash assign fallback のみで Remote Config 値が反映されない。 -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-remote-config-compat.js"></script>
 
+    <!-- ★★Firebase は 使いません（司さん 2026-09-01「Firebaseは使うなっていよろがぼけ」）★★
+         ここに 在った 読み込みを ★全部 外しました★:
+           gstatic の Firebase SDK 4本（app / database / storage / remote-config）
+           js/firebase-config.js ／ js/firebase.js
+           js/trace-outbox.js ／ js/debug-trace.js ／ js/debug-log-uploader.js
+             （この3本は ★Firebase RTDB へ 書く為だけ★の 物）
+         ★FB を 呼ぶ 15か所は 全部 守りが 在るので 何も しなくなります★（2026-09-01 実測）
+         ★料金・距離には 効きません★（FB を 消しても calcFare(5000m)=2,300円）
+         ★ファイル自体は 消していません★（戻せる）。見張り: tests/unit/firebase-tsukawanai.test.js -->
     <script src="js/debug-config.js"></script>
 
     <!-- ★debug-config.js：環境変数制御・本番自動OFF（2026/04/26追加） -->
@@ -5770,8 +5777,6 @@
         }
       })();
     </script>
-
-    <script src="js/firebase-config.js"></script>
 
     <!-- ★設計変更宣言 (2026-05-18・P3 A/B 実験 config 配線):
          firebase-config.js load 後に ab-config.js を読込む (= Firebase RC instance 利用前提)。
@@ -5952,10 +5957,10 @@
     <script src="js/fare-calc.js"></script>
     <script src="js/meter.js"></script>
 
-    <script src="js/firebase.js"></script>
-
     <!-- Phase 2.B (2026-05-10): 訓練データ Firebase Storage 送信 framework・firebase.js の後に load -->
-    <script src="js/training-uploader.js"></script>
+    <!-- ★学習データの「上げ役」は 読みません（司さん 2026-09-01「Firebaseは使うな」）★
+         30分ごとに Firebase Storage へ 上げに 行く 物で、★必ず 失敗します★。
+         ★集める役（js/training-collector.js）は そのまま★＝上げ先を 変える時に すぐ 使えます。 -->
 
     <!-- test-mode.js は H-3 対応で削除済 -->
 
@@ -5983,11 +5988,8 @@
 
     <!-- ★trace-outbox.js: trace/log のオフライン永続送信キュー(IndexedDB)。両uploaderより前にload。
          オフライン走行→閉じても消えず・オンライン/次回起動で自動送信(取りこぼしゼロ)。距離コア非関与 (2026-06-16) -->
-    <script src="js/trace-outbox.js"></script>
-    <script src="js/debug-trace.js"></script>
     <!-- ★debug-log-uploader.js: Eruda console を Firebase RTDB 自動 push (2026-05-29 追加・解析側 Claude 並行参照用)
          feature flag・既定 ON (テストビルド) / OFF (本番)・?debuglog=on/off で切替・debug-trace.js と device_id 共有 -->
-    <script src="js/debug-log-uploader.js"></script>
     <!-- ★dk-config.js = Supabase接続先の単一真実源 (2026-07-31・独立/移設のため)。
          接続先を使う全モジュール(license.js / license-activate.js / 端末管理配線)より必ず先に load。 -->
     <script src="js/dk-config.js"></script>
@@ -14703,8 +14705,14 @@
         <!-- ★設計変更宣言 (2026-05-14): 業務リセット時刻 UI 撤去 (時刻ベース廃止・代行開始トリガーに統一)
          旧 #_st_resetTime input + 説明文 は削除。リセット仕様は onBusinessStart 内の DOM 4 つ 0 化に統一。 -->
 
-        <!-- 学習データ提供 -->
-        <div class="section" id="_st_training">
+        <!-- ★★学習データ提供は 出しません（司さん 2026-09-01「Firebaseは使うな」）★★
+             ★理由★ … この機能は ★Firebase Storage へ 上げる為だけ★の 物でした。
+             Firebase を 外したので ★ON にしても どこにも 上がりません★。
+             「削除」を 押しても ★何も 起きません★（FB.deleteAllTrainingData は 守りで no-op）。
+             ⇒ ★出来ていない物の ボタンを 見せない★ので 画面から 外します。
+             ★中の 仕掛け（TrainingCollector／IndexedDB）は 消していません★＝
+             別の 上げ先（Supabase）に 付け替える時に そのまま 使えます。 -->
+        <div class="section" id="_st_training" style="display: none">
           <div class="section-title">学習データ提供</div>
           <div class="row">
             <div class="row-label">学習データ提供</div>
