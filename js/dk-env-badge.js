@@ -31,13 +31,13 @@
 (function (global) {
   'use strict';
 
-  var ID = 'dkEnvBadge';
+  const ID = 'dkEnvBadge';
   // ★知っている名札は この2つだけ★（増やす時は 見張りも 直す）
-  var SHITTERU = { test: true, prod: true };
+  const SHITTERU = { test: true, prod: true };
 
   function nafuda() {
     try {
-      var c = global && global.DKConfig;
+      const c = global && global.DKConfig;
       return c && typeof c.ENV === 'string' ? c.ENV : null;
     } catch (_) {
       return null;
@@ -54,11 +54,11 @@
   // ★戻り先は「読み込む側が 明示した時」だけ★（<script src=... data-modoru="office">）
   function modoruSaki() {
     try {
-      var d = global.document;
-      var tag = d.querySelector('script[data-modoru]');
+      const d = global.document;
+      const tag = d.querySelector('script[data-modoru]');
       if (!tag) return null;
-      var kind = tag.getAttribute('data-modoru');
-      var c = global.DKConfig;
+      const kind = tag.getAttribute('data-modoru');
+      const c = global.DKConfig;
       if (!c) return null;
       if (kind === 'office' && typeof c.PROD_OFFICE_BASE === 'string') return c.PROD_OFFICE_BASE;
       return null;
@@ -68,8 +68,8 @@
   }
 
   function tsukuru() {
-    var d = global.document;
-    var band = d.createElement('div');
+    const d = global.document;
+    const band = d.createElement('div');
     band.id = ID;
     // ★flex/grid を 使わない★（文が 1文字ずつ 縦に 割れた事が 2回 在ります）
     band.setAttribute(
@@ -86,9 +86,9 @@
     //   ・出すのは ★読み込む側が data-modoru="office" と 明示した画面だけ★
     //     （2026-08-25 司さん「ユーザーは本番前提やのに 引っ越すとか出てくるな」＝
     //       ★メーターの帯には 押す物を 出さない★）
-    var modoru = modoruSaki();
+    const modoru = modoruSaki();
     if (modoru) {
-      var a = d.createElement('a');
+      const a = d.createElement('a');
       a.setAttribute('href', modoru);
       // ★帯は pointer-events:none★（下の画面を 押せるようにする為）。
       //   ★中のボタンは auto に 戻さないと DOM に在るのに 永久に 押せない★（2026-08-21 実際に 踏んだ）
@@ -105,23 +105,40 @@
 
   // ★高さを 測ってから 下げる★（決め打ちの数字を 置かない）
   function sageru(band) {
-    var d = global.document;
-    var h = band.getBoundingClientRect().height;
+    const d = global.document;
+    const h = band.getBoundingClientRect().height;
     if (!(h > 0)) return 0;
-    var b = d.body;
-    var moto = global.getComputedStyle ? global.getComputedStyle(b).paddingTop : '';
-    var motoPx = parseFloat(moto) || 0;
+    const b = d.body;
+    const moto = global.getComputedStyle ? global.getComputedStyle(b).paddingTop : '';
+    const motoPx = parseFloat(moto) || 0;
     b.style.paddingTop = motoPx + h + 'px';
+    // ★親に「自分で 縦に スクロールする 箱」が 在るか★
+    //   在れば その 中で 貼り付いている＝★画面の 上では ない★ので 下げない
+    function _nakaNoHako(e) {
+      for (let p = e.parentElement; p && p !== d.body; p = p.parentElement) {
+        const s2 = global.getComputedStyle(p);
+        if (s2.overflowY === 'auto' || s2.overflowY === 'scroll') return true;
+      }
+      return false;
+    }
+
     // ★上に貼り付く物も 同じ分 下げる★（帯に 隠れると 押せなくなる）
     try {
-      var all = d.querySelectorAll('body *');
-      for (var i = 0; i < all.length; i++) {
-        var e = all[i];
+      const all = d.querySelectorAll('body *');
+      for (let i = 0; i < all.length; i++) {
+        const e = all[i];
         if (e.id === ID) continue;
-        var st = global.getComputedStyle(e);
+        const st = global.getComputedStyle(e);
         if (st.position !== 'fixed' && st.position !== 'sticky') continue;
         if (st.top === 'auto' || st.top === '') continue;
-        var t = parseFloat(st.top);
+        // ★★中の 箱に 貼り付く物は 下げない★★ 2026-09-01
+        //   ★実際に 踏みました★… ダイコメの「距離別の 料金」の 表は
+        //   ★自分の 縦スクロールの 箱★の 中で 見出しを 貼り付けています。
+        //   帯の 分だけ 下げると ★見出しが 1行目に かぶって 1行目が 読めません★でした
+        //   （テスト用の 帯が 出ている 時だけ 起きる＝★本番では 起きない★）。
+        //   ⇒ ★画面の 上に 貼り付く物だけ★下げます（親に スクロールの 箱が 無い 物）。
+        if (st.position === 'sticky' && _nakaNoHako(e)) continue;
+        const t = parseFloat(st.top);
         if (!isFinite(t)) continue;
         e.style.top = t + h + 'px';
       }
@@ -133,12 +150,12 @@
 
   function dasu() {
     try {
-      var d = global.document;
+      const d = global.document;
       if (!d || !d.body) return null;
       if (d.getElementById(ID)) return d.getElementById(ID); // 二重に 出さない
-      var env = nafuda();
+      const env = nafuda();
       if (!dasuka(env)) return null;
-      var band = tsukuru();
+      const band = tsukuru();
       d.body.insertBefore(band, d.body.firstChild);
       sageru(band);
       return band;
@@ -149,7 +166,7 @@
 
   function init() {
     try {
-      var d = global.document;
+      const d = global.document;
       if (!d) return;
       if (d.readyState === 'loading') {
         d.addEventListener('DOMContentLoaded', dasu);
@@ -161,7 +178,7 @@
     }
   }
 
-  var api = { ID: ID, dasuka: dasuka, dasu: dasu, init: init };
+  const api = { ID: ID, dasuka: dasuka, dasu: dasu, init: init };
   if (global) {
     global.DKEnvBadge = api;
     init();
