@@ -1688,6 +1688,27 @@
          ・数字は 見える（今の 料金表が 分かる）
          ・触れない・保存は 出さない
          ★消さずに 止める★ので、事務所が 使えない 時に 戻せます。 */
+      #overlayFare .yomu-gyou {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid #e5e5ea;
+        font-size: 14px;
+      }
+
+      #overlayFare .yomu-na {
+        color: #6b6b70;
+        flex: 0 1 auto;
+      }
+
+      #overlayFare .yomu-at {
+        font-weight: 700;
+        color: #1c1c1e;
+        text-align: right;
+        flex: 1 1 auto;
+      }
+
       #overlayFare .miru-dake-obi {
         background: #fff4e5;
         color: #7a4b00;
@@ -13713,6 +13734,89 @@
           renderVehicles();
         }
 
+        // ━━ ★今の 料金表を 字で 出す（読むだけ）★ 2026-09-01 ━━
+        //   ★司さん「料金表が見れたええやろ」★
+        //   ★お金の 計算は ここに 書きません★（読んだ 中身を そのまま 並べるだけ）。
+        //   数字の 出どころは ★Meter.getFareConfig()★＝実際に 料金を 出している 物。
+        //   ⇒ ★画面に 出る 数字と 実際に 使う 数字が ずれません★
+        function _fareYomu() {
+          const el = $('_fare_yomu');
+          if (!el) return;
+          let c = null;
+          try {
+            c = Meter.getFareConfig();
+          } catch (_) {
+            c = null;
+          }
+          if (!c) {
+            el.textContent = '料金表が まだ 取れていません。';
+            return;
+          }
+          const yen = (n) => (typeof n === 'number' ? n.toLocaleString('ja-JP') + '円' : '—');
+          const m = (n) => (typeof n === 'number' ? n.toLocaleString('ja-JP') + 'm' : '—');
+          const gyou = [];
+          const ire = (na, at) => gyou.push([na, at]);
+
+          ire('最初の 料金', yen(c.base_fare));
+          ire('その 料金で 走れる 距離', m(c.base_distance_m));
+          ire('その先 上がる 料金', yen(c.add_fare));
+          ire('上がる ごとの 距離', m(c.add_distance_m));
+          ire('端数の 丸め', (c.rounding || 1) + '円ごと');
+
+          if (Array.isArray(c.tiers) && c.tiers.length) {
+            c.tiers.forEach((t, i) => {
+              ire(
+                '段階 ' + (i + 1),
+                m(t.from_m) +
+                  ' 〜 ' +
+                  (t.to_m == null ? 'ずっと' : m(t.to_m)) +
+                  '／' +
+                  m(t.add_distance_m) +
+                  ' ごとに +' +
+                  yen(t.add_fare)
+              );
+            });
+          }
+          if (Array.isArray(c.surcharges) && c.surcharges.length) {
+            c.surcharges.forEach((x) =>
+              ire('割増（手で 押す）', (x.name || '—') + ' ' + x.rate + '倍')
+            );
+          }
+          const a = c.autoSurcharges || {};
+          if (a.night && a.night.enabled)
+            ire('深夜の 割増', a.night.from + '時 〜 ' + a.night.to + '時 ' + a.night.rate + '倍');
+          if (a.weekend && a.weekend.enabled) ire('土日の 割増', a.weekend.rate + '倍');
+          if (a.winter && a.winter.enabled)
+            ire('冬の 割増', a.winter.from + ' 〜 ' + a.winter.to + ' ' + a.winter.rate + '倍');
+          if (c.vehiclesEnabled && Array.isArray(c.vehicles) && c.vehicles.length) {
+            c.vehicles.forEach((v) =>
+              ire('車種', (v.name || '—') + ' ' + (v.multiplier || 1) + '倍 ＋' + yen(v.addon || 0))
+            );
+          }
+          if (c.wait && c.wait.enabled)
+            ire(
+              '待ち時間',
+              (c.wait.freeMins || 0) + '分まで 無料／その先 1分 ' + yen(c.wait.ratePerMin || 0)
+            );
+          if (typeof c.minFare === 'number') ire('これより 安くしない', yen(c.minFare));
+          if (typeof c.maxFare === 'number') ire('これより 高くしない', yen(c.maxFare));
+
+          el.innerHTML = '';
+          gyou.forEach(([na, at]) => {
+            const r = document.createElement('div');
+            r.className = 'yomu-gyou';
+            const l = document.createElement('span');
+            l.className = 'yomu-na';
+            l.textContent = na;
+            const v = document.createElement('span');
+            v.className = 'yomu-at';
+            v.textContent = at;
+            r.appendChild(l);
+            r.appendChild(v);
+            el.appendChild(r);
+          });
+        }
+
         // ━━ 待機タブ ━━
         function loadWait() {
           const w = fc.wait || {};
@@ -14215,6 +14319,8 @@
         // ━━ ロード / 保存 (Meter / FB / localStorage 連携) ━━
         function _initAll() {
           _bindTabsOnce();
+          // ★今の 料金表を 字で 出す（読むだけ）★ 2026-09-01
+          _fareYomu();
           loadBasic();
           renderTiers();
           renderSurcharges();
@@ -15594,7 +15700,8 @@
            ★数字は 本物★（倉庫から 取った 物）です。変える所は ★事務所の「料金表」★。
            ★圏外でも 見られます★（焼いてある 写しを 出すので）。 -->
       <div class="miru-dake-obi">
-        ここは <b>見るだけ</b>です。料金を 変えるのは <b>事務所の「料金表」</b>から。
+        <b>料金表は 見るだけ</b>です（変えるのは <b>事務所の「料金表」</b>から）。<br />
+        <b>追加料金・値引き</b>は ここで 触れます。
       </div>
       <div class="layout">
         <!-- ★★いつの 料金表か（2026-08-30・監査役の指摘）★★
@@ -15615,19 +15722,21 @@
           "
         ></div>
         <nav class="tab-nav" id="_fare_tabNav">
-          <button class="tab-btn active" data-tab="extras">追加料金</button>
+          <!-- ★★料金表は 事務所で 変える＝ここは 読むだけ★★ 2026-09-01
+               司さん「事務所でやるならこの画面はメーターの方にいらんことないか？
+                       追加や値引きとかは事務所でもメーターの方でも触れてええけど
+                       料金表が見れたええやろ」
+               ⇒ ★触れない 入力欄を 並べるのを やめました★。
+                 「料金表」の 札で ★今の 料金表を 字で 読むだけ★。
+                 ★追加料金・値引きは 今まで通り 触れます★（端末ごとの その場の ボタン）
+               ★中の 仕掛けは 消していません★（事務所が 使えない 時に 戻せます） -->
+          <button class="tab-btn active" data-tab="ryokinhyou">料金表</button>
+          <button class="tab-btn" data-tab="extras">追加料金</button>
           <button class="tab-btn" data-tab="discounts">値引き</button>
-          <button class="tab-btn" data-tab="basic">基本</button>
-          <button class="tab-btn" data-tab="tiers">段階</button>
-          <button class="tab-btn" data-tab="surcharges">割増</button>
-          <button class="tab-btn" data-tab="auto">自動割増</button>
-          <button class="tab-btn" data-tab="vehicles">車種</button>
-          <button class="tab-btn" data-tab="wait">待機</button>
           <!-- ★区間(ゾーン)料金はcalcFare未実装=設定しても効かない死に機能→タブを隠す(監査・嘘設定で信頼破壊を防ぐ・今後対応)★ -->
-          <button class="tab-btn" data-tab="preview">確認</button>
         </nav>
         <div class="tab-content">
-          <section class="tab-pane" data-pane="basic">
+          <section class="tab-pane" data-pane="basic" style="display: none">
             <div class="card">
               <div class="card-title">基本料金</div>
               <div class="form-row">
@@ -15710,7 +15819,7 @@
               </div>
             </div>
           </section>
-          <section class="tab-pane" data-pane="tiers">
+          <section class="tab-pane" data-pane="tiers" style="display: none">
             <div class="card">
               <div class="card-title">段階料金</div>
               <div class="form-row">
@@ -15722,7 +15831,7 @@
             <div id="_fare_tiersList"></div>
             <button class="btn-add" onclick="window._fare_addTier()">＋ 区間追加</button>
           </section>
-          <section class="tab-pane" data-pane="surcharges">
+          <section class="tab-pane" data-pane="surcharges" style="display: none">
             <div class="card">
               <div class="card-title">手動割増ボタン</div>
               <div class="card-desc">業務画面で ON/OFF できる割増・複数同時で乗算</div>
@@ -15730,7 +15839,7 @@
             <div id="_fare_surchargesList"></div>
             <button class="btn-add" onclick="window._fare_addSurcharge()">＋ 割増追加</button>
           </section>
-          <section class="tab-pane" data-pane="auto">
+          <section class="tab-pane" data-pane="auto" style="display: none">
             <div class="card">
               <div class="card-title">深夜割増</div>
               <div class="form-row">
@@ -15841,7 +15950,7 @@
               <div class="auto-status inactive" id="_fare_autoWinterStatus">現在 適用外</div>
             </div>
           </section>
-          <section class="tab-pane" data-pane="vehicles">
+          <section class="tab-pane" data-pane="vehicles" style="display: none">
             <div class="card">
               <div class="card-title">車種別料金</div>
               <div class="form-row">
@@ -15853,7 +15962,7 @@
             <div id="_fare_vehiclesList"></div>
             <button class="btn-add" onclick="window._fare_addVehicle()">＋ 車種追加</button>
           </section>
-          <section class="tab-pane" data-pane="wait">
+          <section class="tab-pane" data-pane="wait" style="display: none">
             <div class="card">
               <div class="card-title">待機料金</div>
               <div class="form-row">
@@ -15884,7 +15993,18 @@
               </div>
             </div>
           </section>
-          <section class="tab-pane active" data-pane="extras">
+          <!-- ★今の 料金表（読むだけ）★ 2026-09-01 -->
+          <section class="tab-pane active" data-pane="ryokinhyou">
+            <div class="card">
+              <div class="card-title">今の 料金表</div>
+              <div class="card-desc">
+                変えるのは <b>事務所の「料金表」</b>から。ここは 見るだけです。
+              </div>
+              <div id="_fare_yomu"></div>
+            </div>
+          </section>
+
+          <section class="tab-pane" data-pane="extras">
             <div class="card">
               <div class="card-title">追加料金項目 (迎車料金・キャンセル料など)</div>
               <div class="card-desc">
@@ -15909,7 +16029,7 @@
               </button>
             </div>
           </section>
-          <section class="tab-pane" data-pane="preview">
+          <section class="tab-pane" data-pane="preview" style="display: none">
             <div class="card">
               <div class="card-title">割増シミュレーション</div>
               <div class="card-desc">適用した割増を組み合わせた料金プレビュー</div>
