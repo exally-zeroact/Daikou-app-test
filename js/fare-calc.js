@@ -155,6 +155,8 @@ const FareCalc = (() => {
 })();
 
 // Node（試験）から 使う時。browser / Worker では module が 無いので 何も しません。
-// eslint-disable-next-line no-undef
-if (typeof module !== 'undefined' && typeof module.exports !== 'undefined')
+/* eslint-disable no-undef */
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
   module.exports = FareCalc;
+}
+/* eslint-enable no-undef */
