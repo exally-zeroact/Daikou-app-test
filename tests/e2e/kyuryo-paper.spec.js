@@ -42,8 +42,19 @@ const FIX = JSON.parse(
 //     ・金額・率・時間は ★1つも 触りません★（layout を 測る 試験なので）
 //     ・締めは period_start_day=21 の 3分割＝★日にちが 同じなら 同じ 位置★に 入ります
 //     ・月末の 繰り上がり（31日→短い月）は ★その月の 末日に 丸めます★
+// ★★時計を 進めて 走らせられる ように する★★ 2026-09-02
+//   ★なぜ★ … 今日 赤く なったのは ★「今日が 何日か」★でした。
+//   ★中身の 月を 変える★のとは ★別物★です（中身は 何度も 試しましたが
+//   ★今日の 日付★は 試していませんでした）。
+//   ⇒ ★FAKE_NOW を 入れると その日に なったつもりで 走ります★
+//     使い方: FAKE_NOW=2026-10-01T00:05:00 npx playwright test tests/e2e/kyuryo-paper.spec.js
+//   ★入れなければ 今まで通り★（普段の 走りは 1文字も 変わりません）
+// ★名前の 正は FAKE_NOW★（経営者 2026-09-02 の決定・アプリ名を 頭に 付けない）
+//   ★昔の DK_FAKE_NOW も そのまま 通します★
+const FAKE_NOW = process.env.FAKE_NOW || process.env.DK_FAKE_NOW || '';
+
 const TSUKI_ZURASU = (() => {
-  const ima = new Date();
+  const ima = FAKE_NOW ? new Date(FAKE_NOW) : new Date();
   const [fy, fm] = String(FIX.ym || '')
     .split('-')
     .map(Number);
@@ -83,6 +94,24 @@ function zurasu(o, n) {
 }
 
 async function openKyuryo(page, naosu) {
+  // ★画面の 時計も 同じ日に する★（画面は 今日の 年月から 始まるので）
+  if (FAKE_NOW) {
+    await page.addInitScript((iso) => {
+      const T = new Date(iso).getTime();
+      const R = Date;
+      // eslint-disable-next-line no-global-assign
+      Date = class extends R {
+        constructor(...a) {
+          super(...(a.length ? a : [T]));
+        }
+        static now() {
+          return T;
+        }
+      };
+      Date.parse = R.parse;
+      Date.UTC = R.UTC;
+    }, FAKE_NOW);
+  }
   const moto = fs.readFileSync(path.join(__dirname, '..', '..', 'js', 'dk-session.js'), 'utf8');
   const nakami = zurasu(JSON.parse(JSON.stringify(FIX)), TSUKI_ZURASU);
   const tsugi =
@@ -474,4 +503,27 @@ test.describe('★給料明細の紙(PDF)★', () => {
       expect(x.iro, `★0円の日「${x.ji}」まで 赤くしている★`).toBe(KURO);
     });
   });
+});
+
+// ★★時計が 本当に 進んだかを 確かめる★★ 2026-09-02
+//   ★空振りに 気をつける★… 直しを 外すと どの日でも 赤に なるので、
+//   ★「赤に なった＝時計が 効いた」では ありません★。
+//   ⇒ ★画面と Node の 両方で 日付そのものを 読んで 確かめます★。
+//   ★FAKE_NOW を 入れていない 時は 何も 見ません★（普段の 走りを 変えない）
+test('★時計を 進めたら 画面も Node も その日に なっている★', async ({ page }) => {
+  test.skip(!FAKE_NOW, 'FAKE_NOW を 入れた 時だけ 見ます');
+  const machi = new Date(FAKE_NOW);
+  await openKyuryo(page);
+  const gamen = await page.evaluate(() => ({
+    y: new Date().getFullYear(),
+    m: new Date().getMonth() + 1,
+    d: new Date().getDate(),
+  }));
+  expect(gamen.y, '★画面の 年が 進んでいません（時計が 効いていない）★').toBe(machi.getFullYear());
+  expect(gamen.m, '★画面の 月が 進んでいません★').toBe(machi.getMonth() + 1);
+  expect(gamen.d, '★画面の 日が 進んでいません★').toBe(machi.getDate());
+  // Node 側（月の ずらしを 決めている 所）
+  expect(new Date(FAKE_NOW).getFullYear(), '★Node の 読み取りが おかしい★').toBe(
+    machi.getFullYear()
+  );
 });
