@@ -1139,6 +1139,30 @@
             人数ぶんの合計と一致します。
           </div>
         </div>
+
+        <!-- ★★従業員へ 配る（QR・URL）★★ 2026-09-03（司さん）
+             「Rakunallyみたいに 従業員ごとに QRコードや URLを 配って
+               個人が 勝手に 確認できるようにも しろやぼけ」
+             ★作り方は Rakunally から 借りた★（pay_meisai_pub ＋ 初回コード＋本人のパスワード）
+             ★秘密（初回コード）は 窓に 出していない★ので、★配る時だけ 倉庫の 関数が 返す★。 -->
+        <div class="card">
+          <div class="title" style="font-weight: 800; margin-bottom: 4px">
+            従業員へ 配る（自分の 給料明細を 自分で 見る）
+          </div>
+          <div class="note" style="margin: 0 0 10px">
+            <b>配る</b>を押すと、今いる人ぶんの <b>QRコードとURL</b> が出ます。<br />
+            本人は <b>QRを読むだけ</b>で開けます（初回だけ 自分のパスワードを決めます）。<br />
+            <b>忘れた／漏れた</b>ときは その人の <b>作り直す</b> を押してください。
+          </div>
+          <div class="oshi" style="display: flex; gap: 10px; flex-wrap: wrap">
+            <button class="btn" id="btnHaifu" type="button">配る</button>
+            <button class="btn sub2" id="btnHaifuPrint" type="button" disabled>
+              全員分の QRを 印刷
+            </button>
+          </div>
+          <div class="err" id="haifuErr" style="display: none"></div>
+          <div id="haifuList"></div>
+        </div>
       </div>
     </div>
 
@@ -1152,6 +1176,10 @@
     <script src="js/daiko-payroll.js"></script>
     <script src="js/payroll-period.js"></script>
     <script src="js/payroll-daily.js"></script>
+    <!-- ★QRを 出す 部品★ 2026-09-03（従業員へ 配る 用）
+         ★repo に 元から 在る 物★（dashboard.html が 会社URLの QR で 使っている 物と 同じ）
+         ＝新しく 借りて きていません。 -->
+    <script src="js/qrcode.min.js"></script>
     <script>
       (function () {
         'use strict';
@@ -1465,6 +1493,226 @@
           var m = String(d.getMonth() + 1).padStart(2, '0');
           return zure < 0 ? y + '-' + m + '-01' : y + '-' + m + '-28';
         }
+
+        // ============================================================
+        // ★★従業員へ 配る（QR・URL・全員分の印刷・作り直す）★★ 2026-09-03
+        //   ★秘密（初回コード）は 窓に 出していない★ので ★倉庫の 関数から 受け取る★。
+        //   ★お金には 触りません★（配る為の 鍵だけ）
+        // ============================================================
+        var HAIFU = [];
+
+        function haifuUrl(x) {
+          // ★配る URL★ … 同じ画面の ★本人モード★へ（?t= と 初回コード ?c=）
+          //   ★初回コードは パスワードを 決めていない人だけ★（決めた人には 付けない）
+          var b = location.href.split('?')[0].split('#')[0];
+          return (
+            b +
+            '?t=' +
+            encodeURIComponent(x.token) +
+            (x.init_code ? '&c=' + encodeURIComponent(x.init_code) : '')
+          );
+        }
+
+        function qrSvg(text, cell) {
+          try {
+            var qr = window.qrcode(0, 'M');
+            qr.addData(String(text));
+            qr.make();
+            return qr.createSvgTag({ cellSize: cell || 4, margin: 2 });
+          } catch (e) {
+            return '';
+          }
+        }
+
+        function haifuErr(t) {
+          var e = $('haifuErr');
+          if (!e) return;
+          e.style.display = t ? '' : 'none';
+          e.textContent = t || '';
+        }
+
+        function renderHaifu() {
+          var box = $('haifuList');
+          if (!box) return;
+          if (!HAIFU.length) {
+            box.innerHTML = '';
+            $('btnHaifuPrint').disabled = true;
+            return;
+          }
+          $('btnHaifuPrint').disabled = false;
+          box.innerHTML = HAIFU.map(function (x) {
+            var url = haifuUrl(x);
+            return (
+              '<div class="card" style="margin:10px 0 0">' +
+              '<div style="font-weight:800">' +
+              esc(x.name || '') +
+              '　殿</div>' +
+              '<div class="note" style="margin:2px 0 8px">' +
+              (x.pw_ari
+                ? 'もう 自分の パスワードを 決めています（このQRは そのまま 使えます）'
+                : 'まだ パスワードを 決めていません（このQRから 決めます）') +
+              '</div>' +
+              '<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">' +
+              '<div>' +
+              qrSvg(url, 4) +
+              '</div>' +
+              '<div style="flex:1 1 200px;min-width:0">' +
+              '<div class="note" style="margin:0 0 6px;word-break:break-all">' +
+              esc(url) +
+              '</div>' +
+              (x.init_code
+                ? '<div class="note" style="margin:0 0 6px">初回コード <b>' +
+                  esc(x.init_code) +
+                  '</b></div>'
+                : '') +
+              '<button class="btn sub2 chi" type="button" data-hcopy="' +
+              esc(url) +
+              '">URLを 写す</button> ' +
+              '<button class="btn sub2 chi" type="button" data-hsai="' +
+              esc(x.employee_id) +
+              '">作り直す</button>' +
+              '</div></div></div>'
+            );
+          }).join('');
+        }
+
+        function haifuGo() {
+          haifuErr('');
+          var b = $('btnHaifu');
+          b.disabled = true;
+          b.textContent = '用意中…';
+          return DKSession.rest(SESS, 'rpc/dk_kyuryo_haifu', { method: 'POST', body: '{}' })
+            .then(function (r) {
+              return r.json();
+            })
+            .then(function (j) {
+              b.disabled = false;
+              b.textContent = '配る';
+              if (!j || j.ok !== true) {
+                // ★出来なかった事を 0件で 隠さない★（「0人 配った」に 見せない）
+                haifuErr(
+                  '配れませんでした（' +
+                    ((j && j.reason) || '理由不明') +
+                    '）。もう一度 お試しください。'
+                );
+                return;
+              }
+              HAIFU = j.list || [];
+              if (!HAIFU.length) haifuErr('今いる人が 居ません（「従業員」で 登録してください）。');
+              renderHaifu();
+            })
+            .catch(function () {
+              b.disabled = false;
+              b.textContent = '配る';
+              haifuErr('配れませんでした（通信）。もう一度 お試しください。');
+            });
+        }
+
+        // ★全員分の QRカードを 印刷★（氏名＋QR＋リンク＋初回コード＋手順）
+        //   ★window.print() は 使わない★＝URL・日付・ページ番号が 刷られ 戻れない（この repo の 決まり）
+        //   ⇒ 他の 印刷と 同じ ★自前PDF（jsPDF）★に 揃える
+        function haifuPrint() {
+          if (!HAIFU.length) return;
+          // ★紙の 道具は 必要な時に 読む★（この画面に 既に 在る 仕組みを 使う＝2か所に 書かない）
+          return loadPdfLibs()
+            .then(haifuPrintNow)
+            .catch(function () {
+              haifuErr('印刷の 道具が 読めませんでした。もう一度 お試しください。');
+            });
+        }
+
+        function haifuPrintNow() {
+          var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+          var per = 6; // 1枚に 6人
+          HAIFU.forEach(function (x, i) {
+            if (i > 0 && i % per === 0) doc.addPage();
+            var k = i % per;
+            var col = k % 2;
+            var row = Math.floor(k / 2);
+            var x0 = 12 + col * 98;
+            var y0 = 14 + row * 92;
+            doc.setDrawColor(160);
+            doc.roundedRect(x0, y0, 88, 84, 3, 3);
+            doc.setFontSize(11);
+            doc.text(String(x.name || ''), x0 + 4, y0 + 8);
+            doc.setFontSize(7);
+            doc.text('スマホの カメラで このQRを 読んでください', x0 + 4, y0 + 76);
+            doc.text('初回だけ 自分の パスワードを 決めます（8文字以上）', x0 + 4, y0 + 80);
+            var url = haifuUrl(x);
+            // ★QRは 四角を 並べて 描く（画像に しない＝字が つぶれない）★
+            try {
+              var qr = window.qrcode(0, 'M');
+              qr.addData(url);
+              qr.make();
+              var n = qr.getModuleCount();
+              var cell = 52 / n;
+              doc.setFillColor(0, 0, 0);
+              for (var r2 = 0; r2 < n; r2++) {
+                for (var c2 = 0; c2 < n; c2++) {
+                  if (qr.isDark(r2, c2)) {
+                    doc.rect(x0 + 4 + c2 * cell, y0 + 12 + r2 * cell, cell, cell, 'F');
+                  }
+                }
+              }
+            } catch (e) {
+              /* QRが 描けなくても 他は 出す */
+            }
+            if (x.init_code) {
+              doc.setFontSize(8);
+              doc.text('初回コード ' + x.init_code, x0 + 60, y0 + 20);
+            }
+          });
+          doc.save('kyuryo-QR-' + new Date().toISOString().slice(0, 10) + '.pdf');
+        }
+
+        (function () {
+          var b = document.getElementById('btnHaifu');
+          if (b) b.onclick = haifuGo;
+          var p = document.getElementById('btnHaifuPrint');
+          if (p) p.onclick = haifuPrint;
+          var box = document.getElementById('haifuList');
+          if (!box) return;
+          box.onclick = function (ev) {
+            var t = ev.target;
+            if (!t) return;
+            var cp = t.getAttribute && t.getAttribute('data-hcopy');
+            if (cp) {
+              try {
+                navigator.clipboard.writeText(cp);
+                t.textContent = '写しました';
+                setTimeout(function () {
+                  t.textContent = 'URLを 写す';
+                }, 1500);
+              } catch (e) {
+                /* 写せなくても 字は 出ている */
+              }
+              return;
+            }
+            var sai = t.getAttribute && t.getAttribute('data-hsai');
+            if (sai) {
+              t.disabled = true;
+              DKSession.rest(SESS, 'rpc/dk_kyuryo_saihakkou', {
+                method: 'POST',
+                body: JSON.stringify({ p_employee_id: sai }),
+              })
+                .then(function (r) {
+                  return r.json();
+                })
+                .then(function (j) {
+                  t.disabled = false;
+                  if (!j || j.ok !== true) {
+                    haifuErr('作り直せませんでした（' + ((j && j.reason) || '理由不明') + '）。');
+                    return;
+                  }
+                  haifuGo(); // ★作り直した後の 一覧を 出し直す★
+                })
+                .catch(function () {
+                  t.disabled = false;
+                  haifuErr('作り直せませんでした（通信）。');
+                });
+            }
+          };
+        })();
 
         $('btnLogout').onclick = function () {
           DKSession.logout();
