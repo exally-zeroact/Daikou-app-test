@@ -970,6 +970,49 @@
           padding: 1.4em 0 2em;
         }
       }
+
+      /* ★★会社設定から 来た時の 戻る帯★★ 2026-09-06（司さん） */
+      .modoru-bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 0 0 12px;
+      }
+
+      /* ★★日を 選ぶ 帯★★ 2026-09-06（司さん「その日だけ見せてスッキリさせろ」） */
+      .hibar {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .hib {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 9px;
+        padding: 7px 9px;
+        font-size: 13px;
+        font-weight: 700;
+        font-family: inherit;
+        color: var(--blue-d);
+        cursor: pointer;
+        min-width: 44px;
+      }
+
+      .hib.on {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: #fff;
+      }
+
+      /* ★入っている 日には 印★（打ったか どうかが 一目で 分かる） */
+      .hib.ari::after {
+        content: '●';
+        font-size: 9px;
+        margin-left: 3px;
+        vertical-align: super;
+      }
     </style>
   </head>
   <body>
@@ -983,6 +1026,13 @@
         </div>
       </div>
       <div class="sub noprint" id="sub">読み込み中…</div>
+
+      <!-- ★★会社設定から 来た時の「戻る」★★ 2026-09-06（司さん「全ページで戻るボタンすらない」）
+           ★入口は 会社設定の チップ ただ1つ★＝ここでは タブの 行を 出さない。 -->
+      <div class="modoru-bar noprint" id="modoruSet" style="display: none">
+        <a class="btn ghost" href="dashboard.html">← 会社設定へ 戻る</a>
+        <b id="modoruMidashi"></b>
+      </div>
 
       <div class="tabs noprint" id="tabs">
         <button class="tab on" data-tab="slip">明細</button>
@@ -1034,6 +1084,14 @@
 
       <!-- 時数 -->
       <div id="paneHours" style="display: none">
+        <!-- ★★日を 選ぶ★★ 2026-09-06（司さん）
+             ★司さんの言葉★「代行請求書アプリのようにカレンダーで日付選んでできるようにしろ
+                             その日だけ見せてスッキリさせろ」
+             ★前★ 期間の 日を 全部 縦に 並べていた（1〜10日なら 10日ぶん）＝長い
+             ⇒ ★選んだ 日だけ★ 出す。「全部」を 押せば 今まで通り 全部 出る。 -->
+        <div class="card noprint" id="hiCard">
+          <div class="hibar" id="hibar"></div>
+        </div>
         <div id="days"></div>
         <div class="note">
           <b>スマホがまだ無くても使えます。</b>「＋ 手で車を足す」で、その日の車の
@@ -1065,7 +1123,11 @@
                        司さん「個人個人で給料明細に載せるかも選びたいんや
                                山田太郎は車1、山田花子は車2と3とかカスタムしたい」
                        ★何も付けなければ 会社の決まりどおり★ -->
-                  <th>明細に出す車<span class="th-sub">何も付けない=会社の決まりどおり</span></th>
+                  <th>
+                    明細に出す車<span class="th-sub"
+                      >この人だけ／何も付けない=会社の決まりどおり</span
+                    >
+                  </th>
                 </tr>
               </thead>
               <tbody id="empBody" class="emp-body"></tbody>
@@ -1132,7 +1194,11 @@
                   <th>今の呼び方</th>
                   <th>名前<span class="th-sub">空欄=車1・車2…</span></th>
                   <th>並び<span class="th-sub">小さい順</span></th>
-                  <th>明細に出す<span class="th-sub">外すと出ません</span></th>
+                  <!-- ★★同じ名前で 2か所 在り 混乱の元だった★★ 2026-09-06（司さん
+                       「なぜここにも明細に出すチェック欄がある」）
+                       ★別物です★ … ここは ★会社ぜんぶ★／従業員タブのは ★その人だけ★
+                       ⇒ ★名前で 分かるように する★（消さない・中身も 変えない） -->
+                  <th>明細に出す<span class="th-sub">会社ぜんぶ／外すと出ません</span></th>
                 </tr>
               </thead>
               <tbody id="carBody" class="car-body"></tbody>
@@ -1206,28 +1272,33 @@
 
         <div class="card kv-pane">
           <div class="title" style="font-weight: 800; margin-bottom: 10px">明細の期間</div>
+          <!-- ★★払い方を 先に 選ぶ★★ 2026-09-06（司さん「明細の期間のやり方がまったく理解できない」）
+               ★前★ 「何日から」「払い方」「日数」が ★同じ 重さで 3つ 並んでいた★
+                 ⇒ どれが どれに 効くのか 見えない（月3回なら 2つとも 要らない）
+               ★今★ ★払い方を 一番 上に★ ⇒ ★選んだ 物に 要る 欄だけ 出す★ -->
           <table>
             <tbody>
-              <tr>
-                <td>何日から（月1回・日数で切るとき）</td>
-                <td><input class="hrs" id="pStart" /> 日</td>
-              </tr>
               <tr>
                 <td>払い方</td>
                 <td>
                   <select id="pMode">
                     <option value="thirds">月3回（1〜10日 / 11〜20日 / 21日〜末日）</option>
-                    <option value="month_end">月1回（下の「何日から」〜末日）</option>
+                    <option value="month_end">月1回（何日から〜末日）</option>
                     <option value="days">日数で切る</option>
                   </select>
                 </td>
               </tr>
-              <tr>
-                <td>日数（日数で切るとき）</td>
+              <tr id="pStartRow">
+                <td>何日から</td>
+                <td><input class="hrs" id="pStart" /> 日</td>
+              </tr>
+              <tr id="pDaysRow">
+                <td>何日ごとに 切る</td>
                 <td><input class="hrs" id="pDays" /> 日</td>
               </tr>
             </tbody>
           </table>
+          <div class="note" id="pMsg" style="margin-top: 8px"></div>
           <div style="margin-top: 12px">
             <button class="btn" id="btnSaveSet">保存する</button>
             <span class="saved" id="setSaved"></span>
@@ -1416,6 +1487,11 @@
         //   司さんの申告では 赤字が「手で入れた分を保存できませんでした。」だけで、
         //   ★相手の会社が分からないので誰も原因に辿り着けなかった★（実際は検証ゴミの会社だった）。
         //   401/403 は倉庫が「その会社には書けない」と言っている時なので、会社名を添える。
+        // ★★2026-09-06（司さん「明細にだすのチェック外しても保存されない」）★★
+        //   ★倉庫は 断る時に ★理由★ を 返しています。それを 捨てていました★
+        //   ⇒ 画面には「保存できませんでした。」しか 出ず、★誰も 原因に 辿り着けない★
+        //   ⇒ 会社の 決まり「黙って 落とすな」に 真正面から 当たる。
+        //   ★今★ 倉庫の 言い分（message / details / hint）を ★そのまま 出す★。
         function saveErr(msg, r) {
           try {
             var st = r && r.status;
@@ -1425,6 +1501,28 @@
             }
           } catch (_) {
             /* 名前が出せなくても、元の言い方はそのまま出す */
+          }
+          // ★理由を 読みに行く★（読めなくても 元の言い方は 必ず 出す）
+          try {
+            if (r && typeof r.text === 'function') {
+              r.text()
+                .then(function (t) {
+                  var wake = '';
+                  try {
+                    var j = JSON.parse(t);
+                    wake = [j.message, j.details, j.hint].filter(Boolean).join(' / ');
+                  } catch (_) {
+                    wake = String(t || '').slice(0, 200);
+                  }
+                  showErr(msg + (r.status ? ' [' + r.status + ']' : '') + (wake ? ' ' + wake : ''));
+                })
+                .catch(function () {
+                  showErr(msg);
+                });
+              return;
+            }
+          } catch (_) {
+            /* 読めなくても 下で 元の言い方を 出す */
           }
           return showErr(msg);
         }
@@ -2176,6 +2274,21 @@
                 Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (x) {
                   x.className = 'tab' + (x === b2 ? ' on' : '');
                 });
+                // ★★入口を 2つに しない★★ 2026-09-06（司さん）
+                //   ★司さんの言葉★「従業員と給料の設定がなんで2個もある」
+                //   ★私の しくじり★ 会社設定に チップを 足した時、★中身を 移さず リンクで 済ませた★
+                //     ⇒ 同じ物への 入口が「会社設定の チップ」と「給料の タブ」で ★2つ★に なった。
+                //   ⇒★会社設定から 来た時は タブの 行を 出さない★＝入口は チップ ただ1つ。
+                var tabs = document.getElementById('tabs');
+                if (tabs) tabs.style.display = 'none';
+                // ★★戻る所を 作る★★ 2026-09-06（司さん「全ページで戻るボタンすらない」）
+                //   ★会社設定から 来たのに 会社設定へ 帰れませんでした★
+                var modoru = document.getElementById('modoruSet');
+                if (modoru) {
+                  modoru.style.display = '';
+                  var mi = document.getElementById('modoruMidashi');
+                  if (mi) mi.textContent = doko === 'emp' ? '従業員' : '給料の設定（車）';
+                }
               }
             }
             return;
@@ -2569,17 +2682,21 @@
           return t.slice(0, n) + '…';
         }
 
-        // ★その期間に 売上が1件も無い車は 紙に出さない★（番号は詰めて振り直す）
+        // ★★「明細に出す」を 選んだ 車は 中身が 0でも 行を 出す★★ 2026-09-06（司さん）
+        //   ★司さんの言葉★
+        //     「入ってなくても明細に出すってチェックしとんやけん
+        //       車の名前の行がないのがおかしいやろが」
+        //
+        //   ★前★「その期間に 売上が 1件も無い車は 紙に出さない」
+        //     ⇒ 画面（3197行）は ★slipCars＝明細に出す印★で 出しているのに、
+        //       ★紙だけ 中身で 消していた★＝★同じ 明細なのに 出方が 違う★。
+        //     ⇒ 実際 9月は 時数が 0件なので ★車の行が 1本も 出ませんでした★
+        //       （司さんは「明細に出す」を 全部 選んでいるのに）。
+        //   ★今★ ★選んだ車は そのまま 出す★（金額が 空でも 行と 車名は 出る）
+        //     ⇒ 選んだのに 出ない＝「選べていないのか 中身が 無いのか」が 分からない、が 消える。
+        //   ★選ぶ所は 変えていません★（従業員 →「明細に出す車」／会社の 既定）
         function _paperCars(e, cars) {
-          var out = [];
-          cars.forEach(function (x) {
-            var atta = e.cells.some(function (c) {
-              var v = c.carSales ? c.carSales[x.i] : null;
-              return v !== null && v !== undefined && v !== 0;
-            });
-            if (atta) out.push(x);
-          });
-          return out;
+          return (cars || []).slice();
         }
 
         // ★紙1枚を組む★（板 1123×794px・戻り値は 画面外に置いた要素）
@@ -3070,6 +3187,12 @@
           cars: function () {
             return REP.cars;
           },
+          // ★紙に 出す 車（明細に出す 印で 絞った 後）★ 2026-09-06
+          //   ★見張りが「選んだ 車の 行が 出るか」を 数える 為★
+          slipCars: function (ei) {
+            var e = REP.employees[ei || 0];
+            return slipCars(REP.cars, e.employee_id);
+          },
           timeoutMs: function () {
             return HTML2CANVAS_TIMEOUT_MS;
           },
@@ -3289,209 +3412,250 @@
         }
 
         // ── 時数を入れる ────────────────────────
+        // ★★どの 日を 見せるか★★ 2026-09-06（司さん「その日だけ見せてスッキリさせろ」）
+        //   ''（空）＝全部。日付が 入っていれば その日だけ。
+        var HI = '';
+        function hibar() {
+          var n = $('hibar');
+          if (!n || !PERIOD) return;
+          var h =
+            '<button class="hib' + (HI ? '' : ' on') + '" type="button" data-hi="">全部</button>';
+          PERIOD.dates.forEach(function (d) {
+            // ★打ってある 日には ●★（開かなくても 分かる）
+            // ★その日の 時数の 合計が 0より 上なら ●★（打ってあるか 一目で 分かる）
+            var ari = Number(((REP && REP.days[d]) || {}).poolHours || 0) > 0;
+            var w = new Date(d + 'T00:00:00');
+            h +=
+              '<button class="hib' +
+              (HI === d ? ' on' : '') +
+              (ari ? ' ari' : '') +
+              '" type="button" data-hi="' +
+              d +
+              '">' +
+              (w.getMonth() + 1) +
+              '/' +
+              w.getDate() +
+              '</button>';
+          });
+          n.innerHTML = h;
+          Array.prototype.forEach.call(n.querySelectorAll('[data-hi]'), function (b) {
+            b.onclick = function () {
+              HI = b.getAttribute('data-hi');
+              renderDays();
+            };
+          });
+        }
+
         function renderDays() {
           var box = $('days');
           if (!PERIOD) return;
+          hibar();
           var actives = RAW.employees.filter(function (e) {
             return e.active !== false;
           });
           var html = '';
 
-          PERIOD.dates.forEach(function (date) {
-            var day = (REP && REP.days[date]) || null;
-            var meter = RAW.shifts.filter(function (s) {
-              return PayrollDaily.dateOf(s.started_at) === date;
-            });
-            // ★手で入れた1日分も同じ並びに出す（メーターがある車は出さない＝二重に見せない）★
-            var meterDevs = {};
-            meter.forEach(function (s) {
-              meterDevs[s.device_id] = true;
-            });
-            var manual = RAW.manualDays.filter(function (m) {
-              return m.work_date === date && !meterDevs[m.device_id];
-            });
-            var shifts = meter.concat(
-              PayrollDaily.manualAsShifts(manual).shifts.map(function (x) {
-                return x;
-              })
-            );
-            var wh = RAW.workHours.filter(function (w) {
-              return w.work_date === date;
-            });
-
-            html += '<div class="day"><div class="dhead"><div class="dt">' + mdw(date) + '</div>';
-            if (day && day.poolSales) {
-              html +=
-                '<div class="kv">売上合計 <b>¥' +
-                yen(day.poolSales) +
-                '</b></div><div class="kv">時数合計 <b>' +
-                hrs(day.poolHours) +
-                '</b></div><div class="kv">売上1h <b>¥' +
-                yen(day.hourly) +
-                '</b></div><div class="kv">会社に残る分 <b>¥' +
-                yen(day.ownerShare) +
-                '</b></div>';
-            }
-            html += '</div>';
-
-            if (!shifts.length) {
-              html += '<div class="empty">この日はまだ何もありません。</div>';
-            }
-
-            shifts.forEach(function (s) {
-              var isManual = !!s.isManual;
-              var man = isManual
-                ? RAW.manualDays.filter(function (m) {
-                    return m.work_date === date && m.device_id === s.device_id;
-                  })[0] || {}
-                : null;
-              var e = isManual
-                ? {
-                    toll_yen: man.toll_yen,
-                    bridge_yen: man.bridge_yen,
-                    other_yen: man.other_yen,
-                    hours: man.hours,
-                  }
-                : EDIT_BY_SHIFT[s.shift_id] || {};
-              var auto = isManual ? 0 : PayrollDaily.carHoursOf(s, null);
-              // ★UUIDを画面に出さない (2026-08-04)★
-              //   司さん「売上1の横の英語のやつ邪魔でしょうがない」
-              //   旧: 名前が無ければ端末ID(UUID)をそのまま出していた
-              //       → 売上1(7e1919ef-4aaa-411e-8db0-ba0424…)
-              //   新: 名前が無ければ「車1」「車2」（js/car-name.js が1箇所で決める）
-              var label = _carName(s.device_id);
-              var own = CTX && CTX.settings.ownerDeviceId === s.device_id;
-              var crew = wh.filter(function (w) {
-                return w.device_id === s.device_id;
+          // ★選んだ 日だけ★（全部＝HI が 空）2026-09-06
+          PERIOD.dates
+            .filter(function (d2) {
+              return !HI || d2 === HI;
+            })
+            .forEach(function (date) {
+              var day = (REP && REP.days[date]) || null;
+              var meter = RAW.shifts.filter(function (s) {
+                return PayrollDaily.dateOf(s.started_at) === date;
+              });
+              // ★手で入れた1日分も同じ並びに出す（メーターがある車は出さない＝二重に見せない）★
+              var meterDevs = {};
+              meter.forEach(function (s) {
+                meterDevs[s.device_id] = true;
+              });
+              var manual = RAW.manualDays.filter(function (m) {
+                return m.work_date === date && !meterDevs[m.device_id];
+              });
+              var shifts = meter.concat(
+                PayrollDaily.manualAsShifts(manual).shifts.map(function (x) {
+                  return x;
+                })
+              );
+              var wh = RAW.workHours.filter(function (w) {
+                return w.work_date === date;
               });
 
-              html +=
-                '<div class="carrow"><span class="cname">' +
-                esc(label) +
-                (own ? '（自分の車）' : '') +
-                '</span>' +
-                (isManual
-                  ? '<span class="manual">手入力</span>売上 <input class="yen" data-man-date="' +
-                    date +
-                    '" data-man-dev="' +
-                    esc(s.device_id) +
-                    '" data-man-f="sales_yen" value="' +
-                    num(man.sales_yen) +
-                    '">'
-                  : '<span class="kv">売上 ¥' +
-                    yen(num(s.fare_total_yen) - (UriageAgg.deductOf(e, RAW.salesSettings) || 0)) +
-                    '</span>') +
-                '　時間 ' +
-                (isManual
-                  ? '<input class="hrs" data-man-date="' +
-                    date +
-                    '" data-man-dev="' +
-                    esc(s.device_id) +
-                    '" data-man-f="hours" value="' +
-                    num(man.hours) +
-                    '">'
-                  : '<input class="hrs" data-sid="' +
-                    esc(s.shift_id) +
-                    '" data-dev="' +
-                    esc(s.device_id) +
-                    '" value="' +
-                    (e.hours === null || e.hours === undefined ? '' : e.hours) +
-                    '" placeholder="' +
-                    (auto ? auto : '') +
-                    '">') +
-                (isManual
-                  ? '<button class="xbtn" data-man-del-date="' +
-                    date +
-                    '" data-man-del-dev="' +
-                    esc(s.device_id) +
-                    '" title="この行を消す">✕</button>'
-                  : '');
-
-              crew.forEach(function (w) {
-                var emp = RAW.employees.filter(function (x) {
-                  return x.employee_id === w.employee_id;
-                })[0];
+              html += '<div class="day"><div class="dhead"><div class="dt">' + mdw(date) + '</div>';
+              if (day && day.poolSales) {
                 html +=
-                  '<span class="crew">' +
-                  esc(emp ? emp.name : '?') +
-                  '<input class="hrs" style="width:4.2em" data-wh-emp="' +
-                  esc(w.employee_id) +
-                  '" data-wh-date="' +
-                  date +
-                  '" data-wh-dev="' +
-                  esc(s.device_id) +
-                  '" value="' +
-                  (num(w.hours) > 0 ? w.hours : '') +
-                  '" placeholder="' +
-                  hrs(num(e.hours) > 0 ? e.hours : auto) +
-                  '">' +
-                  '<button class="xbtn" data-del-emp="' +
-                  esc(w.employee_id) +
-                  '" data-del-date="' +
-                  date +
-                  '">✕</button></span>';
-              });
-
-              // 追加用
-              var taken = {};
-              wh.forEach(function (w) {
-                taken[w.employee_id] = true;
-              });
-              var rest = actives.filter(function (a) {
-                return !taken[a.employee_id];
-              });
-              if (rest.length) {
-                html +=
-                  '<select data-add-date="' +
-                  date +
-                  '" data-add-dev="' +
-                  esc(s.device_id) +
-                  '"><option value="">＋ 乗った人</option>';
-                rest.forEach(function (a) {
-                  html += '<option value="' + esc(a.employee_id) + '">' + esc(a.name) + '</option>';
-                });
-                html += '</select>';
+                  '<div class="kv">売上合計 <b>¥' +
+                  yen(day.poolSales) +
+                  '</b></div><div class="kv">時数合計 <b>' +
+                  hrs(day.poolHours) +
+                  '</b></div><div class="kv">売上1h <b>¥' +
+                  yen(day.hourly) +
+                  '</b></div><div class="kv">会社に残る分 <b>¥' +
+                  yen(day.ownerShare) +
+                  '</b></div>';
               }
               html += '</div>';
-            });
 
-            // ★手で1台ぶん足す（スマホが無い日・アプリ無しで走った日）★
-            var used = {};
-            shifts.forEach(function (x) {
-              used[x.device_id] = true;
-            });
-            var addable = ((CTX && CTX.devices) || []).filter(function (d) {
-              return !used[d];
-            });
-            // ★2026-08-09: 足せる車が無い時は 理由を出す★
-            //   その日に全部の車を使っていると 選べる車が消え、
-            //   「＋ 新しい車…」だけが並ぶ。仕様どおりだが ★理由が無いと壊れて見える★
-            //   （司さんの「手で給料できん」と見分けがつかない）。
-            if (!addable.length) {
-              html +=
-                '<div class="note" style="margin:6px 0 0;font-size:12px;color:#8c8c8c">' +
-                'この日は全部の車を使っています。新しく足す時は「＋ 新しい車…」を選んでください。' +
-                '</div>';
-            }
-            html +=
-              '<div class="carrow"><select data-man-add="' +
-              date +
-              '"><option value="">＋ 手で車を足す</option>' +
-              addable
-                .map(function (d) {
-                  return (
-                    '<option value="' +
-                    esc(d) +
+              if (!shifts.length) {
+                html += '<div class="empty">この日はまだ何もありません。</div>';
+              }
+
+              shifts.forEach(function (s) {
+                var isManual = !!s.isManual;
+                var man = isManual
+                  ? RAW.manualDays.filter(function (m) {
+                      return m.work_date === date && m.device_id === s.device_id;
+                    })[0] || {}
+                  : null;
+                var e = isManual
+                  ? {
+                      toll_yen: man.toll_yen,
+                      bridge_yen: man.bridge_yen,
+                      other_yen: man.other_yen,
+                      hours: man.hours,
+                    }
+                  : EDIT_BY_SHIFT[s.shift_id] || {};
+                var auto = isManual ? 0 : PayrollDaily.carHoursOf(s, null);
+                // ★UUIDを画面に出さない (2026-08-04)★
+                //   司さん「売上1の横の英語のやつ邪魔でしょうがない」
+                //   旧: 名前が無ければ端末ID(UUID)をそのまま出していた
+                //       → 売上1(7e1919ef-4aaa-411e-8db0-ba0424…)
+                //   新: 名前が無ければ「車1」「車2」（js/car-name.js が1箇所で決める）
+                var label = _carName(s.device_id);
+                var own = CTX && CTX.settings.ownerDeviceId === s.device_id;
+                var crew = wh.filter(function (w) {
+                  return w.device_id === s.device_id;
+                });
+
+                html +=
+                  '<div class="carrow"><span class="cname">' +
+                  esc(label) +
+                  (own ? '（自分の車）' : '') +
+                  '</span>' +
+                  (isManual
+                    ? '<span class="manual">手入力</span>売上 <input class="yen" data-man-date="' +
+                      date +
+                      '" data-man-dev="' +
+                      esc(s.device_id) +
+                      '" data-man-f="sales_yen" value="' +
+                      num(man.sales_yen) +
+                      '">'
+                    : '<span class="kv">売上 ¥' +
+                      yen(num(s.fare_total_yen) - (UriageAgg.deductOf(e, RAW.salesSettings) || 0)) +
+                      '</span>') +
+                  '　時間 ' +
+                  (isManual
+                    ? '<input class="hrs" data-man-date="' +
+                      date +
+                      '" data-man-dev="' +
+                      esc(s.device_id) +
+                      '" data-man-f="hours" value="' +
+                      num(man.hours) +
+                      '">'
+                    : '<input class="hrs" data-sid="' +
+                      esc(s.shift_id) +
+                      '" data-dev="' +
+                      esc(s.device_id) +
+                      '" value="' +
+                      (e.hours === null || e.hours === undefined ? '' : e.hours) +
+                      '" placeholder="' +
+                      (auto ? auto : '') +
+                      '">') +
+                  (isManual
+                    ? '<button class="xbtn" data-man-del-date="' +
+                      date +
+                      '" data-man-del-dev="' +
+                      esc(s.device_id) +
+                      '" title="この行を消す">✕</button>'
+                    : '');
+
+                crew.forEach(function (w) {
+                  var emp = RAW.employees.filter(function (x) {
+                    return x.employee_id === w.employee_id;
+                  })[0];
+                  html +=
+                    '<span class="crew">' +
+                    esc(emp ? emp.name : '?') +
+                    '<input class="hrs" style="width:4.2em" data-wh-emp="' +
+                    esc(w.employee_id) +
+                    '" data-wh-date="' +
+                    date +
+                    '" data-wh-dev="' +
+                    esc(s.device_id) +
+                    '" value="' +
+                    (num(w.hours) > 0 ? w.hours : '') +
+                    '" placeholder="' +
+                    hrs(num(e.hours) > 0 ? e.hours : auto) +
                     '">' +
-                    esc(_carName(d)) + // ★UUIDは出さない (2026-08-05)★
-                    '</option>'
-                  );
-                })
-                .join('') +
-              '<option value="__new__">＋ 新しい車…</option></select></div>';
+                    '<button class="xbtn" data-del-emp="' +
+                    esc(w.employee_id) +
+                    '" data-del-date="' +
+                    date +
+                    '">✕</button></span>';
+                });
 
-            html += '</div>';
-          });
+                // 追加用
+                var taken = {};
+                wh.forEach(function (w) {
+                  taken[w.employee_id] = true;
+                });
+                var rest = actives.filter(function (a) {
+                  return !taken[a.employee_id];
+                });
+                if (rest.length) {
+                  html +=
+                    '<select data-add-date="' +
+                    date +
+                    '" data-add-dev="' +
+                    esc(s.device_id) +
+                    '"><option value="">＋ 乗った人</option>';
+                  rest.forEach(function (a) {
+                    html +=
+                      '<option value="' + esc(a.employee_id) + '">' + esc(a.name) + '</option>';
+                  });
+                  html += '</select>';
+                }
+                html += '</div>';
+              });
+
+              // ★手で1台ぶん足す（スマホが無い日・アプリ無しで走った日）★
+              var used = {};
+              shifts.forEach(function (x) {
+                used[x.device_id] = true;
+              });
+              var addable = ((CTX && CTX.devices) || []).filter(function (d) {
+                return !used[d];
+              });
+              // ★2026-08-09: 足せる車が無い時は 理由を出す★
+              //   その日に全部の車を使っていると 選べる車が消え、
+              //   「＋ 新しい車…」だけが並ぶ。仕様どおりだが ★理由が無いと壊れて見える★
+              //   （司さんの「手で給料できん」と見分けがつかない）。
+              if (!addable.length) {
+                html +=
+                  '<div class="note" style="margin:6px 0 0;font-size:12px;color:#8c8c8c">' +
+                  'この日は全部の車を使っています。新しく足す時は「＋ 新しい車…」を選んでください。' +
+                  '</div>';
+              }
+              html +=
+                '<div class="carrow"><select data-man-add="' +
+                date +
+                '"><option value="">＋ 手で車を足す</option>' +
+                addable
+                  .map(function (d) {
+                    return (
+                      '<option value="' +
+                      esc(d) +
+                      '">' +
+                      esc(_carName(d)) + // ★UUIDは出さない (2026-08-05)★
+                      '</option>'
+                    );
+                  })
+                  .join('') +
+                '<option value="__new__">＋ 新しい車…</option></select></div>';
+
+              html += '</div>';
+            });
           box.innerHTML = html;
           wireDays();
         }
@@ -3995,8 +4159,44 @@
         }
 
         // ── 決め方 ─────────────────────────────
+        // ★★払い方で 要る 欄だけ 出す★★ 2026-09-06（司さん
+        //   「明細の期間のやり方がまったく理解できない」）
+        //   ★前★ 3つが 同じ 重さで 並び、どれが どれに 効くか 見えなかった
+        //     （月3回なら「何日から」も「日数」も 使わないのに 出ていた）
+        //   ★今★ 払い方を 選ぶ ⇒ ★その 払い方に 要る 欄だけ★ 出す ＋ 今の 区切りを 字で 出す
+        function kikanDashiwake() {
+          var m = ($('pMode') || {}).value || 'thirds';
+          var s1 = $('pStartRow');
+          var s2 = $('pDaysRow');
+          var ms = $('pMsg');
+          // ★月3回★ … 区切りは 決まっている（1〜10 / 11〜20 / 21〜末日）＝欄は 要らない
+          // ★月1回★ … 「何日から」だけ 要る
+          // ★日数で切る★ … 「何日から」と「何日ごと」の 両方
+          if (s1) s1.style.display = m === 'thirds' ? 'none' : '';
+          if (s2) s2.style.display = m === 'days' ? '' : 'none';
+          if (!ms) return;
+          var d1 = Number(($('pStart') || {}).value) || 21;
+          var d2 = Number(($('pDays') || {}).value) || 11;
+          if (m === 'thirds') {
+            ms.textContent = '今の 区切り … 1〜10日 ／ 11〜20日 ／ 21日〜末日（月3回）';
+          } else if (m === 'month_end') {
+            ms.textContent = '今の 区切り … ' + d1 + '日 〜 翌月の 前日（月1回）';
+          } else {
+            ms.textContent = '今の 区切り … ' + d1 + '日から ' + d2 + '日ごと';
+          }
+        }
+        (function wireKikan() {
+          ['pMode', 'pStart', 'pDays'].forEach(function (id) {
+            var n = $(id);
+            if (!n) return;
+            n.addEventListener('change', kikanDashiwake);
+            n.addEventListener('input', kikanDashiwake);
+          });
+        })();
+
         function renderSet() {
           var st = PayrollDaily.normSettings(SET);
+          kikanDashiwake();
           var html = '';
           // data-l は★スマホで1行1枚にした時の見出し★（横スクロールさせない）
           Object.keys(st.roles).forEach(function (r) {

@@ -485,6 +485,46 @@
         font-weight: 800;
         background: #f7fbff;
       }
+
+      /* ★★月の 選び方は 代行請求書アプリと 同じ 形★★ 2026-09-06（司さん）
+         ★司さんの言葉★「代行請求書のアプリの月選ぶボタン見てこい」
+         ★実物を 見ました★ … daikou-seikyu.html 3290-3296行
+           <div class="filterbar"> の 中に <select class="fselect"> が 2つ
+           （「― 月を選択 ―」／「全社」）＝★12個 並べる 形では ない★
+         ⇒ 同じ 形に そろえる（幅・角・字も 実物と 同じ 数字） */
+      .filterbar {
+        display: flex;
+        gap: 8px;
+        margin: 0 0 12px;
+      }
+
+      .fselect {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1.5px solid #dbe7f7;
+        border-radius: 10px;
+        font-size: 16px;
+        font-family: inherit;
+        color: #333;
+        outline: none;
+        background: #fff;
+      }
+
+      .fselect:focus {
+        border-color: #007aff;
+      }
+
+      /* ★★内訳の 紙★★ 2026-09-06（司さん「なんで紙で見せるになってないんど」）
+         ★大事な 行（売上・会社に残る分）だけ 薄く 塗る★＝前の「hi」と 同じ 意味 */
+      #kpis td.kk {
+        text-align: left;
+        white-space: normal;
+      }
+
+      #kpis tr.hi > td {
+        background: #eef5ff;
+        font-weight: 800;
+      }
     </style>
   </head>
   <body>
@@ -534,6 +574,14 @@
 
       <div class="card">
         <div class="ttl" id="oneTtl">1ヶ月の内訳</div>
+        <!-- ★★月を ボタンで 選ぶ★★ 2026-09-06（司さん）
+             ★司さんの言葉★「これを 代行請求書アプリのように 月を 選んだら
+                             全体選んだりのボタンで やらせろや」
+             ★前★ ★上の 表の 行を 押す★しか 道が 無かった（押せると 分からない）
+             ⇒ ★全体／1月…12月★の ボタンを ここに 出す。表の 行を 押す 道も 残す。 -->
+        <div class="filterbar">
+          <select class="fselect" id="tsukiSel"></select>
+        </div>
         <div class="kpis" id="kpis"></div>
       </div>
 
@@ -1366,11 +1414,55 @@
           renderPP();
         }
 
+        // ★★月を ボタンで 選ぶ★★ 2026-09-06（司さん）
+        //   ★司さんの言葉★「月を 選んだら 全体選んだりの ボタンで やらせろや」
+        //   ★前★ 上の 表の 行を 押す しか 道が 無く、★押せると 分からない★
+        //   ⇒ ここに ★全体／1月…12月★の ボタンを 出す（表の 行を 押す 道も 残す）
+        //   ★中身が 在る 月には ●★（押す前に 分かる）
+        // ★★月の 選び方は 代行請求書アプリと 同じ★★ 2026-09-06（司さん）
+        //   ★司さんの言葉★「代行請求書のアプリの月選ぶボタン見てこい」
+        //   ★実物を 見て 合わせました★ … daikou-seikyu.html 3290-3296行
+        //     <div class="filterbar"> の 中に <select class="fselect">
+        //     1行目は「― 月を選択 ―」＝★12個 ボタンを 並べる 形では ない★
+        //   ⇒ ここも ★選ぶ 1つ★に する（全体＝年まるごと）
+        //   ★中身が 在る 月には ●★（開かなくても 分かる）
+        function tsukibar() {
+          var n = $('tsukiSel');
+          if (!n || !YR) return;
+          var h = '<option value="0">― 全体（年まるごと）―</option>';
+          for (var i = 1; i <= 12; i++) {
+            var mm = YR.months[i - 1] || {};
+            var ari = Number(mm.net_fare_yen || 0) > 0;
+            h +=
+              '<option value="' +
+              i +
+              '"' +
+              (ONE === i ? ' selected' : '') +
+              '>' +
+              YEAR +
+              '年 ' +
+              i +
+              '月' +
+              (ari ? ' ●' : '') +
+              '</option>';
+          }
+          n.innerHTML = h;
+          n.value = String(ONE || 0);
+          n.onchange = function () {
+            ONE = parseInt(n.value, 10) || 0;
+            // ★表の 行を 押した 時と 同じ 事を する★（決まりを 2か所に 書かない）
+            renderOne();
+            renderUri();
+            renderKyori();
+          };
+        }
+
         function renderOne() {
           var m = ONE ? YR.months[ONE - 1] : YR.total;
+          tsukibar();
           $('oneTtl').textContent = ONE
-            ? YEAR + '年 ' + ONE + '月の内訳（月の行を押すと切り替わります）'
-            : YEAR + '年 まるごとの内訳（月の行を押すとその月に切り替わります）';
+            ? YEAR + '年 ' + ONE + '月の内訳'
+            : YEAR + '年 まるごとの内訳';
           var items = [
             { k: '売上（実費を引いた後）', v: m.salesTotal, hi: true },
             { k: 'うち 税抜き', v: m.exTax },
@@ -1384,19 +1476,28 @@
             { k: '積立金', v: m.reserve },
             { k: '会社に残る分', v: m.ownerShare, hi: true },
           ];
-          $('kpis').innerHTML = items
-            .map(function (i) {
-              return (
-                '<div class="kpi' +
-                (i.hi ? ' hi' : '') +
-                '"><div class="k">' +
-                esc(i.k) +
-                '</div><div class="v">¥' +
-                yen(i.v) +
-                '</div></div>'
-              );
-            })
-            .join('');
+          // ★★内訳も 紙で 見せる★★ 2026-09-06（司さん「なんで紙で見せるになってないんど」）
+          //   ★前★ 1つ 1つが 大きい 箱＝★11個で 画面 3枚ぶん★（スクロールしないと 読めない）
+          //   ★司さんの 前の 指示★「給料明細以外は 分かりやすいように 紙にして
+          //                         スクロールせんでええようにしろ」
+          //   ⇒ 月ごと・売上表・料金表と ★同じ table.kami★（罫線の 紙）に そろえる
+          //   ★数字は 1つも 変えていません★（出す 順も 同じ）
+          $('kpis').innerHTML =
+            '<table class="kami"><thead><tr><th>項目</th><th>金額</th></tr></thead><tbody>' +
+            items
+              .map(function (i) {
+                return (
+                  '<tr' +
+                  (i.hi ? ' class="hi"' : '') +
+                  '><td class="kk">' +
+                  esc(i.k) +
+                  '</td><td>¥' +
+                  yen(i.v) +
+                  '</td></tr>'
+                );
+              })
+              .join('') +
+            '</tbody></table>';
         }
 
         function renderPP() {

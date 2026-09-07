@@ -330,3 +330,89 @@ test('★1ヶ月ぶんでも 箱の 中で 止まる★', async ({ page }) => {
   expect(mieru, '★見える 日数が 減りました★').toBeGreaterThanOrEqual(8);
   expect(mieru, '★大きすぎます（下の 箱が 隠れます）★').toBeLessThanOrEqual(12);
 });
+
+// ★★月の 選び方は 代行請求書アプリと 同じ★★ 2026-09-06（司さん）
+//   ★司さんの言葉★「これを 代行請求書アプリのように 月を 選んだら…」
+//                   「代行請求書のアプリの月選ぶボタン見てこい」
+//   ★1度 外しました★ … ボタンを 12個 並べた ⇒ ★実物と 違う★と 言われた
+//   ★実物を 見て 合わせた★ … daikou-seikyu.html 3290-3296行
+//     <div class="filterbar"> の 中に <select class="fselect">
+//     1行目は「― 月を選択 ―」＝★選ぶ 1つ★（ボタンを 並べない）
+//   ★中身が 在る 月には ●★
+//   ★★わざと壊して 赤に なる事を 見た（2026-09-06 実測）★★
+//     ①tsukibar() の 呼び出しを 消す … ★赤★
+//     ②選んでも 月が 変わらない ように する … ★赤★
+test('★★月を 選ぶと 内訳が 切り替わる（代行請求書と 同じ 形）★★', async ({ page }) => {
+  await hiraku(page);
+  const mae = await page.evaluate(() => {
+    const s = document.getElementById('tsukiSel');
+    const bar = s ? s.closest('.filterbar') : null;
+    return {
+      aru: !!s,
+      cls: s ? s.className : '',
+      bar: !!bar,
+      kazu: s ? s.options.length : 0,
+      atama: s && s.options.length ? s.options[0].textContent.trim() : '',
+      ima: s ? s.value : '',
+      ttl: (document.getElementById('oneTtl') || {}).textContent || '',
+    };
+  });
+  // eslint-disable-next-line no-console
+  console.log('★はじめ★ ' + JSON.stringify(mae));
+  expect(mae.aru, '★月を 選ぶ 所が ありません★').toBe(true);
+  // ★代行請求書アプリと 同じ 形★（filterbar の 中の fselect）
+  expect(mae.cls, '★fselect（実物と 同じ 形）に なっていません★').toContain('fselect');
+  expect(mae.bar, '★filterbar の 中に 入っていません★').toBe(true);
+  expect(mae.kazu, '★全体＋12ヶ月＝13行 ありません★').toBe(13);
+  expect(mae.atama, '★1行目が 全体に なっていません★').toContain('全体');
+  expect(mae.ttl, '★まるごとの 内訳に なっていません★').toContain('まるごと');
+
+  // ★9月を 選ぶ★
+  await page.selectOption('#tsukiSel', '9');
+  await page.waitForTimeout(400);
+  const ato = await page.evaluate(() => ({
+    ima: (document.getElementById('tsukiSel') || {}).value || '',
+    ttl: (document.getElementById('oneTtl') || {}).textContent || '',
+  }));
+  // eslint-disable-next-line no-console
+  console.log('★9月を 選んだ後★ ' + JSON.stringify(ato));
+  expect(ato.ima, '★選んだ 月が 残っていません★').toBe('9');
+  expect(ato.ttl, '★内訳が その月に 切り替わっていません★').toContain('9月の内訳');
+});
+
+// ★★内訳も 紙で 見せる★★ 2026-09-06（司さん「なんで紙で見せるになってないんど」）
+//   ★前★ 1つ 1つが 大きい 箱＝11個で ★画面 3枚ぶん★（スクロールしないと 読めない）
+//   ★司さんの 前の 指示★「給料明細以外は 分かりやすいように 紙にして
+//                         スクロールせんでええようにしろ」
+//   ⇒ 月ごと・売上表・料金表と ★同じ table.kami★（罫線の 紙）に そろえる
+//   ★★わざと壊して 赤に なる事を 見た（2026-09-06 実測）★★
+//     ①紙を やめて 元の 箱に 戻す … ★赤★
+//     ②項目を 1つ 減らす ……… ★赤★（11行 の 数が 合わない）
+test('★★内訳が 紙（罫線の表）で 出る／短い★★', async ({ page }) => {
+  await hiraku(page);
+  const r = await page.evaluate(() => {
+    const box = document.getElementById('kpis');
+    const t = box ? box.querySelector('table.kami') : null;
+    const tr = t ? [...t.querySelectorAll('tbody tr')] : [];
+    return {
+      kami: !!t,
+      head: t ? [...t.querySelectorAll('thead th')].map((x) => x.textContent.trim()) : [],
+      gyou: tr.length,
+      hi: t ? t.querySelectorAll('tbody tr.hi').length : 0,
+      atama: tr.length ? tr[0].children[0].textContent.trim() : '',
+      takasa: box ? Math.round(box.getBoundingClientRect().height) : 0,
+      hamidashi: box ? box.scrollWidth - box.clientWidth : 0,
+    };
+  });
+  // eslint-disable-next-line no-console
+  console.log('★内訳の 紙★ ' + JSON.stringify(r));
+  expect(r.kami, '★紙（罫線の表）に なっていません★').toBe(true);
+  expect(r.head, '★見出しが 違います★').toEqual(['項目', '金額']);
+  expect(r.gyou, '★項目の 数が 合いません★').toBe(11);
+  expect(r.hi, '★大事な 行（売上・会社に残る分）の 印が ありません★').toBe(2);
+  expect(r.atama, '★1行目が 売上では ありません★').toContain('売上');
+  // ★横に すべらない★（司さんの 決め）
+  expect(r.hamidashi, '★横に はみ出しています★').toBeLessThanOrEqual(1);
+  // ★短い★＝1画面（844px）に 収まる
+  expect(r.takasa, '★長すぎます（画面に 収まりません）★').toBeLessThan(844);
+});

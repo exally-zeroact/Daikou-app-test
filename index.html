@@ -4675,7 +4675,12 @@
         position: fixed;
         left: 0;
         right: 0;
-        z-index: 70;
+        /* ★★130 ＝ 常駐青バー(120)・overlay(80) より 上★★ 2026-09-06（司さん）
+           ★私が 09-05 に 70 に して しまい、青バー(120)と overlay(80)の 下に 潜りました★
+           ⇒ 司さんの 元の 指示「★全部の画面に 途切れたら 出して★」(2026-06-30)が
+             ★出ない 画面が ある★ 状態に なっていました。
+           ⇒ ★OBD が 切れても 運転手が 気づけない★＝距離が 黙って 少なくなる。 */
+        z-index: 130;
       "
       data-obd-bar-ukasu="1"
     >
@@ -7557,6 +7562,25 @@
 
       // ─── 設定読み込み ───
       function loadSettings() {
+        // ★★★代行の 距離係数は ★一番 先に★ 当てる★★★ 2026-09-06（司さん「距離が少ない」）
+        //   ★なぜ ここに 移したか（実測で 見つけた 落とし穴）★
+        //     この係数は 前は ★この関数の 終わりの方（旧7620行）★で 当てていました。
+        //     ところが 手前に ★try で 守られていない `JSON.parse`★ が 在ります
+        //     （`daikou_settings` を 読む所）。そこが 1回でも こければ
+        //       ・呼ぶ側（旧10418行）が try/catch で ★黙って 飲み込む★
+        //       ・⇒ ★この行まで 来ない★ ⇒ 係数は 既定の ★1.0 のまま★
+        //     ★1.0 のままだと 2つ 同時に 起きます★
+        //       ①代行の +0.85% が 乗らない
+        //       ②js/meter.js:137 `daikouMode: _daikouDistFactor > 1.0` が ★false★ に なり、
+        //         pipeline の OBD天井の 分位が ★p50 → p25★ に 落ちる。
+        //         ★その差は コードに 実測で 書いてある＝「実走検証で -16%判明」★
+        //         （js/pipeline-distance.js 199行）
+        //     ⇒★★合わせて 約 -17%。画面にも 記録にも 何も 出ません★★
+        //   ★だから 何より 先に 当てる★＝手前に 何が 在っても 影響を 受けない。
+        //   ★数字は 1つも 変えていません（1.0085 のまま・当てる 順番だけ）★
+        if (typeof Meter !== 'undefined' && typeof Meter.setDaikouDistanceFactor === 'function') {
+          Meter.setDaikouDistanceFactor(1.0085);
+        }
         // ★★料金表（2026-08-30・Firebase → Supabase）★★
         //   ①★まず 手元の 写しを 当てる（通信 0回）★＝★圏外でも 料金が 出る★
         //   ②その後で 倉庫から 取り直す。取れなければ ①のまま（★写しは 消さない★）
@@ -7583,21 +7607,31 @@
           localStorage.setItem('daikou_discounts', JSON.stringify([])); // ★値引きプリセット(空で開始)
         }
 
+        // ★★ここで こけても 後ろを 止めない★★ 2026-09-06（司さん）
+        //   `daikou_settings` が 壊れていると JSON.parse が こけます。
+        //   前は それが ★関数ごと 落とし★、呼ぶ側の try/catch が 黙って 飲み込み、
+        //   後ろの 設定が まるごと 当たっていませんでした（★何も 出ない★）。
+        //   ⇒ ★ここだけで 受け止めて 先へ 進む★／★出来なかった事は 記録に 出す★
         const s = localStorage.getItem('daikou_settings');
-        if (s) {
-          const obj = JSON.parse(s);
-          surchargeEnabled = obj.surchargeEnabled || false;
-          surchargeRate = obj.surchargeRate || 1.2;
-          vehicleId = obj.vehicleId || 'v1';
-          // localStorageから料金設定も読み込む（Firebase未接続時の保険）
-          if (obj.baseFare) {
-            Meter.setFareConfig({
-              base_fare: obj.baseFare || 1300,
-              base_distance_m: obj.baseDistanceM || 1000,
-              add_distance_m: obj.addDistanceM || 420,
-              add_fare: obj.addFare || 100,
-            });
+        try {
+          if (s) {
+            const obj = JSON.parse(s);
+            surchargeEnabled = obj.surchargeEnabled || false;
+            surchargeRate = obj.surchargeRate || 1.2;
+            vehicleId = obj.vehicleId || 'v1';
+            // localStorageから料金設定も読み込む（Firebase未接続時の保険）
+            if (obj.baseFare) {
+              Meter.setFareConfig({
+                base_fare: obj.baseFare || 1300,
+                base_distance_m: obj.baseDistanceM || 1000,
+                add_distance_m: obj.addDistanceM || 420,
+                add_fare: obj.addFare || 100,
+              });
+            }
           }
+        } catch (e) {
+          // ★黙って 飲み込まない★（何が こけたか 分かるように 残す）
+          console.error('[設定] daikou_settings が 読めません:', e);
         }
         // ★代行距離係数(現行の狙い=DM Light基準 +0.2%着地)をシステム固定値で自動適用 (2026-06-18/06-22/07-04更新)★:
         //   距離計算式に乗算し distance_m をメーター機(随伴車DM)基準に着地→料金/表示/総走行が追従。料金には係数を掛けない。
@@ -11386,13 +11420,60 @@
         //   初回登録 (controller=null → SW) では reload しない (無限 loop 防止)。
         const _hadSWController = !!navigator.serviceWorker.controller;
         let _swReloaded = false;
+        // ★★業務中は 新しい版を 当てない（読み直さない）★★ 2026-09-06（司さん）
+        //   ★司さんの言葉★「なんで距離や課金変わらんってあれだけゆうて変わったんど」
+        //
+        //   ★何が 起きていたか（実測 2026-09-06）★
+        //     事務所の 画面しか 直していなくても sw.js の 版が 変わります。
+        //     版が 変わると ここが ★走行中でも location.reload()★ を していました。
+        //     読み直すと:
+        //       ①★OBD の Bluetooth が 切れる★（画面が 作り直される）
+        //       ②★「OBDが切れました」の 赤バーが 出ない★
+        //          ＝ _obdWasConnected が ただの変数で 0 に 戻る為（下で 直した）
+        //       ③自動で 繋ぎ直すのは ★Android Chrome だけ★（obd の 自動接続の 注記）
+        //       ④OBD が 死んだ間の 穴は ★位置の直線★で 埋まる＝★道より 短い★
+        //     ⇒★★画面は まとも・距離だけ 少ない★★＝今回 従業員が 気づいた形。
+        //     ⇒★09-04 17:29〜09-05 16:16 に 版が 6回 変わった＝「今までなかった」の 正体★
+        //
+        //   ★直し★ ★業務中は 読み直さない★／★業務が 終わってから 当てる★。
+        //     ・新しい版は SW に 入ったまま（消えません・次に 当たります）
+        //     ・業務が 終わったら 5秒以内に 自分で 読み直します
+        //   ★距離にも 料金にも 1文字も 触っていません★（★いつ 読み直すか★ だけ）
+        let _swReloadMachi = false;
+        function _gyoumuChuu() {
+          try {
+            const s =
+              typeof Business !== 'undefined' && typeof Business.getState === 'function'
+                ? Business.getState()
+                : null;
+            return !!(s && s.start_time);
+          } catch (_) {
+            // ★分からない時は「業務中では ない」＝今まで通り★
+            //   （ここに来るのは Business が まだ 読めていない＝起動直後だけ）
+            return false;
+          }
+        }
         navigator.serviceWorker.addEventListener('controllerchange', function () {
           if (_swReloaded) return;
           if (!_hadSWController) return; // 初回登録は reload skip
+          if (_gyoumuChuu()) {
+            _swReloadMachi = true;
+            if (typeof dlog === 'function')
+              dlog('[SW] controllerchange → ★業務中なので 読み直さない★（業務終了まで 待つ）');
+            return;
+          }
           _swReloaded = true;
           if (typeof dlog === 'function') dlog('[SW] controllerchange → reload (新 code 適用)');
           window.location.reload();
         });
+        // ★業務が 終わったら 当てる★（待たせた 分を 取りに行く）
+        setInterval(function () {
+          if (!_swReloadMachi || _swReloaded) return;
+          if (_gyoumuChuu()) return;
+          _swReloaded = true;
+          if (typeof dlog === 'function') dlog('[SW] 業務が 終わったので 新 code を 当てる');
+          window.location.reload();
+        }, 5000);
         navigator.serviceWorker
           .register('/sw.js')
           .then(function (reg) {
@@ -17220,7 +17301,29 @@
           var _obdLastGoodT = null; // OBDが距離メインで健全だった直近時刻 (null=OBD非駆動/手動切断/業務外)
           var _obdWarnOn = false; // 警告表示中フラグ
           // ★OBD切断 再接続バー(全画面・司さん2026-06-30): 一度繋いだ後の途切れを検知して全画面に再接続を促す。
-          var _obdWasConnected = false; // 一度でも接続したか(手動切断/未接続では再接続バーを出さない用)
+          // ★★読み直しても 覚えている★★ 2026-09-06（司さん「距離が少なめに出た」）
+          //   ★前★ ただの変数＝★画面を 読み直すと 0 に 戻る★
+          //     ⇒ 新しい版が 来て 読み直した 後、OBD は 切れているのに
+          //       ★「この画面で 一度も 繋いでいない」扱いで 赤バーが 出ない★
+          //     ⇒★運転手は 切れた事に 気づけない／距離だけ 少なくなる★
+          //   ★今★ 端末に 覚える。★手動で 切った時は 消す★（今まで通り 出さない）
+          //   ★距離にも 料金にも 触りません★（警告を 出すか 出さないか だけ）
+          var _OBD_TSUNAIDA_KEY = 'dk_obd_tsunaida';
+          function _obdTsunaidaHozon(v) {
+            try {
+              if (v) localStorage.setItem(_OBD_TSUNAIDA_KEY, '1');
+              else localStorage.removeItem(_OBD_TSUNAIDA_KEY);
+            } catch (_) {
+              /* 覚えられなくても 業務は 止めない */
+            }
+          }
+          var _obdWasConnected = (function () {
+            try {
+              return localStorage.getItem(_OBD_TSUNAIDA_KEY) === '1';
+            } catch (_) {
+              return false;
+            }
+          })(); // 一度でも接続したか(手動切断/未接続では再接続バーを出さない用)
           var _obdDropSince = null; // _obdWasConnected中に切断へ入った時刻(猶予4s判定・null=切断でない)
           var _obdClearSince = null; // 警告解除ヒステリシスの安定開始時刻
           var JA = {
@@ -17400,6 +17503,7 @@
             btnD.addEventListener('click', function () {
               _obdLastGoodT = null; // 手動切断 = 警告対象外 (ユーザー意図のOFF)
               _obdWasConnected = false; // 手動切断 = 再接続バーも出さない
+              _obdTsunaidaHozon(false); // ★覚えている分も 消す★
               O.disconnect();
             });
           }
@@ -17410,6 +17514,7 @@
               if (_obdConnected) {
                 _obdLastGoodT = null; // 手動切断 = 警告対象外
                 _obdWasConnected = false; // 手動切断 = 再接続バーも出さない
+                _obdTsunaidaHozon(false); // ★覚えている分も 消す★
                 O.disconnect();
               } else doConnect();
             });
@@ -17443,7 +17548,10 @@
             // ★OBD切断 再接続バー(全画面・司さん2026-06-30「全部の画面に途切れたら出して」)★
             //   一度繋いだ後(_obdWasConnected)に切断したら、猶予4s(自動再接続の余地)後に
             //   全画面の赤バー+赤チップ「OBD 再接続」で再接続を促す。手動切断/未接続/非対応では出さない。
-            if (_obdConnected) _obdWasConnected = true;
+            if (_obdConnected && !_obdWasConnected) {
+              _obdWasConnected = true;
+              _obdTsunaidaHozon(true); // ★読み直しても 覚えている★
+            }
             var _obdSupported = typeof O.isSupported === 'function' && O.isSupported();
             var _obdDropped = _obdSupported && !_obdConnected && _obdWasConnected;
             if (_obdDropped) {
