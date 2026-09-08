@@ -20,7 +20,7 @@
 //   ✅ 業務中に急にバージョン変わらない（安全）
 // ===========================================
 
-const CACHE_NAME = 'daikome-e842eaf';
+const CACHE_NAME = 'daikome-a14a849';
 // ★設計変更宣言 (2026-05-13): 47県データを固定名 cache に分離
 //   旧: アプリコード CACHE_NAME が hash で毎デプロイ更新 → 旧 cache 全削除 →
 //       47県データ (/data/roads-*.js) も全削除 → 全欠落・204MB 再 DL
@@ -141,6 +141,21 @@ const CORE_CODE_FILES = [
   '/js/meter-persist.js',
   '/js/carryover.js',
   '/js/trip-edit.js',
+  // ★★2026-09-08 入れ忘れていた 5本★★（司さん「距離は増えるけど金額が増えない」）
+  //   ★fare-calc.js が 無いと どうなるか（実測）★
+  //     オフラインで 読めない ⇒ FareCalc が 無い
+  //     ⇒ Meter.calcFare が 例外を 投げる
+  //     ⇒ 画面を 書く 所は ★距離を 先に 書いて★ その後 落ちる
+  //       ＝★距離だけ 増えて 料金は 0 の まま★
+  //     ⇒ 確定（onSend）も 同じ 関数を 呼ぶ ので ★押しても 効かない★
+  //   ★2026-09-06 に meter から 切り出した 時に ここへ 足し忘れました★
+  //   （オンラインの 間は 走りながら 取れて いたので 気づけなかった。
+  //     CACHE_NAME が 変わって 古い 控えが 消えた 日に 表に 出た）
+  '/js/fare-calc.js',
+  '/js/fare-config-store.js',
+  '/js/dl-plan.js',
+  '/js/training-collector.js',
+  '/js/dk-env-badge.js',
 ];
 
 self.addEventListener('install', function (e) {
