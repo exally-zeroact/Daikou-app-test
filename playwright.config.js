@@ -20,8 +20,26 @@ export default defineConfig({
   captureGitInfo: { commit: false, diff: false },
   use: {
     baseURL: 'http://localhost:3000',
+    // ★★時間帯は 日本に 固定★★ 2026-09-09（実測）
+    //   ★なぜ 要るか★ CI は UTC で 走るので
+    //     ①深夜割増（22〜5時）が 意図せず 掛かる（1,300 → 1,560）
+    //     ②★日付の 境目が 9時間 ずれる★
+    //   ⇒ ★手元は 緑・CI だけ 赤★ という
+    //     一番 見つけにくい 形に なる。
+    //   ★お客さんは 日本に 居る★ので
+    //   ★試験を 本番に 合わせる★（逆は しない）
+    timezoneId: 'Asia/Tokyo',
     headless: true,
     trace: 'retain-on-failure',
+    // ★★落ちた 時の 証拠を 残す★★ 2026-09-06（指示役）
+    //   ★なぜ 要るか★
+    //     『たまに 赤』は ★明日には いつもの 赤★に なり、★いつもの 赤は 誰も 見なく なる★。
+    //     （今日 飲み屋が 87時間 赤だったのは そこから）
+    //   ★足跡（trace）だけでは 開かないと 分からない★ので
+    //   ★絵と 動画★も 残す。★落ちた 回だけ★＝緑の 回は 1バイトも 増えません。
+    //   ★試験の 判定は 1文字も 変えていません★（残す 物が 増えるだけ）
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
   projects: [
     {
