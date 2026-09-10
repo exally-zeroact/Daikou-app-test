@@ -37,7 +37,24 @@ const UTSUSHI = path.join(__dirname, '..', '..', 'tools', 'fake-clock.mjs');
 const SEIHON = 'C:/Users/zeroa/rakually-test/tools/fake-clock.mjs';
 const KIROKU = 'e14288e4ec2c57c127a4277a574f517e00c2d5c57b885c8c49c2bbd74b8f3b06';
 
-const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+// ★★行の 終わりに 寄りかからない（2026-09-10）★★
+//   この repo は ★倉庫は LF・手元(Windows)は core.autocrlf で CRLF★（.gitattributes 無し）
+//   ⇒ 写しだけ CRLF に なり ★中身は 1バイトも 違わないのに sha256 が 変わって 赤★
+//     実測 … 写し そのまま 953034f9… ／ ★LF に 揃えると e14288e4…＝記録と 一致★
+//              正本(rakually-test) は 元から LF ＝ e14288e4…
+//   ⇒★行の 終わりを LF に 揃えてから 数える★＝★見るのは 中身★
+//     （★記録した 値は 変えて いません★＝LF の 時の 値の まま）
+//   ★配る ファイルは 1バイトも 触りません★
+const sha = (p) =>
+  crypto
+    .createHash('sha256')
+    .update(
+      fs
+        .readFileSync(p, 'utf8')
+        .split(String.fromCharCode(13) + String.fromCharCode(10))
+        .join(String.fromCharCode(10))
+    )
+    .digest('hex');
 
 describe('★借りた 時計の道具（Rakunally の 写し）★', () => {
   it('★写しが 在る★', () => {
