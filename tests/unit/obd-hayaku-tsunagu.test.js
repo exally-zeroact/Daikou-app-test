@@ -31,7 +31,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'js', 'obd-client.js'), 'utf8');
+// ★★行の 終わりに 寄りかからない（2026-09-10）★★
+//   この repo は ★倉庫は LF・手元(Windows)は core.autocrlf で CRLF★（.gitattributes 無し）
+//   ⇒ 下で 字を 探して 本物の 関数を 切り出す時 ★手元だけ 見つからず★
+//     ★関数が 空に なり ReferenceError で 赤★に なって いました（★CI は 緑・手元だけ 赤★）
+//   ⇒★読んだ 直後に 行の 終わりを LF に 揃える★（★配る ファイルは 1バイトも 触りません★）
+const SRC = fs
+  .readFileSync(path.join(__dirname, '..', '..', 'js', 'obd-client.js'), 'utf8')
+  .split(String.fromCharCode(13) + String.fromCharCode(10))
+  .join(String.fromCharCode(10));
 
 // ★本物の _initElm を ファイルから 切り出して 動かす★（写しを 作らない）
 function tsukuru(kotae) {
