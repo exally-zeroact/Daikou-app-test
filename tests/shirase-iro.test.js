@@ -190,15 +190,22 @@ describe('★知らせの 箱を 濃い色で 塗らない★', () => {
     });
 
   it('★★前の 塗りに 戻すと 赤に なる（2つとも）★★', () => {
+    /* ★★字そのものに 寄りかからない★★（2026-09-10 に 踏んだ）
+       最初 `.replace('background: #ffffff;', …)` と 書きました。
+       ⇒ commit の 時に ★prettier/stylelint が #ffffff を #fff に 縮めた★
+       ⇒ 探す 字が 見つからず ★写しを 壊せて いないのに 緑★に なる 所でした
+       ⇒★規則の 中の 塗りを ★形で★ 見つけて 差し替える★（字を 決め打ちしない） */
     const kumi = [
-      [0, 'background: rgba(0, 0, 0, 0.75);'],
-      [1, 'background: #1c1c1e;'],
+      [0, 'rgba(0, 0, 0, 0.75)'],
+      [1, '#1c1c1e'],
     ];
     for (const [i, mae] of kumi) {
-      const utsushi = FILES[i].text.replace('background: #ffffff;', mae);
-      expect(utsushi, '★写しを 壊せて いない＝この 試験は 何も 見て いない★').not.toBe(
-        FILES[i].text
-      );
+      const rules = toastRules(FILES[i].text).filter((r) => !menjoKa(r.name));
+      expect(rules.length, '★' + FILES[i].name + ' に 知らせの 規則が 無い★').toBeGreaterThan(0);
+      const r = rules[0];
+      const kowashita = r.body.replace(/background(-color)?\s*:\s*[^;}]+/, 'background: ' + mae);
+      expect(kowashita, '★写しを 壊せて いない＝この 試験は 何も 見て いない★').not.toBe(r.body);
+      const utsushi = FILES[i].text.replace(r.body, kowashita);
       expect(hantei(utsushi), '★' + FILES[i].name + ' で 戻しても 赤に ならない★').toBe(true);
     }
   });
