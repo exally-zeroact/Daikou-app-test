@@ -24,7 +24,9 @@ const DISAGREE_THRESHOLD = 0.02; // tier1 と tier2 が 2% 以上違うときだ
 
 // ★2026-08-28（指示役）★ 外の鍵が要る見張りは ★正しい★。ただし ★黙って緑にしない★。
 if (!KEY) {
-  console.log('[tier4] ★未測定★ GOOGLE_DIRECTIONS_API_KEY が 設定されていません（外の鍵が要ります）');
+  console.log(
+    '[tier4] ★未測定★ GOOGLE_DIRECTIONS_API_KEY が 設定されていません（外の鍵が要ります）'
+  );
   console.log('[tier4] MISOKUTEI=1 reason=GOOGLE_KEY-not-set');
   console.log('  ⇒「測っていない」であって「異常なし」ではありません。');
   process.exit(0);

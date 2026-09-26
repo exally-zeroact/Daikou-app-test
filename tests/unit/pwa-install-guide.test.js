@@ -71,8 +71,7 @@ describe('★入れる案内★', () => {
 
   it('★古いAPKへ誘導しない★（配っていたのは 2026/05/13 の物）', () => {
     // 客に見える字（class名やファイル名ではない）にAPKが出ないこと
-    const 見える = HTML
-      .replace(/<script[\s\S]*?<\/script>/g, '')
+    const 見える = HTML.replace(/<script[\s\S]*?<\/script>/g, '')
       .replace(/<style[\s\S]*?<\/style>/g, '')
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/<[^>]+>/g, ' ');

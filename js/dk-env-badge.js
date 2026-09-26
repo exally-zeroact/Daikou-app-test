@@ -114,13 +114,13 @@
     b.style.paddingTop = motoPx + h + 'px';
     // ★親に「自分で 縦に スクロールする 箱」が 在るか★
     //   在れば その 中で 貼り付いている＝★画面の 上では ない★ので 下げない
-    function _nakaNoHako(e) {
+    const _nakaNoHako = (e) => {
       for (let p = e.parentElement; p && p !== d.body; p = p.parentElement) {
         const s2 = global.getComputedStyle(p);
         if (s2.overflowY === 'auto' || s2.overflowY === 'scroll') return true;
       }
       return false;
-    }
+    };
 
     // ★上に貼り付く物も 同じ分 下げる★（帯に 隠れると 押せなくなる）
     try {

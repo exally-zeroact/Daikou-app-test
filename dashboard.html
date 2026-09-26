@@ -642,7 +642,12 @@
           <!-- 端末一覧 -->
           <div class="card">
             <h2>有効化した端末</h2>
-            <div class="desc">機種変・入れ替えの時は「外す」で席を空けられます。</div>
+            <div class="desc">
+              <b>車ごとの URL／QR を 下に 出しています。</b>
+              その車の スマホで 開けば、データを 消しても 機種変しても
+              <b>同じ 席に 戻ります</b>（席は 増えません）。<br />
+              「外す」は ★その車を やめる 時だけ★ 使ってください（席が 1つ 空きます）。
+            </div>
             <div id="devList"></div>
           </div>
         </div>
@@ -694,7 +699,8 @@
               <b>高速代・橋代</b>など、売上から 引く 物の 名前を ここで 決めます。<br />
               決めた 物は <b>下の 帯の「入力」</b>に そのまま 出ます。<br />
               <b>▲▼</b>で 出す 順番を 変えられます。<br />
-              <b>消しても 前に 入れた 金額は 消えません</b>（使わない 印を 付けるだけ）。
+              <b>「消す」を 押すと この 一覧から 消えます。</b>
+              <b>前に 入れた 金額は そのまま 残ります</b>（売上の 引き算も 今までどおり）。
             </div>
             <table class="kami" id="jippiTbl" style="margin-top: 10px">
               <thead>
@@ -870,7 +876,15 @@
               return r.ok ? r.json() : [];
             })
             .then(function (j) {
-              JIPPI = j || [];
+              // ★★「消す」を 押した 行は 一覧に 出さない★★ 2026-09-18（司さん）
+              //   ★倉庫からは 消していません★＝deleted_at を 入れて 隠すだけ。
+              //   訳＝売上の 引き算（js/jippi-hozon.js goukei）は ★一覧を 回して★ 足すので、
+              //     行ごと 消すと ★過去に 入れた 実費が 売上から 引かれなく なる★
+              //     ＝★昔の 売上の 数字が 変わる★。だから 隠すだけに する。
+              //   （売上の 画面は 絞らずに 読む＝消した 物も 今までどおり 引かれる）
+              JIPPI = (j || []).filter(function (k) {
+                return k && !k.deleted_at;
+              });
               jippiDraw();
             })
             .catch(function () {
@@ -949,8 +963,19 @@
           });
           Array.prototype.forEach.call(tb.querySelectorAll('[data-keshi]'), function (b) {
             b.onclick = function () {
-              // ★消す＝使わない 印★（前に 入れた 金額は 消さない）
-              jippiSave(b.getAttribute('data-keshi'), 'active', false);
+              // ★★消す＝一覧から 消える★★ 2026-09-18（司さん「消す押したら一覧から消えるようにしろや」）
+              //   ★前は active=false を 書くだけ★だった＝「使う」の ✓ を 外すのと 同じで、
+              //     ★一覧には 残ったまま★。押しても 何も 起きないように 見えていた。
+              //   ★前に 入れた 金額は 今までどおり 消えません★（倉庫の 行は 残す）
+              //
+              //   ★★active は 触らない★★（2026-09-18 実測で 判った・危なかった）
+              //     売上（uriage.html 740行）は ★active !== false で 絞ってから★ 足している。
+              //     ⇒ ここで active=false を 書くと ★過去に 入れた 実費が 売上から
+              //       引かれなく なる＝昔の 売上の 数字が 上がる★。
+              //     ⇒ ★deleted_at だけ 書く★。入力から 消すのは nyuryoku 側の deleted_at の 絞り。
+              jippiSave(b.getAttribute('data-keshi'), {
+                deleted_at: new Date().toISOString(),
+              });
             };
           });
         }
@@ -981,9 +1006,19 @@
             label: String(ima.label == null ? '' : ima.label),
             sort_order: Number(ima.sort_order) || 0,
             active: ima.active !== false,
+            // ★消した 印を 持ち越す★（upsert は 行を 丸ごと 置き換える＝
+            //   書かないと 名前を 打ち直した だけで 消した 物が 生き返る）
+            deleted_at: ima.deleted_at || null,
             updated_at: new Date().toISOString(),
           };
-          body[field] = value;
+          // ★2つ 以上を 一度に 変える 時は 物で 渡す★（消す＝deleted_at と active を 同時に）
+          if (field && typeof field === 'object') {
+            Object.keys(field).forEach(function (k) {
+              body[k] = field[k];
+            });
+          } else {
+            body[field] = value;
+          }
           // ★名前を 空に する ことは 出来ない★（倉庫の 決まり）
           if (!String(body.label || '').trim()) {
             jippiMsg('名前を 空に は できません。');
@@ -1411,6 +1446,73 @@
                 tools.appendChild(btn);
                 wrap.appendChild(left);
                 wrap.appendChild(tools);
+
+                // ★★車ごとの URL / QR★★ 2026-09-19（司さん）
+                //   ★司さん★「このURLとQRコードは車ごとに出さないかんことないか？
+                //             忘れたり消してしまったらもとのメーターに戻れんやないか」
+                //             「車ごとに出さな何のために較正しよんど」
+                //   ★訳★ 端末の 番号は スマホの 中で 作る 乱数＝消すと ★別の 端末★ に なる。
+                //     席が 埋まっていれば 断られ、★事務所で 外す まで 現場が 止まる★。
+                //     較正は ★車（VIN）ごと★ なのに 席は スマホごと ＝ 噛み合っていなかった。
+                //   ★これ★ この車の URL（&d=席の番号）を 開けば ★同じ席に 戻る★。
+                //     席は 増えない（倉庫から見ると 同じ端末が 戻ってきただけ＝冪等）。
+                //   ★QR_BLOCKED の 時は 出さない★（行き先が 違う 時に 配らない・2026-08-21）
+                if (!QR_BLOCKED && currentUrl) {
+                  var carUrl = currentUrl + '&d=' + encodeURIComponent(d.device_id);
+                  var kuruma = document.createElement('div');
+                  kuruma.style.cssText = 'width:100%;margin-top:8px';
+                  var box = document.createElement('div');
+                  box.className = 'url-box';
+                  box.style.cssText = 'font-size:11.5px;padding:8px 10px';
+                  box.textContent = carUrl;
+                  var bar = document.createElement('div');
+                  bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px';
+                  var cp = document.createElement('button');
+                  cp.className = 'btn';
+                  cp.type = 'button';
+                  cp.textContent = 'この車のURLをコピー';
+                  cp.onclick = function () {
+                    function done() {
+                      cp.textContent = 'コピーしました';
+                      setTimeout(function () {
+                        cp.textContent = 'この車のURLをコピー';
+                      }, 1600);
+                    }
+                    if (navigator.clipboard && navigator.clipboard.writeText)
+                      navigator.clipboard.writeText(carUrl).then(done, done);
+                    else done();
+                  };
+                  var qb = document.createElement('button');
+                  qb.className = 'btn ghost';
+                  qb.type = 'button';
+                  qb.textContent = 'QRを表示';
+                  var qv = document.createElement('div');
+                  qv.style.cssText = 'display:none;margin-top:10px';
+                  qb.onclick = function () {
+                    if (qv.style.display === 'none') {
+                      try {
+                        var qr = window.qrcode(0, 'M');
+                        qr.addData(carUrl);
+                        qr.make();
+                        qv.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2 });
+                      } catch (e) {
+                        qv.innerHTML = '';
+                      }
+                      qv.style.display = 'block';
+                      qb.textContent = 'QRを隠す';
+                    } else {
+                      qv.style.display = 'none';
+                      qb.textContent = 'QRを表示';
+                    }
+                  };
+                  bar.appendChild(cp);
+                  bar.appendChild(qb);
+                  kuruma.appendChild(box);
+                  kuruma.appendChild(bar);
+                  kuruma.appendChild(qv);
+                  wrap.style.flexWrap = 'wrap';
+                  wrap.appendChild(kuruma);
+                }
                 list.appendChild(wrap);
               });
             }); // loadCarNames

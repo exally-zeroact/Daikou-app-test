@@ -175,7 +175,9 @@ describe('★実物のファイルで確かめる★', () => {
 describe('★部屋つきの棚の名前★', () => {
   it('daikome.dk_◯◯ は通す', () => {
     expect(
-      G.guard('alter table daikome.dk_payroll_settings add column if not exists show_car_sales boolean not null default true;').ok,
+      G.guard(
+        'alter table daikome.dk_payroll_settings add column if not exists show_car_sales boolean not null default true;'
+      ).ok,
       '★自分の棚を止めている★'
     ).toBe(true);
   });
@@ -183,10 +185,13 @@ describe('★部屋つきの棚の名前★', () => {
     expect(G.guard('alter table dk_trips add column if not exists memo text;').ok).toBe(true);
   });
   it('★他の部屋は止める★', () => {
-    expect(G.guard('alter table public.users add column x text;').ok, '★他の部屋を通した★').toBe(false);
-    expect(G.guard('alter table kyuyo.dk_x add column x text;').ok, '★他の部屋の dk_ を通した★').toBe(
+    expect(G.guard('alter table public.users add column x text;').ok, '★他の部屋を通した★').toBe(
       false
     );
+    expect(
+      G.guard('alter table kyuyo.dk_x add column x text;').ok,
+      '★他の部屋の dk_ を通した★'
+    ).toBe(false);
   });
   it('★自分の部屋でも dk_ で始まらない棚は止める★', () => {
     expect(G.guard('alter table daikome.employees add column x text;').ok).toBe(false);
