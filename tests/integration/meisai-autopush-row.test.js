@@ -251,7 +251,10 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
     Object.assign(
       {
         id: 'row-1',
-        extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362 },
+        // ★★2026-09-29 足した＝dk_meter_yen（その時 メーターが 出していた 額）★★
+        //   これが 無いと 「事務所が 手で 直した」と 「メーターが 変わった」を
+        //   見分けられない。今の行は 印つきなので amount = dk_meter_yen に 揃える。
+        extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362, dk_meter_yen: 2200 },
         company: 'Lounge Chouchou',
         date: '2026-08-04',
         // ★2026-08-09: 行き先は つないだ形（地元の市は落とす）★
@@ -296,7 +299,8 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
     ]);
     expect(r[0].distance).toBe(5.3);
     const cur = existing({ distance: '5.30' });
-    cur.extra = { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5300 };
+    // ★印も 揃える＝「何も 変わっていない」状態に する (2026-09-29)
+    cur.extra = { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5300, dk_meter_yen: 2200 };
     const p = planMeisaiWrite(r, [cur]);
     expect(p.updates.length, '★5.30 と 5.3 を別物と見ている★').toBe(0);
   });
@@ -306,12 +310,19 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
     expect(p.updates[0].patch.distance).toBe(5.36);
   });
 
-  it('★値引きして金額が変わったら直す★', () => {
-    const p = planMeisaiWrite(rows(), [existing({ amount: 9999 })]);
+  it('★メーターが 変わったら 金額を 直す★（値引きを 届ける）', () => {
+    // ★印（dk_meter_yen）が 9999 ＝メーターは 9999 だった → 今 2200 に 変わった
+    const p = planMeisaiWrite(rows(), [
+      existing({
+        amount: 9999,
+        extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362, dk_meter_yen: 9999 },
+      }),
+    ]);
     expect(p.inserts.length).toBe(0);
     expect(p.updates.length).toBe(1);
     expect(p.updates[0].id).toBe('row-1');
-    expect(p.updates[0].patch.amount, '★古い金額のまま残る★').toBe(2200);
+    expect(p.updates[0].patch.amount, '★値引きが 事務所に 届かない★').toBe(2200);
+    expect(p.updates[0].patch.extra.dk_meter_yen, '★印を 進めないと 毎回 直しに 行く★').toBe(2200);
   });
 
   it('★請求先を付け替えたら直す★', () => {
@@ -320,7 +331,13 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
   });
 
   it('★司さんが後から書いた 備考・人数・名前 は絶対に触らない★', () => {
-    const p = planMeisaiWrite(rows(), [existing({ amount: 9999 })]);
+    // ★印を ずらして 「直す側」に 回してから 見る（直さないと 空振りに なる）
+    const p = planMeisaiWrite(rows(), [
+      existing({
+        amount: 9999,
+        extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362, dk_meter_yen: 9999 },
+      }),
+    ]);
     const patch = p.updates[0].patch;
     ['note', 'people', 'name'].forEach((c) => {
       expect(Object.prototype.hasOwnProperty.call(patch, c), '★' + c + ' を書き換えている★').toBe(
@@ -330,8 +347,41 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
   });
 
   it('★変わった列だけ直す★（全部上書きしない）', () => {
-    const p = planMeisaiWrite(rows(), [existing({ amount: 9999 })]);
-    expect(Object.keys(p.updates[0].patch).sort()).toEqual(['amount']);
+    const p = planMeisaiWrite(rows(), [
+      existing({
+        amount: 9999,
+        extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362, dk_meter_yen: 9999 },
+      }),
+    ]);
+    expect(Object.keys(p.updates[0].patch).sort()).toEqual(['amount', 'extra']);
+  });
+
+  it('★事務所が 手で 直した 金額は 送り直しで 戻さない★（司さん 2026-09-29）', () => {
+    // ★印 2200 ＝メーターは 変わっていない。事務所が 1600 に 直した★
+    const p = planMeisaiWrite(rows(), [existing({ amount: 1600 })]);
+    const patch = p.updates.length ? p.updates[0].patch : {};
+    expect(
+      Object.prototype.hasOwnProperty.call(patch, 'amount'),
+      '★事務所の 直しを メーターの 値に 戻している★'
+    ).toBe(false);
+  });
+
+  it('★印が 無い 古い行は 金額を 触らず 印だけ 付ける★', () => {
+    // この直しより 前に 入った 行（本番に 7行 実在）を 守る
+    const cur = existing({ amount: 1600 });
+    cur.extra = { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362 }; // ★印なし★
+    const p = planMeisaiWrite(rows(), [cur]);
+    expect(p.updates.length).toBe(1);
+    expect(
+      Object.prototype.hasOwnProperty.call(p.updates[0].patch, 'amount'),
+      '★印が 無いだけで 事務所の 直しを 消している★'
+    ).toBe(false);
+    expect(p.updates[0].patch.extra.dk_meter_yen, '★印を 付けていない＝次も 守れない★').toBe(2200);
+  });
+
+  it('★新しく 入れる 行には 印が 入っている★', () => {
+    const p = planMeisaiWrite(rows(), []);
+    expect(p.inserts[0].extra.dk_meter_yen).toBe(2200);
   });
 
   it('正確な距離が変わったら extra も直す（他の自由項目は残す）', () => {
