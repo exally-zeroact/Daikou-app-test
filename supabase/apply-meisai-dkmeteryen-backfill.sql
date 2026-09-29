@@ -24,8 +24,13 @@
 --   ・amount / company / date / note など ★お金と 字の 列は 1つも 触らない★。
 --   ・`daikome.dk_trips` に 相手が 居る 行だけ（居ない 行は そのまま 残す）。
 --
--- ★当て方★（門を 通す。★名前が apply-meisai-* の 物しか 通らない★）
---   node scripts/apply-meisai-sql.mjs supabase/apply-meisai-dkmeteryen-backfill.sql
+-- ★★当て方は 変わった（2026-09-29）★★
+--   この 字は `update … set` なので ★門(scripts/sql-guard.mjs)が 止める★。
+--   それで 正しい（門は「その update が 足すだけか」を 読めない）。
+--   ★門を ゆるめる のでは なく、この 1件しか 出来ない 道具を 作った★：
+--     node scripts/apply-dkmeteryen-backfill.mjs          … ★見るだけ★
+--     node scripts/apply-dkmeteryen-backfill.mjs --yaru   … 当てる
+--   この 紙は ★何を やるかの 記録★として 残す（このままでは 当てられない）。
 -- ============================================================
 
 update daikou.meisai m
