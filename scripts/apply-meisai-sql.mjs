@@ -109,7 +109,10 @@ async function main() {
       continue;
     }
     const sql = fs.readFileSync(path.resolve(ROOT, f), 'utf8');
-    const g = guard(sql, { room: HEYA, prefix: TANA });
+    // ★madoPublic:false★ この道具は 棚=meisai なので、窓(view)を public に 許すと
+    //   ★public.meisai（事務所が 読む 素通しの 窓）の 差し替えが 名前として 当たってしまう★。
+    //   この道具に 窓を 配る 用は 無い ので 一律で 止める（2026-09-29）。
+    const g = guard(sql, { room: HEYA, prefix: TANA, madoPublic: false });
     console.log(`  触る棚: ${g.tables.join(', ') || '(なし)'}`);
     if (!g.ok) {
       g.reasons.forEach((r) => console.log('  ✗ ' + r));
