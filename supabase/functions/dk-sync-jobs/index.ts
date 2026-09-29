@@ -12,7 +12,14 @@
 //     ・代行(trip)は勤務ごとに入れ直す(seq で一意)=送り直しで重複しない。
 //     ・★未払い(status='off')でもデータは受け取る★。データを人質にしない(締めは別の層でやる)。
 //     ・値は一切いじらない。メーターが確定した距離・料金をそのまま保存する。
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// ★★2026-09-29 版を x.y.z まで 固定した★★
+//   前は `@2` だった。★ソースが 1バイトも 同じでも、配り直すだけで
+//   借り物が 入れ替わる★（実測 2026-09-29: 配ってある 中身は 2.116.0 /
+//   今 esm.sh が @2 に 返すのは 2.117.2（9/25 公開））。
+//   しかも ★戻す 口が 無い★（/functions/<slug>/versions は 404）。
+//   会社の 決まりとも 一致：[[feedback_cdn_version_must_be_pinned]]
+//   ★今 動いている 物と 同じ 版に 固定する★（上げるなら 別の日に 測ってから）
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.116.0';
 // ★請求書アプリに入れる行を作る所（テストが同じ物を触れるよう外出し）★
 import { buildMeisaiRows, businessDate, planMeisaiWrite } from './meisai-row.js';
 
@@ -253,11 +260,27 @@ async function pushToInvoiceApp(
     //     飛ばすだけだと★請求書アプリだけ古い金額のまま残る★。
     //     直す時に触るのは金額/距離/請求先/日付/行き先だけ。
     //     ★備考・人数・名前は司さんが書いた物なので絶対に触らない★
-    const { data: exist } = await sb
+    // ★★2026-09-29 対立役に 叩かれて 3つ 直した★★
+    //   ①★error を 受ける★ … 前は `const { data: exist } =` だけで 捨てていた。
+    //      落ちると exist=null ⇒ 全行 inserts ⇒ ★索引が 1行でも 弾くと 束ごと 失敗★
+    //      ⇒ updates も 飛び、しかも 勤務は accepted 済み＝★二度と 送られない★。
+    //      書き側の 2箸所は error を 受けているのに ★読み側だけ 非対称★ だった。
+    //   ②★人の 絞り（.eq('user_id')）は 外さない★
+    //      ★一度 外しかけて 自分で 気づいて 戻した（2026-09-29）★。
+    //      `planMeisaiWrite` は ★dk_ref だけ★ で 突き合わせ、直す時は
+    //      `update(patch).eq('id', …)` ＝★行の id★ で 書く（user_id は 見ない・patch にも 入らない）。
+    //      ⇒ 絞りを 外すと ★A社の 同期が B社の 明細行を 書き換える★ 道が 開く。
+    //      索引との 見方の ずれ（索引は 表 全体）は ★下の 1行ずつ insert ＋ 23505 を 数える★
+    //      で 受け止める＝★弾かれた行は 飛ばして 数え、残りは 入る★。
+    //   ③★note を 取る★ … 下の planMeisaiWrite は cur.note を 見るのに 取っていなかった。
+    //      ⇒ いつも undefined ⇒ ★送るたび 備考を 上書きしに 行く★（司さんの 書いた 備考が 消える）。
+    const { data: exist, error: exErr } = await sb
       .from('meisai')
-      .select('id, extra, company, date, destination, amount, distance')
+      .select('id, extra, company, date, destination, amount, distance, note')
       .eq('user_id', ownerId)
       .in('extra->>dk_ref', refs);
+    // ★読めなかったら 書かない★（二重を 作るより 入れない 方が まし）
+    if (exErr) return 'error:明細を 読めなかった ' + String(exErr.message || exErr).slice(0, 100);
 
     // 行を作るのは meisai-row.js（★テストが同じ物を触れるように外に出してある★）
     //
@@ -286,16 +309,64 @@ async function pushToInvoiceApp(
     if (!rows.length) return 'skip:入れる代行が0件';
 
     const plan = planMeisaiWrite(rows, exist || []);
-    if (plan.inserts.length) {
-      const { error: iErr } = await sb.from('meisai').insert(plan.inserts);
-      if (iErr) return 'error:' + String(iErr.message || iErr).slice(0, 120);
+    // ★★2026-09-29 1行ずつ 入れるに 変えた★★
+    //   前は 束で 1回 の insert だった。
+    //   `daikou.meisai` に dk_ref の unique 索引を 張った（2026-09-29）ので、
+    //   ★束の 中の 1行が 弾かれるだけで 束ごと 失敗★ し、
+    //   その場で return するので ★下の updates（金額・距離の 直し）も 丸ごと 飛ぶ★。
+    //   しかも 勤務は accepted に 入るので ★二度と 送られない＝黙って 欠ける★。
+    //   ⇒ ★入れるのは 1行ずつ★。弾かれた 1行だけ 飛ばして 残りは 入れる。
+    //   弾かれた数は 返事に 出す（★黙って 消さない★）。
+    // ★★2026-09-29 その2＝途中で 抜けない（対立役の 指摘）★★
+    //   前は 23505 以外の error で ★その場で return★ していた。
+    //   すると ①既に 入れた 行は 残る＝★半分 入った 請求書★
+    //         ②★下の updates が 丸ごと 走らない★（金額・距離・請求先の 直しが 全部 消える）
+    //         ③それでも 勤務は accepted に 入る ＝ ★二度と 送られず 半分の まま 確定★
+    //   束で 入れていた 頃は「全部 入らない」だったが、1行ずつに した 事で
+    //   ★見た目が 完成品に なる分 こちらの 方が 危ない★。
+    //   ⇒ ★最後まで 回し、updates も 必ず 走らせ、落ちた 数を 返事に 出す★。
+    //
+    //   ★往復の 上限★ この 関数は verify_jwt:false ＝ 運転手なら 誰でも 叩ける。
+    //   MAX_SHIFTS 50 × MAX_TRIPS 300 の 道が 開いている ので 上限を 置く。
+    //   実運用の 最悪は 1勤務 8件（本番 実測・平均 2.73件）なので 500 で 足りる。
+    const IRE_JOUGEN = 500;
+    let hajikareta = 0;
+    let shippai = 0;
+    let saigoNoWake = '';
+    let uchikiri = 0;
+    for (const row of plan.inserts) {
+      if (uchikiri >= IRE_JOUGEN) {
+        saigoNoWake = '上限 ' + IRE_JOUGEN + ' 件で 打ち切った';
+        shippai += plan.inserts.length - uchikiri;
+        break;
+      }
+      uchikiri++;
+      const { error: iErr } = await sb.from('meisai').insert([row]);
+      if (!iErr) continue;
+      const msg = String(iErr.message || iErr);
+      // 23505 = 索引が 弾いた（既に 在る）… 二重を 作らなかっただけなので 進む
+      if (/duplicate key|23505/i.test(msg)) {
+        hajikareta++;
+        continue;
+      }
+      shippai++;
+      saigoNoWake = msg.slice(0, 100);
     }
     for (const u of plan.updates) {
       const { error: uErr } = await sb.from('meisai').update(u.patch).eq('id', u.id);
       if (uErr) return 'error:直し ' + String(uErr.message || uErr).slice(0, 100);
     }
     if (!plan.inserts.length && !plan.updates.length) return 'skip:変わっていない';
-    return 'ok:' + plan.inserts.length + '件入れた/' + plan.updates.length + '件直した';
+    // ★入れられなかった 数も 必ず 返事に 出す（黙って 済ませない）★
+    return (
+      'ok:' +
+      (plan.inserts.length - hajikareta - shippai) +
+      '件入れた/' +
+      plan.updates.length +
+      '件直した' +
+      (hajikareta ? '/★' + hajikareta + '件 既に 在った★' : '') +
+      (shippai ? '/★' + shippai + '件 入らなかった: ' + saigoNoWake + '★' : '')
+    );
   } catch (e) {
     // 請求書側で何が起きても、ダイコメの実績受け取りは止めない
     return 'error:' + String((e as Error)?.message || e).slice(0, 120);

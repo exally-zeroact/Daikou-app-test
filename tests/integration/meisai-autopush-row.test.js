@@ -366,17 +366,37 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
     ).toBe(false);
   });
 
-  it('★印が 無い 古い行は 金額を 触らず 印だけ 付ける★', () => {
-    // この直しより 前に 入った 行（本番に 7行 実在）を 守る
-    const cur = existing({ amount: 1600 });
+  it('★印が 無い行でも 運転手の 値引きは 届く★（2026-09-29 やり直し）', () => {
+    // ★★交換比が 逆だったので 作り直した★★（対立役の 指摘・本番で 数えた）
+    //   前の形「印が 無く 金額も ずれていたら 何もしない（人の裁き待ち）」は
+    //     守る 相手 …… 7行・3,400円 ＝★全部 30日の 外＝もう 送られない＝元から 安全★
+    //     塞ぐ 相手 …… 83行・169,500円 ＝★これから 毎日 使う「値引きが 届く 道」★
+    //   さらに 裁き待ちは ★誰も 読んでいなかった★（j.meisai の 読み手 0箇所）
+    //   ⇒ ★読んで 直すのを やめ 構造で 直す★:
+    //     印は 書いた 時に 必ず 付く ので ★新しい行は 最初から 守られる★。
+    //     既に 在る行は ★1回きりの 埋め戻し★（apply-meisai-dkmeteryen-backfill.sql）。
+    const cur = existing({ amount: 3000 });
     cur.extra = { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362 }; // ★印なし★
+    const yasui = rows();
+    yasui[0].amount = 2500; // 運転手が 500円 値引き
+    yasui[0].extra.dk_meter_yen = 2500;
+    const p = planMeisaiWrite(yasui, [cur]);
+    expect(p.updates[0].patch.amount, '★値引きが 事務所に 届かない★').toBe(2500);
+    expect(p.updates[0].patch.extra.dk_meter_yen, '印を 付けていない＝次も 守れない').toBe(2500);
+  });
+
+  it('★印が 在れば 事務所の 直しは 守られる★（埋め戻しが 済んだ 後の 姿）', () => {
+    // 印＝★メーターの 額★ で 埋める ので、事務所が 下げた 行も 守られる
+    const cur = existing({
+      amount: 1600, // 事務所が 手で 下げた
+      extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362, dk_meter_yen: 2200 },
+    });
     const p = planMeisaiWrite(rows(), [cur]);
-    expect(p.updates.length).toBe(1);
+    const patch = p.updates.length ? p.updates[0].patch : {};
     expect(
-      Object.prototype.hasOwnProperty.call(p.updates[0].patch, 'amount'),
-      '★印が 無いだけで 事務所の 直しを 消している★'
+      Object.prototype.hasOwnProperty.call(patch, 'amount'),
+      '★事務所の 直しを メーターの 値に 戻している★'
     ).toBe(false);
-    expect(p.updates[0].patch.extra.dk_meter_yen, '★印を 付けていない＝次も 守れない★').toBe(2200);
   });
 
   it('★新しく 入れる 行には 印が 入っている★', () => {
@@ -457,16 +477,70 @@ describe('★立てても黙って落ちる、を二度とやらないこと★'
 
   it('★入れられなかった理由を返している★（今回これが無くて原因が分からなかった）', () => {
     expect(SRC, '理由を返していない').toMatch(/return\s+'error:'/);
-    expect(SRC, '入れた件数を返していない').toMatch(/return\s+'ok:'/);
+    // ★2026-09-29 返事が 多行に なったので ★字の 並びでなく「ok: を 返しているか」で 見る★
+    expect(SRC, '入れた件数を返していない').toContain("'ok:' +");
     expect(SRC, '返事に meisai が入っていない').toContain('accepted, meisai');
   });
 
-  it('★入れる時・直す時の失敗を捨てていない★', () => {
-    expect(SRC, 'insert のエラーを受け取っていない').toContain(
-      "const { error: iErr } = await sb.from('meisai').insert(plan.inserts)"
+  it('★読む時・入れる時・直す時の失敗を捨てていない★', () => {
+    // ★★2026-09-29 狙いの 側へ 向け直した★★
+    //   前は `insert(plan.inserts)` という ★書き方 そのもの★ を 探していた。
+    //   unique 索引を 張ったので ★束で 入れると 1行の 衝突で 束ごと 落ちる★。
+    //   ⇒ 1行ずつ 入れる 形に 変えた。★狙いは「失敗を 捨てない」★なので そちらを 見る。
+    //   ★読む側も 足した★（前は 書き側だけ 受けていて 非対称＝対立役の 指摘）
+    expect(SRC, '★明細を 読む 時の error を 受けていない★').toMatch(
+      /const \{ data: exist, error: exErr \}/
     );
-    expect(SRC, '直す時のエラーを受け取っていない').toMatch(/const \{ error: uErr \}/);
+    expect(SRC, '読めなかった時に 書きに 行っている').toMatch(/if \(exErr\) return 'error:/);
+    expect(SRC, 'insert の error を 受け取っていない').toMatch(/const \{ error: iErr \}/);
+    expect(SRC, '直す時の error を 受け取っていない').toMatch(/const \{ error: uErr \}/);
     expect(SRC, '直した結果を返していない').toContain('件直した');
+  });
+
+  it('★束で なく 1行ずつ 入れている★（索引が 1行 弾いても 残りを 落とさない）', () => {
+    expect(SRC, '★まだ 束で 入れている＝1行の 衝突で 勤務丸ごと 黙って 欠ける★').not.toMatch(
+      /insert\(plan\.inserts\)/
+    );
+    expect(SRC, '1行ずつ 回す 輪が 無い').toMatch(/for \(const row of plan\.inserts\)/);
+    expect(SRC, '★衝突を 黙って 飲んでいる（数を 返していない）★').toMatch(/hajikareta/);
+  });
+
+  it('★他社の 明細を 触らない＝人の 絞りを 外していない★（2026-09-29）', () => {
+    // ★★一度 外しかけて 自分で 気づいて 戻した★★
+    //   planMeisaiWrite は ★dk_ref だけ★ で 突き合わせ、
+    //   index.ts は `update(patch).eq('id', …)` ＝★行の id★ で 書く。
+    //   user_id は 見ないし patch にも 入らない。
+    //   ⇒ 読む時の 絞りを 外すと ★A社の 同期が B社の 明細行を 書き換える★。
+    //   索引との 見方の ずれは「1行ずつ insert ＋ 23505 を 数える」で 受け止める。
+    expect(SRC, '★人の 絞りを 外している＝他社の 明細を 書き換える★').toContain(
+      ".eq('user_id', ownerId)"
+    );
+    // 直す時に user_id を 書き換えていない事（行の 持ち主を 奪わない）
+    expect(SRC, '★直す時に user_id を 触っている★').not.toMatch(/patch\.user_id/);
+  });
+
+  it('★入れられなかった 数を 返事に 出している★（黙って 済ませない）', () => {
+    // ★裁き待ち(machi)は やめた★＝返事に 出しても ★誰も 読んでいなかった★（j.meisai の 読み手 0箇所）。
+    //   代わりに「既に 在った」「入らなかった」を 数えて 返す。
+    expect(SRC, '★裁き待ちが 残っている（誰も 読まない 物）★').not.toMatch(/plan\.machi/);
+    expect(SRC, '弾かれた数を 返していない').toContain('件 既に 在った');
+    expect(SRC, '入らなかった数を 返していない').toContain('件 入らなかった');
+  });
+
+  it('★途中で 抜けない＝直し(updates)は 必ず 走る★（半分 入った 請求書を 作らない）', () => {
+    // 前は 23505 以外で その場で return ⇒ ①半分 入る ②updates が 丸ごと 飛ぶ
+    //   ③それでも accepted に 入る ＝★半分の まま 確定・二度と 送られない★
+    const ireBu = SRC.slice(
+      SRC.indexOf('for (const row of plan.inserts)'),
+      SRC.indexOf('for (const u of plan.updates)')
+    );
+    expect(ireBu, '★入れる 輪の 中で 抜けている＝直しが 走らない★').not.toMatch(/return 'error:/);
+    expect(ireBu, '落ちた数を 数えていない').toMatch(/shippai\+\+/);
+  });
+
+  it('★往復に 上限が 在る★（誰でも 叩ける 口なので）', () => {
+    expect(SRC, '上限が 無い').toMatch(/IRE_JOUGEN/);
+    expect(SRC, '★上限が 効かない 形（偽の 番人）★').toMatch(/uchikiri >= IRE_JOUGEN/);
   });
 
   it('★行を作る所を関数の中に書き戻していない★（外に出ていないとテストできない）', () => {

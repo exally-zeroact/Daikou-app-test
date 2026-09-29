@@ -1,0 +1,37 @@
+-- ============================================================
+-- supabase/apply-meisai-dkmeteryen-backfill.sql
+--   ★既に 在る 明細に「その時 メーターが 出していた 額」の 印を 1回だけ 埋める★ 2026-09-29
+--
+-- ★なぜ 要るか★
+--   事務所（代行請求書アプリ）で 手で 直した 金額が、送り直しで メーターの 値に 戻る。
+--   見分けるには ★書いた 時の メーターの 額★ が 要る（`extra.dk_meter_yen`）。
+--   これから 入る 行には 関数が 必ず 付けるが、★既に 在る 150行には 無い★（実測 2026-09-29）。
+--   印が 無い 行は 今までどおり 上書きするので、★埋めるまで 守りが 効かない★。
+--
+-- ★印は「メーターの 額」で 埋める（明細の 額では ない）★
+--   dk_ref = `端末:勤務開始ms:何件目` から `daikome.dk_trips.fare_yen` を 引いて 入れる。
+--   ・金額が 一致している 143行 … どちらで 埋めても 同じ
+--   ・★事務所が 直した 7行（差 3,400円）★ … メーターの 額で 埋めると
+--     次の 送り直しで「メーターは 変わっていない」と 読めて ★事務所の 額が 守られる★。
+--     （明細の 額で 埋めると 逆に「メーターが 変わった」と 読まれて 上書きされる）
+--
+-- ★これは「足すだけ」★
+--   ・`extra` に ★キーを 1つ 足すだけ★。他の キー（dk_ref/dk_from/dk_car/…）は そのまま。
+--   ・既に 印が 在る 行は ★触らない★（2回 当てても 同じ）。
+--   ・amount / company / date / note など ★お金と 字の 列は 1つも 触らない★。
+--   ・`daikome.dk_trips` に 相手が 居る 行だけ（居ない 行は そのまま 残す）。
+--
+-- ★当て方★（門を 通す。★名前が apply-meisai-* の 物しか 通らない★）
+--   node scripts/apply-meisai-sql.mjs supabase/apply-meisai-dkmeteryen-backfill.sql
+-- ============================================================
+
+update daikou.meisai m
+   set extra = m.extra || jsonb_build_object('dk_meter_yen', t.fare_yen)
+  from daikome.dk_shifts s
+  join daikome.dk_trips t
+    on t.shift_id = s.shift_id
+ where m.extra ? 'dk_ref'
+   and not (m.extra ? 'dk_meter_yen')
+   and s.device_id = split_part(m.extra->>'dk_ref', ':', 1)
+   and extract(epoch from s.started_at) * 1000 = (split_part(m.extra->>'dk_ref', ':', 2))::bigint
+   and t.seq = (split_part(m.extra->>'dk_ref', ':', 3))::int;
