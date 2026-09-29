@@ -83,6 +83,21 @@ function checkAgainstSchema(row) {
   return bad;
 }
 
+// ============================================================
+// ★★わざと壊した 記録（2026-09-29 夕・自分で 1つずつ 戻して 測った）★★
+//   壊す前 ………………………………………………… 赤 0 / 全 47
+//   ① 直す輪を 途中で return に 戻す …… 赤 1 / 47
+//   ② 事務所が 消した 行に 書くに 戻す … 赤 1 / 47
+//   ③ deleted_at を 読まないに 戻す …… 赤 1 / 47
+//   ④ 読めない時 何も 入れないに 戻す … 赤 2 / 47
+//   ⑤ 印を 丸めないに 戻す …………… 赤 1 / 47
+//   戻した後 ………………………………………………… 赤 0 / 全 47
+//
+//   ★②は はじめ 赤 0 だった★＝偽の緑。試していた 行が
+//   印も 他の列も 揃っていて ★守りを 外しても 直されない 行★ だった。
+//   「壊したのに 赤に ならない＝まず 壊れているか」で 見つけて 直した。
+// ============================================================
+
 describe('★請求書アプリの列に、そのまま入る値になっていること★', () => {
   it('司さんの実データ2件が、列の型と全部合う', () => {
     build(REAL).forEach((r) => expect(checkAgainstSchema(r), JSON.stringify(r)).toEqual([]));
@@ -423,6 +438,42 @@ describe('★直した代行が請求書アプリにも届くこと★', () => {
     expect(() => planMeisaiWrite(null, null)).not.toThrow();
     expect(() => planMeisaiWrite(rows(), [null, {}, { extra: null }])).not.toThrow();
   });
+  it('★事務所が 消した 行には 触らない★（本番 150行中 32行が 消されていた）', () => {
+    // ★実測 2026-09-29★ daikou.meisai の dk_ref 付き 150行中 ★32行が deleted_at 付き★。
+    //   読む select に deleted_at が 無く、planMeisaiWrite も 見ていなかった ので
+    //   ★消した 行に 印を 打ち、条件次第で 金額も 戻していた★。
+    // ★★この 見張りは 1度 偽の緑 だった（わざと 壊して ★赤 0★）★★
+    //   はじめは `existing({ amount: 1600 })` だけ で 試したが、その行は
+    //   印(dk_meter_yen=2200)も 他の 列も 揃っていて ★守りを 外しても 直されない★。
+    //   ＝何を 測っても 0 に なる 形。「壊したのに 赤に ならない」で 見つけた。
+    //   ⇒ ★守りを 外したら 必ず 書きに 行く 行★ に した：
+    //     ・印(dk_meter_yen)が 無い → 金額を 上書きしに 行く
+    //     ・行き先も 違う → 字も 上書きしに 行く
+    const cur = existing({
+      amount: 1600,
+      destination: '事務所が 書き直した 行き先',
+      extra: { dk_ref: REF, dk_source: 'daikome', dk_distance_m: 5362 },
+    });
+    cur.deleted_at = '2026-09-01T00:00:00Z';
+    // 先に ★消されていなければ 必ず 直される 行★ だ と 見せておく
+    const ikite = Object.assign({}, cur, { deleted_at: null });
+    expect(
+      planMeisaiWrite(rows(), [ikite]).updates.length,
+      '★試している 行 が そもそも 直されない＝何を 測っても 0★'
+    ).toBe(1);
+    const p = planMeisaiWrite(rows(), [cur]);
+    expect(p.updates.length, '★消した 行を 直している★').toBe(0);
+    expect(p.inserts.length, '★消した 行を 入れ直している＝生き返る★').toBe(0);
+  });
+
+  it('★印は amount と 同じ 丸め方★（小数が 1件 出た日から 毎回 上書きし続ける）', () => {
+    // 前は amount = Math.round(fare_yen) なのに 印だけ 丸めていなかった。
+    //   今の 本番は fare_yen の 小数 ★0件 / 603件★（実測 2026-09-29）なので まだ 踏んでいないが、
+    //   1件でも 出た日から ★meterMae(2500.4) ≠ meterIma(2500) で 毎回 上書き★に なる。
+    const t = Object.assign({}, REAL[0], { fare_yen: 2500.4 });
+    const r = build([t])[0];
+    expect(r.extra.dk_meter_yen, '★印だけ 丸めていない★').toBe(r.amount);
+  });
 });
 
 // ============================================================
@@ -492,7 +543,17 @@ describe('★立てても黙って落ちる、を二度とやらないこと★'
     expect(SRC, '★明細を 読む 時の error を 受けていない★').toMatch(
       /const \{ data: exist, error: exErr \}/
     );
-    expect(SRC, '読めなかった時に 書きに 行っている').toMatch(/if \(exErr\) return 'error:/);
+    // ★★この 1行は 2026-09-29 の 夕方に ★逆へ 向け直した★★
+    //   朝は `if (exErr) return 'error:…'`（読めなければ 何も 書かない）を 正と していた。
+    //   だが accepted は ★返り値を 見ずに 立つ★（index.ts:210・2026-08-01 の 決め）ので、
+    //   読みが 1回 落ちた 晚の 勤務は ★明細が 空の まま 確定★に なる（永久に 欠ける）。
+    //   「二重を 作るより…」と 書いたのは ★一意の 索引が 無かった 頃の 話★で、
+    //   今は `meisai_dk_ref_uniq` が 本番・テスト 両方に 当たっている。
+    //   ⇒ ★読めなくても 先へ 進む★に 変えた。新しい 姿は 下の
+    //     「★明細を 読めなくても 入るものは 入れる★」で 見張る。
+    expect(SRC, '★読めないと 何も 入れずに 抜けている★').not.toMatch(
+      /return 'error:明細を 読めなかった/
+    );
     expect(SRC, 'insert の error を 受け取っていない').toMatch(/const \{ error: iErr \}/);
     expect(SRC, '直す時の error を 受け取っていない').toMatch(/const \{ error: uErr \}/);
     expect(SRC, '直した結果を返していない').toContain('件直した');
@@ -528,15 +589,48 @@ describe('★立てても黙って落ちる、を二度とやらないこと★'
     expect(SRC, '入らなかった数を 返していない').toContain('件 入らなかった');
   });
 
-  it('★途中で 抜けない＝直し(updates)は 必ず 走る★（半分 入った 請求書を 作らない）', () => {
-    // 前は 23505 以外で その場で return ⇒ ①半分 入る ②updates が 丸ごと 飛ぶ
-    //   ③それでも accepted に 入る ＝★半分の まま 確定・二度と 送られない★
+  it('★途中で 抜けない＝★入れる輪も 直す輪も★（半分の 請求書を 作らない）', () => {
+    // ★★この 見張りは 2026-09-29 に ★自分で 壊していた★★
+    //   前の 形は 窓を
+    //     SRC.indexOf('for (const row of plan.inserts)') 〜 SRC.indexOf('for (const u of plan.updates)')
+    //   で 取っていた ので、★直す輪は 窓の 外★。
+    //   「途中で 抜けない」と 名乗りながら ★抜けている 方を 一度も 見ていなかった★。
+    //   実際 直す輪には `if (uErr) return 'error:直し …'` が 残っていた（対立役が 見つけた）。
+    //   ＝[[門が 自分の 見たい 所だけ 見ている]]。★窓を 両方に 広げた★。
     const ireBu = SRC.slice(
       SRC.indexOf('for (const row of plan.inserts)'),
       SRC.indexOf('for (const u of plan.updates)')
     );
-    expect(ireBu, '★入れる 輪の 中で 抜けている＝直しが 走らない★').not.toMatch(/return 'error:/);
-    expect(ireBu, '落ちた数を 数えていない').toMatch(/shippai\+\+/);
+    const naosuBu = SRC.slice(
+      SRC.indexOf('for (const u of plan.updates)'),
+      SRC.indexOf("return (\n      'ok:'")
+    );
+    expect(naosuBu.length, '★直す輪の 窓が 空＝測れていない★').toBeGreaterThan(50);
+    expect(ireBu, '★入れる 輪の 中で 抜けている★').not.toMatch(/return 'error:/);
+    expect(naosuBu, '★直す 輪の 中で 抜けている＝半分 直した まま 確定★').not.toMatch(
+      /return 'error:/
+    );
+    expect(ireBu, '入らなかった数を 数えていない').toMatch(/shippai\+\+/);
+    expect(naosuBu, '直せなかった数を 数えていない').toMatch(/naoseNakatta\+\+/);
+  });
+
+  it('★読む select に deleted_at が 入っている★', () => {
+    expect(SRC, '★deleted_at を 取っていない＝消した 行か 分からない★').toMatch(
+      /select\('id, extra,[^']*deleted_at'\)/
+    );
+  });
+
+  it('★明細を 読めなくても 入るものは 入れる★（永久に 欠ける 口を 塞ぐ）', () => {
+    // accepted は ★返り値を 見ずに 立つ★（2026-08-01 の 決め・そのまま）ので、
+    //   読みが 落ちた 晚に `return 'error:…'` すると ★明細が 空の まま 確定★。
+    //   一意の 索引が 当たった 今は 二重を DB が 弾く ので 先へ 進める。
+    expect(SRC, '★読めないと 何も 入れずに 抜けている★').not.toMatch(
+      /return 'error:明細を 読めなかった/
+    );
+    expect(SRC, '読めなかった 事を 返事に 出していない').toMatch(/yomeNakatta/);
+    expect(SRC, '読めない時に 直しを やろうと している').toMatch(
+      /planMeisaiWrite\(rows, yomeNakatta \? \[\] : exist/
+    );
   });
 
   it('★往復に 上限が 在る★（誰でも 叩ける 口なので）', () => {

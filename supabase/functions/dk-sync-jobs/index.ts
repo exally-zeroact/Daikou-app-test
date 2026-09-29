@@ -276,11 +276,23 @@ async function pushToInvoiceApp(
     //      ⇒ いつも undefined ⇒ ★送るたび 備考を 上書きしに 行く★（司さんの 書いた 備考が 消える）。
     const { data: exist, error: exErr } = await sb
       .from('meisai')
-      .select('id, extra, company, date, destination, amount, distance, note')
+      // ★deleted_at も 取る★2026-09-29：本番実測で dk_ref 付き 150行中 ★32行が 消されていた★。
+      //   見ていなかったので ★事務所が 消した 32行に 書きに 行っていた★。
+      .select('id, extra, company, date, destination, amount, distance, note, deleted_at')
       .eq('user_id', ownerId)
       .in('extra->>dk_ref', refs);
-    // ★読めなかったら 書かない★（二重を 作るより 入れない 方が まし）
-    if (exErr) return 'error:明細を 読めなかった ' + String(exErr.message || exErr).slice(0, 100);
+    // ★★読めなかった時の 振る舞いを 変えた（2026-09-29 対立役の 指摘・私も 数え直した）★★
+    //   朝に 書いた `return 'error:…'` は ★永久に 欠ける 口★ だった：
+    //     昇で accepted は ★返り値を 見ずに 立つ★（上の 210行・2026-08-01 の 決め）ので、
+    //     読みが 1回 落ちた 晚の 勤務は ★明細が 空の まま 確定★ に なる。
+    //   ★なぜ 今は 止めなくて 良いか★
+    //     「二重を 作るより…」と 書いたのは ★一意の 索引が 無かった 頃の 話★。
+    //     今は `meisai_dk_ref_uniq`（daikou.meisai の extra->>'dk_ref'）が
+    //     本番・テスト 両方に ★当て済み★ なので、二重は DB が 弾く。
+    //   ⇒ ★読めなくても 先へ 進む★：全行を insert に 落とし、既に 在る行は 23505 で
+    //     弾かれて 数えられる。直し(updates)は ★今の値が 分からないので やらない★。
+    //     ＝★何も 入らない★ から ★入るものは 入る★ に 変わる。理由は 返事に 出す。
+    const yomeNakatta = exErr ? String(exErr.message || exErr).slice(0, 80) : '';
 
     // 行を作るのは meisai-row.js（★テストが同じ物を触れるように外に出してある★）
     //
@@ -308,7 +320,7 @@ async function pushToInvoiceApp(
     if (!bizDate) return 'skip:業務開始の日付が読めない';
     if (!rows.length) return 'skip:入れる代行が0件';
 
-    const plan = planMeisaiWrite(rows, exist || []);
+    const plan = planMeisaiWrite(rows, yomeNakatta ? [] : exist || []);
     // ★★2026-09-29 1行ずつ 入れるに 変えた★★
     //   前は 束で 1回 の insert だった。
     //   `daikou.meisai` に dk_ref の unique 索引を 張った（2026-09-29）ので、
@@ -352,11 +364,20 @@ async function pushToInvoiceApp(
       shippai++;
       saigoNoWake = msg.slice(0, 100);
     }
+    // ★★直しの 輪も 途中で 抜けない（2026-09-29・入れる輪だけ 直して こちらを 忘れていた）★★
+    //   入れる輪は 09-29 に 直したのに ★この輪は `return` の まま★ だった。
+    //   ★しかも 私の 見張りの 窓が `for (const u of plan.updates)` で 切れていて
+    //     この輪を ★一度も 見ていなかった★（門が 自分の 見たい 所だけ 見ていた）。
+    //   半分 直した まま accepted ＝★半分の 請求書が 確定★ に なる。
+    let naoseNakatta = 0;
     for (const u of plan.updates) {
       const { error: uErr } = await sb.from('meisai').update(u.patch).eq('id', u.id);
-      if (uErr) return 'error:直し ' + String(uErr.message || uErr).slice(0, 100);
+      if (!uErr) continue;
+      naoseNakatta++;
+      saigoNoWake = '直し ' + String(uErr.message || uErr).slice(0, 80);
     }
-    if (!plan.inserts.length && !plan.updates.length) return 'skip:変わっていない';
+    if (!plan.inserts.length && !plan.updates.length && !yomeNakatta)
+      return 'skip:変わっていない';
     // ★入れられなかった 数も 必ず 返事に 出す（黙って 済ませない）★
     return (
       'ok:' +
@@ -364,8 +385,17 @@ async function pushToInvoiceApp(
       '件入れた/' +
       plan.updates.length +
       '件直した' +
-      (hajikareta ? '/★' + hajikareta + '件 既に 在った★' : '') +
-      (shippai ? '/★' + shippai + '件 入らなかった: ' + saigoNoWake + '★' : '')
+      // ★読めていたのに 23505 ＝★読みで 見えない 行が 在る★（別の 持ち主の 行 等）
+      //   索引は 表 全体・読みは .eq('user_id', ownerId) ＝★見る 範囲が 違う★。
+      //   その 代行は ★事務所に 一生 出ない★ ので 「既に 在った」と 同じ 箱に 入れない。
+      (hajikareta
+        ? yomeNakatta
+          ? '/★' + hajikareta + '件 既に 在った★'
+          : '/★★' + hajikareta + '件 読みで 見えない 行が 在る★★'
+        : '') +
+      (shippai ? '/★' + shippai + '件 入らなかった: ' + saigoNoWake + '★' : '') +
+      (naoseNakatta ? '/★' + naoseNakatta + '件 直せなかった: ' + saigoNoWake + '★' : '') +
+      (yomeNakatta ? '/★今の明細を 読めず 入れるだけに した: ' + yomeNakatta + '★' : '')
     );
   } catch (e) {
     // 請求書側で何が起きても、ダイコメの実績受け取りは止めない

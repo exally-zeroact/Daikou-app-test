@@ -160,7 +160,11 @@ function buildMeisaiRows(opts) {
         //   ★これが 無いと「事務所が 手で 直した」と「メーターが 変わった」を 見分けられない★。
         //   下の planMeisaiWrite は この 値と くらべて、
         //   ★メーターが 変わった時だけ amount を 直す★（詳しくは そちらの 注記）。
-        dk_meter_yen: typeof t.fare_yen === 'number' ? t.fare_yen : null,
+        // ★amount と ★同じ 丸め方★ に する（2026-09-29）
+        //   前は amount = Math.round(fare_yen) なのに 印だけ 丸めていなかった。
+        //   今の 本番は fare_yen の 小数 ★0件★（実測）なので まだ 踏んでいないが、
+        //   1件でも 小数が 出た日から ★毎回 「メーターが 変わった」と 読んで 上書きし続ける★。
+        dk_meter_yen: typeof t.fare_yen === 'number' ? Math.round(t.fare_yen) : null,
         // ★車の札 (2026-09-03)★ 取れた時だけ 足す（無い時は キーごと 作らない）
         ...(carLabel === null ? {} : { dk_car: carLabel }),
         ...(carNo === null ? {} : { dk_car_no: carNo }),
@@ -210,6 +214,12 @@ function planMeisaiWrite(rows, existing) {
   (Array.isArray(rows) ? rows : []).forEach((r) => {
     const cur = byRef.get(String(r.extra.dk_ref));
     if (!cur) return inserts.push(r);
+    // ★★事務所が 消した 行には 一切 触らない（2026-09-29）★★
+    //   本番実測：dk_ref 付き 150行中 ★32行が deleted_at 付き★。
+    //   見ていなかったので ★消した 行に 印を 打ち、条件次第で 金額も 戻していた★。
+    //   消したのは 人の 決め なので ★生き返らせない・書き換えない★。
+    //   （insert も しない＝索引が 弾くので どうせ 入らない）
+    if (cur.deleted_at) return;
     const patch = {};
     // ★★2026-09-29＝金額は「メーターが 変わった時だけ」直す（司さん「1.2両方やれや」）★★
     //   ★何が 起きていたか（対立役2人＋私が 別々に 数えて 一致）★
