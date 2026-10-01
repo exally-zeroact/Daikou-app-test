@@ -218,7 +218,7 @@ https://exally-test.vercel.app/daikou-seikyu.html                 ← どちら�
 | HTTP | 両方 200 |
 | 大きさ | 両方 **403,168 バイト**（※指示にあった 353,403 とは違った。測り直した値がこれ） |
 | md5 | 両方 `934d1281…` ＝**同じファイル** |
-| 見ている倉庫 | 両方 `tnfwipbgfgjaymlszeid` ＝**本番倉庫** |
+| 見ている倉庫 | ★**repo ごとに 違う**★（2026-09-30 実測・15面 調べて 食い違い 0）<br>本番 `Daikou-app` → `tnfwipbgfgjaymlszeid`／テスト `Daikou-app-test` → `khawdrnvssdenumbiwfg`<br>事務所（代行請求書）も それぞれ 同じ 倉庫を 見ている。<br>※ この行は 以前「両方 本番倉庫」と 書いて いたが ★古い字★ だった。 |
 | `exally.vercel.app/daikou-seikyu.html` | **404**（Exally本体には入っていない） |
 
 **＝どちらを開いても、司さんが実務で使っている明細が出る。**
