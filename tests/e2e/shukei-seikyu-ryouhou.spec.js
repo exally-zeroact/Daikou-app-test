@@ -12,6 +12,7 @@
 //   ★★わざと壊して 赤に なるのを 見た（2026-10-06 実測）★★
 //     明細の 消した 行（deleted_at）も 数える ⇒ ★赤★（④ 現金が 43,300 で ない）
 //     打った 額と 明細を 両方 足す ⇒ ★赤★（③ 現金が 31,300）
+//     売上の 無い 日の 明細も 数える ⇒ ★赤★（⑤ 月の 現金が 38,300）
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
@@ -82,8 +83,8 @@ async function hiraku(page, hyou) {
 const ED = (seikyu) => [
   { shift_id: 's1', toll_yen: 0, bridge_yen: 0, other_yen: 0, denshi_yen: 0, seikyu_yen: seikyu },
 ];
-const MS = (amount, deleted) => ({
-  date: '2026-10-03',
+const MS = (amount, deleted, date) => ({
+  date: date || '2026-10-03',
   amount: amount,
   deleted_at: deleted ? '2026-10-04T00:00:00Z' : null,
 });
@@ -94,9 +95,16 @@ for (const [na, hyou, kitai] of [
   [
     '③ 両方に 違う 額（打った 額を 使い 知らせを 出す・足さない）',
     { dk_shift_edits: ED(10000), meisai: [MS(12000)] },
-    { shirase: true },
+    { shirase: true, nai: ['31,300', '22,000'] },
   ],
   ['④ 消した 明細は 数えない', { meisai: [MS(10000), MS(7777, true)] }, { shirase: false }],
+  [
+    // ★売上の 無い 日の 明細は 数えない★（請求書アプリは 1月から・ダイコメの 売上は 8月から＝引くと 現金が マイナス）
+    //   同じ 月（10/5）は 知らせに 出す／売上の 無い 月（7/10）は 黙って 数えない
+    '⑤ 売上の 無い 日の 明細は 数えない',
+    { meisai: [MS(10000), MS(5000, false, '2026-10-05'), MS(3000, false, '2026-07-10')] },
+    { shirase: '10/5', nai: ['38,300', '35,300', '15,000'] },
+  ],
 ]) {
   test('★請求書 ' + na + ' ⇒ 現金 43,300・売上 53,300 の まま★', async ({ page }) => {
     const err = [];
@@ -108,7 +116,14 @@ for (const [na, hyou, kitai] of [
     expect(r.ji, '★売上が 変わった（請求書で 売上を 下げては いけない）★').toContain('53,300');
     expect(r.ji, '★現金が Excel（43,300）と 違う★').toContain('43,300');
     expect(r.ji, '★請求書が 10,000 で ない★').toContain('10,000');
-    if (kitai.shirase) {
+    // ★間違えた 時に 出る 数★（日の 行に 43,300 が 在っても 月の 合計が 違えば ここで 赤）
+    (kitai.nai || []).forEach((x) => {
+      expect(r.ji, '★間違えた 時の 数 ' + x + ' が 出ている★').not.toContain(x);
+    });
+    if (kitai.shirase === '10/5') {
+      expect(r.shirase, '★売上の 無い 日の 明細を 知らせていない★').toContain('10/5');
+      expect(r.shirase, '★売上の 無い 月まで 知らせている★').not.toContain('7/10');
+    } else if (kitai.shirase) {
       expect(r.shirase, '★両方に 違う 額が 在るのに 知らせが 無い★').toContain('10/3');
       expect(r.shirase).toContain('12,000');
     } else {
