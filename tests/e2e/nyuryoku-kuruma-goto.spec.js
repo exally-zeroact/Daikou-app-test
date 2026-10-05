@@ -47,12 +47,20 @@ const KINDS = [
   { kind_id: 'kmx1', label: 'その他2', sort_order: 40, active: true },
 ];
 
-async function hiraku(page, edits) {
+async function hiraku(page, edits, kyoriNai) {
   const moto = fs.readFileSync(path.join(__dirname, '..', '..', 'js', 'dk-session.js'), 'utf8');
   const stub =
     moto +
     ';(function(){var D=' +
-    JSON.stringify({ co: CO, L: LABELS, SH: SH, K: KINDS, HI: HI, E: edits || [] }) +
+    JSON.stringify({
+      co: CO,
+      L: LABELS,
+      SH: SH,
+      K: KINDS,
+      HI: HI,
+      E: edits || [],
+      KN: !!kyoriNai,
+    }) +
     ';var S=window.DKSession;' +
     // ★★材料が 無い時に 黙って 緑に しない★★ 2026-09-11
     //   ★前★ if(!S)return; ＝作り物が 効いていなくても ★そのまま 緑★
@@ -75,6 +83,9 @@ async function hiraku(page, edits) {
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){' +
     ' return Promise.resolve([D.co]);}});};' +
     'S.rest=function(s,p,o){ if(o&&o.method)window.__okutta.push({saki:p,body:o.body});' +
+    // ★距離の 列が まだ 無い 倉庫★＝本物は 400 を 返す
+    ' if(D.KN&&String(p).indexOf("select=actual_total_m")>=0)return Promise.resolve({ok:false,status:400,' +
+    ' text:function(){return Promise.resolve("");},json:function(){return Promise.resolve({});}});' +
     ' return Promise.resolve({ok:true,status:200,text:function(){return Promise.resolve("");},' +
     ' json:function(){return Promise.resolve(rows(p));}});};' +
     'S.softList=function(s,p,st){if(st)st.tried++;return Promise.resolve(rows(p));};})();';
@@ -283,4 +294,23 @@ test('★★⑦-2 別の 回にも 額が 在る 時は 合計を 出して 打�
   expect(r.atai, '★2回ぶんの 合計が 出ていません★').toBe('1700');
   expect(r.utenai, '★打てます（打つと 二重に 引かれる）★').toBe(true);
   expect(r.hint, '★なぜ 打てないか 書いていません★').toContain('売上表で');
+});
+
+// ★★⑧ 10-05 倉庫に 距離の 列が まだ 無い 線（本番に SQL を 当てる 前）★★
+//   打っても 400 で 保存できない 欄は 出さない。回数（前から 在る 列）は 出す
+test('★★⑧ 距離の 列が 無い 倉庫では 距離の 欄を 出さない★★', async ({ page }) => {
+  await hiraku(page, [], true);
+  const r = await page.evaluate(() =>
+    [...document.querySelectorAll('.sha')].map((d) => ({
+      na: ((d.querySelector('.sha-na') || {}).textContent || '').trim(),
+      ran: [...d.querySelectorAll('.frow .flabel')].map((x) => x.textContent.trim()),
+    }))
+  );
+  // eslint-disable-next-line no-console
+  console.log('★列が 無い 倉庫★ ' + JSON.stringify(r));
+  const x = r.find((v) => v.na === '1466');
+  expect(x.ran, '★回数が 消えました（前から 在る 列）★').toContain('回数');
+  expect(x.ran, '★保存できない 実車距離の 欄が 出ています★').not.toContain('実車距離');
+  expect(x.ran, '★保存できない 総走行距離の 欄が 出ています★').not.toContain('総走行距離');
+  expect(x.ran, '★売上が 消えました★').toContain('売上');
 });

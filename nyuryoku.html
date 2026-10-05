@@ -355,6 +355,8 @@
         var HI = ''; // 'YYYY-MM-DD'（今 見ている 日）
         var RAW = { shifts: [], labels: [], kinds: [] };
         var EDITS = {}; // shift_id → 手で入れた1行
+        // ★倉庫に 距離の 列が 在るか★ 2026-10-05（無い 線では 距離の 欄を 出さない＝打っても 保存できない 欄を 見せない）
+        var KYORI_ARU = false;
         var NAMAE = {}; // 端末ID → 車の名前
         var PP = 0; // その日の 電子決済
         // ★★手で 入れた 1日ぶん★★ 2026-09-08（走った 記録が 無い 日の 実費）
@@ -510,6 +512,15 @@
             soft('dk_day_extras?select=*&pay_date=eq.' + encodeURIComponent(HI) + '&limit=5'),
             // ★★手で 入れた 1日ぶん★★ 2026-09-08（走った 記録が 無い 日の 実費）
             soft('dk_manual_days?select=*&work_date=eq.' + encodeURIComponent(HI) + '&limit=50'),
+            // ★★距離の 列が 倉庫に 在るか★★ 2026-10-05（supabase/apply-tebiki-kyori.sql を 当てた 線だけ 在る）
+            //   在る ⇒ 実車距離・総走行距離の 欄を 出す／無い（400）⇒ 出さない（回数は 前から 在るので 出す）
+            DKSession.rest(SESS, 'dk_manual_days?select=actual_total_m,total_distance_m&limit=1')
+              .then(function (x) {
+                return !!(x && x.ok);
+              })
+              .catch(function () {
+                return false;
+              }),
           ])
             .then(function (res) {
               RAW.shifts = Array.isArray(res[0]) ? res[0] : [];
@@ -539,6 +550,7 @@
                   PP = JippiHozon.seisuu(x.denshi_yen);
                 }
               });
+              KYORI_ARU = res[6] === true;
               TEBIKI = {};
               (Array.isArray(res[5]) ? res[5] : []).forEach(function (x) {
                 if (x && x.device_id) TEBIKI[x.device_id] = x;
@@ -737,26 +749,31 @@
                 'decimal',
                 '0.1',
               ],
-            ].forEach(function (f) {
-              h +=
-                '<div class="frow"><span class="flabel">' +
-                f[0] +
-                '</span><div class="fen"><input class="finput fnum" type="number" inputmode="' +
-                f[4] +
-                '" min="0" step="' +
-                f[5] +
-                '" ' +
-                keyAttr +
-                '="' +
-                esc(key) +
-                '" data-f="' +
-                f[1] +
-                '" value="' +
-                f[2] +
-                '"><span class="en">' +
-                f[3] +
-                '</span></div></div>';
-            });
+            ]
+              // ★距離の 列が 倉庫に 無い 線では 距離の 欄を 出さない★（打っても 保存できない 為）
+              .filter(function (f) {
+                return KYORI_ARU || f[1] === 'trip_count';
+              })
+              .forEach(function (f) {
+                h +=
+                  '<div class="frow"><span class="flabel">' +
+                  f[0] +
+                  '</span><div class="fen"><input class="finput fnum" type="number" inputmode="' +
+                  f[4] +
+                  '" min="0" step="' +
+                  f[5] +
+                  '" ' +
+                  keyAttr +
+                  '="' +
+                  esc(key) +
+                  '" data-f="' +
+                  f[1] +
+                  '" value="' +
+                  f[2] +
+                  '"><span class="en">' +
+                  f[3] +
+                  '</span></div></div>';
+              });
           }
           // ★★電子決済★★（どちらの 車でも 打てる）
           h +=
