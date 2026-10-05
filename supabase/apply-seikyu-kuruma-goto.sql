@@ -18,9 +18,19 @@
 --                        updated_at,hours,expenses,denshi_yen
 --       dk_manual_days … company_id,work_date,device_id,sales_yen,hours,toll_yen,bridge_yen,
 --                        other_yen,trip_count,note,updated_at,expenses,denshi_yen
---     ★dk_manual_days は apply-tebiki-kyori.sql（距離 2列）を 先に 当てる★（この ファイルは その 後ろに 足す）
+--   ★★この 1本で 足りる★★（対立役 10-06：距離の SQL が 当たっていない 本番で view の 作り直しが 落ち、
+--     手前の 列だけ 残ると 入力画面が 請求書の 欄を 出して 保存が 400 に なる）
+--     ⇒ ★距離の 2列（apply-tebiki-kyori.sql と 同じ）も ここで 先に 足す★＝view の 作り直しが 落ちる 因が 無くなる。
+--       （begin/commit は SQL の 門 scripts/sql-guard.mjs の 白名簿に 無いので 使わない）
 --   ★security_invoker は 付け直す★／★何度 流しても 同じ★
 -- ============================================================
+
+-- 距離（apply-tebiki-kyori.sql と 同じ・何度 流しても 同じ）
+alter table daikome.dk_manual_days
+  add column if not exists actual_total_m double precision;
+
+alter table daikome.dk_manual_days
+  add column if not exists total_distance_m double precision;
 
 alter table daikome.dk_shift_edits
   add column if not exists seikyu_yen integer;
