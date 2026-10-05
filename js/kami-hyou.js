@@ -422,9 +422,9 @@
       K.atama(k, '売上表（車ごと・日ごと）', ym(k)) +
       '<div class="big">' +
       K.box('売上', en(d.uriage)) +
-      K.box('実費', en(d.jippi), true) +
+      K.box('引いた 実費', en(d.jippi), true) +
       '</div>';
-    const ths = ['<th>車</th>', '<th>売上</th>', '<th>実費</th>'];
+    const ths = ['<th>車</th>', '<th>売上</th>', '<th>引いた 実費</th>'];
     const rows = cars.map(function (c) {
       return (
         '<tr><td>' +
@@ -447,7 +447,7 @@
           '</div><div>' +
           K.hyou(ths, rows.slice(Math.ceil(rows.length / 2)), sum) +
           '</div></div>');
-    const hths = ['<th>日</th>', '<th>売上</th>', '<th>実費</th>'];
+    const hths = ['<th>日</th>', '<th>売上</th>', '<th>引いた 実費</th>'];
     function han(a, b, sm) {
       const rs = [];
       for (let i = a; i <= b; i++) {

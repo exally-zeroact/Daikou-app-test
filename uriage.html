@@ -537,6 +537,8 @@
       </div>
 
       <div class="err" id="err" style="display: none"></div>
+      <!-- ★知らせは 畳まない★（会社の 登録の 案内などが 畳まれて 見えなくなる・対立役 10-05） -->
+      <div class="msg" id="msg" style="display: none"></div>
 
       <!-- ★★細かい 表と 実費を 直す 所は 畳む★★ 2026-10-05（消さない：入力の 画面が「売上表で 1回ずつ 直して」と 案内している） -->
       <details id="motoHyou" class="moto-hyou">
@@ -569,7 +571,6 @@
             <b>「入力」</b>で 日ごとに 入れられます。
           </div>
           <div id="list"></div>
-          <div class="msg" id="msg" style="display: none"></div>
           <div class="note">
             件数・実車距離・総走行距離は<b>メーターが確定した数字</b>です（ここでは変えられません）。<br />
             <b>売上＝メーターの合計から、上で選んだ実費を引いた分</b>です。<br />
@@ -1183,7 +1184,12 @@
           //   ⇒ ★下の 帯の「入力」（nyuryoku.html）★へ 出しました。
           //   ここ（売上表）は ★見る 所★＝車ごと／日ごと の 2つだけ。
 
-          kamiMiseru();
+          // ★紙が 描けなくても 表・設定は 動かす★（対立役 10-05：投げると 読み込みの catch に 吸われ「通信を確認」と 出て 全部 止まった）
+          try {
+            kamiMiseru();
+          } catch (e) {
+            kamiMsg('紙を 出せません：' + (e && e.message ? e.message : e));
+          }
           var rows = MODE === 'day' ? DAYS : ROWS;
           if (!rows.length) {
             list.innerHTML = '';
