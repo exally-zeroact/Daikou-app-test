@@ -178,6 +178,12 @@ begin
         where w.company_id = r.company_id
           and w.work_date between p_from and p_to
           and w.device_id is not null
+          -- ★本人が 乗った 車と 日だけ★（他の 車の 乗り方は 返さない・対立役 10-06）
+          and exists (
+            select 1 from daikome.dk_work_hours w2
+            where w2.company_id = r.company_id and w2.employee_id = r.employee_id
+              and w2.work_date = w.work_date and w2.device_id = w.device_id
+          )
         group by w.work_date, w.device_id
       ) x
     ),

@@ -250,3 +250,21 @@ describe('★1台の 回数・距離の 額を 乗った 2人で 分ける★', 
     expect(R(r.staff[0].kasan)).toBe(553.85);
   });
 });
+
+// ★★給料の 画面が 走った 記録の 距離を 取っている★★ 2026-10-06（対立役：事務所と 紙は 距離を 取らず 1km いくら が 0円＝本人の 画面と ずれた）
+//   画面を 開く 試験は 作り物の 倉庫が 頼まれていない 列まで 返すので 見つけられない ⇒ 頼む 字そのものを 見る
+//   わざと壊す（10-06 実測）：kyuryo.html の 2か所の どちらかから actual_total_m を 消す ⇒ ★赤★
+describe('★給料の 画面は 走った 記録の 回数と 距離を 頼む★', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const HTML = fs.readFileSync(path.join(__dirname, '..', '..', 'kyuryo.html'), 'utf8');
+  it('dk_shifts を 頼む 所 全部に trip_count・actual_total_m・total_distance_m が 在る', () => {
+    const tanomi = HTML.match(/'dk_shifts\?select=[^']*'/g) || [];
+    expect(tanomi.length, '★dk_shifts を 頼む 所が 見つからない★').toBeGreaterThanOrEqual(2);
+    tanomi.forEach((t) => {
+      ['trip_count', 'actual_total_m', 'total_distance_m'].forEach((k) => {
+        expect(t, '★' + t + ' に ' + k + ' が 無い★').toContain(k);
+      });
+    });
+  });
+});
