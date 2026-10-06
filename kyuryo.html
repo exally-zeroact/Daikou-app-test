@@ -862,6 +862,11 @@
         font-size: 16px;
       }
 
+      .adj-chui {
+        color: #b42318;
+        font-weight: 700;
+      }
+
       .adj-msg {
         color: #b42318;
         font-size: 14px;
@@ -2522,6 +2527,45 @@
 
         // ★★手当・控除を 打つ 所★★ 2026-10-06（司さん「ア」＝給料の 総額と 会社に 残る分も 動く）
         //   1行＝1人の 1つの 手当 か 控除。日付は ★今 見ている 払う回の 中★（その回の 明細に 載る）
+        // ★★手当・控除の 知らせ★★ 2026-10-06（対立役）
+        //   ①外した 人（明細に 出ない 人）の 手当・控除＝給料の 総額には 入るのに どの 明細にも 出ない
+        //   ②差引 支給が マイナスの 人（控除が 働いた 分より 多い）
+        //   ★止めは しない★（止めるかは お金の 決め＝司さんに 訊く）。数えて 出すだけ
+        function adjChui() {
+          if (HONNIN || !REP) return '';
+          var aru = {};
+          (REP.employees || []).forEach(function (e) {
+            aru[e.employee_id] = true;
+          });
+          var nokori = 0;
+          Object.keys(REP.days || {}).forEach(function (d) {
+            ((REP.days[d] || {}).adj || []).forEach(function (a) {
+              if (!aru[a.employee_id]) nokori += a.kind === 'koujo' ? -a.yen : a.yen;
+            });
+          });
+          var minus = (REP.employees || []).filter(function (e) {
+            return e.totalPay < 0;
+          });
+          var t = '';
+          if (nokori) {
+            t +=
+              '<div>外した 人に 手当・控除 ¥' +
+              yen(nokori) +
+              ' が あります（どの 明細にも 出ません・給料の 総額には 入っています）。</div>';
+          }
+          if (minus.length) {
+            t +=
+              '<div>差引 支給が マイナスの 人：' +
+              minus
+                .map(function (e) {
+                  return esc(e.name) + ' ¥' + yen(e.totalPay);
+                })
+                .join('、') +
+              '</div>';
+          }
+          return t ? '<div class="card adj-chui noprint">' + t + '</div>' : '';
+        }
+
         function adjPanelOf(eid) {
           return document.querySelector('[data-adj-panel="' + String(eid).replace(/"/g, '') + '"]');
         }
@@ -2900,6 +2944,13 @@
               if (!dd) return;
               o.hi[dd - 1] = (o.hi[dd - 1] || 0) + (c.pay || 0);
               o.hiJikan[dd - 1] = (o.hiJikan[dd - 1] || 0) + (c.hours || 0);
+            });
+            // ★★手当・控除も その 日の 金額に 入れる★★ 2026-10-06（対立役：月ごと／個別の 合計は 差し引き 後・
+            //   日ごとは 働いた 分だけ で 同じ 紙の 上で 合わなかった）＝日の 合計 ＝ 期の 合計
+            (e.adj || []).forEach(function (a) {
+              var dd = Number(String(a.date || '').slice(8, 10));
+              if (!dd) return;
+              o.hi[dd - 1] = (o.hi[dd - 1] || 0) + (a.kind === 'koujo' ? -a.yen : a.yen);
             });
           });
           out.forEach(function (o) {
@@ -4109,7 +4160,7 @@
               '<div class="card"><div class="msg">まず「従業員」で人を登録してください。</div></div>';
             return;
           }
-          var html = '';
+          var html = adjChui();
           // ★描き直すと チェックは 消える＝「選んだ人を 印刷」も その場で 揃える★（10-03 対立役：
           //   前は 月を 変えても「選んだ 1人を 印刷」が 残り、押すと printAll([]) で ★全員ぶん★ 出た）
           setTimeout(nurikae, 0);
