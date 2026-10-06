@@ -1,0 +1,103 @@
+// ============================================================
+// ★★見張り：給料の 手当・控除＝明細の 紙に 内わけが 出て 合計が 動く・画面から 足せる★★ 2026-10-06
+//
+//   司さん「ア」＝手当・控除は 会社に 残る分も 動かす
+//   ★押す物の一覧（先に書く）★ 1. 明細 2. その 人の「手当・控除」 3. 円を 打って「足す」
+//
+//   ★★わざと壊して 赤に なるのを 見た（2026-10-06 実測）★★
+//     紙の 見出しの 下の 内わけ（adjGyou）を 外す ⇒ ★赤★（差引 支給 が 出ない）
+// ============================================================
+const { test, expect } = require('@playwright/test');
+const { openKyuryo } = require('./kyuryo-harness');
+
+async function goukei(page) {
+  await page.waitForTimeout(800);
+  return page.evaluate(() => {
+    const t = (document.getElementById('slips') || document.body).textContent;
+    const m = [...t.matchAll(/合計\s*¥\s*(\d{1,3}(?:,\d{3})*)/g)];
+    return m.map((x) => Number(x[1].replace(/,/g, ''))).reduce((a, b) => a + b, 0);
+  });
+}
+
+test('★手当 500・控除 3,000 ⇒ 紙に 内わけ・合計は −2,500★', async ({ browser }) => {
+  const p1 = await browser.newPage();
+  await p1.setViewportSize({ width: 390, height: 844 });
+  await openKyuryo(p1);
+  const mae = await goukei(p1);
+
+  const p2 = await browser.newPage();
+  await p2.setViewportSize({ width: 390, height: 844 });
+  await openKyuryo(p2, (f) => {
+    // ★その 月に ずらした 後の 日付と 人で 作る★（材料は 開く 前に 今の 月へ ずらされている）
+    const w = f.workHours[0];
+    f.adjustments = [
+      {
+        adj_id: 'a1',
+        employee_id: w.employee_id,
+        work_date: w.work_date,
+        kind: 'teate',
+        label: 'ガソリン代',
+        yen: 500,
+      },
+      {
+        adj_id: 'a2',
+        employee_id: w.employee_id,
+        work_date: w.work_date,
+        kind: 'koujo',
+        label: '前借り',
+        yen: 3000,
+      },
+    ];
+    return f;
+  });
+  const ato = await goukei(p2);
+  const ji = await p2.evaluate(() => (document.getElementById('slips') || {}).textContent || '');
+  // eslint-disable-next-line no-console
+  console.log('★合計★ 前=' + mae + ' 後=' + ato);
+  expect(mae, '★明細の 合計が 読めていない★').toBeGreaterThan(0);
+  expect(ato - mae, '★手当 500・控除 3,000 で 合計が −2,500 に ならない★').toBe(-2500);
+  expect(ji, '★紙に 差引 支給 が 出ていない★').toContain('差引 支給');
+  expect(ji, '★手当の 名前が 出ていない★').toContain('ガソリン代');
+  expect(ji, '★控除の 名前が 出ていない★').toContain('前借り');
+  await p1.close();
+  await p2.close();
+});
+
+test('★「手当・控除」から 足すと 倉庫へ 送る★', async ({ page }) => {
+  const err = [];
+  page.on('pageerror', (e) => err.push(e.message));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openKyuryo(page);
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => {
+    window.__okutta = [];
+    const S = window.DKSession;
+    const moto = S.rest;
+    S.rest = function (s, p, o) {
+      if (o && o.method) window.__okutta.push({ p: p, m: o.method, body: o.body });
+      return moto.apply(this, arguments);
+    };
+  });
+  const b = page.locator('[data-meisai-adj]').first();
+  await expect(b, '★「手当・控除」の ボタンが 無い★').toBeVisible();
+  await b.click();
+  const panel = page.locator('.adj-panel').first();
+  await expect(panel).toBeVisible();
+  await panel.locator('[data-adj-f="kind"]').selectOption('koujo');
+  await panel.locator('[data-adj-f="label"]').fill('制服代');
+  await panel.locator('[data-adj-f="yen"]').fill('2000');
+  await panel.locator('[data-adj-add]').click();
+  await page.waitForTimeout(800);
+  const okutta = await page.evaluate(() => window.__okutta);
+  const o = okutta.filter((x) => String(x.p).indexOf('dk_pay_adjustments') === 0 && x.m === 'POST');
+  // eslint-disable-next-line no-console
+  console.log('★送った★ ' + JSON.stringify(o.map((x) => x.body)));
+  expect(o.length, '★足すを 押しても 送っていない★').toBe(1);
+  const body = JSON.parse(o[0].body);
+  expect(body.kind).toBe('koujo');
+  expect(body.label).toBe('制服代');
+  expect(body.yen).toBe(2000);
+  expect(body.employee_id, '★誰の 分か 付いていない★').toBeTruthy();
+  expect(body.company_id, '★会社が 付いていない★').toBeTruthy();
+  expect(err, '★画面が 落ちた★').toEqual([]);
+});
