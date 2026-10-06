@@ -572,6 +572,10 @@
           teate: 0,
           koujo: 0,
           adj: [],
+          // ★ほかの 払い方の 内わけ★ 2026-10-06（明細の 紙に 出す 為。給料の 額は 変えない）
+          kasan: 0, // 1回いくら・1kmいくら の 分（1台の 額を 分けた 後）
+          nikkyuHi: 0, // 日給を 使った 日の 数
+          wariHi: 0, // 指定日の 割増が 付いた 日の 数
         };
       });
 
@@ -617,6 +621,9 @@
           if (worked) {
             row.totalPay += n(s.pay);
             row.kasegi += n(s.pay);
+            row.kasan += n(s.kasan);
+            if (n(s.nikkyu) > 0) row.nikkyuHi += 1;
+            if (s.wariMult && s.wariMult !== 1) row.wariHi += 1;
             row.totalHours += n(s.hours);
             row.workedDays += 1;
           }
