@@ -2129,17 +2129,16 @@
             mado.innerHTML =
               '<div class="card"><div class="msg">この月の 記録は ありません。</div></div>';
           } else {
-            var m = window.__paper.maisu(0);
-            var hi = window.__paper.hi(0);
+            // ★★PDF と 同じ 紙の 束（日と 車の 両方で 分けた 後）を 見せる★★ 2026-10-07（対立役：
+            //   画面は 日だけで 分けて いて 車が 多いと 下が 切れた）
+            var tabaH = window.__paper.sheets(0);
             // ★紙は A4 の 大きさで 組まれる★ので 画面の 幅に 合わせて 縮める
             var haba = mado.clientWidth || box.clientWidth || 360;
             // ★幅に 合わせて 縮めるだけだと スマホで 字が 読めない★（実測＝0.32倍）
             //   ⇒ ★読める 下限まで しか 縮めない★。はみ出た 分は ★横に 送って 見る★。
             var sc = Math.max(0.62, Math.min(1, haba / 1123));
-            for (var i = 0; i < m.n; i++) {
-              var from = i * m.per;
-              var to = Math.min(hi, from + m.per);
-              var el = window.__paper.build(0, from, to, i + 1, m.n);
+            for (var i = 0; i < tabaH.length; i++) {
+              var el = tabaH[i];
               el.style.position = 'static';
               el.style.left = 'auto';
               el.style.top = 'auto';
@@ -3925,6 +3924,17 @@
         // ★何枚に分けるか★＝1枚に入る日の数から出す
         //   ★62日ぶんの期間まで作れる★（js/payroll-period.js:128 days<=62／月まとめは28〜31日）
         //   実測：本物の10日・11日 → 1枚／31日 → 3枚（★字は 9pt以上のまま★）
+        // ★組んだ 紙の 本当の 高さ★（画面の 外に 1度 置いて 測る）
+        function _takasa(el) {
+          el.style.position = 'absolute';
+          el.style.left = '-99999px';
+          el.style.top = '0';
+          el.style.visibility = 'hidden';
+          document.body.appendChild(el);
+          var h = el.scrollHeight;
+          el.remove();
+          return h;
+        }
         function _maisu(e, showCarSales, allCars) {
           var probe = _buildPaperSheet(e, showCarSales, allCars, 0, e.cells.length);
           var hairu = Math.floor(
@@ -3936,12 +3946,17 @@
           // ★★縦（車の 行）の 分け方★★ 2026-10-07
           //   紙の 高さ − 上下の 余白 − 見出し − 内わけの 行 に 入る 行の 数から、決まった 4行
           //   （日付・金額・時間・時間（全台））を 引いた 分が 1枚に 入る 車の 数
+          //   ★★見積もりは 使わず 組んだ 紙の 高さを 測る★★（対立役 10-07：内わけが 折り返すと 26px の
+          //     見積もりより 高く なり 800〜876px で 切れた）＝入るまで 1台ずつ 減らす
           var nCars = showCarSales ? _paperCars(e, allCars).length : 0;
-          var uchiwake = (adjGyou(e).match(/<div /g) || []).length;
-          var rowH = +probe.getAttribute('data-row-h') || 50;
-          var aki = SHEET_H - 36 - 96 - uchiwake * 26;
-          var carPer = Math.floor(aki / rowH) - 4;
-          if (carPer < 1) carPer = 1;
+          var carPer = nCars > 0 ? nCars : 1;
+          var to0 = Math.min(e.cells.length, per);
+          while (
+            carPer > 1 &&
+            _takasa(_buildPaperSheet(e, showCarSales, allCars, 0, to0, 1, 1, 0, carPer)) > SHEET_H
+          ) {
+            carPer--;
+          }
           var carN = nCars > 0 ? Math.ceil(nCars / carPer) : 1;
           return { per: per, n: n, carPer: carPer, carN: carN };
         }
@@ -4428,17 +4443,15 @@
             document.querySelectorAll('#slips .kami-mado'),
             function (mado) {
               var ei = Number(mado.getAttribute('data-ei'));
-              var m = window.__paper.maisu(ei);
-              var hi = window.__paper.hi(ei);
+              // ★★PDF と 同じ 紙の 束★★ 2026-10-07（対立役：日だけで 分けて 車が 多いと 下が 切れた）
+              var taba = window.__paper.sheets(ei);
               var haba = mado.clientWidth || 360;
               // ★紙 1枚が 画面に 全部 入る 大きさ★（見切れさせない・司さん 10-05「見切れてめちゃくちゃ」）
               //   細かい 字は ★押すと 開く PDF★で 見る（代行請求書の 請求書ページと 同じ）
               var sc = Math.min(1, (haba - 2) / 1123);
               var empId = String(window.__paper.emp(ei).employee_id);
-              for (var i = 0; i < m.n; i++) {
-                var from = i * m.per;
-                var to = Math.min(hi, from + m.per);
-                var el = window.__paper.build(ei, from, to, i + 1, m.n);
+              for (var i = 0; i < taba.length; i++) {
+                var el = taba[i];
                 el.style.position = 'static';
                 el.style.left = 'auto';
                 el.style.top = 'auto';
