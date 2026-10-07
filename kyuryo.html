@@ -2855,7 +2855,7 @@
           return Promise.all([
             soft(
               // ★距離も 取る★ 2026-10-06（1kmいくら の 材料。無いと 事務所と 紙だけ 0円＝本人の 画面と ずれる・対立役）
-              'dk_shifts?select=shift_id,device_id,started_at,ended_at,elapsed_sec,fare_total_yen,trip_count,actual_total_m,total_distance_m' +
+              'dk_shifts?select=shift_id,device_id,started_at,ended_at,elapsed_sec,fare_total_yen,trip_count,actual_total_m,total_distance_m,excluded' +
                 '&started_at=gte.' +
                 encodeURIComponent(from) +
                 '&started_at=lt.' +
@@ -3382,7 +3382,7 @@
           Promise.all([
             soft(
               // ★距離も 取る★ 2026-10-06（1kmいくら の 材料。無いと 事務所と 紙だけ 0円＝本人の 画面と ずれる・対立役）
-              'dk_shifts?select=shift_id,device_id,started_at,ended_at,elapsed_sec,fare_total_yen,trip_count,actual_total_m,total_distance_m' +
+              'dk_shifts?select=shift_id,device_id,started_at,ended_at,elapsed_sec,fare_total_yen,trip_count,actual_total_m,total_distance_m,excluded' +
                 '&started_at=gte.' +
                 encodeURIComponent(from) +
                 '&started_at=lt.' +
@@ -3696,8 +3696,12 @@
           );
         }
 
-        function _buildPaperSheet(e, showCarSales, allCars, from, to, maiNo, maiN) {
+        function _buildPaperSheet(e, showCarSales, allCars, from, to, maiNo, maiN, carFrom, carTo) {
           var cars = showCarSales ? _paperCars(e, allCars) : [];
+          // ★★車の 行が 1枚に 入らない 時は 次の 紙へ★★ 2026-10-07（司さん「前からある2つもやれ」・対立役：
+          //   車 9台＋内わけ 1行 で 紙の 下が 切れた）＝★字も 行の 高さも 変えず★ 車の 行を 分ける。番号は 続き
+          var carOff = carFrom || 0;
+          cars = cars.slice(carOff, carTo === undefined ? cars.length : carTo);
           // ★画面と 同じ 1本を使う★（紙で 別に書くと 画面と紙で 違う数が出る）
           var F = SLIP_F;
 
@@ -3707,7 +3711,7 @@
           rows.push({ lbl: '時間', get: F.hours });
           cars.forEach(function (x, n) {
             rows.push({
-              lbl: '売上' + (n + 1),
+              lbl: '売上' + (n + 1 + carOff),
               sub: x.car.label, // ★車名は 小さい2行目★＝列を広げない
               get: function (c) {
                 return F.car(c, x.i);
@@ -3929,7 +3933,17 @@
           var per = hairu > 1 ? hairu : 1;
           var mai = Math.ceil(e.cells.length / per);
           var n = mai > 1 ? mai : 1;
-          return { per: per, n: n };
+          // ★★縦（車の 行）の 分け方★★ 2026-10-07
+          //   紙の 高さ − 上下の 余白 − 見出し − 内わけの 行 に 入る 行の 数から、決まった 4行
+          //   （日付・金額・時間・時間（全台））を 引いた 分が 1枚に 入る 車の 数
+          var nCars = showCarSales ? _paperCars(e, allCars).length : 0;
+          var uchiwake = (adjGyou(e).match(/<div /g) || []).length;
+          var rowH = +probe.getAttribute('data-row-h') || 50;
+          var aki = SHEET_H - 36 - 96 - uchiwake * 26;
+          var carPer = Math.floor(aki / rowH) - 4;
+          if (carPer < 1) carPer = 1;
+          var carN = nCars > 0 ? Math.ceil(nCars / carPer) : 1;
+          return { per: per, n: n, carPer: carPer, carN: carN };
         }
 
         // ★返らない時に 永久に待たない★（指示役 2026-08-26）
@@ -3971,13 +3985,26 @@
         function _empSheets(e, cars) {
           var m = _maisu(e, showCarSalesNow(), cars);
           var out = [];
-          for (var i = 0; i < m.n; i++) {
-            var from = i * m.per;
-            var to = Math.min(e.cells.length, from + m.per);
-            out.push({
-              el: _buildPaperSheet(e, showCarSalesNow(), cars, from, to, i + 1, m.n),
-              muki: 'yoko',
-            });
+          var zen = m.n * m.carN;
+          for (var k = 0; k < m.carN; k++) {
+            for (var i = 0; i < m.n; i++) {
+              var from = i * m.per;
+              var to = Math.min(e.cells.length, from + m.per);
+              out.push({
+                el: _buildPaperSheet(
+                  e,
+                  showCarSalesNow(),
+                  cars,
+                  from,
+                  to,
+                  out.length + 1,
+                  zen,
+                  k * m.carPer,
+                  (k + 1) * m.carPer
+                ),
+                muki: 'yoko',
+              });
+            }
           }
           return out;
         }
@@ -4089,6 +4116,13 @@
               no,
               n
             );
+          },
+          // ★1人ぶんの 紙を 全部（日と 車の 両方で 分けた 後）★ 2026-10-07（見張りが 高さと 売上n を 数える）
+          sheets: function (ei) {
+            var e = REP.employees[ei];
+            return _empSheets(e, slipCars(REP.cars, e.employee_id)).map(function (x) {
+              return x.el;
+            });
           },
           maisu: function (ei) {
             var e = REP.employees[ei];
