@@ -4514,7 +4514,8 @@
             .forEach(function (date) {
               var day = (REP && REP.days[date]) || null;
               var meter = RAW.shifts.filter(function (s) {
-                return PayrollDaily.dateOf(s.started_at) === date;
+                // ★使わない 印の 業務は 出さない★ 2026-10-07（対立役：出すと 計算は 手入力 ¥7,000・画面は ¥0 で 手入力の 欄が 消えた）
+                return s.excluded !== true && PayrollDaily.dateOf(s.started_at) === date;
               });
               // ★手で入れた1日分も同じ並びに出す（メーターがある車は出さない＝二重に見せない）★
               var meterDevs = {};
