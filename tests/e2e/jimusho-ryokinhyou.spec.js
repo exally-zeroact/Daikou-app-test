@@ -377,3 +377,53 @@ test('★★⑩ 土日・冬を 決める 日を 選んで 保存すると そ�
     SOUKO.autoSurcharges.night
   );
 });
+
+// ★★⑪ 期間の 割増を 好きなだけ 足して 保存できる・日付が 変なら 保存できない★★ 2026-10-08
+//   司さん「冬だけやなかろがGWとかもあるし、そこは自由にカスタムできるようにしとけや」
+//   ★わざと壊して 赤（2026-10-08 実測）★ 日付の 確かめを 外す ⇒ ★赤★（変な 日付で 保存が 押せる）
+test('★★⑪ 期間の 割増（GW）を 足して 保存すると 送られる・日付が 変なら 押せない★★', async ({
+  page,
+}) => {
+  await login(page);
+  const okutta = await souko(page);
+  await hiraku(page);
+  await page.click('#btnKikanAdd');
+  const ins = page.locator('#kikanList input');
+  await ins.nth(0).fill('GW');
+  await ins.nth(1).fill('4-29');
+  await ins.nth(2).fill('05-05');
+  await ins.nth(3).fill('1.2');
+  await page.waitForTimeout(200);
+  await expect(page.locator('#btnSave'), '★変な 日付で 保存が 押せます★').toBeDisabled();
+  await ins.nth(1).fill('04-29');
+  await page.waitForTimeout(200);
+  await page.click('#btnSave');
+  await page.waitForTimeout(600);
+  const hozon = okutta.filter((o) => o.body && o.body.indexOf('"config"') >= 0);
+  expect(hozon.length, '★保存が 送られていません★').toBeGreaterThan(0);
+  const k = JSON.parse(hozon[0].body).config.autoSurcharges.kikan;
+  expect(k && k.length, '★期間が 送られていません★').toBe(1);
+  expect({ name: k[0].name, from: k[0].from, to: k[0].to, rate: k[0].rate }).toEqual({
+    name: 'GW',
+    from: '04-29',
+    to: '05-05',
+    rate: 1.2,
+  });
+});
+
+// ★★⑫ 重なった 時の 掛け方を 選んで 保存すると 送られる（既定は 項目 無し）★★ 2026-10-08
+//   司さん「ユーザーが自由にカスタムできるようにしろや」
+//   ★わざと壊して 赤（2026-10-08 実測）★ atsumeru の kasanari を 書く 行を 外す ⇒ ★赤★
+test('★★⑫ 重なった 時の 掛け方を 選んで 保存すると その通り 送られる★★', async ({ page }) => {
+  await login(page);
+  const okutta = await souko(page);
+  await hiraku(page);
+  await expect(page.locator('#fKasanari'), '★既定が 掛け合わせる で ない★').toHaveValue('kakeru');
+  await page.selectOption('#fKasanari', 'ookii');
+  await page.waitForTimeout(200);
+  await page.click('#btnSave');
+  await page.waitForTimeout(600);
+  const hozon = okutta.filter((o) => o.body && o.body.indexOf('"config"') >= 0);
+  expect(hozon.length, '★保存が 送られていません★').toBeGreaterThan(0);
+  expect(JSON.parse(hozon[0].body).config.autoSurcharges.kasanari).toBe('ookii');
+});
