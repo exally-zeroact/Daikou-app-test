@@ -82,7 +82,7 @@ async function souko(page, opts) {
         ? []
         : [
             {
-              config: SOUKO,
+              config: opts.config || SOUKO,
               updated_at: '2026-08-20T02:03:04.000Z',
               // ★倉庫に 入っている 形★（事務所から 変えた時は 'jimusho:' が 付く）
               updated_by: 'jimusho:uid-mihari',
@@ -426,4 +426,32 @@ test('★★⑫ 重なった 時の 掛け方を 選んで 保存すると そ�
   const hozon = okutta.filter((o) => o.body && o.body.indexOf('"config"') >= 0);
   expect(hozon.length, '★保存が 送られていません★').toBeGreaterThan(0);
   expect(JSON.parse(hozon[0].body).config.autoSurcharges.kasanari).toBe('ookii');
+});
+
+// ★★⑬ 会社が 打った 期間の 名前・日付は「今の 料金」の 表で 字の まま（動かない・崩れない）★★ 2026-10-08 対立役
+//   ★わざと壊して 赤（2026-10-08 実測）★ imaKami の esc を 外す ⇒ ★赤★（img が 動く）
+test('★★⑬ 期間の 名前に タグを 入れても 表で 動かない★★', async ({ page }) => {
+  await login(page);
+  const c = JSON.parse(JSON.stringify(SOUKO));
+  c.autoSurcharges.kikan = [
+    {
+      id: 'k1',
+      name: '<img src=x onerror="window.__xss=1">GW',
+      from: '04-29',
+      to: '05-05',
+      rate: 1.2,
+    },
+  ];
+  await souko(page, { config: c });
+  await page.goto('/ryokinhyou.html');
+  await expect(page.locator('#imaBody')).toContainText('GW', { timeout: 15000 });
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => ({
+    xss: window.__xss || 0,
+    img: document.querySelectorAll('#imaBody img').length,
+    ji: document.getElementById('imaBody').textContent,
+  }));
+  expect(r.xss, '★名前の 字が 動いた★').toBe(0);
+  expect(r.img, '★名前が タグとして 入った★').toBe(0);
+  expect(r.ji).toContain('<img');
 });

@@ -1444,14 +1444,15 @@
             b += gyou(
               '冬の 割増',
               Math.round((a.winter.rate || 1) * 100 - 100) + '%増',
-              (a.winter.from || '') + '〜' + (a.winter.to || ''),
+              esc(a.winter.from) + '〜' + esc(a.winter.to), // ★字は 逃がす（表に そのまま 入る）★
               '—'
             );
           (Array.isArray(a.kikan) ? a.kikan : []).forEach(function (k) {
             b += gyou(
-              (k.name || '期間') + 'の 割増',
+              // ★会社が 打った 名前・日付は 逃がす★（<b> や & で 表が 崩れる・字が 動く を 起こさない・対立役）
+              esc(k.name || '期間') + 'の 割増',
               Math.round((k.rate || 1) * 100 - 100) + '%増',
-              (k.from || '') + '〜' + (k.to || ''),
+              esc(k.from) + '〜' + esc(k.to),
               '—'
             );
           });

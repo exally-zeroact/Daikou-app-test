@@ -229,6 +229,8 @@ describe('★自動割増は 日本時間・土日／冬は 業務を 始めた 
       '倍率'
     );
     expect(FC.kikanNoKatachi({ name: '冬', from: '12-15', to: '03-15', rate: 1.1 })).toBe('');
+    // 年を 跨がない 長い 期間は 止めない（司さん「自由にカスタム」）
+    expect(FC.kikanNoKatachi({ name: '夏', from: '04-01', to: '10-31', rate: 1.1 })).toBe('');
   });
 
   it('★★② メーターの 道（calcFare）も 業務を 始めた 日で 判じる★★', () => {

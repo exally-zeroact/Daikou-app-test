@@ -144,11 +144,13 @@ const FareCalc = (() => {
       );
     if (ym && k.from > k.to) return nm + 'の 始めが 終わりより 後です。';
     if (mm) {
-      // 毎年の 期間が 半年を 超える＝始めと 終わりを 逆に 入れた 事が 多い（05-05〜04-29 は 359日）
+      // ★年を 跨いで 半年を 超える 毎年の 期間＝始めと 終わりを 逆に 入れた 形（05-05〜04-29 は 360日）★
+      //   年を 跨がない 期間（04-01〜10-31 など）は 長さを 問わない（司さん「自由にカスタム」・対立役）
       const hi = (s) => Date.UTC(2001, Number(s.slice(0, 2)) - 1, Number(s.slice(3, 5)));
       let nichi = (hi(k.to) - hi(k.from)) / 86400000 + 1;
-      if (nichi <= 0) nichi += 365;
-      if (nichi > 183)
+      const matagu = nichi <= 0;
+      if (matagu) nichi += 365;
+      if (matagu && nichi > 183)
         return nm + 'が ' + nichi + '日間 に なります。始めと 終わりが 逆に なって いませんか。';
     }
     if (!(typeof k.rate === 'number' && k.rate >= 1))
