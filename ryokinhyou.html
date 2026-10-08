@@ -968,7 +968,7 @@
           h.autoSurcharges.winter.rate = suji('fWinRate', 1);
           // ★選んだ 時だけ 書く★（触っていない 料金表に 項目を 足さない＝既定は 業務を 始めた 日）
           if ($('fHiKijun').value === 'hashitta') h.autoSurcharges.hiNoKijun = 'hashitta';
-          else if (h.autoSurcharges.hiNoKijun) h.autoSurcharges.hiNoKijun = 'hajime';
+          else delete h.autoSurcharges.hiNoKijun; // 既定＝項目 無し（選んで 戻した 時に「変えた」扱いに しない・対立役）
 
           // ★空なら 使わない（0 に しない）★
           if ($('fMin').value === '') delete h.minFare;
