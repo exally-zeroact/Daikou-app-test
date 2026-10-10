@@ -17,7 +17,7 @@
 //   9. 不正データ skip (= city 空 / prc_num1 空 / 緯度経度 範囲外)
 //  10. CSV 列順変更耐性 (= header 名で・動的解決)
 //  11. UTF-8 BOM 耐性
-//  12. 実 ehime data (= data/addresses-chiban-ehime.js) load + 今治市役所の点 hit verify (= build 後・skip 可)
+//  12. 実 ehime data (= data/addresses-chiban-ehime.js) load + 公の点（波止浜駅のそば） hit verify (= build 後・skip 可)
 //
 // 絶対ルール準拠: 距離 / 課金 / Worker B / map-matcher 完全無関係・住所表示専用。
 
@@ -91,8 +91,8 @@ function makeChibanPosCsv(rows) {
         def(r.lg_code, '382027'),
         def(r.machiaza_id, '0185001'),
         def(r.prc_id, '000010000100000'),
-        r.rep_lon, // 配布 swap 時は・ここに lat 値 (例 34.066133)
-        r.rep_lat, // 配布 swap 時は・ここに lon 値 (例 132.997739)
+        r.rep_lon, // 配布 swap 時は・ここに lat 値 (例 34.093883)
+        r.rep_lat, // 配布 swap 時は・ここに lon 値 (例 132.962159)
         'EPSG:6668',
         '2500',
       ].join(',')
@@ -145,20 +145,20 @@ describe('build-address.js --chiban: 3 キー JOIN', () => {
         lg_code: '382027',
         machiaza_id: '0185001',
         prc_id: '000010000100000',
-        rep_lon: '34.066133',
-        rep_lat: '132.997739',
+        rep_lon: '34.093883',
+        rep_lat: '132.962159',
       },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
     expect(b.points.length).toBe(1);
-    expect(b.points[0].lat).toBe(3406613);
-    expect(b.points[0].lng).toBe(13299774);
+    expect(b.points[0].lat).toBe(3409388);
+    expect(b.points[0].lng).toBe(13296216);
   });
 
   it('座標 pos に対応行が無い body → skipNoPos', () => {
     const body = makeChibanBodyCsv([{ prc_id: '000010000100000' }, { prc_id: '000010000200000' }]);
     const pos = makeChibanPosCsv([
-      { prc_id: '000010000100000', rep_lon: '34.066133', rep_lat: '132.997739' },
+      { prc_id: '000010000100000', rep_lon: '34.093883', rep_lat: '132.962159' },
       // prc_id=200000 は pos に無い
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
@@ -168,8 +168,8 @@ describe('build-address.js --chiban: 3 キー JOIN', () => {
   it('prc_id が異なれば・別 entry', () => {
     const body = makeChibanBodyCsv([{ prc_id: '000010000100000' }, { prc_id: '000010000200000' }]);
     const pos = makeChibanPosCsv([
-      { prc_id: '000010000100000', rep_lon: '34.066133', rep_lat: '132.997739' },
-      { prc_id: '000010000200000', rep_lon: '34.066200', rep_lat: '132.997800' },
+      { prc_id: '000010000100000', rep_lon: '34.093883', rep_lat: '132.962159' },
+      { prc_id: '000010000200000', rep_lon: '34.09395', rep_lat: '132.96222' },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
     expect(b.points.length).toBe(2);
@@ -183,13 +183,13 @@ describe('build-address.js --chiban: rep_lon/rep_lat 値 swap auto-detect', () =
     const pos = makeChibanPosCsv([
       {
         prc_id: '000010000100000',
-        rep_lon: '34.066133', // 配布 swap = lat 値
-        rep_lat: '132.997739', // 配布 swap = lon 値
+        rep_lon: '34.093883', // 配布 swap = lat 値
+        rep_lat: '132.962159', // 配布 swap = lon 値
       },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
-    expect(b.points[0].lat).toBe(3406613); // 34.066133 → 3406613
-    expect(b.points[0].lng).toBe(13299774); // 132.997739 → 13299774
+    expect(b.points[0].lat).toBe(3409388); // 34.093883 → 3409388
+    expect(b.points[0].lng).toBe(13296216); // 132.962159 → 13296216
   });
 
   it('normal 配布 (rep_lon=lon値) でも・正しく解釈', () => {
@@ -197,13 +197,13 @@ describe('build-address.js --chiban: rep_lon/rep_lat 値 swap auto-detect', () =
     const pos = makeChibanPosCsv([
       {
         prc_id: '000010000100000',
-        rep_lon: '132.997739', // normal = lon 値
-        rep_lat: '34.066133', // normal = lat 値
+        rep_lon: '132.962159', // normal = lon 値
+        rep_lat: '34.093883', // normal = lat 値
       },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
-    expect(b.points[0].lat).toBe(3406613);
-    expect(b.points[0].lng).toBe(13299774);
+    expect(b.points[0].lat).toBe(3409388);
+    expect(b.points[0].lng).toBe(13296216);
   });
 
   it('範囲外座標 → skip (= posOutOfRange に・カウント・point にならない)', () => {
@@ -246,7 +246,7 @@ describe('build-address.js --chiban: POI v2 構造 + k/g', () => {
   it('output は・{v:2, prefecture, generated, precision, bbox, gridSize, oazas, grid, points}', () => {
     const body = makeChibanBodyCsv([{ prc_id: '000010000100000', prc_num1: '6', prc_num2: '33' }]);
     const pos = makeChibanPosCsv([
-      { prc_id: '000010000100000', rep_lon: '34.066133', rep_lat: '132.997739' },
+      { prc_id: '000010000100000', rep_lon: '34.093883', rep_lat: '132.962159' },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
     expect(b.v).toBe(2);
@@ -292,30 +292,30 @@ describe('build-address.js --chiban: 座標 int×1e5 + bbox + grid', () => {
   it('lat/lng は・int × 1e5 (= 既存 POI / street / rsdt と完全統一)', () => {
     const body = makeChibanBodyCsv([{ prc_id: '000010000100000' }]);
     const pos = makeChibanPosCsv([
-      { prc_id: '000010000100000', rep_lon: '34.066133', rep_lat: '132.997739' },
+      { prc_id: '000010000100000', rep_lon: '34.093883', rep_lat: '132.962159' },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
-    expect(b.points[0].lat).toBe(3406613);
-    expect(b.points[0].lng).toBe(13299774);
+    expect(b.points[0].lat).toBe(3409388);
+    expect(b.points[0].lng).toBe(13296216);
   });
 
   it('bbox = [minLat, minLng, maxLat, maxLng] integer', () => {
     const body = makeChibanBodyCsv([{ prc_id: '000010000100000' }, { prc_id: '000010000200000' }]);
     const pos = makeChibanPosCsv([
-      { prc_id: '000010000100000', rep_lon: '34.066133', rep_lat: '132.997739' },
-      { prc_id: '000010000200000', rep_lon: '34.065800', rep_lat: '132.997300' },
+      { prc_id: '000010000100000', rep_lon: '34.093883', rep_lat: '132.962159' },
+      { prc_id: '000010000200000', rep_lon: '34.09355', rep_lat: '132.96172' },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
-    expect(b.bbox[0]).toBe(3406580);
-    expect(b.bbox[1]).toBe(13299730);
-    expect(b.bbox[2]).toBe(3406613);
-    expect(b.bbox[3]).toBe(13299774);
+    expect(b.bbox[0]).toBe(3409355);
+    expect(b.bbox[1]).toBe(13296172);
+    expect(b.bbox[2]).toBe(3409388);
+    expect(b.bbox[3]).toBe(13296216);
   });
 
   it('grid 索引 = encoding-utils.gridKey に・point index 登録', () => {
     const body = makeChibanBodyCsv([{ prc_id: '000010000100000' }]);
     const pos = makeChibanPosCsv([
-      { prc_id: '000010000100000', rep_lon: '34.066133', rep_lat: '132.997739' },
+      { prc_id: '000010000100000', rep_lon: '34.093883', rep_lat: '132.962159' },
     ]);
     const b = buildChibanFromCsv(body, pos, 'ehime');
     const keys = Object.keys(b.grid);
@@ -436,8 +436,8 @@ describe('build-address.js --chiban: UTF-8 BOM 耐性', () => {
   });
 });
 
-// ─── 10. ★ 実 ehime data 今治市役所の点 hit verify (build 後・skip 可) ──
-describe('build-address.js --chiban: 実 ehime data 今治市役所の点 hit verify', () => {
+// ─── 10. ★ 実 ehime data 公の点（波止浜駅のそば） hit verify (build 後・skip 可) ──
+describe('build-address.js --chiban: 実 ehime data 公の点（波止浜駅のそば） hit verify', () => {
   const REAL_PATH = path.join(__dirname, '..', '..', 'data', 'addresses-chiban-ehime.js');
 
   // 実 ehime data (= 164 MB JS) は・load + 271 万点 sweep に・~7 秒 → vitest default 5 秒で timeout
@@ -482,7 +482,7 @@ describe('build-address.js --chiban: 実 ehime data 今治市役所の点 hit ve
   );
 
   it(
-    '★ 今治市役所の点 (34.06615, 132.99778) → 「今治市別宮町１丁目 4番地1」が・5m 以内で hit',
+    '★ 公の点（波止浜駅のそば） (34.0939, 132.9622) → 「今治市別宮町１丁目 4番地1」が・5m 以内で hit',
     { timeout: 60000 },
     () => {
       if (!fs.existsSync(REAL_PATH)) {
@@ -509,14 +509,14 @@ describe('build-address.js --chiban: 実 ehime data 今治市役所の点 hit ve
       let best = null;
       let bestD = Infinity;
       for (const p of b.points) {
-        const d = hav(34.06615, 132.99778, p.lat / 100000, p.lng / 100000);
+        const d = hav(34.0939, 132.9622, p.lat / 100000, p.lng / 100000);
         if (d < bestD) {
           bestD = d;
           best = p;
         }
       }
       expect(bestD).toBeLessThan(5);
-      // ★2026-10-10 点を 司さんの所から 今治市役所（別宮町1丁目4番地1）へ移した。この期待値は 未測定（data を repo に置いていないので 一度も回っていない）＝data を作った日に 確かめて直す。合わなければ 赤になる（緑にはならない）★
+      // ★2026-10-10 点を 司さんの所から 波止浜駅のそば（高部）へ移した。この期待値は 未測定（data を repo に置いていないので 一度も回っていない）＝data を作った日に 確かめて直す。合わなければ 赤になる（緑にはならない）★
       expect(b.oazas[best.c]).toBe('今治市別宮町１丁目');
       expect(best.k).toBe('4');
       expect(best.g).toBe('1');
