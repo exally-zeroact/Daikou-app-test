@@ -120,6 +120,18 @@ function zokusei(tagText) {
   return at;
 }
 
+// 属性の 実体参照を 1回 ほどく（ブラウザが 属性を 読む 時と 同じ・&amp;#9733; は &#9733; に なる）
+function jitaiWoToku(s) {
+  const NAMAE = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  return String(s).replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);?/gi, (all, x) => {
+    if (x[0] === '#') {
+      const n = x[1] === 'x' || x[1] === 'X' ? parseInt(x.slice(2), 16) : parseInt(x.slice(1), 10);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : all;
+    }
+    return NAMAE[x.toLowerCase()] != null ? NAMAE[x.toLowerCase()] : all;
+  });
+}
+
 // タグの 終わり（引用符の 中の > は 飛ばす）
 function tagNoOwari(s, i) {
   let q = null;
@@ -177,8 +189,21 @@ function htmlWoMiru(src) {
     // 属性（style は CSS の 注記を 外す・on... は JS として も 読む＝数 9733 で ★ を 作る 形）
     for (const [k, v0] of at) {
       const v = k === 'style' ? cssNoChuukiWoKesu(v0) : v0;
+      // on... と javascript: は JS（ブラウザは 実体参照を ほどいてから 走らせる）
+      const toita = jitaiWoToku(v);
+      const js = /^on/.test(k)
+        ? toita
+        : /^\s*javascript:/i.test(toita)
+          ? toita.replace(/^\s*javascript:/i, '')
+          : null;
+      const fuku = k === 'srcdoc' ? jitaiWoToku(v) : null; // srcdoc は ほどくと HTML
       if (HOSHI.test(v) || HOSHI.test(k)) hit(lt, k + '="' + v + '"');
-      else if (/^on/.test(k) && jsWoMiru(v).hoshi.length) hit(lt, k + '="' + v + '"');
+      else if (fuku != null && htmlWoMiru(fuku).hoshi.length) hit(lt, k + '="' + v + '"');
+      else if (js != null) {
+        const r = jsWoMiru(js);
+        if (r.yomenai) out.yomenai.push(k + ' 属性が JS として 読めない 行' + gyou(src, lt));
+        else if (r.hoshi.length) hit(lt, k + '="' + v + '"');
+      }
     }
     const atSrc = (at.find(([k]) => k === 'src') || [])[1];
     const atType = (at.find(([k]) => k === 'type') || [])[1];
@@ -188,11 +213,16 @@ function htmlWoMiru(src) {
       !tag.startsWith('</') &&
       /^(textarea|title|xmp|noembed|noframes|iframe|noscript|plaintext)$/.test(lname)
     ) {
-      const re2 = new RegExp('</' + lname + '\\s*>', 'ig');
+      // 閉じタグは </名前 の 後に 空白・/・> の どれか（ブラウザは </textarea foo> でも 閉じる）
+      const re2 = new RegExp('</' + lname + '(?=[\\s/>])', 'ig');
       re2.lastIndex = gt + 1;
       const m2 = lname === 'plaintext' ? null : re2.exec(src);
+      const gt2 = m2 ? tagNoOwari(src, m2.index) : -1;
       honbun(gt + 1, m2 ? m2.index : src.length);
-      i = m2 ? m2.index + m2[0].length : src.length;
+      if (lname !== 'plaintext' && gt2 < 0) {
+        out.yomenai.push(lname + ' が 閉じない 行' + gyou(src, lt)); // 後ろを 全部 飲み込む＝黙らない
+      }
+      i = gt2 < 0 ? src.length : gt2 + 1;
       continue;
     }
     if (!tag.startsWith('</') && (lname === 'script' || lname === 'style')) {
@@ -318,6 +348,7 @@ function zenbuKazoeru() {
       srcWoRepoNoNamaeNi('/' + v.replace(/^\.?\//, ''), f),
     ]) {
       if (p && aru.has(p) && !KARIMONO.test(p) && !hani.has(p)) kekka.minaiSrc.push(f + ' → ' + v);
+      else if (p && aru.has(p) && KARIMONO.test(p)) kekka.sotoSrc.push(p); // JS が 読む 見ない 物も 名簿へ
     }
   }
   kekka.hani = [...hani].sort();

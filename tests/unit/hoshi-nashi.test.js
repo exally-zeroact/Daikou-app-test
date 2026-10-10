@@ -79,10 +79,34 @@ describe('客の 字に ★ が 無い', () => {
   });
   it('html が 読むのに 見ない 物は 名簿の 通り（名前の 形で 外す ので、新しい 物は ここで 止める）', () => {
     // data/＝本物の 名前（下）・*.min.js＝借り物（QR・暗号）。自前の 物を x.min.js や data/ に 置くと 見なくなる＝ここで 赤
+    // html の src と JS の 字（data-registry・sw.js の 先取り・el.src=…）の 両方から 集める（対立役 B）
     expect(k.sotoSrc).toEqual([
       'data/addresses-coarse-jp.js',
+      'data/addresses-fine-jp.js',
+      'data/airports-jp.js',
+      'data/coarse-jp.js',
+      'data/coastline-jp.js',
+      'data/dem-jp.js',
+      'data/emergency-medical-jp.js',
+      'data/faults-jp.js',
+      'data/hazard-cliff-jp.js',
+      'data/highways-jp.js',
+      'data/hiking-trails-jp.js',
+      'data/michinoeki-jp.js',
+      'data/misc-jp.js',
+      'data/night-clinics-jp.js',
+      'data/peaks-jp.js',
+      'data/ports-jp.js',
+      'data/pref-borders-jp.js',
+      'data/railways-jp.js',
+      'data/road-graph-backbone-jp.js',
+      'data/shelters-jp.js',
+      'data/stations-jp.js',
+      'data/waterways-jp.js',
       'js/qrcode.min.js',
       'js/tweetnacl.min.js',
+      'vendor/fontkit.umd.min.js',
+      'vendor/pdf-lib.min.js',
     ]);
   });
   it('data/ を 外す 訳が 生きている（本物の 店の 名前に ★ が 在る＝消すと 名前が 変わる）', () => {
@@ -179,6 +203,30 @@ describe('門の 歯（作った 入力で 赤に なるか）', () => {
     ).toBe(1);
     expect(htmlAka('<script>el.textContent=unescape("%u2605")</script>')).toBe(1);
     expect(jsAka('el.textContent = /★/.source;')).toBe(1);
+  });
+  // 本番前の 対立役 2回目（2026-10-10）の A・C
+  it('HTML：字の 箱の 閉じタグが 崩れた 形でも 閉じる・閉じなければ 読めない（後ろを 黙って 飲み込まない）', () => {
+    expect(
+      htmlAka('<textarea></textarea/><script>t.textContent=String.fromCharCode(9733)</script>')
+    ).toBe(1);
+    expect(htmlWoMiru('<textarea></textarea foo><script src="scripts/x.js"></script>').src).toEqual(
+      ['scripts/x.js']
+    );
+    expect(htmlWoMiru('<textarea>あ<script>var a=1;</script>').yomenai.length).toBe(1);
+  });
+  it('HTML：on 属性が 読めない 時は 黙らない・srcdoc・javascript: も 見る', () => {
+    expect(
+      htmlAka(
+        '<button onclick="this.title=&#39;a&#39;;this.textContent=String.fromCharCode(9733)">あ</button>'
+      )
+    ).toBe(1);
+    expect(htmlWoMiru('<button onclick="var s = \'とじない">あ</button>').yomenai.length).toBe(1);
+    expect(htmlAka('<iframe srcdoc="&lt;p&gt;&amp;#9733;&lt;/p&gt;"></iframe>')).toBe(1);
+    expect(htmlAka('<iframe srcdoc="&lt;p&gt;&amp;starf;&lt;/p&gt;"></iframe>')).toBe(1);
+    expect(
+      htmlAka('<a href="javascript:void(this.textContent=String.fromCharCode(9733))">あ</a>')
+    ).toBe(1);
+    expect(htmlAka('<a href="javascript:void(0)" onclick="go()">あ</a>')).toBe(0);
   });
   it('探す 形が 普通の 字を 拾わない', () => {
     expect(HOSHI.test('&#97330; \\u26050 料金 ☆ 2605円')).toBe(false);
