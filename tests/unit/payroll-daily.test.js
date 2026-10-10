@@ -10,7 +10,7 @@
 //   ▼実物を読んで確定した一番大事なこと（口頭では出てこなかった）
 //     『計算』シートの人ごとの時数は入力ではなく **=[@時数2] のような式** だった。
 //     つまり ★人の時数 = その日その人が乗った車の時数★。
-//     例) 1/10 は 竹内=[@時数4](8.75) 八木=[@時数2](9.00) と、日によって乗る車が変わる。
+//     例) 1/10 は 試験=[@時数4](8.75) 例野=[@時数2](9.00) と、日によって乗る車が変わる。
 //     だから「誰がどの車に乗ったか」を持たないと時数が決まらない。
 //
 //   ▼もう一つ: 時数合計 = 車の時数の合計（人の時数の合計ではない）
@@ -71,12 +71,12 @@ const CTX_0110 = {
   employees: EMP,
   workHours: [
     // 誰がどの車に乗ったか（時数は車から決まるので入れない）
-    { work_date: '2026-01-10', employee_id: 'e1', device_id: 'dev2' }, // 白石 = 時数2
-    { work_date: '2026-01-10', employee_id: 'e5', device_id: 'dev2' }, // 八木 = 時数2
+    { work_date: '2026-01-10', employee_id: 'e1', device_id: 'dev2' }, // 見本 = 時数2
+    { work_date: '2026-01-10', employee_id: 'e5', device_id: 'dev2' }, // 例野 = 時数2
     { work_date: '2026-01-10', employee_id: 'e2', device_id: 'dev3' }, // 架空二 = 時数3
-    { work_date: '2026-01-10', employee_id: 'e3', device_id: 'dev3' }, // 真道 = 時数3
-    { work_date: '2026-01-10', employee_id: 'e4', device_id: 'dev4' }, // 竹内 = 時数4
-    { work_date: '2026-01-10', employee_id: 'e6', device_id: 'dev4' }, // 結田 = 時数4
+    { work_date: '2026-01-10', employee_id: 'e3', device_id: 'dev3' }, // 三六 = 時数3
+    { work_date: '2026-01-10', employee_id: 'e4', device_id: 'dev4' }, // 試験 = 時数4
+    { work_date: '2026-01-10', employee_id: 'e6', device_id: 'dev4' }, // 模擬 = 時数4
   ],
   payrollSettings: { owner_device_id: 'devT' },
 };
@@ -473,7 +473,7 @@ describe('★壊れたデータでも画面を殺さない★', () => {
       })
     );
     const r = D.computeDay('2026-01-10', ctx);
-    expect(r.staffTotal).toBe(55900); // 八木の9,000を含んだまま
+    expect(r.staffTotal).toBe(55900); // 例野の9,000を含んだまま
     expect(r.ownerShare).toBe(18390);
   });
 });
