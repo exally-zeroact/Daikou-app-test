@@ -1,7 +1,7 @@
 {
   "name": "【テスト用】ダイコメ",
   "short_name": "【テスト】ダイコメ",
-  "description": "★テスト用★ 本番ではありません（本番は https://daikou-app.vercel.app/）",
+  "description": "【テスト用】本番ではありません（本番は https://daikou-app.vercel.app/）",
   "id": "/?source=pwa",
   "start_url": "/",
   "scope": "/",

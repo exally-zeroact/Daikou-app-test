@@ -1,7 +1,7 @@
 {
   "name": "【テスト用】ダイコメ 事務所",
   "short_name": "【テスト】事務所",
-  "description": "★テスト用★ 運転代行の事務所（売上表・給料・月次集計）（本番は https://daikou-app.vercel.app/）",
+  "description": "【テスト用】運転代行の事務所（売上表・給料・月次集計）（本番は https://daikou-app.vercel.app/）",
   "id": "/dashboard.html",
   "start_url": "/dashboard.html",
   "scope": "/",
