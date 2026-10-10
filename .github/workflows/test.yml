@@ -46,7 +46,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: 20 # ★Castally の CI と同じ版★（24 では Linux で double free で落ちた・run 38071799983）
       # ★公開 repo に 実在の 字（司さん・会社・お客さんの 本物）を 戻さない★（2026-10-10）
       #   一覧は repo に 置かない＝secret KINSHI_JI（1行に 1語）。無ければ「未測定」で 赤。
       #   指紋（変数 KINSHI_JI_FINGER）と 違えば 赤＝secret が 縮んだ・壊れた を 止める。
