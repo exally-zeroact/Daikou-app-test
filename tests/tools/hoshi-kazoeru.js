@@ -51,7 +51,7 @@ const KARIMONO = /^(data|vendor)\/|\.min\.js$/; // 見ない 訳＝上の 説明
 
 // ★ の 形（字の 生の 書き方で 探す）
 const HOSHI =
-  /★|\\u0*2605(?![0-9a-f])|\\u\{0*2605\}|&#0*9733(?![0-9])|&#x0*2605(?![0-9a-f])|&starf;|&bigstar;|\\0*2605(?![0-9a-f])|%E2%98%85/i;
+  /★|\\u0*2605(?![0-9a-f])|\\u\{0*2605\}|&#0*9733(?![0-9])|&#x0*2605(?![0-9a-f])|&starf;|&bigstar;|\\0*2605(?![0-9a-f])|%E2%98%85|%u0*2605(?![0-9a-f])/i;
 
 function cssNoChuukiWoKesu(s) {
   return String(s).replace(/\/\*[\s\S]*?\*\//g, ' ');
@@ -91,7 +91,7 @@ function jsWoMiru(src, opt) {
   out.yomenai = null;
   for (const t of tokens) {
     const label = t.type.label;
-    if (label === 'string' || label === 'template') {
+    if (label === 'string' || label === 'template' || label === 'regexp') {
       out.katamari++;
       const nama = src.slice(t.start, t.end);
       if (HOSHI.test(nama) || HOSHI.test(String(t.value))) {
@@ -106,15 +106,16 @@ function jsWoMiru(src, opt) {
   return out;
 }
 
+// 属性は 全部 並べる（同じ 名前が 2つ 在っても 両方 見る＝ブラウザは 先の 方を 使う）
 function zokusei(tagText) {
-  const at = {};
+  const at = [];
   const re = /([^\s=/>"'<]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g;
   let m;
   const body = tagText.replace(/^<\/?[A-Za-z][^\s/>]*/, '');
   while ((m = re.exec(body))) {
     let v = m[2] == null ? '' : m[2];
     if (/^["']/.test(v)) v = v.slice(1, -1);
-    at[m[1].toLowerCase()] = v;
+    at.push([m[1].toLowerCase(), v]);
   }
   return at;
 }
@@ -149,8 +150,15 @@ function htmlWoMiru(src) {
     }
     honbun(i, lt);
     if (src.startsWith('<!--', lt)) {
-      const e = src.indexOf('-->', lt + 4);
-      i = e < 0 ? src.length : e + 3;
+      // HTML の 決まり：<!--> と <!---> は その場で 閉じる・--!> でも 閉じる
+      if (src.startsWith('>', lt + 4)) i = lt + 5;
+      else if (src.startsWith('->', lt + 4)) i = lt + 6;
+      else {
+        const e1 = src.indexOf('-->', lt + 4);
+        const e2 = src.indexOf('--!>', lt + 4);
+        i = Math.min(e1 < 0 ? Infinity : e1 + 3, e2 < 0 ? Infinity : e2 + 4);
+        if (i === Infinity) i = src.length;
+      }
       continue;
     }
     if (!/^<\/?[A-Za-z!]/.test(src.slice(lt, lt + 2))) {
@@ -166,12 +174,27 @@ function htmlWoMiru(src) {
     const tag = src.slice(lt, gt + 1);
     const name = (tag.match(/^<\/?([A-Za-z][^\s/>]*)/) || [])[1];
     const at = zokusei(tag);
-    // 属性（style は CSS の 注記を 外す）
-    for (const k of Object.keys(at)) {
-      const v = k === 'style' ? cssNoChuukiWoKesu(at[k]) : at[k];
+    // 属性（style は CSS の 注記を 外す・on... は JS として も 読む＝数 9733 で ★ を 作る 形）
+    for (const [k, v0] of at) {
+      const v = k === 'style' ? cssNoChuukiWoKesu(v0) : v0;
       if (HOSHI.test(v) || HOSHI.test(k)) hit(lt, k + '="' + v + '"');
+      else if (/^on/.test(k) && jsWoMiru(v).hoshi.length) hit(lt, k + '="' + v + '"');
     }
+    const atSrc = (at.find(([k]) => k === 'src') || [])[1];
+    const atType = (at.find(([k]) => k === 'type') || [])[1];
     const lname = (name || '').toLowerCase();
+    // 中身を 字として そのまま 出す 箱（注記も タグも 効かない）＝閉じる タグまで 全部 本文として 見る
+    if (
+      !tag.startsWith('</') &&
+      /^(textarea|title|xmp|noembed|noframes|iframe|noscript|plaintext)$/.test(lname)
+    ) {
+      const re2 = new RegExp('</' + lname + '\\s*>', 'ig');
+      re2.lastIndex = gt + 1;
+      const m2 = lname === 'plaintext' ? null : re2.exec(src);
+      honbun(gt + 1, m2 ? m2.index : src.length);
+      i = m2 ? m2.index + m2[0].length : src.length;
+      continue;
+    }
     if (!tag.startsWith('</') && (lname === 'script' || lname === 'style')) {
       const re = new RegExp('</' + lname + '\\s*>', 'ig');
       re.lastIndex = gt + 1;
@@ -182,11 +205,11 @@ function htmlWoMiru(src) {
         const c = cssNoChuukiWoKesu(naka);
         if (HOSHI.test(c))
           hit(gt + 1 + naka.search(HOSHI), c.slice(c.search(HOSHI), c.search(HOSHI) + 60));
-      } else if (at.src != null) {
-        out.src.push(at.src);
+      } else if (atSrc !== undefined) {
+        out.src.push(atSrc);
         if (naka.trim() && HOSHI.test(naka)) hit(gt + 1, naka);
       } else {
-        const type = (at.type || '').toLowerCase();
+        const type = (atType || '').toLowerCase();
         out.inlineScript++;
         if (/json/.test(type)) {
           if (HOSHI.test(naka)) hit(gt + 1, naka.slice(naka.search(HOSHI)));
@@ -238,6 +261,8 @@ function zenbuKazoeru() {
   );
   const hani = new Set(kihon);
   const kekka = {
+    kotoni: {}, // ファイルごとの 字の 塊の 数（痩せを ファイル ごとに 見る）
+    sotoSrc: [], // html が 読むのに 見ない 物（data/ vendor/ *.min.js）＝門で 名簿と 突き合わせる
     hoshi: [],
     katamari: 0,
     inlineScript: 0,
@@ -264,7 +289,8 @@ function zenbuKazoeru() {
       for (const s of r.src) {
         const p = srcWoRepoNoNamaeNi(s, f); // 外の URL は 無し（別の 枠）
         if (p && !aru.has(p)) kekka.nakuSrc.push(f + ' → ' + s);
-        else if (p && !KARIMONO.test(p) && !hani.has(p)) {
+        else if (p && KARIMONO.test(p)) kekka.sotoSrc.push(p);
+        else if (p && !hani.has(p)) {
           hani.add(p);
           kyuu.push(p);
         }
@@ -281,6 +307,7 @@ function zenbuKazoeru() {
       if (r.yomenai) kekka.yomenai.push(f + '：' + r.yomenai);
     }
     kekka.katamari += r.katamari || 0;
+    kekka.kotoni[f] = r.katamari || 0;
     jsNoNamae.push(...(r.jsNoNamae || []).map((v) => [f, v]));
     for (const h of r.hoshi) kekka.hoshi.push(f + ':' + h.gyou + '  ' + h.ji.replace(/\s+/g, ' '));
   }
@@ -294,6 +321,7 @@ function zenbuKazoeru() {
     }
   }
   kekka.hani = [...hani].sort();
+  kekka.sotoSrc = [...new Set(kekka.sotoSrc)].sort();
   return kekka;
 }
 

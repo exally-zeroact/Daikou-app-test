@@ -10,8 +10,8 @@
 //   ★0本で 緑に しない★＝下の 下限（ファイル数・inline script・字の塊）を 割ったら 赤
 // ============================================================
 const { HOSHI, jsWoMiru, htmlWoMiru, zenbuKazoeru } = require('../tools/hoshi-kazoeru.js');
-const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const k = zenbuKazoeru();
 console.log(
@@ -45,6 +45,8 @@ describe('客の 字に ★ が 無い', () => {
       'ryokinhyou.html',
       'nyuryoku.html',
       'dashboard.html',
+      'shukei.html',
+      'uriage.html',
       'js/obd-client.js',
       'js/fare-config-store.js',
       'manifest.json',
@@ -56,12 +58,48 @@ describe('客の 字に ★ が 無い', () => {
       expect(k.hani).toContain(f);
     }
   });
+  it('お客さんの 画面ごとに 痩せていない（全体の 下限では 1本 抜けても 黙る＝ファイルごとに 見る）', () => {
+    // 2026-10-10 の 数の 8割（対立役：shukei 465・ryokinhyou 396・uriage 237 は 全体の 下限では 抜けても 黙った）
+    const KAGEN = {
+      'index.html': 2680,
+      'kyuryo.html': 1240,
+      'shukei.html': 370,
+      'ryokinhyou.html': 310,
+      'dashboard.html': 280,
+      'uriage.html': 190,
+      'nyuryoku.html': 150,
+      'shindan.html': 90,
+      'login.html': 80,
+      'js/obd-client.js': 230,
+      'js/meter.js': 130,
+      'js/fare-config-store.js': 70,
+    };
+    const yase = Object.keys(KAGEN).filter((f) => !(k.kotoni[f] >= KAGEN[f]));
+    expect(yase.map((f) => `${f} ${k.kotoni[f]} < ${KAGEN[f]}`)).toEqual([]);
+  });
+  it('html が 読むのに 見ない 物は 名簿の 通り（名前の 形で 外す ので、新しい 物は ここで 止める）', () => {
+    // data/＝本物の 名前（下）・*.min.js＝借り物（QR・暗号）。自前の 物を x.min.js や data/ に 置くと 見なくなる＝ここで 赤
+    expect(k.sotoSrc).toEqual([
+      'data/addresses-coarse-jp.js',
+      'js/qrcode.min.js',
+      'js/tweetnacl.min.js',
+    ]);
+  });
   it('data/ を 外す 訳が 生きている（本物の 店の 名前に ★ が 在る＝消すと 名前が 変わる）', () => {
-    const src = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'data', 'michinoeki-jp.js'),
-      'utf8'
-    );
-    expect(src).toMatch(/★/);
+    // 1店の 名前に 頼らない＝data/ の js の どれかに ★ が 在れば 良い（今 14本）
+    const ROOT = path.join(__dirname, '..', '..');
+    const dataJs = execFileSync('git', ['ls-files', 'data/*.js'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter(Boolean);
+    expect(dataJs.length).toBeGreaterThan(0);
+    // data/ は 大きい（全部 読むと 40秒）＝git grep で 名前だけ 取る
+    const hoshiAri = execFileSync('git', ['grep', '-l', '★', '--', 'data/*.js'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter(Boolean);
+    expect(hoshiAri.length).toBeGreaterThan(0);
     expect(k.hani.some((f) => f.startsWith('data/'))).toBe(false);
   });
 });
@@ -119,6 +157,28 @@ describe('門の 歯（作った 入力で 赤に なるか）', () => {
     expect(r.hoshi.length).toBe(1);
     expect(r.inlineScript).toBe(1);
     expect(r.yomenai).toEqual([]);
+  });
+  // 本番前の 対立役（2026-10-10）が 示した 緑で 通る 形
+  it('HTML：注記の 閉じ方（<!--> ・ <!---> ・ --!>）で 本文を 飲み込まない', () => {
+    expect(htmlAka('<!-->★<p>x</p><!-- y -->')).toBe(1);
+    expect(htmlAka('<!--->★<p>x</p><!-- y -->')).toBe(1);
+    expect(htmlAka('<!-- x --!>★<!-- y -->')).toBe(1);
+  });
+  it('HTML：字の 箱（textarea・title）の 中は 注記に 見えても 字＝赤', () => {
+    expect(htmlAka('<textarea><!-- ★ --></textarea>')).toBe(1);
+    expect(htmlAka('<title><!--★--></title>')).toBe(1);
+    expect(htmlAka('<textarea>ふつう</textarea><p>あ</p>')).toBe(0);
+  });
+  it('HTML：同じ 属性が 2つ・on 属性の 数 9733・%u2605・正規表現の 字 は 赤', () => {
+    expect(htmlAka('<input placeholder="★名前" placeholder="名前">')).toBe(1);
+    expect(
+      htmlAka('<button onclick="this.textContent=String.fromCharCode(9733)">あ</button>')
+    ).toBe(1);
+    expect(
+      htmlAka('<button onclick="this.textContent=String.fromCodePoint(0x2605)">あ</button>')
+    ).toBe(1);
+    expect(htmlAka('<script>el.textContent=unescape("%u2605")</script>')).toBe(1);
+    expect(jsAka('el.textContent = /★/.source;')).toBe(1);
   });
   it('探す 形が 普通の 字を 拾わない', () => {
     expect(HOSHI.test('&#97330; \\u26050 料金 ☆ 2605円')).toBe(false);
