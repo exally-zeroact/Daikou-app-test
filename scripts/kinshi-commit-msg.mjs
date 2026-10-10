@@ -29,8 +29,23 @@ import { realpathSync } from 'node:fs';
 export const FUDA = ['司さん家', '司さんの家', '司さん宅', '司さんの自宅'];
 
 // 比べる前の ならし：全角/半角・大文字小文字・空白の揺れを ならす
+//   ★NFKC で揃わない物も 寄せる★（対立役が通した形）：ダッシュの類（U+2010〜2015・U+2212）→「-」、
+//   幅0の字（U+200B〜200D・U+2060・U+FEFF）は消す
 export function narasu(s) {
-  return String(s).normalize('NFKC').toLowerCase().replace(/\s+/g, '');
+  return String(s)
+    .normalize('NFKC')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '');
+}
+
+// commit の文の本文だけを取る：切り取り線（git commit -v の「>8」）より下の差分は 見ない。
+//   ★「#」で始まる行は 捨てない★（-m で書いた見出しは そのまま commit に残るため）
+export function honbun(text) {
+  const lines = String(text).split(/\r?\n/);
+  const cut = lines.findIndex((l) => /^# -+ >8 -+$/.test(l));
+  return (cut >= 0 ? lines.slice(0, cut) : lines).join('\n');
 }
 
 export function ichiran(text) {
@@ -72,6 +87,15 @@ function selfTest() {
     ['札の別の形', '司さん宅 のそば', 1],
     ['種類と数だけ', '付近の点を 2点 移した・実機の記録7本', 0],
     ['1字だけの語は 数えない', '見', 0],
+    // ↓ 対立役（本番前）が通した形
+    ['「#」で始まる行（-m の見出し）', honbun('題\n\n# 見本太郎 の点'), 1],
+    ['番地のダッシュが U+2212', '架空区見本台1\u22122\u22123', 1],
+    ['名前に幅0の空白', '見本\u200b太郎', 1],
+    [
+      '切り取り線より下の差分は見ない',
+      honbun('題\n# ------------------------ >8 ------------------------\n-見本太郎'),
+      0,
+    ],
   ];
   let ok = 0;
   for (const [name, msg, want] of cases) {
@@ -105,11 +129,25 @@ function main() {
   const words = [...li.words, ...FUDA];
   const file = at('--file');
   const range = at('--range');
-  if (file) {
-    const msg = readFileSync(file, 'utf8')
+  if (argv.includes('--pre-push')) {
+    // ★push する前に まだどの遠くにも無い commit を全部見る★
+    //   cherry-pick・rebase・--no-verify・HUSKY=0 は commit-msg の門を通らないため、公開の前の最後の関所。
+    //   stdin は「<local ref> <local sha> <remote ref> <remote sha>」の行（git の決まり）
+    const stdin = readFileSync(0, 'utf8');
+    const shas = stdin
       .split(/\r?\n/)
-      .filter((l) => !l.startsWith('#'))
-      .join('\n');
+      .map((l) => l.trim().split(/\s+/)[1])
+      .filter((s) => s && !/^0+$/.test(s));
+    if (!shas.length) {
+      console.log('✓ commit の文の 実在の字 0 件（送る commit なし）');
+      process.exitCode = 0;
+      return;
+    }
+    if (miru([...shas, '--not', '--remotes'], words, true)) process.exitCode = 0;
+    return;
+  }
+  if (file) {
+    const msg = honbun(readFileSync(file, 'utf8'));
     const n = ataru(msg, words);
     if (n) {
       console.error(
@@ -125,30 +163,37 @@ function main() {
     return;
   }
   if (range) {
-    const out = execFileSync('git', ['log', '--format=%H%x00%B%x01', range], { encoding: 'utf8' });
-    const commits = out
-      .split('\x01')
-      .map((c) => c.trim())
-      .filter(Boolean);
-    let bad = 0;
-    for (const c of commits) {
-      const [sha, msg] = c.split('\x00');
-      const n = ataru(msg || '', words);
-      if (n) {
-        bad++;
-        console.error(`★${sha.slice(0, 9)} の文に 実在の字か 札が ${n} 語★（字は出しません）`);
-      }
-    }
-    if (!commits.length) {
-      console.error(`★未測定★ ${range} に commit が 0本（範囲の取り違え）`);
-      return;
-    }
-    if (bad) return;
-    console.log(`✓ commit の文の 実在の字 0 件（${commits.length} 本・${words.length} 語で見た）`);
-    process.exitCode = 0;
+    if (miru([range], words, false)) process.exitCode = 0;
     return;
   }
-  console.error('使い方: --file <COMMIT_EDITMSG> | --range <base>..<head> | --self-test');
+  console.error(
+    '使い方: --file <COMMIT_EDITMSG> | --range <base>..<head> | --pre-push（stdin） | --self-test'
+  );
+}
+
+// git log の範囲の commit の文を全部見る。全部 0件なら true
+function miru(revs, words, zeroOk) {
+  const out = execFileSync('git', ['log', '--format=%H%x00%B%x01', ...revs], { encoding: 'utf8' });
+  const commits = out
+    .split('\x01')
+    .map((c) => c.trim())
+    .filter(Boolean);
+  if (!commits.length && !zeroOk) {
+    console.error(`★未測定★ ${revs.join(' ')} に commit が 0本（範囲の取り違え）`);
+    return false;
+  }
+  let bad = 0;
+  for (const c of commits) {
+    const [sha, msg] = c.split('\x00');
+    const n = ataru(honbun(msg || ''), words);
+    if (n) {
+      bad++;
+      console.error(`★${sha.slice(0, 9)} の文に 実在の字か 札が ${n} 語★（字は出しません）`);
+    }
+  }
+  if (bad) return false;
+  console.log(`✓ commit の文の 実在の字 0 件（${commits.length} 本・${words.length} 語で見た）`);
+  return true;
 }
 
 const isMain = (() => {
