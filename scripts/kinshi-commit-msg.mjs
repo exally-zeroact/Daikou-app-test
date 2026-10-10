@@ -143,7 +143,9 @@ function main() {
       process.exitCode = 0;
       return;
     }
-    if (miru([...shas, '--not', '--remotes'], words, true)) process.exitCode = 0;
+    const okMsg = miru([...shas, '--not', '--remotes'], words, true);
+    const okMail = mailMiru([...shas, '--not', '--remotes']);
+    if (okMsg && okMail) process.exitCode = 0;
     return;
   }
   if (file) {
@@ -169,6 +171,41 @@ function main() {
   console.error(
     '使い方: --file <COMMIT_EDITMSG> | --range <base>..<head> | --pre-push（stdin） | --self-test'
   );
+}
+
+// ★commit の作者と commit した人の欄に メールを出さない★（司さん 10-11「アドレスが分からんようにしろや」）
+//   通すのは GitHub の noreply（…@users.noreply.github.com）と GitHub 自身（noreply@github.com）だけ。
+//   出すのは SHA と 欄の名前だけ（メールの字は出さない）。全部 通れば true
+export function mailOk(mail) {
+  const m = String(mail || '')
+    .trim()
+    .toLowerCase();
+  return m.endsWith('@users.noreply.github.com') || m === 'noreply@github.com';
+}
+function mailMiru(revs) {
+  const out = execFileSync('git', ['log', '--format=%H%x00%ae%x00%ce', ...revs], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  let bad = 0;
+  for (const line of out.split('\n').filter(Boolean)) {
+    const [sha, ae, ce] = line.split('\x00');
+    const which = [!mailOk(ae) && '作者', !mailOk(ce) && 'commit した人'].filter(Boolean);
+    if (which.length) {
+      bad++;
+      console.error(
+        `★${sha.slice(0, 9)} の ${which.join('と')} の欄に メールが出ています★（noreply にしてから作り直す）`
+      );
+    }
+  }
+  if (bad) {
+    console.error(
+      '  git config --local user.email を GitHub の noreply にしてください（global は触らない）。'
+    );
+    return false;
+  }
+  console.log('✓ 作者と commit した人の欄 全部 noreply');
+  return true;
 }
 
 // git log の範囲の commit の文を全部見る。全部 0件なら true
