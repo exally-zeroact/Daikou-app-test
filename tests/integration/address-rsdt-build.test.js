@@ -427,13 +427,13 @@ describe('build-address.js --rsdt: 実 ehime data 最近傍 verify', () => {
     CASE_TIMEOUT_MS
   );
 
-  // ★ 公の点（波止浜駅のそば） (34.0939, 132.9622) の・所在地「今治市高部」は・地番地区
+  // ★ 作り物の点 (34.0939, 132.9622) の・所在地「今治市高部」は・地番地区
   //   (= ABR rsdt_addr_flg=0 → ABR rsdt に・含まれない)。これは設計通り (= 号無し領域)。
   //   commit4 SEARCH_CHAIN で・rsdt MISS → street で 「別宮町一丁目4」 fallback する。
-  //   ★2026-10-10 点を 司さんの所から 波止浜駅のそば（高部）へ移した。この期待値は 未測定（data を repo に置いていないので 一度も回っていない）＝data を作った日に 確かめて直す。合わなければ 赤になる（緑にはならない）★
+  //   ★2026-10-10 点を 司さんの所から 作り物の点（高部）へ移した。この期待値は 未測定（data を repo に置いていないので 一度も回っていない）＝data を作った日に 確かめて直す。合わなければ 赤になる（緑にはならない）★
   //   よって rsdt 単独 verify は・実 ABR 住居表示地区 GPS で実施。
   it(
-    '公の点（波止浜駅のそば） (34.0939, 132.9622) は・地番地区 = ABR rsdt に・近傍 100m 内 hit なし (= 設計通り・SEARCH_CHAIN で street fallback)',
+    '作り物の点 (34.0939, 132.9622) は・地番地区 = ABR rsdt に・近傍 100m 内 hit なし (= 設計通り・SEARCH_CHAIN で street fallback)',
     () => {
       if (!REAL) return;
       const b = REAL;

@@ -50,7 +50,7 @@ beforeAll(() => {
   if (typeof notifyRawGps !== 'function') {
     throw new Error('Business.notifyRawGps 未 export');
   }
-  // 本物 愛媛 bundle (= 波止浜駅のそば PIP 用)
+  // 本物 愛媛 bundle (= 作り物の点 PIP 用)
   const ehimePath = path.join(__dirname, '..', '..', 'data', 'town-polygons-ehime.js');
   if (fs.existsSync(ehimePath)) {
     const sandbox = {};
@@ -84,7 +84,7 @@ afterEach(() => {
 
 // ─── 1-4. 3 段 fallback behavior ─
 describe('getCurrentLiveAddress: 3 段 fallback (snap fresh → snap stale → raw GPS)', () => {
-  it('1. ① snap fresh → 住所文字列 (= 波止浜駅のそば・高部 → 「今治市高部」)', () => {
+  it('1. ① snap fresh → 住所文字列 (= 作り物の点・高部 → 「今治市高部」)', () => {
     if (!ehimeBundle) return;
     notifyMMSnap(34.0939, 132.9622);
     expect(getCurrentLiveAddress()).toBe('今治市高部');
@@ -129,7 +129,7 @@ describe('getCurrentLiveAddress: 3 段 fallback (snap fresh → snap stale → r
 
   it('7. ① snap fresh 優先 (= raw GPS あっても snap が・優先)', () => {
     if (!ehimeBundle) return;
-    notifyMMSnap(34.0939, 132.9622); // 波止浜駅のそば
+    notifyMMSnap(34.0939, 132.9622); // 作り物の点
     notifyRawGps(33.80677, 132.73824); // 松山市 (= raw GPS は・別位置)
     // snap fresh が優先 → 「今治市高部」 を返す (= raw GPS は無視)
     expect(getCurrentLiveAddress()).toBe('今治市高部');

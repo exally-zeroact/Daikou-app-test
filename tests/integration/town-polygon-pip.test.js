@@ -3,11 +3,11 @@
 // ★設計変更宣言 (2026-05-23・住所① 案 C 高精度版・point-in-polygon verify):
 //   business.js __addressFormatter pure helper の・behavior verify。
 //   本物 data file (= data/town-polygons-ehime.js) を・require・本物 NII Geoshape
-//   町丁字 polygon で・PIP 動作 + 波止浜駅のそば regression verify。
+//   町丁字 polygon で・PIP 動作 + 作り物の点 regression verify。
 //
 // 検証内容 (= 本物データ形式 fixture・decimal mock 禁止):
 //   1. _pointInPolygon ray casting 8 ケース (= 正方形 内/外/edge/vertex/凸/凹)
-//   2. _findTownPolygonAddress: 本物 1 県 (= 愛媛) で・波止浜駅のそば = 「別宮町一丁目 (今治市)」regression
+//   2. _findTownPolygonAddress: 本物 1 県 (= 愛媛) で・作り物の点 = 「別宮町一丁目 (今治市)」regression
 //   3. 各町境界部 5-10 点 (= 北浜町 / 常盤町 / 美保町 / 室屋町 境界)
 //   4. polygon 外 (= 海上座標) → null
 //   5. notifyMMSnap public API (= snap cache)
@@ -17,7 +17,7 @@
 // 絶対ルール準拠:
 //   ✓ distance_m / Meter.getNearestAddress / Worker B 本体: 完全無関係 (= pure helper のみ verify)
 //   ✓ 本物 town-polygons-ehime.js (= 既存 build script 出力) を・直接 require
-//   ✓ decimal mock 禁止: 波止浜駅のそば (公の建物) の座標 + 本物 polygon
+//   ✓ decimal mock 禁止: 作り物の点の座標 + 本物 polygon
 
 'use strict';
 
@@ -143,8 +143,8 @@ describe('_pointInPolygon: ray casting 基本 8 ケース', () => {
 });
 
 // ─── 2-4. _findTownPolygonAddress: 本物 愛媛 bundle で・regression ─
-describe('_findTownPolygonAddress: 本物 愛媛 bundle・波止浜駅のそば regression', () => {
-  it('★ 波止浜駅のそば (34.0939, 132.9622) → 「高部 (今治市)」', () => {
+describe('_findTownPolygonAddress: 本物 愛媛 bundle・作り物の点 regression', () => {
+  it('★ 作り物の点 (34.0939, 132.9622) → 「高部 (今治市)」', () => {
     const r = findTownPolygonAddress(34.0939, 132.9622, ehimeBundle);
     expect(r).not.toBeNull();
     expect(r.n).toBe('高部');

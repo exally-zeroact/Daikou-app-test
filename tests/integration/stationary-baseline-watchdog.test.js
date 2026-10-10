@@ -20,7 +20,7 @@
 //   ★絶対ルール準拠:
 //     ・distance_m / calcFare / running gate / 5加算経路 / isStationary 判定本体: 1 byte 不変
 //     ・本 file は test 追加のみ・本番 js/*.js は触らない
-//     ・既存 section 3-5 (= 波止浜駅のそば PIP / banner 削除 watchdog) は1byte 不変で保持
+//     ・既存 section 3-5 (= 作り物の点 PIP / banner 削除 watchdog) は1byte 不変で保持
 
 'use strict';
 
@@ -415,8 +415,8 @@ describe('Fix② accuracy cap watchdog (実 gps-worker.js 経由・★新構造)
   });
 });
 
-// ─── 3. 波止浜駅のそば fixture (= 案 C 既存 PIP regression と統合・距離挙動 verify) ───
-describe('波止浜駅のそば baseline (= 案 C 既存 PIP regression と整合)', () => {
+// ─── 3. 作り物の点 fixture (= 案 C 既存 PIP regression と統合・距離挙動 verify) ───
+describe('作り物の点 baseline (= 案 C 既存 PIP regression と整合)', () => {
   let ehimeBundle;
   let Business;
   let pointInPolygon;
@@ -434,16 +434,16 @@ describe('波止浜駅のそば baseline (= 案 C 既存 PIP regression と整�
     pointInPolygon = Business.__addressFormatter.pointInPolygon;
   });
 
-  it('★ 波止浜駅のそば (= 公の場所の座標) 高部 polygon 内 = YES (= 案 C 既存 regression)', () => {
+  it('★ 作り物の点 高部 polygon 内 = YES (= 案 C 既存 regression)', () => {
     if (!ehimeBundle) return;
-    const betsumiya1 = ehimeBundle.items.find((it) => it.n === '高部' && it.c === '今治市');
-    expect(betsumiya1).toBeDefined();
+    const takabe = ehimeBundle.items.find((it) => it.n === '高部' && it.c === '今治市');
+    expect(takabe).toBeDefined();
     const userLatI = Math.round(34.0939 * 100000);
     const userLngI = Math.round(132.9622 * 100000);
-    expect(pointInPolygon(userLatI, userLngI, betsumiya1.rings[0])).toBe(true);
+    expect(pointInPolygon(userLatI, userLngI, takabe.rings[0])).toBe(true);
   });
 
-  it('★ 波止浜駅のそば 北浜町 polygon 内 = NO (= 案 C 既存 regression)', () => {
+  it('★ 作り物の点 北浜町 polygon 内 = NO (= 案 C 既存 regression)', () => {
     if (!ehimeBundle) return;
     const kitahama = ehimeBundle.items.find((it) => it.n === '北浜町' && it.c === '今治市');
     expect(kitahama).toBeDefined();

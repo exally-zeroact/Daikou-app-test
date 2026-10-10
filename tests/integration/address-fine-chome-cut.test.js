@@ -106,7 +106,7 @@ describe('_cutChomeSuffix: 末尾 ○丁目 カット', () => {
 
 // ─── 6-8. _findNearestMunicipality の・各分岐 ─────
 describe('_findNearestMunicipality: 本物 coarse 形式で・最近傍 市町村 hit', () => {
-  it('公の点（波止浜駅のそば） (34.0939, 132.9622) → 今治市 hit', () => {
+  it('作り物の点 (34.0939, 132.9622) → 今治市 hit', () => {
     // 本物 ADDRESSES_COARSE_JP 形式 (= int×1e5 + items・n=市町村名 / c=JIS5桁)
     global.window = {
       ADDRESSES_COARSE_JP: {
@@ -140,7 +140,7 @@ describe('_findNearestMunicipality: 本物 coarse 形式で・最近傍 市町�
         items: [{ lat: 3500000, lng: 13900000, n: '東京都', c: '13101' }], // 東京・遠い
       },
     };
-    // 公の点（波止浜駅のそば） から・~600km 離れた・東京は・hit しない
+    // 作り物の点 から・~600km 離れた・東京は・hit しない
     expect(findNearestMunicipality(34.0939, 132.9622)).toBe(null);
   });
 

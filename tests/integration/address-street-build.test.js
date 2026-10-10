@@ -11,7 +11,7 @@
 //   4. 大字 dict 圧縮 (= 同 city+oaza は・1 entry)
 //   5. grid 索引 (= encoding-utils.gridKey)
 //   6. 街区符号 k field 保持
-//   7. ★ 公の点（波止浜駅のそば） (= 34.0939, 132.9622) → 「今治市別宮町一丁目4」（未測定）at 実 ehime data
+//   7. ★ 作り物の点 (= 34.0939, 132.9622) → 「今治市別宮町一丁目4」（未測定）at 実 ehime data
 //
 // 絶対ルール準拠: 距離 / 課金 / Worker B / map-matcher 完全無関係・住所表示専用。
 
@@ -234,7 +234,7 @@ describe('build-address.js --street: 街区符号 k field', () => {
   });
 });
 
-// ─── 7. ★ 実 ehime data で・公の点（波止浜駅のそば） 最近傍 verify ───────
+// ─── 7. ★ 実 ehime data で・作り物の点 最近傍 verify ───────
 
 describe('build-address.js --street: 実 ehime data 最近傍 verify', () => {
   const REAL_PATH = path.join(__dirname, '..', '..', 'data', 'addresses-street-ehime.js');
@@ -260,7 +260,7 @@ describe('build-address.js --street: 実 ehime data 最近傍 verify', () => {
     expect(Object.keys(b.grid).length).toBeGreaterThan(100);
   });
 
-  it('★ 公の点（波止浜駅のそば） (34.0939, 132.9622) → 「今治市別宮町一丁目4」が・20m 以内で hit', () => {
+  it('★ 作り物の点 (34.0939, 132.9622) → 「今治市別宮町一丁目4」が・20m 以内で hit', () => {
     if (!fs.existsSync(REAL_PATH)) {
       // ★2026-08-28: ここも「skip」で 緑で終わっていました（同じ形が 2か所ありました）。
       console.warn('★未測定★ data/addresses-street-ehime.js が 在りません（build を回していない）');
@@ -291,7 +291,7 @@ describe('build-address.js --street: 実 ehime data 最近傍 verify', () => {
       }
     }
     expect(bestD).toBeLessThan(20); // 20m 以内 hit
-    // ★2026-10-10 点を 司さんの所から 波止浜駅のそば（高部）へ移した。この期待値は 未測定（data を repo に置いていないので 一度も回っていない）＝data を作った日に 確かめて直す。合わなければ 赤になる（緑にはならない）★
+    // ★2026-10-10 点を 司さんの所から 作り物の点（高部）へ移した。この期待値は 未測定（data を repo に置いていないので 一度も回っていない）＝data を作った日に 確かめて直す。合わなければ 赤になる（緑にはならない）★
     expect(b.oazas[best.c] + best.k).toBe('今治市別宮町一丁目4');
   });
 });

@@ -96,7 +96,7 @@ beforeAll(() => {
   // ─── RegionHelper mock (= 本物 形式・特定 lat/lng で・現在地県判定) ───
   global.RegionHelper = {
     getCurrentPref: function (lat, lng /* , accuracy */) {
-      // 公の点（波止浜駅のそば） (34.0939, 132.9622) → ehime
+      // 作り物の点 (34.0939, 132.9622) → ehime
       if (typeof lat !== 'number' || typeof lng !== 'number') return null;
       if (lat > 33 && lat < 35 && lng > 132 && lng < 134) return 'ehime';
       if (lat > 35 && lat < 36 && lng > 139 && lng < 140) return 'tokyo';
@@ -278,7 +278,7 @@ describe('mm-data-pipeline staged load: _priorityLoadCurrentPref', () => {
       loader: global.DataLoader,
     });
     pipeline._loadedPrefs.add('ehime');
-    // 公の点（波止浜駅のそば） (34.0939, 132.9622) → ehime・既 loaded で・skip
+    // 作り物の点 (34.0939, 132.9622) → ehime・既 loaded で・skip
     await pipeline._priorityLoadCurrentPref(34.0939, 132.9622, 10);
     expect(worker.posted.length).toBe(0);
   });
