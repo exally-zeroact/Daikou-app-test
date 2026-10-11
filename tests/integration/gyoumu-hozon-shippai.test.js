@@ -11,7 +11,8 @@
 //     行き止まりに なる。⇒ 始めて、積めなかった 報告は mae_tsumenai に 持ち越し、業務終了・次の 開始の 度に 積み直す。
 //   ★持ち越しは state に 入れず 別の 鍵（dk_business_mae_tsumenai）に 業務開始・終了の 時だけ 書く★（state に 入れると
 //     1秒ごとの 保存が 膨らみ、満杯の 端末で 欠けた 晩が 届いた＝下の 字数の 上限つき 倉庫の 試験で 縛る）。
-//   ★わざと壊して 赤に なった 記録（10-11・18通り 全部 赤）★：持ち越しを state に 入れる 1本／鍵に 書かない 2本／abandon の 守りを 外す 1本／start で 持ち越さない 4本／
+//   ★持ち越しが 鍵に 書けて いない 時は「閉じると 消える」と 言う（mae_kakenai は 書けた 結果で 決める）★
+//   ★わざと壊して 赤に なった 記録（10-11・22通り 全部 赤）★：書けない 印を 立てない 1本／開始で 知らせを 呼ばない 1本／知らせが 印を 見ない 1本／終了の 知らせが 印を 見ない 1本／持ち越しを state に 入れる 1本／鍵に 書かない 2本／abandon の 守りを 外す 1本／start で 持ち越さない 4本／
 //     持ち越しを 引き継がない 1本／end で 持ち越しを 積み直さない 2本／load で 戻さない 1本／2回目 end で 時刻を 書き直す 1本／
 //     壊れを 退けない 3本／退けずに 上書き 3本／中身の 無い 札を 落とさない 2本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
 //     save が true を 返さない 1本／画面の 持ち越し知らせを 外す 1本／終了で 持ち越しを 見ない 1本／終了の 知らせを 外す 1本／送る 結果を 出す 1本。
@@ -261,12 +262,53 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
     expect(B.getState().fare_total_yen).toBe(25000);
   });
 
-  it('画面：業務開始の 後で 持ち越しが 在れば 知らせて 始める（止めない・本物の 字で 縛る）', () => {
+  it('画面：業務開始の すぐ 後で 持ち越しを 知らせる（止めない・本物の 字で 縛る）', () => {
     const i = H.indexOf('function onBusinessStart()');
     const body = H.slice(i, H.indexOf('\n      }\n', i));
-    expect(body).toMatch(
-      /Business\.start\(\);\s*\/\/[^\n]*\n\s*if \(\(Business\.getState\(\)\.mae_tsumenai \|\| \[\]\)\.length > 0\)\s*showToastLong\(\s*'前の 業務が まだ 端末に 保存できていません[^']*'\s*\);\s*\/\//
+    expect(body).toMatch(/Business\.start\(\);\s*_maeShirase\(\);/);
+  });
+
+  // ★本物の _maeShirase を index.html から 切り出して 回す★
+  function maeShirase(bs) {
+    const i = H.indexOf('function _maeShirase() {');
+    const f = H.slice(i, H.indexOf('\n      }\n', i) + 8);
+    const deta = [];
+    // eslint-disable-next-line no-new-func
+    new Function('Business', 'showToastLong', f + '\n_maeShirase();')({ getState: () => bs }, (m) =>
+      deta.push(m)
     );
+    return deta;
+  }
+
+  it('画面：持ち越しが 端末に 書けて いない 時は「閉じると 消える」・書けて いれば「もう一度 保存」・無ければ 出さない', () => {
+    expect(maeShirase({ mae_tsumenai: [] })).toEqual([]);
+    const kakenai = maeShirase({ mae_tsumenai: [{}], mae_kakenai: true });
+    expect(kakenai.length).toBe(1);
+    expect(kakenai[0]).toMatch(/^前の 業務が まだ 端末に 保存できていません/);
+    expect(kakenai[0]).toMatch(/アプリを 閉じると 前の 業務が 消えます/);
+    expect(kakenai[0]).not.toMatch(/もう一度 保存します/);
+    const kaketa = maeShirase({ mae_tsumenai: [{}], mae_kakenai: false });
+    expect(kaketa[0]).toMatch(/業務終了の 時に もう一度 保存します/);
+    expect(kaketa[0]).not.toMatch(/閉じると/);
+  });
+
+  it('持ち越しの 鍵が 書けない → mae_kakenai・書ける → 消える 印は 立たない・開き直しで 読めたら 書けている', () => {
+    const ls = makeStorage();
+    let B = load(ls);
+    hitoban(B);
+    ls.setDame((k) => k === HK || k === 'dk_business_mae_tsumenai');
+    B.end();
+    B.start();
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(B.getState().mae_kakenai).toBe(true);
+    ls.setDame(rirekiDake);
+    B.end(); // 鍵は 書ける・履歴は まだ だめ
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(B.getState().mae_kakenai).toBe(false);
+    B = load(ls);
+    B.load();
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(B.getState().mae_kakenai).toBe(false);
   });
 
   it('画面：業務終了で 積めていなければ（持ち越しも）知らせ・送る 結果の 知らせは 出さない', () => {
@@ -276,6 +318,7 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
       /const tsumenai =\s*!!_bs && \(_bs\.history_pushed !== true \|\| \(_bs\.mae_tsumenai \|\| \[\]\)\.length > 0\);/
     );
     expect(f).toMatch(/if \(tsumenai\)\s*showToastLong\(/);
+    expect(f).toMatch(/\(_bs\.mae_kakenai \? 'アプリを 閉じると 前の 業務が 消えます。' : ''\)/);
     expect(f).toMatch(/'この 業務は 端末に 保存できませんでした/);
     expect(f).toMatch(/const say = function \(msg\) \{\s*if \(tsumenai\) return;/);
   });

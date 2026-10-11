@@ -63,6 +63,7 @@ const Business = (function () {
   //   先に 転び、開き直すと 途中の 件数の 晩が 事務所へ 届く＝taiketsu が 本物の business.js で 測った）。
   //   別の 鍵（MAE_KEY）に、業務開始と 業務終了の 時だけ 書く。load() で 戻す。
   let _mae = [];
+  let _maeKaketa = true; // 持ち越しを MAE_KEY に 書けているか（書けて いなければ 閉じると 消える）
 
   // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
   //   旧: 3 時間猶予の RESUME_GRACE_MS / canResume / checkAutoAbandon で時刻ベース管理
@@ -1052,7 +1053,13 @@ const Business = (function () {
   // 取得・集計
   // ─────────────────────────────────────────
   function getState() {
-    return { ...state, trips: [...state.trips], mae_tsumenai: _mae.slice() };
+    return {
+      ...state,
+      trips: [...state.trips],
+      mae_tsumenai: _mae.slice(),
+      // ★持ち越しが 手元に しか 無い（書けた 結果で 決める・見込みの 空きで 決めない）★
+      mae_kakenai: _mae.length > 0 && !_maeKaketa,
+    };
   }
 
   // 日報集計
@@ -1171,8 +1178,10 @@ const Business = (function () {
     try {
       if (list.length === 0) localStorage.removeItem(MAE_KEY);
       else localStorage.setItem(MAE_KEY, JSON.stringify(list));
+      _maeKaketa = true;
     } catch (_) {
-      /* 書けなくても 手元の 持ち越しで 次の 終了に 積み直す */
+      // 書けなくても 手元の 持ち越しで 次の 終了に 積み直す（画面は「閉じると 消える」と 言う）
+      _maeKaketa = false;
     }
   }
 
@@ -1199,6 +1208,7 @@ const Business = (function () {
 
   function load() {
     _mae = _maeYomu(); // 持ち越しは state と 別に 戻す（state が 無くても）
+    _maeKaketa = true; // 倉庫から 読めた＝書けている
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return false;
