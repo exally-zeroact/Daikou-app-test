@@ -8822,14 +8822,12 @@
             refreshSensorPermission();
           }
           // Business 状態を active に
-          // ★始められなかった（前の 業務を 履歴に 積めない）時は 止めて 知らせる (2026-10-11)★
-          //   既に 業務中の false は 前の 通り 進む。それ以外の false は 全部 止める（分からない時は 止める側）。
-          if (Business.start() === false && !Business.getState().active) {
+          Business.start();
+          // ★前の 業務を まだ 履歴に 積めていない（持ち越し）＝事務所へ 未送信★を 知らせる (10-11)
+          if ((Business.getState().mae_tsumenai || []).length > 0)
             showToastLong(
-              '前の 業務が 端末に 保存できていないので、新しい 業務を 始めませんでした（端末の 空きが 足りない 等）。\n始めると 前の 業務が 事務所へ 送れずに 消えます。事務所へ 連絡してください。'
+              '前の 業務が まだ 端末に 保存できていません（端末の 空きが 足りない 等）。\n事務所へ まだ 送れていません。業務終了の 時に もう一度 保存します。事務所へ 連絡してください。'
             );
-            return;
-          }
           // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
           //   旧: autoResetCheck (時刻ベース・12:00 等で発火) で表示値リセット
           //   新: 代行開始ボタン押下時 (= ここ) でホーム画面の集計表示を全部 0 にリセット
@@ -10724,11 +10722,15 @@
           // ★この 業務を 履歴に 積めなかった＝事務所へ まだ 送れない★ことを 知らせる (2026-10-11)
           //   前は 「送るものはありません」と 言った（積めていない 業務は 送る 名簿に 無いので）。
           //   この時は 送る 結果の 知らせを 出さない（前の 晩の 分が 送れても「送りました」は 誤解の 元）。
+          const _bs = typeof Business !== 'undefined' ? Business.getState() : null;
           const tsumenai =
-            typeof Business !== 'undefined' && Business.getState().history_pushed !== true;
+            !!_bs && (_bs.history_pushed !== true || (_bs.mae_tsumenai || []).length > 0);
           if (tsumenai)
             showToastLong(
-              'この 業務は 端末に 保存できませんでした（端末の 空きが 足りない 等）。\n事務所へ まだ 送れていません。事務所へ 連絡してください。'
+              (_bs.history_pushed !== true
+                ? 'この 業務は 端末に 保存できませんでした（端末の 空きが 足りない 等）。'
+                : '前の 業務が まだ 端末に 保存できていません（端末の 空きが 足りない 等）。') +
+                '\n事務所へ まだ 送れていません。事務所へ 連絡してください。'
             );
           if (!window.JobSync || typeof window.JobSync.sync !== 'function') return;
           const say = function (msg) {

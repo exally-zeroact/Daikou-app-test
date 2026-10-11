@@ -7,9 +7,12 @@
 //   ②壊れた 履歴は 毎回 積めなかった。③2回目の end() が 終了時刻を 書き直し 勤務時間が 伸びた。
 //   ④save() の 失敗は dlog だけ。
 //   ★本物の js/business.js を 回す★（写しを 持たない）。画面の 側は 本物の 字で 縛る。
-//   ★わざと壊して 赤に なった 記録（10-11・11通り 全部 赤・後で 1通り 足した）★：中身の 無い 札を 落とさない 2本／abandon の 守りを 外す 3本／start の 早帰りを 外す 2本／
-//     2回目 end で 時刻を 書き直す 1本／壊れを 退けない 3本／退けずに 上書き 3本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
-//     save が true を 返さない 1本／画面の 開始の 止めを 外す 1本／終了の 知らせを 外す 1本／送る 結果を 出す 1本。
+//   ★積めない 時に 業務開始を 止める 形は やめた★：いつも 書けない 端末（非公開の 閲覧 等）では 毎晩 働けない
+//     行き止まりに なる。⇒ 始めて、積めなかった 報告は mae_tsumenai に 持ち越し、業務終了・次の 開始の 度に 積み直す。
+//   ★わざと壊して 赤に なった 記録（10-11・16通り 全部 赤）★：abandon の 守りを 外す 1本／start で 持ち越さない 4本／
+//     持ち越しを 引き継がない 1本／end で 持ち越しを 積み直さない 2本／load で 戻さない 1本／2回目 end で 時刻を 書き直す 1本／
+//     壊れを 退けない 3本／退けずに 上書き 3本／中身の 無い 札を 落とさない 2本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
+//     save が true を 返さない 1本／画面の 持ち越し知らせを 外す 1本／終了で 持ち越しを 見ない 1本／終了の 知らせを 外す 1本／送る 結果を 出す 1本。
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -87,23 +90,56 @@ function hitoban(B) {
 }
 
 describe('★業務の 記録が 保存できない 時に 黙って 消さない（10-11）★', () => {
-  it('終了で 積めず・次の 開始でも 積めない → 始めず・その晩の 25,000円は 残る → 空きが できたら 積めて 始まる', () => {
+  it('終了で 積めず・次の 開始でも 積めない → 始まる（行き止まりに しない）・前の 25,000円は 持ち越す → 空きが できた 業務終了で 2件 積む', () => {
     const ls = makeStorage();
     const B = load(ls);
     hitoban(B);
     ls.setDame(rirekiDake);
     B.end();
     expect(B.getState().history_pushed).toBe(false);
-    expect(B.start()).toBe(false);
-    expect(B.getState().fare_total_yen).toBe(25000);
-    expect(B.getState().trip_count).toBe(10);
-    expect(B.getState().active).toBe(false);
-    ls.setDame(() => false);
     expect(B.start()).toBe(true);
+    expect(B.getState().active).toBe(true);
+    const mae = B.getState().mae_tsumenai;
+    expect(mae.length).toBe(1);
+    expect({ f: mae[0].fare_total_yen, c: mae[0].trip_count }).toEqual({ f: 25000, c: 10 });
+    for (let i = 0; i < 2; i++) B.onTripEnd(1000, 3000, Date.now());
+    ls.setDame(() => false);
+    B.end();
+    expect(B.getState().mae_tsumenai.length).toBe(0);
     const h = hist(ls);
-    expect(h.length).toBe(1);
-    expect(h[0].fare_total_yen).toBe(25000);
-    expect(h[0].trip_count).toBe(10);
+    expect(h.map((x) => x.fare_total_yen).sort()).toEqual([25000, 6000]);
+    B.start(); // 次の 開始で 増えない
+    expect(hist(ls).length).toBe(2);
+  });
+
+  it('いつも 書けない 端末（非公開の 閲覧 等）でも 毎晩 始められる・持ち越しは 手元で 溜まる', () => {
+    const ls = makeStorage();
+    const B = load(ls);
+    ls.setDame(zenbu);
+    for (let n = 0; n < 3; n++) {
+      expect(B.start()).toBe(true);
+      B.onTripEnd(1000, 2500, Date.now());
+      B.end();
+    }
+    expect(B.getState().mae_tsumenai.length).toBe(2);
+    expect(B.start()).toBe(true);
+    expect(B.getState().mae_tsumenai.length).toBe(3);
+  });
+
+  it('持ち越しは 開き直し（load）でも 消えない', () => {
+    const ls = makeStorage();
+    let B = load(ls);
+    hitoban(B);
+    ls.setDame(rirekiDake);
+    B.end();
+    B.start();
+    B = load(ls); // 開き直し
+    B.load();
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(B.getState().mae_tsumenai[0].fare_total_yen).toBe(25000);
+    ls.setDame(() => false);
+    B.end();
+    expect(hist(ls).some((x) => x.fare_total_yen === 25000)).toBe(true);
   });
 
   it('abandon() は 積めなければ false で state を 消さない', () => {
@@ -164,7 +200,9 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
     B.end();
     expect(B.getState().history_pushed).toBe(false);
     expect(ls.m[HK]).toBe('{bad');
-    expect(B.start()).toBe(false);
+    expect(B.start()).toBe(true); // 始まる・前の 業務は 持ち越す
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(ls.m[HK]).toBe('{bad');
   });
 
   it('積めなかった 業務の 2回目の end() は 終了時刻を 変えない（勤務時間が 伸びない）・積めたら 1件', () => {
@@ -221,21 +259,22 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
     expect(B.getState().fare_total_yen).toBe(25000);
   });
 
-  it('画面：業務開始は 始められない false で 止めて 知らせる（本物の 字で 縛る）', () => {
-    expect(H).toMatch(
-      /if \(Business\.start\(\) === false && !Business\.getState\(\)\.active\) \{\s*showToastLong\(\s*'前の 業務が 端末に 保存できていないので[^']*'\s*\);\s*return;\s*\}/
+  it('画面：業務開始の 後で 持ち越しが 在れば 知らせて 始める（止めない・本物の 字で 縛る）', () => {
+    const i = H.indexOf('function onBusinessStart()');
+    const body = H.slice(i, H.indexOf('\n      }\n', i));
+    expect(body).toMatch(
+      /Business\.start\(\);\s*\/\/[^\n]*\n\s*if \(\(Business\.getState\(\)\.mae_tsumenai \|\| \[\]\)\.length > 0\)\s*showToastLong\(\s*'前の 業務が まだ 端末に 保存できていません[^']*'\s*\);\s*\/\//
     );
   });
 
-  it('画面：業務終了で 積めていなければ 知らせ・送る 結果の 知らせは 出さない', () => {
+  it('画面：業務終了で 積めていなければ（持ち越しも）知らせ・送る 結果の 知らせは 出さない', () => {
     const i = H.indexOf('function _syncAfterEnd() {');
     const f = H.slice(i, H.indexOf('\n      }\n', i));
     expect(f).toMatch(
-      /const tsumenai =\s*typeof Business !== 'undefined' && Business\.getState\(\)\.history_pushed !== true;/
+      /const tsumenai =\s*!!_bs && \(_bs\.history_pushed !== true \|\| \(_bs\.mae_tsumenai \|\| \[\]\)\.length > 0\);/
     );
-    expect(f).toMatch(
-      /if \(tsumenai\)\s*showToastLong\(\s*'この 業務は 端末に 保存できませんでした/
-    );
+    expect(f).toMatch(/if \(tsumenai\)\s*showToastLong\(/);
+    expect(f).toMatch(/'この 業務は 端末に 保存できませんでした/);
     expect(f).toMatch(/const say = function \(msg\) \{\s*if \(tsumenai\) return;/);
   });
 
