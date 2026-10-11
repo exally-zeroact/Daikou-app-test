@@ -259,44 +259,60 @@ async function hazushiMeisai(
     const ids = exist.map((e: Record<string, unknown>) => e.id as string);
     const { data: log, error: lErr } = await sb
       .from('dk_meisai_hazushi')
-      .select('meisai_id')
+      .select('meisai_id, hidden_at')
       .in('meisai_id', ids);
     if (lErr)
       return 'hazushi-error:外した 記録を 読めない ' + String(lErr.message || lErr).slice(0, 60);
     const months = Array.from(
       new Set(exist.map((e: Record<string, unknown>) => String(e.date || '').slice(0, 7)))
     );
+    // ★出した 月＝invoices（1社の PDF の 控え）か invoice_no（番号を 決めた）★
+    //   invoices だけでは 全社の PDF・印刷で 出した 月と、会社名を 付け替えた 月を 見落とす（taiketsu）
     const { data: inv, error: iErr } = await sb
       .from('invoices')
       .select('company, month')
       .eq('user_id', ownerId)
       .in('month', months)
       .is('deleted_at', null);
+    const { data: ban, error: bErr } = await sb
+      .from('invoice_no')
+      .select('company, month')
+      .eq('user_id', ownerId)
+      .in('month', months);
     // ★出した 請求書が 読めない 時は 何も しない★（出した 月を 書き換える 恐れ）
-    if (iErr) return 'hazushi-error:請求書を 読めない ' + String(iErr.message || iErr).slice(0, 60);
+    if (iErr || bErr)
+      return (
+        'hazushi-error:請求書を 読めない ' +
+        String((iErr || bErr)?.message || iErr || bErr).slice(0, 60)
+      );
     const plan = planMeisaiHazushi({
       deviceId,
       shiftStartMs: shiftStart,
       trips,
       existing: exist,
-      hazushita: (log || []).map((r: Record<string, unknown>) => r.meisai_id),
-      deta: (inv || []).map((r: Record<string, unknown>) => `${r.company}|${r.month}`),
+      kiroku: log || [],
+      deta: (inv || [])
+        .concat(ban || [])
+        .map((r: Record<string, unknown>) => `${r.company}|${r.month}`),
     });
     let hazushita = 0;
     let modoshita = 0;
     let ochita = 0;
     for (const h of plan.hides) {
-      // 記録を 先に 書く（記録が 無いまま 消すと 戻せない 行に なる）
+      // ★記録に「端末が 立てる 消した 時刻」を 持たせ、同じ 時刻を 行に 書く★
+      //   記録を 先に 書く（記録が 無いまま 消すと 戻せない 行に なる）。
+      //   行の 書きが 落ちて 記録だけ 残っても、時刻が 合わないので 戻しには 使われない。
+      const ts = new Date().toISOString();
       const { error: e1 } = await sb
         .from('dk_meisai_hazushi')
-        .upsert({ meisai_id: h.id, dk_ref: h.ref }, { onConflict: 'meisai_id' });
+        .upsert({ meisai_id: h.id, dk_ref: h.ref, hidden_at: ts }, { onConflict: 'meisai_id' });
       if (e1) {
         ochita++;
         continue;
       }
       const { error: e2 } = await sb
         .from('meisai')
-        .update({ deleted_at: new Date().toISOString() })
+        .update({ deleted_at: ts })
         .eq('id', h.id)
         .is('deleted_at', null);
       if (e2) ochita++;
@@ -308,12 +324,16 @@ async function hazushiMeisai(
         ochita++;
         continue;
       }
-      await sb.from('dk_meisai_hazushi').delete().eq('meisai_id', r.id);
+      const { error: e4 } = await sb.from('dk_meisai_hazushi').delete().eq('meisai_id', r.id);
+      if (e4) ochita++; // 残っても 時刻が 合わないので 次の 送りで 捨てる
       modoshita++;
     }
-    if (!hazushita && !modoshita && !ochita && !plan.tometa.length)
-      return 'hazushi-skip:変わっていない';
-    return (
+    // 古い 記録（行が 生きている・時刻が 違う＝事務所が 消し直した）は 捨てる
+    for (const id of plan.sutekiroku) {
+      const { error: e5 } = await sb.from('dk_meisai_hazushi').delete().eq('meisai_id', id);
+      if (e5) ochita++;
+    }
+    const kekka =
       'hazushi-ok:' +
       hazushita +
       '件外した/' +
@@ -322,9 +342,16 @@ async function hazushiMeisai(
       (plan.tometa.length
         ? '/★請求書を 出した 月なので ' + plan.tometa.length + '件 変えていない★'
         : '') +
-      (ochita ? '/★' + ochita + '件 書けなかった★' : '')
-    );
+      (ochita ? '/★' + ochita + '件 書けなかった★' : '');
+    // ★返事の 字は 端末が 読まない★（taiketsu）＝関数の ログにも 残す（Supabase の Logs で 読める）
+    if (plan.tometa.length || ochita) console.warn('[dk-sync-jobs] ' + deviceId + ' ' + kekka);
+    if (!hazushita && !modoshita && !ochita && !plan.tometa.length)
+      return 'hazushi-skip:変わっていない';
+    return kekka;
   } catch (e) {
+    console.warn(
+      '[dk-sync-jobs] hazushi-error ' + String((e as Error)?.message || e).slice(0, 120)
+    );
     return 'hazushi-error:' + String((e as Error)?.message || e).slice(0, 120);
   }
 }

@@ -309,9 +309,14 @@ function planMeisaiWrite(rows, existing) {
 //     ・戻すのは ★端末が 外した 行★（ダイコメ側の 表 dk_meisai_hazushi に 記録が 在る 行）だけ。
 //       事務所が 消した 行は 今まで 通り 生き返らせない。印を extra に 置かないのは、
 //       請求書アプリの 保存（meisaiToDb）が extra を 丸ごと 作り直して 消すため。
-//     ・★請求書を 出した 月（その 会社・その 月の invoices が 在る）は 外さない・戻さない★
+//     ・★請求書を 出した 月は 外さない・戻さない★
 //       入金の 画面は 明細を 読み直すので、出した 紙と ずれる。どうするかは 司さんの 決め（待ち）。
-//       止めた 物は tometa に 入れて 返事に 出す。
+//       「出した」は invoices（1社の PDF の 控え）か invoice_no（番号を 決めた＝全社の PDF・印刷も
+//       ここに 残る・会社名の 付け替えにも 付いて行く）の どちらかに その 会社・その 月が 在る 事
+//       （taiketsu：invoices だけでは 全社の PDF で 出した 月を 見落とす）。止めた 物は tometa。
+//     ・★戻すのは 端末が 立てた 消した 時刻と 今の deleted_at が 同じ 行だけ★（taiketsu：
+//       記録だけ 残った 後に 事務所が 消した 行を 生き返らせて 二重請求に しない）。
+//       行が 生きているのに 記録が 在る・時刻が 違う 記録は 捨てる（sutekiroku）。
 function planMeisaiHazushi(opts) {
   const o = opts || {};
   const head = String(o.deviceId || '') + ':' + String(o.shiftStartMs || 0) + ':';
@@ -319,16 +324,31 @@ function planMeisaiHazushi(opts) {
   (Array.isArray(o.trips) ? o.trips : []).forEach((t) => {
     if (t && Number.isFinite(Number(t.seq))) bySeq.set(Number(t.seq), t);
   });
-  const hazushita = new Set((Array.isArray(o.hazushita) ? o.hazushita : []).map(String));
+  const kiroku = new Map();
+  (Array.isArray(o.kiroku) ? o.kiroku : []).forEach((k) => {
+    if (k && k.meisai_id) kiroku.set(String(k.meisai_id), k);
+  });
+  const jikoku = (v) => {
+    const n = Date.parse(String(v || ''));
+    return Number.isFinite(n) ? n : null;
+  };
   const deta = new Set((Array.isArray(o.deta) ? o.deta : []).map(String));
   const hides = [];
   const restores = [];
   const tometa = [];
+  const sutekiroku = [];
   (Array.isArray(o.existing) ? o.existing : []).forEach((e) => {
     const ref = e && e.extra && e.extra.dk_ref ? String(e.extra.dk_ref) : '';
     if (!ref || ref.indexOf(head) !== 0) return;
     const seqStr = ref.slice(head.length);
     if (!/^[0-9]+$/.test(seqStr)) return;
+    const k = kiroku.get(String(e.id));
+    const onaji =
+      !!k &&
+      !!e.deleted_at &&
+      jikoku(e.deleted_at) !== null &&
+      jikoku(e.deleted_at) === jikoku(k.hidden_at);
+    if (k && !onaji) sutekiroku.push(e.id); // 古い 記録（もう 端末が 外した 状態では ない）
     const t = bySeq.get(Number(seqStr));
     if (!t) return; // ★代行が 居ない＝分からない＝触らない★
     const genkin = t.payment_type === 'cash' && t.customer_id === null;
@@ -342,12 +362,12 @@ function planMeisaiHazushi(opts) {
     if (!e.deleted_at && genkin) {
       if (deteiru) tometa.push({ id: e.id, ref: ref, naze: 'hazusu' });
       else hides.push({ id: e.id, ref: ref });
-    } else if (e.deleted_at && seikyu && hazushita.has(String(e.id))) {
+    } else if (e.deleted_at && seikyu && onaji) {
       if (deteiru) tometa.push({ id: e.id, ref: ref, naze: 'modosu' });
       else restores.push({ id: e.id, ref: ref });
     }
   });
-  return { hides, restores, tometa };
+  return { hides, restores, tometa, sutekiroku };
 }
 
 export {

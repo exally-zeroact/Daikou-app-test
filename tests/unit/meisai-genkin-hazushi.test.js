@@ -74,7 +74,7 @@ describe('★請求書払いに 戻ったら、端末が 外した 行だけ 戻
     const p = plan({
       trips: [seikyu(1)],
       existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
-      hazushita: ['a'],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
     });
     expect(p.restores).toEqual([{ id: 'a', ref: ref(1) }]);
   });
@@ -83,7 +83,7 @@ describe('★請求書払いに 戻ったら、端末が 外した 行だけ 戻
     const p = plan({
       trips: [seikyu(1)],
       existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
-      hazushita: [],
+      kiroku: [],
     });
     expect(p.restores).toEqual([]);
   });
@@ -93,7 +93,7 @@ describe('★請求書払いに 戻ったら、端末が 外した 行だけ 戻
     const p = plan({
       trips: [namaeNashi],
       existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
-      hazushita: ['a'],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
     });
     expect(p.restores).toEqual([]);
   });
@@ -114,7 +114,7 @@ describe('★請求書を 出した 月は 外さない・戻さない（司さ�
     const p = plan({
       trips: [seikyu(1)],
       existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
-      hazushita: ['a'],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
       deta: ['見本商事|2026-10'],
     });
     expect(p.restores).toEqual([]);
@@ -128,5 +128,37 @@ describe('★請求書を 出した 月は 外さない・戻さない（司さ�
       deta: ['別商事|2026-10', '見本商事|2026-09'],
     });
     expect(p.hides.length).toBe(1);
+  });
+});
+
+describe('★記録の 時刻が 行の 消した 時刻と 同じ 時だけ 戻す★（taiketsu の 指摘3）', () => {
+  it('事務所が 消し直した 行（時刻が 違う）は 記録が 在っても 戻さず、記録を 捨てる', () => {
+    const p = plan({
+      trips: [seikyu(1)],
+      existing: [row('a', 1, { deleted_at: '2026-10-12T05:00:00+00:00' })],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
+    });
+    expect(p.restores).toEqual([]);
+    expect(p.sutekiroku).toEqual(['a']);
+  });
+
+  it('行が 生きているのに 記録が 在る（書きが 片方 落ちた）なら 記録を 捨てる', () => {
+    const p = plan({
+      trips: [seikyu(1)],
+      existing: [row('a', 1)],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
+    });
+    expect(p.restores).toEqual([]);
+    expect(p.sutekiroku).toEqual(['a']);
+  });
+
+  it('同じ 時刻（倉庫の 書き方が 違っても）なら 戻し、記録は 捨てる 側に 入れない', () => {
+    const p = plan({
+      trips: [seikyu(1)],
+      existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00+00:00' })],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
+    });
+    expect(p.restores.length).toBe(1);
+    expect(p.sutekiroku).toEqual([]);
   });
 });
