@@ -73,6 +73,7 @@ const Business = (function () {
   // ★2026-08-08: まだ上がっていない業務を捨てないための道具★
   const SYNCED_KEY = 'dk_synced_shifts'; // job-sync が「送れた」印を残す所（読むだけ）
   const DROPPED_KEY = 'dk_history_dropped'; // 上限を超えて捨てた件数（黙って消さない）
+  const BROKEN_KEY = 'dk_business_history_kowareta'; // 読めなかった 履歴の 字の 退け先（消さない）
   const UNSENT_KEEP_MAX = 200; // 30日を過ぎても残す「未送信」の上限
   const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
@@ -135,8 +136,12 @@ const Business = (function () {
     //   前業務が ended 状態 (= 再開可能 limbo) なら履歴に push してから新業務開始。
     //   abandon() は内部で _appendHistory + state リセットを実施。
     if (state.ended) {
-      abandon();
+      // ★前の 業務を 履歴に 積めなかったら 新しい 業務を 始めない (2026-10-11)★
+      //   前は 積めなくても state を 消して 始めた＝その晩の 業務が 事務所へ 上がらずに 消えた。
+      //   空きが 無ければ 新しい 業務も 保存できないので、止めて 知らせる（呼び手が 画面で 言う）。
+      if (abandon() !== true) return false;
     }
+    _hozonShippaiShiraseta = false; // 新しい 業務＝保存の 失敗を もう一度 知らせられる
     const now = Date.now();
     state = {
       active: true,
@@ -201,6 +206,14 @@ const Business = (function () {
   function end() {
     if (!state.active && !state.start_time) return null;
     if (state.ended && state.history_pushed) return getReport(); // 2回押しても増やさない
+    // ★既に 終えて 積めていない 業務は ★時刻を 変えずに★ 積み直すだけ (2026-10-11)★
+    //   前は 2回目の end() が end_time を 今に 書き直し、日報画面に いた 分だけ
+    //   事務所へ 送る 勤務時間（elapsed_sec）が 伸びた。
+    if (state.ended) {
+      state.history_pushed = _appendHistory(getReport()) === true;
+      save();
+      return getReport();
+    }
     const now = Date.now();
     state.active = false;
     state.ended = true;
@@ -288,7 +301,12 @@ const Business = (function () {
     // ★end() が既に積んでいれば積み直さない (2026-08-03)★ これが二重 push の唯一の防波堤。
     if (state.start_time && !state.history_pushed) {
       const report = getReport();
-      _appendHistory(report);
+      // ★積めなかったら state を 消さずに false (2026-10-11)★
+      //   前は 返事を 見ずに 消した＝積めない 晩の 業務が 事務所へ 上がらずに 黙って 消えた。
+      if (_appendHistory(report) !== true) {
+        save();
+        return false;
+      }
     }
     state = {
       active: false,
@@ -335,6 +353,11 @@ const Business = (function () {
   //       diff > 0 なら state.total_distance_m += diff
   //   これにより MM 道路距離 (= 課金距離と一致) が業務集計にも反映される。
   let _lastGpsSaveAt = 0;
+  // ★保存の 失敗を 画面へ 知らせる 受け口 (2026-10-11)★
+  //   save() は 1秒ごとに 呼ばれるので、知らせるのは ★1つの 業務で 1回だけ★（start() で 戻す）。
+  //   前は 空き不足を dlog だけで 飲み、アプリを 閉じると 今の 業務が 黙って 消えた。
+  let _hozonShippaiFn = null;
+  let _hozonShippaiShiraseta = false;
   const GPS_SAVE_INTERVAL_MS = 1000;
   let _lastDebugLogAt = 0;
 
@@ -1118,9 +1141,24 @@ const Business = (function () {
   function save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return true;
     } catch (e) {
       if (typeof dlog === 'function') dlog('[Business] save error: ' + e.message);
+      if (!_hozonShippaiShiraseta && typeof _hozonShippaiFn === 'function') {
+        _hozonShippaiShiraseta = true;
+        try {
+          _hozonShippaiFn();
+        } catch (_) {
+          /* 知らせで 転んでも 業務は 止めない */
+        }
+      }
+      return false;
     }
+  }
+
+  // 保存の 失敗を 知らせる 関数を 登録する（index.html が 起動時に 呼ぶ）
+  function onHozonShippai(fn) {
+    _hozonShippaiFn = fn;
   }
 
   function load() {
@@ -1213,7 +1251,19 @@ const Business = (function () {
   function _appendHistory(report) {
     try {
       const raw = localStorage.getItem(HISTORY_KEY);
-      const list = raw ? JSON.parse(raw) : [];
+      // ★読めない 履歴（壊れた 字・配列でない）は 別の 鍵へ 退けてから 新しく 積む (2026-10-11)★
+      //   前は 読めないと 毎回 積めず、その後の 業務が 全部 事務所へ 上がらずに 消えた。
+      //   退けた 字は 消さない（BROKEN_KEY）。退けられない（空き不足）なら 積めない＝false。
+      let list = null;
+      try {
+        list = raw ? JSON.parse(raw) : [];
+      } catch (_) {
+        list = null;
+      }
+      if (!Array.isArray(list)) {
+        localStorage.setItem(BROKEN_KEY + '_' + Date.now(), String(raw));
+        list = [];
+      }
       list.unshift(report); // 新しい順
       // 直近 RETENTION_DAYS 日分のみ保持
       // 判定は end_time 優先（無ければ start_time、それも無ければ残す）
@@ -1411,6 +1461,7 @@ const Business = (function () {
     getState,
     getReport,
     save,
+    onHozonShippai,
     load,
     restoreFromHistory,
     // ★試験が「画面と同じ関数」を呼べるように出す (2026-09-26)★
