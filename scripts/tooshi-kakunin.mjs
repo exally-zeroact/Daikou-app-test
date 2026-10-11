@@ -197,9 +197,16 @@ async function main() {
     if (String(g3.shirushi) !== '2200') warui.push('★印が 進んでいない＝次は 守れない★');
 
     // ── ⑤ 運転手が 現金に 戻すと 明細から 外れる（2026-10-12）──
-    console.log('\n⑤ 運転手が 請求書払い → 現金 に 直して 送る');
+    console.log(
+      '\n⑤ 運転手が 請求書払い → 現金 に 直して 送る（前の 送りで 行の 書きが 落ちて 残った 記録が 在る ふり）'
+    );
+    // ★taiketsu の 指摘★ 記録だけ 残った 行を 同じ 送りで 外して 記録を 捨てると 戻せなくなる
+    await q(`insert into daikome.dk_meisai_hazushi (meisai_id, dk_ref, hidden_at)
+             values ('${g3.id}', '${co.device_id}:${MS}:1', '2020-09-13T00:00:00Z');`);
     console.log('   返事 =', await okuru(2200, true));
     const g5 = await gyou();
+    if (!g5.deleted_at || Date.parse(g5.deleted_at) !== Date.parse('2020-09-13T00:00:00Z'))
+      warui.push('★残っていた 記録の 時刻で 外していない＝戻せない 行に なる★');
     console.log(`   → 消した印=${g5.deleted_at ? 'あり' : 'なし'} / 外した記録=${g5.kiroku}`);
     if (!g5.deleted_at) warui.push('★現金に 戻したのに 明細に 残った★');
     if (String(g5.kiroku) !== '1') warui.push('★外した 記録が 無い＝戻せない★');

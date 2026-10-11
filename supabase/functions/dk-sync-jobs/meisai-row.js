@@ -348,8 +348,13 @@ function planMeisaiHazushi(opts) {
       !!e.deleted_at &&
       jikoku(e.deleted_at) !== null &&
       jikoku(e.deleted_at) === jikoku(k.hidden_at);
-    if (k && !onaji) sutekiroku.push(e.id); // 古い 記録（もう 端末が 外した 状態では ない）
     const t = bySeq.get(Number(seqStr));
+    // 古い 記録（もう 端末が 外した 状態では ない）は 捨てる。
+    //   ★ただし これから 外す 行の 記録は 捨てない★（taiketsu：同じ 送りで 外して 記録を 消すと
+    //   戻せない 行に なり 請求が 漏れる）＝外す 側は 既に 在る 記録の 時刻を 使う（index.ts）
+    const korekaraHazusu =
+      !!t && !e.deleted_at && t.payment_type === 'cash' && t.customer_id === null;
+    if (k && !onaji && !korekaraHazusu) sutekiroku.push(e.id);
     if (!t) return; // ★代行が 居ない＝分からない＝触らない★
     const genkin = t.payment_type === 'cash' && t.customer_id === null;
     const seikyu =

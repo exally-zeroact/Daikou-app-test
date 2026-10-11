@@ -162,3 +162,26 @@ describe('★記録の 時刻が 行の 消した 時刻と 同じ 時だけ 戻
     expect(p.sutekiroku).toEqual([]);
   });
 });
+
+describe('★外す 行の 記録は 同じ 送りで 捨てない★（taiketsu：外して 記録を 消すと 戻せず 請求が 漏れる）', () => {
+  it('記録が 残っている・行は 生きている・現金 → 外す 側に 入り、記録は 捨てない', () => {
+    const p = plan({
+      trips: [genkin(1)],
+      existing: [row('a', 1)],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
+    });
+    expect(p.hides).toEqual([{ id: 'a', ref: ref(1) }]);
+    expect(p.sutekiroku, '外す 行の 記録を 捨てた＝戻せない 行に なる').toEqual([]);
+  });
+
+  it('出した 月で 止めた 行でも、現金の 間は 記録を 捨てない（後で 外す 時に 使う）', () => {
+    const p = plan({
+      trips: [genkin(1)],
+      existing: [row('a', 1)],
+      kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
+      deta: ['見本商事|2026-10'],
+    });
+    expect(p.hides).toEqual([]);
+    expect(p.sutekiroku).toEqual([]);
+  });
+});

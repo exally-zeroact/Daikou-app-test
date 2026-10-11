@@ -301,22 +301,37 @@ async function hazushiMeisai(
     for (const h of plan.hides) {
       // ★記録に「端末が 立てる 消した 時刻」を 持たせ、同じ 時刻を 行に 書く★
       //   記録を 先に 書く（記録が 無いまま 消すと 戻せない 行に なる）。
-      //   行の 書きが 落ちて 記録だけ 残っても、時刻が 合わないので 戻しには 使われない。
-      const ts = new Date().toISOString();
+      //   ★記録は 上書きしない★（taiketsu：同じ 端末の 送りが 重なると 記録と 行の 時刻が ずれ、
+      //   戻せない 行に なる）。既に 記録が 在れば その 時刻を 使う＝前の 送りで 行の 書きが
+      //   落ちて 残った 記録も、重なった 送りも、同じ 時刻で 揃う。
+      let ts = new Date().toISOString();
       const { error: e1 } = await sb
         .from('dk_meisai_hazushi')
-        .upsert({ meisai_id: h.id, dk_ref: h.ref, hidden_at: ts }, { onConflict: 'meisai_id' });
+        .insert({ meisai_id: h.id, dk_ref: h.ref, hidden_at: ts });
       if (e1) {
-        ochita++;
-        continue;
+        if (!/duplicate key|23505/i.test(String(e1.message || e1))) {
+          ochita++;
+          continue;
+        }
+        const { data: aru, error: e1b } = await sb
+          .from('dk_meisai_hazushi')
+          .select('hidden_at')
+          .eq('meisai_id', h.id)
+          .maybeSingle();
+        if (e1b || !aru || !aru.hidden_at) {
+          ochita++;
+          continue;
+        }
+        ts = String(aru.hidden_at);
       }
-      const { error: e2 } = await sb
+      const { data: kaita, error: e2 } = await sb
         .from('meisai')
         .update({ deleted_at: ts })
         .eq('id', h.id)
-        .is('deleted_at', null);
+        .is('deleted_at', null)
+        .select('id');
       if (e2) ochita++;
-      else hazushita++;
+      else if (kaita && kaita.length) hazushita++; // 0行＝重なった 送りが 先に 外した
     }
     for (const r of plan.restores) {
       const { error: e3 } = await sb.from('meisai').update({ deleted_at: null }).eq('id', r.id);
