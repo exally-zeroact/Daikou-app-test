@@ -263,6 +263,52 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
     expect(B.getState().mae_tsumenai.length).toBe(0);
   });
 
+  it('読めない 持ち越しを 退けられず・持ち越しが 在る → 「閉じると 消える」の 印が 立つ', () => {
+    const ls = makeStorage();
+    ls.m.dk_business_mae_tsumenai = '{x';
+    ls.setDame((k) => k === HK || k.startsWith('dk_business_mae_tsumenai_kowareta_'));
+    const B = load(ls);
+    B.load();
+    hitoban(B);
+    B.end();
+    B.start();
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(B.getState().mae_kakenai).toBe(true);
+    expect(ls.m.dk_business_mae_tsumenai).toBe('{x');
+  });
+
+  it('手元 [A,B]・倉庫 [A] で 業務中の load() → 重ねず 2件・空きが できたら 同じ 晩の 2件 無し', () => {
+    const ls = makeStorage();
+    const nowOrig = Date.now;
+    let t = nowOrig();
+    Date.now = () => (t += 60000);
+    try {
+      const B = load(ls);
+      hitoban(B); // 晩 A
+      ls.setDame(rirekiDake);
+      B.end();
+      B.start(); // A を 持ち越し・鍵に 書ける
+      expect(JSON.parse(ls.m.dk_business_mae_tsumenai).length).toBe(1);
+      B.onTripEnd(1000, 3000, Date.now()); // 晩 B
+      ls.setDame((k) => k === HK || k === 'dk_business_mae_tsumenai');
+      B.end();
+      B.start(); // 手元 [A,B]・倉庫 [A]
+      expect(B.getState().mae_tsumenai.length).toBe(2);
+      B.load();
+      expect(B.getState().mae_tsumenai.length).toBe(2);
+      ls.setDame(() => false);
+      B.end();
+      const kazu = {};
+      hist(ls).forEach((r) => {
+        kazu[r.start_time] = (kazu[r.start_time] || 0) + 1;
+      });
+      expect(Object.values(kazu).every((c) => c === 1)).toBe(true);
+      expect(hist(ls).length).toBe(3);
+    } finally {
+      Date.now = nowOrig;
+    }
+  });
+
   it('壊れた 履歴を 退ける 空きも 無い → 積めない（壊れた 字は 上書きしない）', () => {
     const ls = makeStorage();
     ls.m[HK] = '{bad';
