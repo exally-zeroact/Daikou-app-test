@@ -13,6 +13,7 @@
 //     1秒ごとの 保存が 膨らみ、満杯の 端末で 欠けた 晩が 届いた＝下の 字数の 上限つき 倉庫の 試験で 縛る）。
 //   ★持ち越しが 鍵に 書けて いない 時は「閉じると 消える」と 言う（mae_kakenai は 書けた 結果で 決める）★
 //   ★読めない 持ち越しの 鍵は 退けてから 空に・壊れた 字の 写しは 同じ 字なら 同じ 鍵★（直す 前の 版で 2本 赤を 確かめた）
+//   ★読めない 字を 退けられない 間は 鍵に 触らない・業務中の load() で 手元にしか 無い 持ち越しを 消さない★（直す 前の 版で 2本 赤）
 //   ★わざと壊して 赤に なった 記録（10-11・22通り 全部 赤）★：書けない 印を 立てない 1本／開始で 知らせを 呼ばない 1本／知らせが 印を 見ない 1本／終了の 知らせが 印を 見ない 1本／持ち越しを state に 入れる 1本／鍵に 書かない 2本／abandon の 守りを 外す 1本／start で 持ち越さない 4本／
 //     持ち越しを 引き継がない 1本／end で 持ち越しを 積み直さない 2本／load で 戻さない 1本／2回目 end で 時刻を 書き直す 1本／
 //     壊れを 退けない 3本／退けずに 上書き 3本／中身の 無い 札を 落とさない 2本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
@@ -231,6 +232,35 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
     );
     expect(nokoshi.length).toBe(1);
     expect(ls.m[nokoshi[0]]).toBe('[{"start_time":1,"fare');
+  });
+
+  it('読めない 持ち越しを 退ける 空きも 無い → 鍵を 消さない・上書きしない', () => {
+    const ls = makeStorage();
+    ls.m.dk_business_mae_tsumenai = '{x';
+    ls.setDame((k) => k.startsWith('dk_business_mae_tsumenai_kowareta_'));
+    const B = load(ls);
+    B.load();
+    hitoban(B);
+    B.end();
+    B.start();
+    expect(ls.m.dk_business_mae_tsumenai).toBe('{x');
+  });
+
+  it('手元にしか 無い 持ち越しは 業務中の load()（便の 直し）で 消えず・印も 下りない → 空きが できたら 積む', () => {
+    const ls = makeStorage();
+    const B = load(ls);
+    hitoban(B);
+    ls.setDame((k) => k === HK || k === 'dk_business_mae_tsumenai');
+    B.end();
+    B.start();
+    expect(B.getState().mae_kakenai).toBe(true);
+    B.load(); // js/trip-edit.js が 便を 直した 後に 呼ぶ
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(B.getState().mae_kakenai).toBe(true);
+    ls.setDame(() => false);
+    B.end();
+    expect(hist(ls).some((x) => x.fare_total_yen === 25000)).toBe(true);
+    expect(B.getState().mae_tsumenai.length).toBe(0);
   });
 
   it('壊れた 履歴を 退ける 空きも 無い → 積めない（壊れた 字は 上書きしない）', () => {

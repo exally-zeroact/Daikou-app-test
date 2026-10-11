@@ -64,6 +64,7 @@ const Business = (function () {
   //   別の 鍵（MAE_KEY）に、業務開始と 業務終了の 時だけ 書く。load() で 戻す。
   let _mae = [];
   let _maeKaketa = true; // 持ち越しを MAE_KEY に 書けているか（書けて いなければ 閉じると 消える）
+  let _maeYomenai = null; // 読めず 退けも できなかった MAE_KEY の 字（在る 間は 鍵に 触らない＝消さない）
 
   // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
   //   旧: 3 時間猶予の RESUME_GRACE_MS / canResume / checkAutoAbandon で時刻ベース管理
@@ -1175,6 +1176,16 @@ const Business = (function () {
   // 持ち越しを 手元と MAE_KEY に 置く（書けなくても 手元には 持つ・空なら 鍵を 消す）
   function _maeOku(list) {
     _mae = list;
+    // ★読めない 字が 退けられずに 残っている 間は 鍵を 消さない・上書きしない★（10-11）
+    if (_maeYomenai != null) {
+      try {
+        _kowaretaWoNokosu(MAE_KEY + '_kowareta', _maeYomenai);
+        _maeYomenai = null; // 退けられた＝鍵を 使って よい
+      } catch (_) {
+        _maeKaketa = list.length === 0; // 手元にしか 無い（持ち越しが 在れば「閉じると 消える」）
+        return;
+      }
+    }
     try {
       if (list.length === 0) localStorage.removeItem(MAE_KEY);
       else localStorage.setItem(MAE_KEY, JSON.stringify(list));
@@ -1196,11 +1207,12 @@ const Business = (function () {
       /* 下で 退ける */
     }
     // ★読めない 持ち越しは 退けてから 空に する★（次の _maeOku([]) が 消しても 字は 残る・10-11）
+    //   退けられない 時は _maeYomenai に 持ち、_maeOku が 鍵に 触らない（消さない）。
     if (raw != null) {
       try {
         _kowaretaWoNokosu(MAE_KEY + '_kowareta', raw);
       } catch (_) {
-        /* 退けられなくても 起動は 止めない */
+        _maeYomenai = raw;
       }
     }
     return [];
@@ -1227,8 +1239,20 @@ const Business = (function () {
   }
 
   function load() {
-    _mae = _maeYomu(); // 持ち越しは state と 別に 戻す（state が 無くても）
-    _maeKaketa = true; // 倉庫から 読めた＝書けている
+    // 持ち越しは state と 別に 戻す（state が 無くても）
+    // ★業務中の load()（便の 直し js/trip-edit.js）で 手元にしか 無い 持ち越しを 消さない★（10-11）
+    //   書けて いない 手元の 分は 残して 読んだ 分と 足し合わせ、印は 書けた 結果でしか 下ろさない。
+    const yonda = _maeYomu();
+    if (!_maeKaketa && _mae.length > 0) {
+      const aru = Object.create(null);
+      _mae.forEach((r) => {
+        aru[String(r.start_time)] = true;
+      });
+      _mae = _mae.concat(yonda.filter((r) => !aru[String(r.start_time)]));
+    } else {
+      _mae = yonda;
+      _maeKaketa = true; // 倉庫から 読めた＝書けている
+    }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return false;
