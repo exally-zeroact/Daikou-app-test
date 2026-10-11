@@ -9875,6 +9875,7 @@
           //   freezeBilling で display latch に加えて distance_m の加算も停止(精算終了/走行に戻るまで)。
           if (typeof Meter.freezeBilling === 'function') Meter.freezeBilling();
           else if (typeof Meter.latchDisplay === 'function') Meter.latchDisplay();
+          _saveMeterSnapshot(); // ★確定を すぐ 控えに 書く★（10-12・次の GPS の 前に 落ちても 確定が 戻る）
           const s = Meter.getState();
           // ★設計変更宣言 (2026-05-16・Step2・renderFare 計算式を startUiTimer と統一):
           //   旧: let fare = s.fare_yen (= state.fare_yen ・Tier 1 commit ベース)
@@ -10006,6 +10007,7 @@
         histSaved = false; // 再走行するので保存フラグリセット
         // ★2026-07-23★: 確定で凍結した課金距離を解除し再走行分を再び計上 (running は維持のまま)
         if (typeof Meter.unfreezeBilling === 'function') Meter.unfreezeBilling();
+        _saveMeterSnapshot(); // ★走行に 戻った 事を すぐ 控えに 書く★（10-12・古い 確定で 戻らない）
         // Meterは止めていないのでresume不要
         try {
           FB.updateVehicle({ status: 'driving' });

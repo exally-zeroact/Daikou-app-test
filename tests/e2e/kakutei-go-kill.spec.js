@@ -55,3 +55,41 @@ test('確定 → 落ちる → 開き直す で 確定画面・同じ 額・凍�
   expect(ato.frozen).toBe(true);
   expect(ato.fare).toBe(mae.fare);
 });
+
+test('確定 → 走行に戻る → すぐ 落ちる で 走行画面・凍結なし', async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('sensor_permission_active', '1');
+    sessionStorage.setItem('sensorGranted', '1');
+    sessionStorage.setItem('dl_just_completed', '1');
+    localStorage.setItem('daikome_training_consent', 'dismissed');
+    localStorage.setItem('pwa_banner_dismissed', '1');
+    localStorage.setItem('apk_banner_dismissed', '1');
+    localStorage.setItem('tutorial_done', '1');
+  });
+  await page.goto('/index.html', { waitUntil: 'load' });
+  await page.waitForFunction(() => typeof Business !== 'undefined' && typeof Meter !== 'undefined');
+  await page.evaluate(() => {
+    Business.start();
+    Business.onTripStart(35, 135, 10);
+    appState = 'driving';
+    extras = [];
+    surchargeOn = false;
+    Meter.start();
+    Meter.setDistance(3000);
+    if (typeof startUiTimer === 'function') startUiTimer();
+    onSend(); // 確定
+    _saveMeterSnapshot(); // 確定の 間に GPS が 来て 控えに「確定」が 書かれた
+    Business.save();
+    cancelFare(); // 走行に戻る → 次の GPS の 前に 落ちる
+    // 落ちる＝画面が 隠れる・pagehide での 書き直しは 起きない（ここから 先は 書かせない）
+    window.removeEventListener('pagehide', _saveMeterSnapshot);
+    _saveMeterSnapshot = function () {};
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof Meter !== 'undefined' && appState !== 'idle', null, {
+    timeout: 5000,
+  });
+  const ato = await page.evaluate(() => ({ appState, frozen: Meter.getState().billing_frozen }));
+  expect(ato.appState).toBe('driving');
+  expect(ato.frozen).toBe(false);
+});
