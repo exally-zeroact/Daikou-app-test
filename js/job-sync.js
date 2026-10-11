@@ -549,6 +549,7 @@
   //   送っている 間に 中身が 変わった 勤務（_sync が 送信済みに しなかった 物）も 同じく 回し直す。
   let _mataYobareta = false;
   const MATA_MAX = 3; // 回し直しの 上限（直しが 続いても 止まる）
+  const MATA_ATO_MS = 1500; // 上限で 止まった 時に もう 1回 送るまでの 間
   async function sync() {
     if (_ugoiteru) {
       _mataYobareta = true;
@@ -569,8 +570,20 @@
       }
       return r;
     })().finally(function () {
+      // ★上限で 止まった 時も 直しを 捨てない★（taiketsu の 指摘：1回の 送りの 間に 4回 直すと
+      //   最後の 額が 次に アプリを 開くまで 出なかった）＝少し 置いて もう 1回 送る
+      const nokori = _mataYobareta;
       _mataYobareta = false;
       _ugoiteru = null;
+      if (nokori) {
+        try {
+          setTimeout(function () {
+            sync();
+          }, MATA_ATO_MS);
+        } catch (_) {
+          /* 置けなくても 印は 外れた まま＝次の 送りで 届く */
+        }
+      }
     });
     return _ugoiteru;
   }

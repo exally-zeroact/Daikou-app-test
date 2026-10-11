@@ -23,6 +23,7 @@ let JobSync;
 let TripEdit;
 let sentBodies;
 let release;
+let kenngai; // true の 間の 送りは 通信できない（圏外）
 
 function shift(start, tripStart, fare) {
   return {
@@ -49,10 +50,12 @@ beforeEach(() => {
   };
   globalThis.DKConfig = { fn: (n) => 'https://example.invalid/' + n, headers: () => ({}) };
   sentBodies = [];
+  kenngai = false;
   // ★送っている 間を 作る★：受け取りは release() を 呼ぶまで 返さない
   globalThis.fetch = (url, opt) => {
     const body = JSON.parse(opt.body);
     sentBodies.push(body);
+    if (kenngai) return Promise.reject(new Error('offline'));
     return new Promise((resolve) => {
       release = () =>
         resolve({
@@ -197,5 +200,49 @@ describe('★送っている 最中の 直しが その場で 事務所へ 届�
     expect(sentBodies.length).toBe(1);
     expect(r.sent).toBe(1);
     expect(JSON.parse(store.dk_synced_shifts).sort()).toEqual(['1000', '2000']);
+  });
+
+  it('回し直しの 上限まで 直し続けても、最後の 額が 少し 後に 届く（回し直しの 上限で 捨てない）', async () => {
+    store.daikou_business_history = JSON.stringify([shift(2000, 2100, 2500)]);
+    store.dk_synced_shifts = JSON.stringify([]);
+    const p = JobSync.sync();
+    await tick();
+    // 送るたびに 直す（初めの 送り＋回し直し 3回＝上限 まで 使い切る）
+    for (let n = 1; n <= 3; n++) {
+      naosu(2100, 100 * n, 2500);
+      JobSync.sync();
+      await kaesu();
+    }
+    expect(sentBodies.length).toBe(4); // 上限の 最後の 回し直しが 送っている 最中
+    naosu(2100, 500, 2500); // その 最中に もう 1回 直す（画面は 送り直しを 呼ぶ）
+    JobSync.sync();
+    release();
+    await p;
+    expect(sentBodies.length).toBe(4);
+    await new Promise((r) => setTimeout(r, 1700)); // 上限で 止まった 後の もう 1回
+    const last = sentBodies[sentBodies.length - 1];
+    expect(last.shifts[0].trips[0].fare_yen, '最後の 直し（2,000円）が 送られない').toBe(2000);
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(JSON.parse(store.dk_synced_shifts)).toEqual(['2000']);
+  }, 10000);
+
+  it('回し直しで 圏外に なったら「圏外」を 返す（今 終えた 勤務は まだ 送れていない）', async () => {
+    store.daikou_business_history = JSON.stringify([shift(1000, 1100, 2000)]);
+    store.dk_synced_shifts = JSON.stringify([]);
+    const p = JobSync.sync();
+    await tick();
+    store.daikou_business_history = JSON.stringify([
+      shift(1000, 1100, 2000),
+      shift(5000, 5100, 3000),
+    ]);
+    const pOwari = JobSync.sync(); // 業務終了
+    kenngai = true;
+    release();
+    const r = await pOwari;
+    await p;
+    expect(r.ok).toBe(false);
+    expect(r.reason, '送れていないのに「送りました」と 言う').toBe('offline');
+    expect(JSON.parse(store.dk_synced_shifts)).toEqual(['1000']);
   });
 });
