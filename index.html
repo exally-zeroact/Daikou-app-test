@@ -10614,6 +10614,10 @@
           ctx.cur = cur;
           const r = MeterPersist.restore(null, ctx);
           if (!r || !r.restored) return;
+          // ★待機は 同じ 代行の 時だけ・距離より 先に 戻す★（10-11・setDistance が 待機込みで 料金を 出す）
+          if (r.fare_restored && r.wait_sec != null && typeof Meter.setWaitSec === 'function') {
+            Meter.setWaitSec(r.wait_sec);
+          }
           // ★必ず上書き（足し算にしない）★ 2回呼んでも2倍にならない
           if (typeof Meter.setDistance === 'function' && r.distance_m != null) {
             Meter.setDistance(r.distance_m);
