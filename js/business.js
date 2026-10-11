@@ -1304,6 +1304,8 @@ const Business = (function () {
       let keptUnsentOld = 0;
       let droppedNow = 0;
       const trimmed = list.filter((item) => {
+        // ★中身の 無い 札（null・字・数）は 落とす (2026-10-11)★ 前は item.end_time で 転び、毎回 積めなかった
+        if (!item || typeof item !== 'object') return false;
         const t = item.end_time || item.start_time || null;
         if (t === null) return true; // 時刻不明は残す（保険）
         if (t >= cutoff) return true; // 30日以内は今までどおり残す

@@ -7,7 +7,7 @@
 //   ②壊れた 履歴は 毎回 積めなかった。③2回目の end() が 終了時刻を 書き直し 勤務時間が 伸びた。
 //   ④save() の 失敗は dlog だけ。
 //   ★本物の js/business.js を 回す★（写しを 持たない）。画面の 側は 本物の 字で 縛る。
-//   ★わざと壊して 赤に なった 記録（10-11・11通り 全部 赤）★：abandon の 守りを 外す 3本／start の 早帰りを 外す 2本／
+//   ★わざと壊して 赤に なった 記録（10-11・11通り 全部 赤・後で 1通り 足した）★：中身の 無い 札を 落とさない 2本／abandon の 守りを 外す 3本／start の 早帰りを 外す 2本／
 //     2回目 end で 時刻を 書き直す 1本／壊れを 退けない 3本／退けずに 上書き 3本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
 //     save が true を 返さない 1本／画面の 開始の 止めを 外す 1本／終了の 知らせを 外す 1本／送る 結果を 出す 1本。
 // ============================================================
@@ -132,6 +132,25 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
       );
       expect(nokoshi.length).toBe(1);
       expect(ls.m[nokoshi[0]]).toBe(kowareta);
+      expect(B.start()).toBe(true);
+    });
+  }
+
+  for (const nakami of [
+    '[null]',
+    '[{"start_time":1,"end_time":2,"fare_total_yen":100}, null, 5]',
+  ]) {
+    it(`履歴に 中身の 無い 札（${nakami.length}字）→ 落として 積む・元の 業務は 残す・次も 始まる`, () => {
+      const ls = makeStorage();
+      ls.m[HK] = nakami;
+      const B = load(ls);
+      hitoban(B);
+      B.end();
+      expect(B.getState().history_pushed).toBe(true);
+      const h = hist(ls);
+      expect(h.every((x) => x && typeof x === 'object')).toBe(true);
+      expect(h[0].fare_total_yen).toBe(25000);
+      expect(h.length).toBe(nakami.startsWith('[null]') ? 1 : 2);
       expect(B.start()).toBe(true);
     });
   }
