@@ -57,11 +57,12 @@ const Business = (function () {
     //   ⇒ 業務開始で ここに 控え、終了で 今の値との ★差★ を 履歴に 入れます。
     //   ★これも 保存・復元・初期化の 全部に 通すこと★（漏れると 開き直しで 差が 出せない）。
     mienai_base: null,
-    // ★前の 業務で 履歴に 積めなかった 報告（2026-10-11）★
-    //   積めないまま 次の 業務を 始めても 消さずに 持ち越し、業務終了・次の 開始の 度に 積み直す。
-    //   ★これも 保存・復元・初期化の 全部に 通すこと★（漏れると 持ち越しが 消える）。
-    mae_tsumenai: [],
   };
+  // ★前の 業務で 履歴に 積めなかった 報告＝持ち越し（2026-10-11）★
+  //   ★state に 入れない★（state は 1秒ごとに 丸ごと 書くので、入れると 満杯の 端末で 今夜の 保存が
+  //   先に 転び、開き直すと 途中の 件数の 晩が 事務所へ 届く＝taiketsu が 本物の business.js で 測った）。
+  //   別の 鍵（MAE_KEY）に、業務開始と 業務終了の 時だけ 書く。load() で 戻す。
+  let _mae = [];
 
   // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
   //   旧: 3 時間猶予の RESUME_GRACE_MS / canResume / checkAutoAbandon で時刻ベース管理
@@ -78,6 +79,7 @@ const Business = (function () {
   const SYNCED_KEY = 'dk_synced_shifts'; // job-sync が「送れた」印を残す所（読むだけ）
   const DROPPED_KEY = 'dk_history_dropped'; // 上限を超えて捨てた件数（黙って消さない）
   const BROKEN_KEY = 'dk_business_history_kowareta'; // 読めなかった 履歴の 字の 退け先（消さない）
+  const MAE_KEY = 'dk_business_mae_tsumenai'; // 履歴に 積めなかった 前の 業務の 報告（持ち越し）
   const UNSENT_KEEP_MAX = 200; // 30日を過ぎても残す「未送信」の上限
   const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
@@ -136,19 +138,16 @@ const Business = (function () {
       if (typeof dlog === 'function') dlog('[Business] already active');
       return false;
     }
-    // ★設計変更宣言 (2026-05-14): 旧 checkAutoAbandon(true) を abandon() に置換
-    //   前業務が ended 状態 (= 再開可能 limbo) なら履歴に push してから新業務開始。
-    //   abandon() は内部で _appendHistory + state リセットを実施。
     // ★前の 業務を 履歴に 積めなくても 消さずに 持ち越して 始める (2026-10-11)★
     //   前は 積めなくても state を 消して 始めた＝その晩の 業務が 事務所へ 上がらずに 消えた。
     //   止めて 始めさせないと、いつも 書けない 端末では 毎晩 働けなくなる（行き止まり）。
-    //   ⇒ 積めなかった 報告は mae_tsumenai に 持ち越し、積めた 時に 外す（呼び手が 画面で 知らせる）。
-    let mae = Array.isArray(state.mae_tsumenai) ? state.mae_tsumenai.slice() : [];
+    //   ⇒ 積めなかった 報告は 持ち越し（_mae・MAE_KEY）、積めた 時に 外す（呼び手が 画面で 知らせる）。
+    const mae = _mae.slice();
     if (state.ended && state.start_time && !state.history_pushed) {
       const maeReport = getReport();
       if (_appendHistory(maeReport) !== true) mae.push(maeReport);
     }
-    mae = _maeWoTsumu(mae);
+    _maeOku(_maeWoTsumu(mae));
     _hozonShippaiShiraseta = false; // 新しい 業務＝保存の 失敗を もう一度 知らせられる
     const now = Date.now();
     state = {
@@ -166,7 +165,6 @@ const Business = (function () {
       // 経由地点 + 住所表示機能 (2026-05-15・業務開始時は trip 未開始のため null)
       current_trip: null,
       history_pushed: false, // ★新しい業務なので、まだ積んでいない★
-      mae_tsumenai: mae,
       // ★「見えなかった分」の 基準を ここで 控える (2026-09-03)★
       //   ★abandon() が 先に 走って 前業務を 積んだ 後★なので、ここで 控えれば
       //   前業務の 分は 入りません。取れない時は null＝差も null（0 と 書かない）。
@@ -220,7 +218,7 @@ const Business = (function () {
     //   事務所へ 送る 勤務時間（elapsed_sec）が 伸びた。
     if (state.ended) {
       state.history_pushed = _appendHistory(getReport()) === true;
-      state.mae_tsumenai = _maeWoTsumu(state.mae_tsumenai);
+      _maeOku(_maeWoTsumu(_mae));
       save();
       return getReport();
     }
@@ -249,7 +247,7 @@ const Business = (function () {
       //   ⇒ ★積めなかったら 印を 立てない★＝次の abandon() が もう一度 試す。
       state.history_pushed = _appendHistory(report) === true;
     }
-    state.mae_tsumenai = _maeWoTsumu(state.mae_tsumenai); // 持ち越しも 積み直す
+    _maeOku(_maeWoTsumu(_mae)); // 持ち越しも 積み直す
     save();
     if (typeof dlog === 'function') dlog('[Business] end (history saved / resumable)');
     return report;
@@ -334,7 +332,6 @@ const Business = (function () {
       // 経由地点 + 住所表示機能 (2026-05-15・abandon で trip 進行中なら破棄)
       current_trip: null,
       history_pushed: false, // ★リセット後は「まだ積んでいない」★
-      mae_tsumenai: Array.isArray(state.mae_tsumenai) ? state.mae_tsumenai : [], // 持ち越しは 消さない
       mienai_base: null, // ★業務が 無い間は 基準も 無い (2026-09-03)★
     };
     // ★ Phase 2: 業務破棄で business_active 完全停止
@@ -1055,7 +1052,7 @@ const Business = (function () {
   // 取得・集計
   // ─────────────────────────────────────────
   function getState() {
-    return { ...state, trips: [...state.trips] };
+    return { ...state, trips: [...state.trips], mae_tsumenai: _mae.slice() };
   }
 
   // 日報集計
@@ -1168,6 +1165,27 @@ const Business = (function () {
     }
   }
 
+  // 持ち越しを 手元と MAE_KEY に 置く（書けなくても 手元には 持つ・空なら 鍵を 消す）
+  function _maeOku(list) {
+    _mae = list;
+    try {
+      if (list.length === 0) localStorage.removeItem(MAE_KEY);
+      else localStorage.setItem(MAE_KEY, JSON.stringify(list));
+    } catch (_) {
+      /* 書けなくても 手元の 持ち越しで 次の 終了に 積み直す */
+    }
+  }
+
+  // MAE_KEY から 持ち越しを 戻す（読めない・配列でない 時は 空・中身の 無い 札は 落とす）
+  function _maeYomu() {
+    try {
+      const a = JSON.parse(localStorage.getItem(MAE_KEY) || '[]');
+      return Array.isArray(a) ? a.filter((r) => r && typeof r === 'object') : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   // 持ち越しの 報告を 積み直す（積めた 物を 外し、残りを 返す）
   function _maeWoTsumu(list) {
     if (!Array.isArray(list) || list.length === 0) return [];
@@ -1180,6 +1198,7 @@ const Business = (function () {
   }
 
   function load() {
+    _mae = _maeYomu(); // 持ち越しは state と 別に 戻す（state が 無くても）
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return false;
@@ -1210,10 +1229,6 @@ const Business = (function () {
         // ★2026-09-03★ ここを復元し忘れると、開き直したあとに
         //   ★業務開始からの 差が 出せなくなる★（積み上がった数を そのまま 入れてしまう）
         mienai_base: parsed.mienai_base || null,
-        // ★2026-10-11★ ここを復元し忘れると、積めなかった 前の 業務が 開き直しで 消える
-        mae_tsumenai: Array.isArray(parsed.mae_tsumenai)
-          ? parsed.mae_tsumenai.filter((r) => r && typeof r === 'object')
-          : [],
       };
       // ★設計変更宣言 (2026-05-14): ロード後の自動 abandon (checkAutoAbandon) は撤去。
       //   limbo (ended=true / start_time!=null) はそのまま維持・代行開始時に abandon() で履歴 push。

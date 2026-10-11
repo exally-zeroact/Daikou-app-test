@@ -8826,7 +8826,7 @@
           // ★前の 業務を まだ 履歴に 積めていない（持ち越し）＝事務所へ 未送信★を 知らせる (10-11)
           if ((Business.getState().mae_tsumenai || []).length > 0)
             showToastLong(
-              '前の 業務が まだ 端末に 保存できていません（端末の 空きが 足りない 等）。\n事務所へ まだ 送れていません。業務終了の 時に もう一度 保存します。事務所へ 連絡してください。'
+              '前の 業務が まだ 端末に 保存できていません（アプリの 保存場所が 一杯 等）。\n事務所へ まだ 送れていません。業務終了の 時に もう一度 保存します。アプリや サイトの データは 消さないでください。事務所へ 連絡してください。'
             );
           // ★設計変更宣言 (2026-05-14・業務リセット仕様変更):
           //   旧: autoResetCheck (時刻ベース・12:00 等で発火) で表示値リセット
@@ -9125,6 +9125,7 @@
           //       → 結果: 業務再開ボタンの表示条件 (start_time !== null && !active) を満たさず・出番なし
           //   新: Business.end() → state.active=false / state.ended=true / start_time 維持 (limbo state)
           //       履歴の確定 push は次の Business.start() 内の abandon() で実施 (二重 push 回避)
+          //       （2026-10-11〜 start() は abandon() を 呼ばず、積めない 時は 持ち越す）
           //       → 結果: businessStart 画面に戻った時に updateResumeFromStartVisibility が
           //               「前回の業務を引き継ぐ場合は」note + 業務再開ボタンを表示する
           Business.end();
@@ -10710,7 +10711,7 @@
         if (typeof Business !== 'undefined' && typeof Business.onHozonShippai === 'function')
           Business.onHozonShippai(function () {
             showToastLong(
-              '業務の 記録が 端末に 保存できませんでした（端末の 空きが 足りない 等）。\nアプリを 閉じると 今の 業務の 記録が 消えます。事務所へ 連絡してください。'
+              '業務の 記録が 端末に 保存できませんでした（アプリの 保存場所が 一杯 等）。\nアプリを 閉じると 今の 業務の 記録が 消えます。事務所へ 連絡してください。'
             );
           });
       } catch (_) {
@@ -10728,8 +10729,8 @@
           if (tsumenai)
             showToastLong(
               (_bs.history_pushed !== true
-                ? 'この 業務は 端末に 保存できませんでした（端末の 空きが 足りない 等）。'
-                : '前の 業務が まだ 端末に 保存できていません（端末の 空きが 足りない 等）。') +
+                ? 'この 業務は 端末に 保存できませんでした（アプリの 保存場所が 一杯 等）。'
+                : '前の 業務が まだ 端末に 保存できていません（アプリの 保存場所が 一杯 等）。') +
                 '\n事務所へ まだ 送れていません。事務所へ 連絡してください。'
             );
           if (!window.JobSync || typeof window.JobSync.sync !== 'function') return;

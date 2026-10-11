@@ -9,7 +9,9 @@
 //   ★本物の js/business.js を 回す★（写しを 持たない）。画面の 側は 本物の 字で 縛る。
 //   ★積めない 時に 業務開始を 止める 形は やめた★：いつも 書けない 端末（非公開の 閲覧 等）では 毎晩 働けない
 //     行き止まりに なる。⇒ 始めて、積めなかった 報告は mae_tsumenai に 持ち越し、業務終了・次の 開始の 度に 積み直す。
-//   ★わざと壊して 赤に なった 記録（10-11・16通り 全部 赤）★：abandon の 守りを 外す 1本／start で 持ち越さない 4本／
+//   ★持ち越しは state に 入れず 別の 鍵（dk_business_mae_tsumenai）に 業務開始・終了の 時だけ 書く★（state に 入れると
+//     1秒ごとの 保存が 膨らみ、満杯の 端末で 欠けた 晩が 届いた＝下の 字数の 上限つき 倉庫の 試験で 縛る）。
+//   ★わざと壊して 赤に なった 記録（10-11・18通り 全部 赤）★：持ち越しを state に 入れる 1本／鍵に 書かない 2本／abandon の 守りを 外す 1本／start で 持ち越さない 4本／
 //     持ち越しを 引き継がない 1本／end で 持ち越しを 積み直さない 2本／load で 戻さない 1本／2回目 end で 時刻を 書き直す 1本／
 //     壊れを 退けない 3本／退けずに 上書き 3本／中身の 無い 札を 落とさない 2本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
 //     save が true を 返さない 1本／画面の 持ち越し知らせを 外す 1本／終了で 持ち越しを 見ない 1本／終了の 知らせを 外す 1本／送る 結果を 出す 1本。
@@ -282,5 +284,116 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
     expect(H).toMatch(
       /Business\.onHozonShippai\(function \(\) \{\s*showToastLong\(\s*'業務の 記録が 端末に 保存できませんでした/
     );
+  });
+});
+
+// ★字数の 合計に 上限が ある 倉庫（本物の 端末の 保存枠に 近い 形）で 回す★（10-11・taiketsu の 物差しを 移した）
+//   鍵ごとに 失敗させる 偽物（rirekiDake）だけでは、持ち越しを state に 入れて 1秒ごとの 保存が 膨らみ、
+//   開き直すと 途中の 件数の 晩が 事務所へ 届く 道（244/321 通り）を 捕まえられなかった。
+//   3晩 積んでから 空きを F 字だけ 残し、毎晩 開き直して 10件ずつ 6晩。最後に 枠を 外して 履歴を 見る。
+function makeCapStorage() {
+  const m = {};
+  const used = () => Object.keys(m).reduce((a, k) => a + k.length + m[k].length, 0);
+  return {
+    m,
+    cap: 1e12,
+    used,
+    getItem: (k) => (k in m ? m[k] : null),
+    setItem(k, v) {
+      v = String(v);
+      const nu = used() - (k in m ? k.length + m[k].length : 0) + k.length + v.length;
+      if (nu > this.cap) {
+        const e = new Error('QuotaExceededError');
+        e.name = 'QuotaExceededError';
+        throw e;
+      }
+      m[k] = v;
+    },
+    removeItem: (k) => {
+      delete m[k];
+    },
+    key: (i) => Object.keys(m)[i] || null,
+    get length() {
+      return Object.keys(m).length;
+    },
+  };
+}
+
+describe('★保存枠が 一杯の 端末で 件数の 欠けた 晩・同じ 晩の 2件が 届かない（10-11）★', () => {
+  it('空き 0〜8000字（250字刻み 33通り）で 欠けた 晩 0・同じ start_time の 2件 0', () => {
+    const nowOrig = Date.now;
+    let t = Date.UTC(2026, 9, 1);
+    Date.now = () => (t += 60000);
+    const boot = (ls) => {
+      const B = load(ls);
+      B.load();
+      return B;
+    };
+    let kaketa = 0;
+    let nijuu = 0;
+    try {
+      for (let F = 0; F <= 8000; F += 250) {
+        const ls = makeCapStorage();
+        let B = boot(ls);
+        for (let d = 0; d < 3; d++) {
+          B.start();
+          for (let i = 0; i < 10; i++) {
+            B.onTripEnd(1000, 1000, Date.now());
+            B.save();
+          }
+          B.end();
+        }
+        ls.cap = ls.used() + F;
+        const ryokin = [2001, 2002, 2003, 2004, 2005, 2006];
+        for (const f of ryokin) {
+          B = boot(ls);
+          if (B.getState().active) B.end();
+          B.start();
+          for (let i = 0; i < 10; i++) {
+            B.onTripEnd(1000, f, Date.now());
+            B.save();
+          }
+          B.end();
+        }
+        ls.cap = 1e12;
+        B = boot(ls);
+        if (B.getState().active) B.end();
+        B.start();
+        B.end();
+        const h = JSON.parse(ls.getItem(HK));
+        const kazu = {};
+        h.forEach((r) => {
+          kazu[r.start_time] = (kazu[r.start_time] || 0) + 1;
+        });
+        if (Object.values(kazu).some((c) => c > 1)) nijuu++;
+        if (
+          ryokin.some((f) =>
+            h.some(
+              (r) => r.trip_count && r.fare_total_yen / r.trip_count === f && r.trip_count < 10
+            )
+          )
+        )
+          kaketa++;
+      }
+    } finally {
+      Date.now = nowOrig;
+    }
+    expect({ kaketa, nijuu }).toEqual({ kaketa: 0, nijuu: 0 });
+  });
+
+  it('1秒ごとに 書く 業務の state に 持ち越しを 入れない', () => {
+    const ls = makeStorage();
+    const B = load(ls);
+    hitoban(B);
+    ls.setDame(rirekiDake);
+    B.end();
+    B.start();
+    expect(B.getState().mae_tsumenai.length).toBe(1);
+    expect(ls.m['daikou_business_state'] || '').not.toMatch(/mae_tsumenai/);
+    expect(JSON.parse(ls.m.dk_business_mae_tsumenai).length).toBe(1);
+    B.onTripEnd(1000, 3000, Date.now());
+    B.save();
+    B.end(); // 今夜も 積めない＝持ち越し 1件のまま（今夜は 終えた state に 残る）・state には やはり 入れない
+    expect(ls.m['daikou_business_state'] || '').not.toMatch(/mae_tsumenai/);
   });
 });
