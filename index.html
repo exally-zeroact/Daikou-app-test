@@ -10652,6 +10652,13 @@
             }
             if (typeof dlog === 'function') dlog('[MeterPersist] ' + r.notice);
           }
+          // ★確定した 後に 落ちた 時は 確定を 戻し、確定画面へ 戻す★（10-11）
+          //   checkDrivingRestore の Meter.start() で 凍結が 外れ、走行画面の まま
+          //   停車中の 待機が 確定額の 上に 積み増されていた（客の 払いが 確定額より 上がる）。
+          if (r.fare_restored && r.billing_frozen && typeof Meter.freezeBilling === 'function') {
+            Meter.freezeBilling();
+            if (appState === 'driving' && typeof onSend === 'function') onSend();
+          }
         } catch (_) {
           /* ★戻せなくても業務は止めない★ */
         }

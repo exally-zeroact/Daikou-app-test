@@ -45,6 +45,8 @@ function restoreFn() {
     'window',
     'dlog',
     'showToastLong',
+    'appState',
+    'onSend',
     HTML.slice(at, end + 8) + '\nreturn _restoreMeterSnapshot;'
   );
 }
@@ -71,7 +73,7 @@ function hikae(over) {
   );
 }
 
-function modosu(m, tripStart) {
+function modosu(m, tripStart, onSend) {
   const P = require(MP);
   const fn = restoreFn()(
     m,
@@ -79,7 +81,9 @@ function modosu(m, tripStart) {
     () => ({ businessStart: BIZ, tripStart: tripStart, now: Date.now() }),
     {},
     null,
-    () => {}
+    () => {},
+    'driving',
+    onSend || (() => {})
   );
   fn();
 }
@@ -152,5 +156,63 @@ describe('★戻さない 時★', () => {
     m.setWaitSec(NaN);
     m.setWaitSec('900');
     expect(m.getState().wait_sec).toBe(300);
+  });
+});
+
+describe('★確定した 後に 落ちても、確定額より 上がらない★（taiketsu の 指摘・10-11）', () => {
+  function kakuteiShiteKorosu() {
+    const P = require(MP);
+    const m1 = freshMeter();
+    m1.setDistance(3000);
+    m1.setWaitSec(900);
+    m1.freezeBilling(); // 確定
+    const kakutei = m1.getState().fare_yen;
+    expect(
+      P.save(null, m1.getState(), { businessStart: BIZ, tripStart: TRIP, now: Date.now() })
+    ).toBe(true);
+    return kakutei;
+  }
+
+  it('開き直した 後に 停車 300秒（客の 支払い中）でも 料金は 確定額の まま', () => {
+    const kakutei = kakuteiShiteKorosu();
+    const m2 = freshMeter();
+    m2.setDistance(3000); // checkDrivingRestore と 同じ
+    modosu(m2, TRIP);
+    expect(m2.getState().billing_frozen).toBe(true);
+    let t = Date.now();
+    m2.setLastGps(35, 139, 0, 0, t);
+    for (let i = 0; i < 300; i++) {
+      t += 1000;
+      m2.update({ lat: 35, lng: 139, altitude: 0, speedKmh: 0, accuracy: 5, timestamp: t });
+    }
+    const st = m2.getState();
+    expect(st.fare_yen).toBe(kakutei);
+    expect(m2.calcFare(st.distance_m)).toBe(kakutei);
+  });
+
+  it('確定画面へ 戻す（onSend を 1回 呼ぶ）', () => {
+    kakuteiShiteKorosu();
+    const m2 = freshMeter();
+    let n = 0;
+    modosu(m2, TRIP, () => n++);
+    expect(n).toBe(1);
+  });
+
+  it('確定して いない 控えでは 凍結も 確定画面へも 行かない', () => {
+    hikae({ billing_frozen: false });
+    const m2 = freshMeter();
+    let n = 0;
+    modosu(m2, TRIP, () => n++);
+    expect(m2.getState().billing_frozen).toBe(false);
+    expect(n).toBe(0);
+  });
+
+  it('別の 代行の 控えが 確定済みでも 凍結しない', () => {
+    hikae({ billing_frozen: true });
+    const m2 = freshMeter();
+    let n = 0;
+    modosu(m2, TRIP + 1, () => n++);
+    expect(m2.getState().billing_frozen).toBe(false);
+    expect(n).toBe(0);
   });
 });
