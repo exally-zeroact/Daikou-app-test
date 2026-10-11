@@ -12,6 +12,7 @@
 //   ★持ち越しは state に 入れず 別の 鍵（dk_business_mae_tsumenai）に 業務開始・終了の 時だけ 書く★（state に 入れると
 //     1秒ごとの 保存が 膨らみ、満杯の 端末で 欠けた 晩が 届いた＝下の 字数の 上限つき 倉庫の 試験で 縛る）。
 //   ★持ち越しが 鍵に 書けて いない 時は「閉じると 消える」と 言う（mae_kakenai は 書けた 結果で 決める）★
+//   ★読めない 持ち越しの 鍵は 退けてから 空に・壊れた 字の 写しは 同じ 字なら 同じ 鍵★（直す 前の 版で 2本 赤を 確かめた）
 //   ★わざと壊して 赤に なった 記録（10-11・22通り 全部 赤）★：書けない 印を 立てない 1本／開始で 知らせを 呼ばない 1本／知らせが 印を 見ない 1本／終了の 知らせが 印を 見ない 1本／持ち越しを state に 入れる 1本／鍵に 書かない 2本／abandon の 守りを 外す 1本／start で 持ち越さない 4本／
 //     持ち越しを 引き継がない 1本／end で 持ち越しを 積み直さない 2本／load で 戻さない 1本／2回目 end で 時刻を 書き直す 1本／
 //     壊れを 退けない 3本／退けずに 上書き 3本／中身の 無い 札を 落とさない 2本／知らせを 毎回 1本／新しい 業務で 印を 戻さない 1本／
@@ -193,6 +194,44 @@ describe('★業務の 記録が 保存できない 時に 黙って 消さな�
       expect(B.start()).toBe(true);
     });
   }
+
+  it('壊れた 履歴で 履歴に 書けない まま 5晩 回しても 退けた 写しは 1本（呼ぶ 度に 増えない）', () => {
+    const ls = makeStorage();
+    ls.m[HK] = '{bad';
+    const B = load(ls);
+    ls.setDame(rirekiDake);
+    const nowOrig = Date.now;
+    let t = nowOrig();
+    Date.now = () => (t += 60000); // 晩ごとに 時刻が 進む（同じ ミリ秒で 鍵が 重なって 緑に ならない）
+    try {
+      for (let n = 0; n < 5; n++) {
+        B.start();
+        B.onTripEnd(1000, 2500, Date.now());
+        B.end();
+      }
+    } finally {
+      Date.now = nowOrig;
+    }
+    const nokoshi = Object.keys(ls.m).filter((k) => k.startsWith('dk_business_history_kowareta_'));
+    expect(nokoshi.length).toBe(1);
+    expect(ls.m[nokoshi[0]]).toBe('{bad');
+  });
+
+  it('読めない 持ち越しの 鍵は 退けてから 空に する（黙って 消さない）', () => {
+    const ls = makeStorage();
+    ls.m.dk_business_mae_tsumenai = '[{"start_time":1,"fare';
+    const B = load(ls);
+    B.load();
+    expect(B.getState().mae_tsumenai.length).toBe(0);
+    hitoban(B);
+    B.end(); // 持ち越しが 空＝鍵を 消す
+    expect(ls.m.dk_business_mae_tsumenai).toBe(undefined);
+    const nokoshi = Object.keys(ls.m).filter((k) =>
+      k.startsWith('dk_business_mae_tsumenai_kowareta_')
+    );
+    expect(nokoshi.length).toBe(1);
+    expect(ls.m[nokoshi[0]]).toBe('[{"start_time":1,"fare');
+  });
 
   it('壊れた 履歴を 退ける 空きも 無い → 積めない（壊れた 字は 上書きしない）', () => {
     const ls = makeStorage();

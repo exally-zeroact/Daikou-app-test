@@ -1187,12 +1187,32 @@ const Business = (function () {
 
   // MAE_KEY から 持ち越しを 戻す（読めない・配列でない 時は 空・中身の 無い 札は 落とす）
   function _maeYomu() {
+    let raw = null;
     try {
-      const a = JSON.parse(localStorage.getItem(MAE_KEY) || '[]');
-      return Array.isArray(a) ? a.filter((r) => r && typeof r === 'object') : [];
+      raw = localStorage.getItem(MAE_KEY);
+      const a = JSON.parse(raw || '[]');
+      if (Array.isArray(a)) return a.filter((r) => r && typeof r === 'object');
     } catch (_) {
-      return [];
+      /* 下で 退ける */
     }
+    // ★読めない 持ち越しは 退けてから 空に する★（次の _maeOku([]) が 消しても 字は 残る・10-11）
+    if (raw != null) {
+      try {
+        _kowaretaWoNokosu(MAE_KEY + '_kowareta', raw);
+      } catch (_) {
+        /* 退けられなくても 起動は 止めない */
+      }
+    }
+    return [];
+  }
+
+  // 読めなかった 字を 退ける（同じ 字は 同じ 鍵＝呼ぶ 度に 写しが 増えない）。書けなければ 投げる
+  function _kowaretaWoNokosu(saki, raw) {
+    const ji = String(raw);
+    let h = 5381;
+    for (let i = 0; i < ji.length; i++) h = ((h * 33) ^ ji.charCodeAt(i)) >>> 0;
+    const k = saki + '_' + h.toString(36) + '_' + ji.length;
+    if (localStorage.getItem(k) !== ji) localStorage.setItem(k, ji);
   }
 
   // 持ち越しの 報告を 積み直す（積めた 物を 外し、残りを 返す）
@@ -1308,7 +1328,7 @@ const Business = (function () {
         list = null;
       }
       if (!Array.isArray(list)) {
-        localStorage.setItem(BROKEN_KEY + '_' + Date.now(), String(raw));
+        _kowaretaWoNokosu(BROKEN_KEY, raw);
         list = [];
       }
       list.unshift(report); // 新しい順
