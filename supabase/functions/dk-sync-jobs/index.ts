@@ -21,7 +21,7 @@
 //   ★今 動いている 物と 同じ 版に 固定する★（上げるなら 別の日に 測ってから）
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.116.0';
 // ★請求書アプリに入れる行を作る所（テストが同じ物を触れるよう外出し）★
-import { buildMeisaiRows, businessDate, planMeisaiWrite } from './meisai-row.js';
+import { buildMeisaiRows, businessDate, planMeisaiHazushi, planMeisaiWrite } from './meisai-row.js';
 
 const MAX_SHIFTS = 50; // 1リクエストの勤務上限
 const MAX_TRIPS = 300; // 勤務1件あたりの代行上限
@@ -194,6 +194,9 @@ Deno.serve(async (req: Request) => {
       //     入らない理由が7通りあるのに、全部 return で黙って抜けていたので
       //     ★立てたのに入らない時に、どこで止まったか分からなかった★（実際に踏んだ）。
       //     返事に出しておけば、事務所からでも1回叩けば理由が読める。
+      // ★現金に 戻した 代行の 行を 外す／請求書払いに 戻ったら 戻す（2026-10-12）★
+      //   入れる・直す より 先に 走らせる（戻した 行を 下の 直しが そのまま 直せる）
+      meisai.push(await hazushiMeisai(sb, co.owner_id as string | null, device_id, s));
       meisai.push(
         await pushToInvoiceApp(
           sb,
@@ -216,6 +219,115 @@ Deno.serve(async (req: Request) => {
 
   return json({ ok: true, accepted, meisai });
 });
+
+// ★★現金に 戻した 代行の 行を 外す（2026-10-12）★★
+//   決めは meisai-row.js の planMeisaiHazushi（試験が 同じ 物を 触る）。ここは 読んで 書くだけ。
+//   ・外した 記録は ダイコメ側の 表 dk_meisai_hazushi（請求書アプリの 保存で 消えない 所）
+//   ・請求書を 出した 月は 外さない・戻さない（司さんの 決め待ち）＝止めた 数を 返事に 出す
+//   ・何が 起きても 勤務の 受け取りは 止めない
+async function hazushiMeisai(
+  sb: ReturnType<typeof createClient>,
+  ownerId: string | null,
+  deviceId: string,
+  shift: Record<string, unknown>
+): Promise<string> {
+  try {
+    if (Deno.env.get('DK_MEISAI_AUTOPUSH') !== '1') return 'hazushi-off';
+    if (!ownerId) return 'hazushi-skip:会社がアカウント登録していない';
+    const shiftStart = isNum(shift.start_time) ? shift.start_time : 0;
+    if (!shiftStart) return 'hazushi-skip:勤務の開始が読めない';
+    const raw = Array.isArray(shift.trips) ? (shift.trips as Record<string, unknown>[]) : [];
+    const trips = raw
+      .filter((t) => t && isNum(t.distance_m) && isNum(t.fare_yen))
+      .slice(0, MAX_TRIPS)
+      .map((t, i) => ({
+        seq: isNum(t.seq) ? Math.round(t.seq) : i + 1,
+        payment_type: t.payment_type,
+        customer_id: t.customer_id === undefined ? undefined : t.customer_id,
+        customer_name: t.customer_name,
+      }));
+    // like の 特別な 字（% _ \）を 逃がす
+    const head = `${deviceId}:${shiftStart}:`.replace(/[\\%_]/g, (c) => '\\' + c);
+    const { data: exist, error: exErr } = await sb
+      .from('meisai')
+      .select('id, extra, company, date, deleted_at')
+      .eq('user_id', ownerId)
+      .like('extra->>dk_ref', head + '%');
+    if (exErr)
+      return 'hazushi-error:明細を 読めない ' + String(exErr.message || exErr).slice(0, 60);
+    if (!exist || !exist.length) return 'hazushi-skip:この 勤務の 行が 無い';
+    const ids = exist.map((e: Record<string, unknown>) => e.id as string);
+    const { data: log, error: lErr } = await sb
+      .from('dk_meisai_hazushi')
+      .select('meisai_id')
+      .in('meisai_id', ids);
+    if (lErr)
+      return 'hazushi-error:外した 記録を 読めない ' + String(lErr.message || lErr).slice(0, 60);
+    const months = Array.from(
+      new Set(exist.map((e: Record<string, unknown>) => String(e.date || '').slice(0, 7)))
+    );
+    const { data: inv, error: iErr } = await sb
+      .from('invoices')
+      .select('company, month')
+      .eq('user_id', ownerId)
+      .in('month', months)
+      .is('deleted_at', null);
+    // ★出した 請求書が 読めない 時は 何も しない★（出した 月を 書き換える 恐れ）
+    if (iErr) return 'hazushi-error:請求書を 読めない ' + String(iErr.message || iErr).slice(0, 60);
+    const plan = planMeisaiHazushi({
+      deviceId,
+      shiftStartMs: shiftStart,
+      trips,
+      existing: exist,
+      hazushita: (log || []).map((r: Record<string, unknown>) => r.meisai_id),
+      deta: (inv || []).map((r: Record<string, unknown>) => `${r.company}|${r.month}`),
+    });
+    let hazushita = 0;
+    let modoshita = 0;
+    let ochita = 0;
+    for (const h of plan.hides) {
+      // 記録を 先に 書く（記録が 無いまま 消すと 戻せない 行に なる）
+      const { error: e1 } = await sb
+        .from('dk_meisai_hazushi')
+        .upsert({ meisai_id: h.id, dk_ref: h.ref }, { onConflict: 'meisai_id' });
+      if (e1) {
+        ochita++;
+        continue;
+      }
+      const { error: e2 } = await sb
+        .from('meisai')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', h.id)
+        .is('deleted_at', null);
+      if (e2) ochita++;
+      else hazushita++;
+    }
+    for (const r of plan.restores) {
+      const { error: e3 } = await sb.from('meisai').update({ deleted_at: null }).eq('id', r.id);
+      if (e3) {
+        ochita++;
+        continue;
+      }
+      await sb.from('dk_meisai_hazushi').delete().eq('meisai_id', r.id);
+      modoshita++;
+    }
+    if (!hazushita && !modoshita && !ochita && !plan.tometa.length)
+      return 'hazushi-skip:変わっていない';
+    return (
+      'hazushi-ok:' +
+      hazushita +
+      '件外した/' +
+      modoshita +
+      '件戻した' +
+      (plan.tometa.length
+        ? '/★請求書を 出した 月なので ' + plan.tometa.length + '件 変えていない★'
+        : '') +
+      (ochita ? '/★' + ochita + '件 書けなかった★' : '')
+    );
+  } catch (e) {
+    return 'hazushi-error:' + String((e as Error)?.message || e).slice(0, 120);
+  }
+}
 
 // 代行請求書アプリの `meisai` に、請求書払いの代行を1件1行で入れる。
 //   meisai の列: company(会社名) / date / destination(行き先) / amount(金額) / distance(距離) /
@@ -376,8 +488,7 @@ async function pushToInvoiceApp(
       naoseNakatta++;
       saigoNoWake = '直し ' + String(uErr.message || uErr).slice(0, 80);
     }
-    if (!plan.inserts.length && !plan.updates.length && !yomeNakatta)
-      return 'skip:変わっていない';
+    if (!plan.inserts.length && !plan.updates.length && !yomeNakatta) return 'skip:変わっていない';
     // ★入れられなかった 数も 必ず 返事に 出す（黙って 済ませない）★
     return (
       'ok:' +

@@ -1,0 +1,132 @@
+// ============================================================
+// ★現金に 戻した 代行の 明細の 行を 外す／請求書払いに 戻ったら 戻す（2026-10-12）★
+//   司さんの 決まり「外したら 外す」。決めは meisai-row.js の planMeisaiHazushi。
+//   ★分からない 時は 触らない★・★出した 月は 変えない（司さんの 決め待ち）★を 縛る。
+// ============================================================
+import { describe, it, expect } from 'vitest';
+import { planMeisaiHazushi } from '../../supabase/functions/dk-sync-jobs/meisai-row.js';
+
+const DEV = 'dev-1';
+const SS = 1791000000000;
+const ref = (seq) => `${DEV}:${SS}:${seq}`;
+const row = (id, seq, over) =>
+  Object.assign(
+    { id, extra: { dk_ref: ref(seq) }, company: '見本商事', date: '2026-10-11', deleted_at: null },
+    over || {}
+  );
+const genkin = (seq) => ({ seq, payment_type: 'cash', customer_id: null, customer_name: '' });
+const seikyu = (seq) => ({
+  seq,
+  payment_type: 'invoice',
+  customer_id: 'c1',
+  customer_name: '見本商事',
+});
+const plan = (o) => planMeisaiHazushi(Object.assign({ deviceId: DEV, shiftStartMs: SS }, o));
+
+describe('★はっきり 現金に した 代行の 行だけ 外す★', () => {
+  it('現金に 戻した 代行の 行は 外す', () => {
+    const p = plan({ trips: [genkin(1), seikyu(2)], existing: [row('a', 1), row('b', 2)] });
+    expect(p.hides).toEqual([{ id: 'a', ref: ref(1) }]);
+    expect(p.restores).toEqual([]);
+  });
+
+  it('請求書払いの まま（名前が 空でも）なら 外さない＝黙って 請求漏れに しない', () => {
+    const namaeNashi = { seq: 1, payment_type: 'invoice', customer_id: 'c1', customer_name: '' };
+    const p = plan({ trips: [namaeNashi], existing: [row('a', 1)] });
+    expect(p.hides).toEqual([]);
+  });
+
+  it('代行が 送りに 居ない 行は 触らない（分からない）', () => {
+    const p = plan({ trips: [genkin(2)], existing: [row('a', 1)] });
+    expect(p.hides).toEqual([]);
+  });
+
+  it('区分が 変（customer_id が 欠けている・数）なら 触らない', () => {
+    const kaketa = { seq: 1, payment_type: 'cash' };
+    const hen = { seq: 2, payment_type: 'cash', customer_id: 5 };
+    const p = plan({ trips: [kaketa, hen], existing: [row('a', 1), row('b', 2)] });
+    expect(p.hides).toEqual([]);
+  });
+
+  it('別の 勤務・別の 端末の 行は 触らない', () => {
+    const p = plan({
+      trips: [genkin(1)],
+      existing: [
+        row('x', 1, { extra: { dk_ref: `${DEV}:${SS + 1}:1` } }),
+        row('y', 1, { extra: { dk_ref: `other:${SS}:1` } }),
+        row('z', 1, { extra: { dk_ref: `${DEV}:${SS}:1x` } }),
+      ],
+    });
+    expect(p.hides).toEqual([]);
+  });
+
+  it('既に 消されている 行は 外さない（二度 外さない）', () => {
+    const p = plan({
+      trips: [genkin(1)],
+      existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
+    });
+    expect(p.hides).toEqual([]);
+  });
+});
+
+describe('★請求書払いに 戻ったら、端末が 外した 行だけ 戻す★', () => {
+  it('端末が 外した 行（記録が 在る）は 戻す', () => {
+    const p = plan({
+      trips: [seikyu(1)],
+      existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
+      hazushita: ['a'],
+    });
+    expect(p.restores).toEqual([{ id: 'a', ref: ref(1) }]);
+  });
+
+  it('事務所が 消した 行（記録が 無い）は 生き返らせない', () => {
+    const p = plan({
+      trips: [seikyu(1)],
+      existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
+      hazushita: [],
+    });
+    expect(p.restores).toEqual([]);
+  });
+
+  it('戻った 先が 名前の 空な 請求書払いなら 戻さない（入れる 側の 決まりと 同じ）', () => {
+    const namaeNashi = { seq: 1, payment_type: 'invoice', customer_id: 'c1', customer_name: '' };
+    const p = plan({
+      trips: [namaeNashi],
+      existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
+      hazushita: ['a'],
+    });
+    expect(p.restores).toEqual([]);
+  });
+});
+
+describe('★請求書を 出した 月は 外さない・戻さない（司さんの 決め待ち）★', () => {
+  it('その 会社・その 月の 請求書が 在れば 外さず、止めた 物として 返す', () => {
+    const p = plan({
+      trips: [genkin(1)],
+      existing: [row('a', 1)],
+      deta: ['見本商事|2026-10'],
+    });
+    expect(p.hides).toEqual([]);
+    expect(p.tometa).toEqual([{ id: 'a', ref: ref(1), naze: 'hazusu' }]);
+  });
+
+  it('戻す 時も 出した 月なら 戻さない', () => {
+    const p = plan({
+      trips: [seikyu(1)],
+      existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
+      hazushita: ['a'],
+      deta: ['見本商事|2026-10'],
+    });
+    expect(p.restores).toEqual([]);
+    expect(p.tometa.length).toBe(1);
+  });
+
+  it('別の 会社・別の 月の 請求書では 止めない', () => {
+    const p = plan({
+      trips: [genkin(1)],
+      existing: [row('a', 1)],
+      deta: ['別商事|2026-10', '見本商事|2026-09'],
+    });
+    expect(p.hides.length).toBe(1);
+  });
+});

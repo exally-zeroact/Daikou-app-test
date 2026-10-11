@@ -96,7 +96,7 @@ async function main() {
 
   // ★持ち主の 在る 会社＋その 端末★（持ち主が 無いと 249行目で 弾かれる）
   const co = (
-    await q(`select c.url_token, c.name, d.device_id
+    await q(`select c.url_token, c.name, c.owner_id, d.device_id
                from daikome.dk_companies c
                join daikome.dk_company_devices d on d.company_id = c.company_id
               where c.owner_id is not null
@@ -109,16 +109,19 @@ async function main() {
     (
       await q(`select (select count(*) from daikome.dk_shifts) a,
                       (select count(*) from daikome.dk_trips) b,
-                      (select count(*) from daikou.meisai) c;`)
+                      (select count(*) from daikou.meisai) c,
+                      (select count(*) from daikome.dk_meisai_hazushi) d,
+                      (select count(*) from daikou.invoices) e;`)
     )[0];
   const gyou = async () =>
     (
-      await q(`select amount, note, extra->>'dk_meter_yen' as shirushi
-                 from daikou.meisai
+      await q(`select id, amount, note, deleted_at, extra->>'dk_meter_yen' as shirushi,
+                      (select count(*) from daikome.dk_meisai_hazushi h where h.meisai_id = m.id) kiroku
+                 from daikou.meisai m
                 where extra->>'dk_ref' = '${co.device_id}:${MS}:1';`)
     )[0];
 
-  const okuru = async (yen) => {
+  const okuru = async (yen, genkin) => {
     const r = await fetch(url + '/functions/v1/dk-sync-jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: key, Authorization: 'Bearer ' + key },
@@ -136,9 +139,9 @@ async function main() {
                 seq: 1,
                 distance_m: 5362,
                 fare_yen: yen,
-                customer_id: 'tooshi-kakunin',
-                customer_name: '【通し確認】お客',
-                payment_type: 'invoice',
+                customer_id: genkin ? null : 'tooshi-kakunin',
+                customer_name: genkin ? '' : '【通し確認】お客',
+                payment_type: genkin ? 'cash' : 'invoice',
                 start_time: MS + 60000,
                 end_time: MS + 900000,
                 start_address: '今治市 A町',
@@ -156,7 +159,9 @@ async function main() {
 
   const warui = [];
   const mae = await kazu();
-  console.log(`\n★前★ dk_shifts=${mae.a} dk_trips=${mae.b} meisai=${mae.c}`);
+  console.log(
+    `\n★前★ dk_shifts=${mae.a} dk_trips=${mae.b} meisai=${mae.c} 外した記録=${mae.d} 請求書=${mae.e}`
+  );
 
   try {
     // ── ① 通すと 1行 増える／② 印が 付く ──
@@ -189,17 +194,53 @@ async function main() {
     console.log(`   → ${g3.amount}円 / 印=${g3.shirushi}`);
     if (Number(g3.amount) !== 2200) warui.push('★運転手の 値引きが 届かない★');
     if (String(g3.shirushi) !== '2200') warui.push('★印が 進んでいない＝次は 守れない★');
+
+    // ── ⑤ 運転手が 現金に 戻すと 明細から 外れる（2026-10-12）──
+    console.log('\n⑤ 運転手が 請求書払い → 現金 に 直して 送る');
+    console.log('   返事 =', await okuru(2200, true));
+    const g5 = await gyou();
+    console.log(`   → 消した印=${g5.deleted_at ? 'あり' : 'なし'} / 外した記録=${g5.kiroku}`);
+    if (!g5.deleted_at) warui.push('★現金に 戻したのに 明細に 残った★');
+    if (String(g5.kiroku) !== '1') warui.push('★外した 記録が 無い＝戻せない★');
+
+    // ── ⑥ 請求書払いに 戻すと 戻る（事務所の 備考も 残る）──
+    console.log('\n⑥ 運転手が また 請求書払いに 直して 送る');
+    console.log('   返事 =', await okuru(2200));
+    const g6 = await gyou();
+    console.log(
+      `   → 消した印=${g6.deleted_at ? 'あり' : 'なし'} / 外した記録=${g6.kiroku} / 備考「${g6.note}」`
+    );
+    if (g6.deleted_at) warui.push('★請求書払いに 戻したのに 戻らない★');
+    if (String(g6.kiroku) !== '0') warui.push('★外した 記録が 残った★');
+    if (!String(g6.note).includes('事務所が 手で 直した'))
+      warui.push('★戻した 時に 備考が 消えた★');
+
+    // ── ⑦ 請求書を 出した 月は 現金に しても 外さない（司さんの 決め待ち）──
+    console.log('\n⑦ その 会社・その 月の 請求書を 出した ふり → 現金に 直して 送る');
+    const tsuki = new Date(MS + 9 * 3600000).toISOString().slice(0, 7);
+    await q(`insert into daikou.invoices (user_id, month, company, invoice_no, issued_at, total, tax)
+             values ('${co.owner_id}', '${tsuki}', '【通し確認】お客', 'TOOSHI-1', now(), 2200, 0);`);
+    console.log('   返事 =', await okuru(2200, true));
+    const g7 = await gyou();
+    console.log(`   → 消した印=${g7.deleted_at ? 'あり' : 'なし'}`);
+    if (g7.deleted_at) warui.push('★請求書を 出した 月の 行を 外した★');
   } finally {
     // ── 後片付け（★失敗しても 必ず 消す★）──
     console.log('\n★後片付け★');
+    await q(`delete from daikome.dk_meisai_hazushi where dk_ref = '${co.device_id}:${MS}:1';`);
+    await q(
+      `delete from daikou.invoices where invoice_no = 'TOOSHI-1' and company = '【通し確認】お客';`
+    );
     await q(`delete from daikou.meisai where extra->>'dk_ref' = '${co.device_id}:${MS}:1';`);
     await q(`delete from daikome.dk_trips
               where shift_id in (select shift_id from daikome.dk_shifts
                                   where started_at = to_timestamp(${MS} / 1000.0));`);
     await q(`delete from daikome.dk_shifts where started_at = to_timestamp(${MS} / 1000.0);`);
     const ato = await kazu();
-    console.log(`   後 dk_shifts=${ato.a} dk_trips=${ato.b} meisai=${ato.c}`);
-    if (String(ato.a) !== String(mae.a) || String(ato.b) !== String(mae.b) || String(ato.c) !== String(mae.c))
+    console.log(
+      `   後 dk_shifts=${ato.a} dk_trips=${ato.b} meisai=${ato.c} 外した記録=${ato.d} 請求書=${ato.e}`
+    );
+    if (['a', 'b', 'c', 'd', 'e'].some((k) => String(ato[k]) !== String(mae[k])))
       warui.push('★元の 数に 戻っていない（片付け残り）★');
   }
 
@@ -210,7 +251,8 @@ async function main() {
     process.exit(1);
   }
   console.log('  ①1行 増えた ②印が 付いた ③事務所の 額が 守られた ④値引きが 届いた');
-  console.log('TOOSHI RESULT: OK（4 / 4）');
+  console.log('  ⑤現金で 外れた ⑥請求書払いで 戻った ⑦出した 月は 外さない');
+  console.log('TOOSHI RESULT: OK（7 / 7）');
 }
 
 main().catch((e) => {

@@ -300,6 +300,56 @@ function planMeisaiWrite(rows, existing) {
   return { inserts, updates };
 }
 
+// ★★現金に 戻した 代行の 行を 外す／請求書払いに 戻ったら 戻す（2026-10-12）★★
+//   司さんの 決まり「外したら 外す」＝運転手が 乗車の 直しで 現金に したのに 請求書に 行が 残っていた
+//   （入れるのは 請求書払いの 代行だけで、外す 道が 無かった）。
+//   ★分からない 時は 触らない★（taiketsu の 叩き）:
+//     ・外すのは 同じ seq の 代行が ★はっきり 現金★（送られた payment_type が 'cash' で customer_id が null）の 時だけ。
+//       代行が 居ない・名前が 空・区分が 変 … どれも 触らない（黙って 請求漏れに しない）。
+//     ・戻すのは ★端末が 外した 行★（ダイコメ側の 表 dk_meisai_hazushi に 記録が 在る 行）だけ。
+//       事務所が 消した 行は 今まで 通り 生き返らせない。印を extra に 置かないのは、
+//       請求書アプリの 保存（meisaiToDb）が extra を 丸ごと 作り直して 消すため。
+//     ・★請求書を 出した 月（その 会社・その 月の invoices が 在る）は 外さない・戻さない★
+//       入金の 画面は 明細を 読み直すので、出した 紙と ずれる。どうするかは 司さんの 決め（待ち）。
+//       止めた 物は tometa に 入れて 返事に 出す。
+function planMeisaiHazushi(opts) {
+  const o = opts || {};
+  const head = String(o.deviceId || '') + ':' + String(o.shiftStartMs || 0) + ':';
+  const bySeq = new Map();
+  (Array.isArray(o.trips) ? o.trips : []).forEach((t) => {
+    if (t && Number.isFinite(Number(t.seq))) bySeq.set(Number(t.seq), t);
+  });
+  const hazushita = new Set((Array.isArray(o.hazushita) ? o.hazushita : []).map(String));
+  const deta = new Set((Array.isArray(o.deta) ? o.deta : []).map(String));
+  const hides = [];
+  const restores = [];
+  const tometa = [];
+  (Array.isArray(o.existing) ? o.existing : []).forEach((e) => {
+    const ref = e && e.extra && e.extra.dk_ref ? String(e.extra.dk_ref) : '';
+    if (!ref || ref.indexOf(head) !== 0) return;
+    const seqStr = ref.slice(head.length);
+    if (!/^[0-9]+$/.test(seqStr)) return;
+    const t = bySeq.get(Number(seqStr));
+    if (!t) return; // ★代行が 居ない＝分からない＝触らない★
+    const genkin = t.payment_type === 'cash' && t.customer_id === null;
+    const seikyu =
+      t.payment_type === 'invoice' &&
+      typeof t.customer_id === 'string' &&
+      !!t.customer_id &&
+      typeof t.customer_name === 'string' &&
+      !!t.customer_name;
+    const deteiru = deta.has(String(e.company) + '|' + String(e.date || '').slice(0, 7));
+    if (!e.deleted_at && genkin) {
+      if (deteiru) tometa.push({ id: e.id, ref: ref, naze: 'hazusu' });
+      else hides.push({ id: e.id, ref: ref });
+    } else if (e.deleted_at && seikyu && hazushita.has(String(e.id))) {
+      if (deteiru) tometa.push({ id: e.id, ref: ref, naze: 'modosu' });
+      else restores.push({ id: e.id, ref: ref });
+    }
+  });
+  return { hides, restores, tometa };
+}
+
 export {
   MEISAI_COLUMNS,
   placeText,
@@ -309,5 +359,6 @@ export {
   refOf,
   buildMeisaiRows,
   planMeisaiWrite,
+  planMeisaiHazushi,
   UPDATABLE,
 };
