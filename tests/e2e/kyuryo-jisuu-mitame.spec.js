@@ -27,7 +27,7 @@ const TARO = 'ec8d275b-38c0-4d9f-b471-eeb10226a6a9';
 const JIRO = '46a60d53-02b7-47ef-829e-6fd03cee1a31';
 const SABURO = 'd5d0c7da-4b13-455a-92e4-462137f4424c';
 
-function fixture() {
+function fixture(tweak) {
   const F = JSON.parse(JSON.stringify(F0));
   // 8/1 1号車：2回目の 勤務（1時間）を 足す＝車の 時間は 9 + 1 = 10
   F.shifts.push({
@@ -51,6 +51,7 @@ function fixture() {
     device_id: CAR2,
     hours: 0,
   });
+  if (tweak) tweak(F);
   return F;
 }
 
@@ -77,8 +78,9 @@ function sess(F) {
   );
 }
 
-async function hiraku(page) {
-  const F = fixture();
+async function hiraku(page, opt) {
+  const o = opt || {};
+  const F = fixture(o.tweak);
   await page.route('**/js/dk-session.js*', (r) =>
     r.fulfill({
       status: 200,
@@ -90,6 +92,8 @@ async function hiraku(page) {
     r.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"u1"}' })
   );
   await page.setViewportSize({ width: 390, height: 900 });
+  // 時計を 止める（今日の 日付に 頼らない）＝日本の 2026-08-05 12時
+  await page.clock.setFixedTime(new Date('2026-08-05T03:00:00Z'));
   await page.goto('/kyuryo.html#hours', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2600);
   await page.evaluate(() => {
@@ -105,6 +109,7 @@ async function hiraku(page) {
   }
   await expect(page.locator('#monthLabel')).toContainText('8月');
   await page.waitForTimeout(500);
+  if (o.ichinichi) return;
   // 期間を 全部 見る（既定は 1日ずつ）
   await page.click('#hiZen');
   await page.waitForTimeout(300);
@@ -200,4 +205,79 @@ test('手入力の 車を 消す＝確かめる・取り消したら 消さな�
     window.__calls.filter((c) => c.m === 'DELETE' && c.p.indexOf('dk_manual_days') === 0)
   );
   expect(del).toHaveLength(1);
+});
+
+test('既定は 今日（日本時間）・乗った人が 居ない 車の 日を 帯に 出し、押すと その日', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    ichinichi: true,
+    // 8/1 2号車の 次郎を 外す＝乗った人が 0人の 車
+    tweak: (F) => {
+      F.workHours = F.workHours.filter(
+        (w) => !(w.work_date === '2026-08-01' && w.employee_id === JIRO)
+      );
+    },
+  });
+  await expect(page.locator('#hiSel')).toHaveValue('2026-08-05');
+  await expect(page.locator('#days .day[data-date]')).toHaveCount(1);
+  const obi = page.locator('#hibar .hizen');
+  await expect(obi).toContainText('乗った人が居ない車がある日');
+  await expect(obi.locator('[data-nn-hi]')).toHaveCount(1);
+  await obi.locator('[data-nn-hi="2026-08-01"]').click();
+  await expect(page.locator('#hiSel')).toHaveValue('2026-08-01');
+  const car2 = hi(page, '2026-08-01').locator('.carrow', { hasText: '2号車' });
+  await expect(car2).toContainText('乗った人が 居ません');
+});
+
+test('入れ漏れの 無い 期間は「入れ漏れはありません」', async ({ page }) => {
+  await hiraku(page, { ichinichi: true });
+  await expect(page.locator('#hibar .hizen')).toContainText('乗った人の入れ漏れはありません');
+});
+
+test('車が 決まっていない 乗った人（車が 空）も 出る', async ({ page }) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.workHours.push({
+        company_id: CO,
+        work_date: '2026-08-03',
+        employee_id: SABURO,
+        device_id: '',
+        hours: 3,
+      });
+    },
+  });
+  const d3 = hi(page, '2026-08-03');
+  await expect(d3).not.toHaveClass(/kara/);
+  await expect(d3.locator('.carrow', { hasText: '車が決まっていない人' })).toContainText(
+    'どの車に 乗ったか 決まっていません'
+  );
+  await expect(d3.locator('.crewrow', { hasText: 'テスト三郎' })).toHaveCount(1);
+});
+
+test('札の 保存に 失敗したら 札が 押せる形に 戻る', async ({ page }) => {
+  await hiraku(page);
+  await page.evaluate(() => {
+    const S = window.DKSession;
+    const moto = S.rest;
+    S.rest = function (s, p, o) {
+      if ((o && o.method) === 'POST')
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          text: () => Promise.resolve('x'),
+          json: () => Promise.resolve({}),
+        });
+      return moto(s, p, o);
+    };
+  });
+  const chip = hi(page, '2026-08-01')
+    .locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + SABURO + '"]')
+    .first();
+  await chip.click();
+  await page.waitForTimeout(500);
+  const dis = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-chip-emp]')].some((b) => b.disabled)
+  );
+  expect(dis, '失敗の 後も 札が 押せないまま').toBe(false);
 });

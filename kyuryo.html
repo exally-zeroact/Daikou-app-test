@@ -1351,6 +1351,17 @@
         color: var(--muted);
       }
 
+      .hizen .nnari {
+        color: var(--danger);
+        font-weight: 700;
+      }
+
+      .hizen .nnhi {
+        color: var(--danger);
+        text-decoration: underline;
+        padding: 4px 3px;
+      }
+
       .hizen button {
         background: none;
         border: none;
@@ -5142,6 +5153,21 @@
         // ★★どの 日を 見せるか★★ 2026-09-06（司さん「その日だけ見せてスッキリさせろ」）
         //   ''（空）＝全部。日付が 入っていれば その日だけ。
         var HI = ''; // 見せる 日（'zenbu'＝期間を 全部）
+        // その日 動いた 車（自分の 車は 除く）で 乗った人が 0人の 車
+        //   既定が 1日だけに なったので、入れ漏れの 日が 目に 入らない（対立役）。帯に 日を 並べて 知らせる
+        function noriNashi(date) {
+          var cars = (CTX && CTX.byDate && CTX.byDate[date]) || {};
+          var own = (CTX && CTX.settings && CTX.settings.ownerDeviceId) || '';
+          var nori = {};
+          RAW.workHours.forEach(function (w) {
+            if (w.work_date === date) nori[w.device_id || ''] = true;
+          });
+          return Object.keys(cars).filter(function (dev) {
+            var c = cars[dev] || {};
+            if (dev === own || nori[dev]) return false;
+            return num(c.hours) > 0 || num(c.sales) > 0;
+          });
+        }
         function hibar() {
           var n = $('hibar');
           if (!n || !PERIOD) return;
@@ -5149,7 +5175,7 @@
           if (!ds.length) return;
           // 期間が 変わって 選んだ 日が 外れたら：今日が 期間の 中なら 今日、無ければ 期間の 最初の 日
           if (HI !== 'zenbu' && ds.indexOf(HI) < 0) {
-            var t = new Date();
+            var t = jstNow(); // 開く 月と 同じ 日本時間（対立役：端末の 時計だと 日本の 外で 1日 ずれる）
             var kyou =
               t.getFullYear() +
               '-' +
@@ -5160,10 +5186,10 @@
           }
           var zen = HI === 'zenbu';
           var i = ds.indexOf(HI);
-          // 時数が 入っている 日の 数（前の 日の 札の ● の 代わり）
-          var ari = ds.filter(function (d) {
-            return Number(((REP && REP.days[d]) || {}).poolHours || 0) > 0;
-          }).length;
+          // 乗った人が 居ない 車が ある 日（入れ漏れ）
+          var more = ds.filter(function (d) {
+            return noriNashi(d).length > 0;
+          });
           var you = '';
           if (!zen) {
             var w = new Date(HI + 'T00:00:00');
@@ -5182,11 +5208,27 @@
             you +
             '</span></div><button class="navb" id="nextD" type="button"' +
             (zen || i >= ds.length - 1 ? ' disabled' : '') +
-            '>次の日 ›</button></div><div class="hizen"><span>時数が入っている日 ' +
-            ari +
-            ' / ' +
-            ds.length +
-            '日</span><button type="button" id="hiZen">' +
+            '>次の日 ›</button></div><div class="hizen"><span class="' +
+            (more.length ? 'nnari' : '') +
+            '">' +
+            (more.length
+              ? '乗った人が居ない車がある日：' +
+                more
+                  .map(function (d) {
+                    var w2 = new Date(d + 'T00:00:00');
+                    return (
+                      '<button type="button" class="nnhi" data-nn-hi="' +
+                      d +
+                      '">' +
+                      (w2.getMonth() + 1) +
+                      '/' +
+                      w2.getDate() +
+                      '</button>'
+                    );
+                  })
+                  .join('')
+              : '乗った人の入れ漏れはありません') +
+            '</span><button type="button" id="hiZen">' +
             (zen ? '1日ずつ見る' : '期間を全部見る') +
             '</button></div>';
           $('prevD').onclick = function () {
@@ -5210,6 +5252,12 @@
             HI = v;
             renderDays();
           };
+          Array.prototype.forEach.call(n.querySelectorAll('[data-nn-hi]'), function (b) {
+            b.onclick = function () {
+              HI = b.getAttribute('data-nn-hi');
+              renderDays();
+            };
+          });
           $('hiZen').onclick = function () {
             HI = zen ? '' : 'zenbu';
             renderDays();
@@ -5269,9 +5317,10 @@
               });
               // 車の 記録が 無いのに 乗った人だけ 残っている 車も 出す（見えないのに 給料が 出る 人を 作らない）
               wh.forEach(function (w) {
-                if (w.device_id && !shiftsByDev[w.device_id]) {
-                  shiftsByDev[w.device_id] = [];
-                  devs.push(w.device_id);
+                var k = w.device_id || ''; // 空＝車が 決まっていない（計算は 時間が 在れば 払う）
+                if (!shiftsByDev[k]) {
+                  shiftsByDev[k] = [];
+                  devs.push(k);
                 }
               });
 
@@ -5350,10 +5399,10 @@
                 // UUIDを画面に出さない (2026-08-04)
                 //   司さん「売上1の横の英語のやつ邪魔でしょうがない」
                 //   名前が無ければ「車1」「車2」（js/car-name.js が1箇所で決める）
-                var label = _carName(dev);
-                var own = CTX && CTX.settings.ownerDeviceId === dev;
+                var label = dev ? _carName(dev) : '車が決まっていない人';
+                var own = !!dev && CTX && CTX.settings.ownerDeviceId === dev;
                 var crew = wh.filter(function (w) {
-                  return w.device_id === dev;
+                  return (w.device_id || '') === dev;
                 });
                 var carHours = c ? num(c.hours) : 0;
 
@@ -5371,8 +5420,14 @@
                   sub +
                   '</span>' +
                   (nashi
-                    ? '<span class="keikoku">この日 この車の 記録が ありません。時間を 入れていない 人は 給料が 出ません</span>'
-                    : '') +
+                    ? '<span class="keikoku">' +
+                      (dev
+                        ? 'この日 この車の 記録が ありません。乗っていないなら ✕ で外し、乗ったなら 下の「＋ 手で車を足す」で この車を 足してください'
+                        : 'どの車に 乗ったか 決まっていません。✕ で外して、乗った車の「＋ 乗った人」から 足し直してください') +
+                      '</span>'
+                    : !crew.length && !own && c && (num(c.hours) > 0 || num(c.sales) > 0)
+                      ? '<span class="keikoku">乗った人が 居ません</span>'
+                      : '') +
                   '</div>';
 
                 // 売上
@@ -5527,6 +5582,31 @@
           wireDays();
         }
 
+        // 乗った人を 足す 札・選ぶ箱を 保存中は 押せなくする／保存が 済んだら 戻す
+        //   （成功なら 描き直しで 新しい 物に 替わる。失敗の 時に 押せないまま 残らないように）
+        function tomeru(on) {
+          Array.prototype.forEach.call(
+            document.querySelectorAll('[data-chip-emp],[data-add-date]'),
+            function (x) {
+              x.disabled = on;
+            }
+          );
+        }
+        function modosu(pr) {
+          if (pr && pr.then) {
+            pr.then(
+              function () {
+                tomeru(false);
+              },
+              function () {
+                tomeru(false);
+              }
+            );
+          } else {
+            tomeru(false);
+          }
+        }
+
         function wireDays() {
           // 車の時数
           Array.prototype.forEach.call(document.querySelectorAll('[data-sid]'), function (i) {
@@ -5549,11 +5629,14 @@
           Array.prototype.forEach.call(document.querySelectorAll('[data-add-date]'), function (s) {
             s.onchange = function () {
               if (!s.value) return;
-              saveWorkHour(
-                s.getAttribute('data-add-date'),
-                s.value,
-                s.getAttribute('data-add-dev'),
-                ''
+              tomeru(true);
+              modosu(
+                saveWorkHour(
+                  s.getAttribute('data-add-date'),
+                  s.value,
+                  s.getAttribute('data-add-dev'),
+                  ''
+                )
               );
             };
           });
@@ -5561,17 +5644,14 @@
           //   （対立役：描き直しの前に 別の 車の 札で 同じ 人を 押すと 黙って 後の 車へ 移る）
           Array.prototype.forEach.call(document.querySelectorAll('[data-chip-emp]'), function (b) {
             b.onclick = function () {
-              Array.prototype.forEach.call(
-                document.querySelectorAll('[data-chip-emp]'),
-                function (x) {
-                  x.disabled = true;
-                }
-              );
-              saveWorkHour(
-                b.getAttribute('data-chip-date'),
-                b.getAttribute('data-chip-emp'),
-                b.getAttribute('data-chip-dev'),
-                ''
+              tomeru(true);
+              modosu(
+                saveWorkHour(
+                  b.getAttribute('data-chip-date'),
+                  b.getAttribute('data-chip-emp'),
+                  b.getAttribute('data-chip-dev'),
+                  ''
+                )
               );
             };
           });
@@ -5752,7 +5832,7 @@
             hours: isFinite(v) && v > 0 ? v : 0, // 0 = 乗った車の時数を使う
             updated_at: new Date().toISOString(),
           };
-          upsert('dk_work_hours', 'company_id,work_date,employee_id', body)
+          return upsert('dk_work_hours', 'company_id,work_date,employee_id', body)
             .then(function (r) {
               if (!r.ok) return saveErr('乗った人を保存できませんでした。', r);
               showErr('');
