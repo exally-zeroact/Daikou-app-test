@@ -347,6 +347,7 @@
     <script src="js/dk-session.js"></script>
     <script src="js/car-name.js"></script>
     <script src="js/jippi-hozon.js"></script>
+    <script src="js/uriage-agg.js"></script>
     <script>
       (function () {
         'use strict';
@@ -633,7 +634,10 @@
             if (!x) {
               x = detaAru[sh.device_id] = { device_id: sh.device_id, fare_total_yen: 0, ids: [] };
             }
-            x.fare_total_yen += Number(sh.fare_total_yen) || 0;
+            // 売上＝事務所が 直した 額 か メーター（UriageAgg.uriageOf の 1か所）2026-10-14
+            var u = UriageAgg.uriageOf(sh, EDITS[sh.shift_id]);
+            if (u === null) x.dame = true;
+            else x.fare_total_yen += u;
             x.ids.push(sh.shift_id);
             x.shift_id = sh.shift_id;
           });
@@ -955,7 +959,8 @@
           JippiHozon.saveJippi(SESS, shiftId, COMPANY.company_id, EDITS[shiftId], field, value)
             .then(function (body) {
               showErr('');
-              EDITS[shiftId] = body;
+              // 前の 行に 重ねる（置き換えると 売上の 直し などが 読み直すまで 画面から 消える）
+              EDITS[shiftId] = Object.assign({}, EDITS[shiftId] || {}, body);
             })
             .catch(function (r) {
               saveErr('保存できませんでした。通信を確認してください。', r);

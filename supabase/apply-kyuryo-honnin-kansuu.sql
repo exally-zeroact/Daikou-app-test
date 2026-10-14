@@ -155,7 +155,8 @@ begin
     --                    ＝★絞っても 金額は 1円も 変わらない★
     'edits', (
       select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from (
-        select ed.shift_id, ed.toll_yen, ed.bridge_yen, ed.other_yen, ed.expenses, ed.hours
+        -- uriage_yen＝事務所が 直した 売上（2026-10-14・apply-uriage-naoshi.sql と 同じ 送りで 当てる）
+        select ed.shift_id, ed.toll_yen, ed.bridge_yen, ed.other_yen, ed.expenses, ed.hours, ed.uriage_yen
         from daikome.dk_shift_edits ed where ed.company_id = r.company_id
       ) x
     ),

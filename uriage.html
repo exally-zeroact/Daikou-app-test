@@ -938,6 +938,14 @@
           // ★車ごと／日ごと の両方を作る（数字は同じ物から作る＝食い違わない）★
           ROWS = UriageAgg.byDevice(RAW.shifts, edits, RAW.labels, SETTINGS);
           DAYS = UriageAgg.byDay(RAW.shifts, edits, RAW.labels, SETTINGS);
+          // 売上の 直しが 読めない 業務が 在れば 知らせる（合計に その 業務は 入っていない）2026-10-14
+          var dame = UriageAgg.total(ROWS).uriage_dame;
+          if (dame)
+            showErr(
+              '売上の 直しが 読めない 業務が ' +
+                dame +
+                '件 あります（合計に 入っていません）。給料の「時数を入れる」で 直してください。'
+            );
         }
 
         // ---------- 売上から引くものの設定 ----------
@@ -1024,7 +1032,15 @@
             '/' +
             d.getDate() +
             '</span><span>' +
-            money(s.fare_total_yen) +
+            (function () {
+              // 売上＝事務所が 直した 額 か メーター（UriageAgg.uriageOf の 1か所）2026-10-14
+              var u = UriageAgg.uriageOf(s, e);
+              if (u === null) return '読めません';
+              var naoshi = e.uriage_yen !== null && e.uriage_yen !== undefined;
+              return (
+                money(u) + (naoshi ? '（直した・メーター ' + money(s.fare_total_yen) + '）' : '')
+              );
+            })() +
             '</span></div>' +
             '<div class="dsub">' +
             (s.trip_count || 0) +

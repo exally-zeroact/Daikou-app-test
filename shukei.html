@@ -1485,6 +1485,13 @@
           //   CTX_KYU ＝ 前後の 月も 入れた 物（★給料（締めた 分）を 数える GetsujiAgg だけ★）
           CTX_KYU = PayrollDaily.buildCtx(RAW);
           CTX = PayrollDaily.buildCtx(toshiDake(RAW));
+          // 売上の 直しが 読めない 業務が 在れば 知らせる（その 業務の 売上は 入っていない）2026-10-14
+          if (CTX_KYU.uriageDame && CTX_KYU.uriageDame.length)
+            showErr(
+              '売上の 直しが 読めない 業務が ' +
+                CTX_KYU.uriageDame.length +
+                '件 あります（売上・給料に 入っていません）。給料の「時数を入れる」で 直してください。'
+            );
           // ★PAYS＝日ごとの 請求書／電子決済★（画面の 数字と 紙で 同じ 物を 使う為に 外へ）
           var pays = PAYMENTS.slice();
           // ★★日ごとが 在る 月は 日ごとを 使う（二重に 数えない）★★ 2026-09-06

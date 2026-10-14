@@ -3311,6 +3311,8 @@
               salesSettings: RAW.salesSettings,
               payrollSettings: SET,
             });
+            // 売上の 直しが 読めない 業務が 在れば 紙を 出さない 2026-10-14
+            if (uriageDameBun(ctx)) throw new Error(uriageDameBun(ctx));
             // ★★紙の 日 ＝ この月に 締める 期の 日 全部★★ 2026-10-07（司さん「イ」＝締めた 分）
             //   月3回 等は 暦の 月と 同じ 日（対立役 132か月で 0か月 違い）。期が 0 の 月は 暦の 日
             var hibi = [];
@@ -3916,6 +3918,18 @@
           _CAR_NAMES = null; // ★データを読み直したら車の名前も作り直す★
           CTX = PayrollDaily.buildCtx(RAW);
           REP = PayrollDaily.report(PERIOD ? PERIOD.dates : [], CTX);
+          var ub = uriageDameBun(CTX);
+          if (ub) showErr(ub);
+        }
+        // 売上の 直しが 読めない 業務が 在る 時の 字（明細・紙を 止める）2026-10-14
+        //   メーターの 額に 黙って 倒すと 給料が 違う 額で 出る＝お金の 出力は 止めて 警告
+        function uriageDameBun(ctx) {
+          var k = (ctx && ctx.uriageDame && ctx.uriageDame.length) || 0;
+          return k
+            ? '売上の 直しが 読めない 業務が ' +
+                k +
+                '件 あります。給料の 明細・紙は 止めています。「時数を入れる」で その 売上を 直してください。'
+            : '';
         }
 
         // ---------- 描画 ----------
@@ -4900,6 +4914,11 @@
               '<div class="card"><div class="msg">まず「従業員」で人を登録してください。</div></div>';
             return;
           }
+          var ubDame = uriageDameBun(CTX);
+          if (ubDame) {
+            box.innerHTML = '<div class="card"><div class="msg">' + esc(ubDame) + '</div></div>';
+            return;
+          }
           var html = adjChui();
           // ★描き直すと チェックは 消える＝「選んだ人を 印刷」も その場で 揃える★（10-03 対立役：
           //   前は 月を 変えても「選んだ 1人を 印刷」が 残り、押すと printAll([]) で ★全員ぶん★ 出た）
@@ -5499,7 +5518,10 @@
                   var uri = 0;
                   ss.forEach(function (s) {
                     var e0 = EDIT_BY_SHIFT[s.shift_id] || {};
-                    uri += num(s.fare_total_yen) - (UriageAgg.deductOf(e0, RAW.salesSettings) || 0);
+                    // 売上＝直した 額 か メーター（UriageAgg.uriageOf の 1か所）2026-10-14
+                    uri +=
+                      num(UriageAgg.uriageOf(s, e0)) -
+                      (UriageAgg.deductOf(e0, RAW.salesSettings) || 0);
                   });
                   html += '<div class="camt">¥' + yen(uri) + '</div>';
                 }
