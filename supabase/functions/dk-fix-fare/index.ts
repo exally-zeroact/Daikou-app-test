@@ -123,6 +123,8 @@ Deno.serve(async (req: Request) => {
     .eq('shift_id', shift.shift_id)
     .eq('seq', seq);
   if (tErr) return json({ ok: false, reason: 'trip_update_failed' }, 500);
+  // 直す 代行が 見つからない（seq が 合わない）＝何も 直していない ⇒ 合計も 事務所の 直しも 触らない 2026-10-14（対立役）
+  if (!count) return json({ ok: true, updated: 0, reason: 'no_trip' });
 
   // ④ 業務の 合計を 数え直す（★足し算し直すだけ★・件数や距離は 触らない）
   const { data: trips } = await sb
