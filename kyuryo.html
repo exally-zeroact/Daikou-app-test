@@ -5974,26 +5974,12 @@
             });
         }
 
-        // 売上の 欄の 字を 読む：カンマ・空白・全角を 外し、0以上の 整数だけ。空＝null（メーターに 戻す）
-        //   読めない 時は undefined（保存を 止めて 字で 出す）＝parseInt で「9,800」が 9円 に ならない 様に（対立役）
-        function uriageYomu(v) {
-          var t = String(v === null || v === undefined ? '' : v)
-            .replace(/[０-９]/g, function (c) {
-              return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
-            })
-            .replace(/[,，\s円¥￥]/g, '');
-          if (t === '') return null;
-          if (!/^\d+$/.test(t)) return undefined;
-          var n0 = Number(t);
-          return Number.isSafeInteger(n0) ? n0 : undefined;
-        }
-
         // メーターの 車の 売上を 事務所が 直す（dk_shift_edits.uriage_yen）2026-10-14
         //   元の 記録（dk_shifts）は 書かない。送るのは この 2列だけ（他の 列を 古い 値で 上書きしない）
         //   請求書の 一覧で 後から 直すと dk-fix-fare が 空に 戻す＝後から 直した 方が 勝つ
         function saveCarUriage(shiftId, value) {
           if (!COMPANY) return;
-          var v = uriageYomu(value);
+          var v = UriageAgg.yomuUriage(value); // 字の 読み方は 1か所（js/uriage-agg.js）
           if (v === undefined) {
             showErr(
               '売上は 0以上の 整数で 入れてください（空に すると メーターの 額に 戻ります）。'

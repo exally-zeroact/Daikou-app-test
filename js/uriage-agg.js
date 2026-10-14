@@ -89,6 +89,21 @@
     return null;
   }
 
+  // 売上の 欄の 字を 読む（給料の 時数を入れる・入力 の 両方が 使う 1か所）2026-10-14
+  //   カンマ・空白・円・全角の 数字を 外し、0以上の 整数だけ。空＝null（メーターに 戻す）。
+  //   読めない 時は undefined（保存を 止めて 字で 出す）＝parseInt で「9,800」が 9円 に ならない 様に（対立役）
+  function yomuUriage(v) {
+    const t = String(v === null || v === undefined ? '' : v)
+      .replace(/[０-９]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
+      })
+      .replace(/[,，\s円¥￥]/g, '');
+    if (t === '') return null;
+    if (!/^\d+$/.test(t)) return undefined;
+    const x = Number(t);
+    return Number.isSafeInteger(x) ? x : undefined;
+  }
+
   function deductOf(edit, settings) {
     try {
       const st = normSettings(settings);
@@ -356,6 +371,7 @@
     normSettings: normSettings,
     deductOf: deductOf,
     uriageOf: uriageOf,
+    yomuUriage: yomuUriage,
     DEFAULT_DEDUCT: DEFAULT_DEDUCT,
   };
 
