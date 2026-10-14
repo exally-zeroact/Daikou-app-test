@@ -886,6 +886,8 @@
             $('shaList').innerHTML = '';
             return;
           }
+          // 会社設定の「並び」の 順（走った 車が 1台も 無い 日も 同じ・対立役 10-14）
+          ids = CarName.sortIds(ids, RAW.labels);
           NAMAE = CarName.nameMap(ids, RAW.labels);
           // ★走っていない 日★＝全部 「読み取れていない 車」
           var html = '';
