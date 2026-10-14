@@ -4,7 +4,7 @@
 //   司さん「給料明細もなんで2つに分かれるんどぼけ １枚で終わるように自動調整しろってゆうとったろが」
 //   司さんの 絵：10日 の 期間が「1/2枚目（9日）」「2/2枚目（1日）」に 分かれた（3台・5桁の 売上）
 //   前は 字を 15px に 決め打ちし、入らない 日を 次の 紙へ 送っていた。
-//   ⇒ 入るまで 字を 小さく（下限 12px＝紙の 9pt）。12px でも 入らない 時だけ 分ける。
+//   ⇒ 入るまで 字を 小さく（下限 13px＝PDF で 9.09pt）。13px でも 入らない 時だけ 分ける。
 //
 //   ★わざと壊して 赤に なるのを 見た（2026-10-14 実測）★
 //     字の 大きさを 合わせる 前の kyuryo.html に 戻す ⇒ 赤（10日 が 2枚・15px のまま）
@@ -86,6 +86,7 @@ test('10日・11日の 期間（3台・5桁の 売上・毎日 働く）は 明�
         hi: P.hi(ei),
         mai: els.length,
         font: els.map((el) => Number(el.getAttribute('data-font-px'))),
+        sub: els.map((el) => Number(el.getAttribute('data-sub-px'))),
         haba: els.map((el) => {
           el.style.position = 'absolute';
           el.style.left = '0';
@@ -104,7 +105,13 @@ test('10日・11日の 期間（3台・5桁の 売上・毎日 働く）は 明�
   for (const x of r) {
     expect(x.hi).toBeGreaterThanOrEqual(10);
     expect(x.mai, x.hi + '日の 期間が ' + x.mai + '枚に 分かれた').toBe(1);
-    x.font.forEach((fp) => expect(fp, '字が 9pt（12px）より 小さい').toBeGreaterThanOrEqual(12));
+    // 板 → PDF の 倍率（js/kami-egaku.js の bai）で 9pt 以上か（本文も 2行目も）
+    const BAI = Math.min((842 - 40) / 1123, (595 - 40) / 794);
+    x.font
+      .concat(x.sub)
+      .forEach((fp) =>
+        expect(fp * BAI, '字が PDF で 9pt より 小さい（' + fp + 'px）').toBeGreaterThanOrEqual(9)
+      );
     x.haba.forEach((w) => expect(w, '右に はみ出した').toBeLessThanOrEqual(0));
   }
   expect(err).toEqual([]);

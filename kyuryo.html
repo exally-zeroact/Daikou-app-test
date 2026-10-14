@@ -4243,8 +4243,8 @@
           //   司さん「給料明細もなんで2つに分かれるんどぼけ １枚で終わるように自動調整しろってゆうとったろが」
           //   前は 字を 15px に 決め打ちし、入らない 日は 次の 紙へ 送っていた（10日 が 9日＋1日 の 2枚）。
           //   ⇒ その 紙の 日が 全部 入るまで 字を 15px から 0.5px ずつ 小さく する。
-          //     ★下限は 12px（紙で 9pt）★＝一番 小さい 字 ≧9pt の 決まりは 守る。
-          //     12px でも 入らない 時（31日 まとめ 等）だけ 紙を 分ける（_maisu）。
+          //     ★下限は 13px（PDF で 9.09pt）★＝一番 小さい 字 ≧9pt の 決まりは 守る。
+          //     13px でも 入らない 時（31日 まとめ 等）だけ 紙を 分ける（_maisu）。
           var LABEL_MAX = Math.floor(tableW * 0.3);
           var CELL_PAD = 8;
           var labelInk, labelW, labelKake, minColW;
@@ -4275,11 +4275,13 @@
             minColW = mc;
             return mc * days <= tableW - lw;
           };
-          var FONT_MIN = 12; // 板の 12px ＝ 紙の 9pt
+          // 板の 13px ＝ PDF で 9.09pt（紙に 置く 倍率は 0.75 で なく 0.699＝js/kami-egaku.js の bai：
+          //   min((842-40)/1123, (595-40)/794)。12px だと 8.39pt で 9pt を 割る＝対立役 10-14）
+          var FONT_MIN = 13;
           while (!hakaru(fontPx) && fontPx > FONT_MIN) {
             fontPx = Math.max(FONT_MIN, fontPx - 0.5);
           }
-          // 2行目（車の 番号）も 同じ だけ 小さく（下限 12px）
+          // 2行目（車の 番号）も 同じ だけ 小さく（下限 13px）
           subPx = Math.max(FONT_MIN, subPx - (15 - fontPx));
 
           var dayW = Math.floor((tableW - labelW) / days);
