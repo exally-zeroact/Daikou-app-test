@@ -5476,9 +5476,21 @@
 
                 var sub = nashi ? '' : isManual ? '<span class="manual">手入力</span>' : 'メーター';
                 if (own) sub += '（自分の車）';
-                if (isManual && c && num(c.expense) > 0) {
-                  // 手入力の 欄は 引く前の 額。日の 売上は 実費を 引いた 後（対立役：同じ 画面で 食い違って 見えた）
+                if (c && num(c.expense) > 0) {
+                  // 売上の 欄は 実費を 引く 前の 額。日の 売上は 実費を 引いた 後（対立役：同じ 画面で 食い違って 見えた）
                   sub += ' 実費 −¥' + yen(c.expense) + ' → ¥' + yen(num(c.sales) - num(c.expense));
+                }
+                if (!isManual && !nashi) {
+                  // 事務所が 直した 売上が 在る 時は メーターの 額を 横に 出す 2026-10-14
+                  var naoshiMoto = ss
+                    .filter(function (s) {
+                      var e1 = EDIT_BY_SHIFT[s.shift_id] || {};
+                      return e1.uriage_yen !== null && e1.uriage_yen !== undefined;
+                    })
+                    .map(function (s) {
+                      return '¥' + yen(num(s.fare_total_yen));
+                    });
+                  if (naoshiMoto.length) sub += ' 直した（メーター ' + naoshiMoto.join('・') + '）';
                 }
 
                 html +=
@@ -5515,15 +5527,25 @@
                     num(man.sales_yen) +
                     '"></div>';
                 } else {
-                  var uri = 0;
-                  ss.forEach(function (s) {
+                  // メーターの 車の 売上も 直せる 2026-10-14（司さん「赤丸の売上の数も任意でユーザーが修正できるようにしとけよ」）
+                  //   欄は 1回の 業務ごと（同じ 車で 2回 働いた 日は 2つ）。実費を 引く 前の 額。
+                  //   空＝メーターの 額（placeholder）に 戻す。印は data-uri-sid（data-sid は 時間の 保存に 結ばれている）
+                  html += '<div class="camt hcell">';
+                  ss.forEach(function (s, i) {
                     var e0 = EDIT_BY_SHIFT[s.shift_id] || {};
-                    // 売上＝直した 額 か メーター（UriageAgg.uriageOf の 1か所）2026-10-14
-                    uri +=
-                      num(UriageAgg.uriageOf(s, e0)) -
-                      (UriageAgg.deductOf(e0, RAW.salesSettings) || 0);
+                    var naoshi = e0.uriage_yen !== null && e0.uriage_yen !== undefined;
+                    html +=
+                      '<label>' +
+                      (ss.length > 1 ? i + 1 + '回目 ' : '') +
+                      '¥<input class="yen" inputmode="numeric" aria-label="売上（実費を 引く 前）" data-uri-sid="' +
+                      esc(s.shift_id) +
+                      '" value="' +
+                      (naoshi ? esc(String(e0.uriage_yen)) : '') +
+                      '" placeholder="' +
+                      yen(num(s.fare_total_yen)) +
+                      '"></label>';
                   });
-                  html += '<div class="camt">¥' + yen(uri) + '</div>';
+                  html += '</div>';
                 }
 
                 // 時間（同じ 車で 2回 働いた 日は 欄を 2つ）
@@ -5724,6 +5746,14 @@
             i.onchange = function () {
               hozonSuru(function () {
                 return saveCarHours(i.getAttribute('data-sid'), i.value);
+              });
+            };
+          });
+          // メーターの 車の 売上の 直し 2026-10-14
+          Array.prototype.forEach.call(document.querySelectorAll('[data-uri-sid]'), function (i) {
+            i.onchange = function () {
+              hozonSuru(function () {
+                return saveCarUriage(i.getAttribute('data-uri-sid'), i.value);
               });
             };
           });
@@ -5941,6 +5971,64 @@
             })
             .catch(function () {
               showErr('時間を保存できませんでした。');
+            });
+        }
+
+        // 売上の 欄の 字を 読む：カンマ・空白・全角を 外し、0以上の 整数だけ。空＝null（メーターに 戻す）
+        //   読めない 時は undefined（保存を 止めて 字で 出す）＝parseInt で「9,800」が 9円 に ならない 様に（対立役）
+        function uriageYomu(v) {
+          var t = String(v === null || v === undefined ? '' : v)
+            .replace(/[０-９]/g, function (c) {
+              return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
+            })
+            .replace(/[,，\s円¥￥]/g, '');
+          if (t === '') return null;
+          if (!/^\d+$/.test(t)) return undefined;
+          var n0 = Number(t);
+          return Number.isSafeInteger(n0) ? n0 : undefined;
+        }
+
+        // メーターの 車の 売上を 事務所が 直す（dk_shift_edits.uriage_yen）2026-10-14
+        //   元の 記録（dk_shifts）は 書かない。送るのは この 2列だけ（他の 列を 古い 値で 上書きしない）
+        //   請求書の 一覧で 後から 直すと dk-fix-fare が 空に 戻す＝後から 直した 方が 勝つ
+        function saveCarUriage(shiftId, value) {
+          if (!COMPANY) return;
+          var v = uriageYomu(value);
+          if (v === undefined) {
+            showErr(
+              '売上は 0以上の 整数で 入れてください（空に すると メーターの 額に 戻ります）。'
+            );
+            renderDays();
+            return;
+          }
+          var cur = EDIT_BY_SHIFT[shiftId] || {};
+          var body = {
+            shift_id: shiftId,
+            company_id: COMPANY.company_id,
+            uriage_yen: v,
+            uriage_at: v === null ? null : new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          return upsert('dk_shift_edits', 'shift_id', body)
+            .then(function (r) {
+              if (!r.ok) return saveErr('売上を保存できませんでした。', r);
+              showErr('');
+              var neu = Object.assign({}, cur, body);
+              EDIT_BY_SHIFT[shiftId] = neu;
+              var found = false;
+              RAW.edits = RAW.edits.map(function (e) {
+                if (e.shift_id === shiftId) {
+                  found = true;
+                  return Object.assign({}, e, body);
+                }
+                return e;
+              });
+              if (!found) RAW.edits.push(neu);
+              recalc();
+              renderDays();
+            })
+            .catch(function () {
+              showErr('売上を保存できませんでした。');
             });
         }
 
