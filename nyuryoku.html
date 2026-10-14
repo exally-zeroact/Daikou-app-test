@@ -672,6 +672,9 @@
           RAW.shifts.forEach(function (sh) {
             if (sh && sh.device_id && zenbu.indexOf(sh.device_id) < 0) zenbu.push(sh.device_id);
           });
+          // 会社設定の「並び」の 順に 並べる（js/car-name.js の 1か所）2026-10-14
+          //   司さん「入力のとこの並びもめちゃくちゃやろがぼけ」＝前は 札を 読んだ 順の まま だった
+          zenbu = CarName.sortIds(zenbu, RAW.labels);
           NAMAE = CarName.nameMap(zenbu, RAW.labels);
           zenbu.forEach(function (dev) {
             var sh = detaAru[dev];
