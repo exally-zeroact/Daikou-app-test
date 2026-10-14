@@ -97,3 +97,20 @@ describe('③ ④ ⑤ 給料と 売上表', () => {
     expect(t.fare_total_yen).toBe(5000 + 7000);
   });
 });
+
+describe('月次（GetsujiAgg）も 読めない 直しが 在れば 止める', () => {
+  it('ctx.uriageDame が 在れば out.dame（売上・税・現金を 出さない）', () => {
+    const G = require('../../js/getsuji-agg.js');
+    const ctx = P.buildCtx({
+      shifts: [shift('a', 'd1', 9800)],
+      edits: [{ shift_id: 'a', uriage_yen: -1 }],
+      employees: [],
+      workHours: [],
+      manualDays: [],
+      labels: [],
+    });
+    const r = G.month(2026, 9, ctx, []);
+    expect(r.dame).toBe(true);
+    expect(r.riyuu).toContain('売上の 直し');
+  });
+});

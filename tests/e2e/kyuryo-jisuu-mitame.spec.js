@@ -578,3 +578,23 @@ test('売上の 欄の 字：「9,800」「９８００」は 9800・負や 字�
   p = await edPosts(page);
   expect(p, '読めない 字で 送った').toHaveLength(2);
 });
+
+test('売上の 直しが 読めない 業務が 在れば 明細の 画面・PDF（全員・1人）を 止める', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.edits = [{ shift_id: SHIFT1, company_id: CO, uriage_yen: -5 }];
+    },
+  });
+  await page.click('.tab[data-tab="slip"]');
+  await page.waitForTimeout(600);
+  await expect(page.locator('#slips')).toContainText('売上の 直しが 読めない');
+  await page.evaluate(() => {
+    const e = document.getElementById('err');
+    e.textContent = '';
+  });
+  await page.click('#btnPrint');
+  await page.waitForTimeout(500);
+  await expect(page.locator('#err')).toContainText('売上の 直しが 読めない');
+});

@@ -578,7 +578,13 @@
             return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c];
           });
         }
+        var URIAGE_DAME = 0; // 売上の 直しが 読めない 業務の 数（他の 字で 消さない）2026-10-14
         function showErr(m) {
+          if (!m && URIAGE_DAME)
+            m =
+              '売上の 直しが 読めない 業務が ' +
+              URIAGE_DAME +
+              '件 あります（合計に 入っていません）。給料の「時数を入れる」で 直してください。';
           $('err').textContent = m;
           $('err').style.display = m ? 'block' : 'none';
         }
@@ -940,6 +946,7 @@
           DAYS = UriageAgg.byDay(RAW.shifts, edits, RAW.labels, SETTINGS);
           // 売上の 直しが 読めない 業務が 在れば 知らせる（合計に その 業務は 入っていない）2026-10-14
           var dame = UriageAgg.total(ROWS).uriage_dame;
+          URIAGE_DAME = dame;
           if (dame)
             showErr(
               '売上の 直しが 読めない 業務が ' +
