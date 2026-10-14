@@ -1359,7 +1359,8 @@
       .hizen .nnhi {
         color: var(--danger);
         text-decoration: underline;
-        padding: 4px 3px;
+        padding: 6px 7px;
+        margin: 0 2px;
       }
 
       .hizen button {
@@ -5153,20 +5154,38 @@
         // ★★どの 日を 見せるか★★ 2026-09-06（司さん「その日だけ見せてスッキリさせろ」）
         //   ''（空）＝全部。日付が 入っていれば その日だけ。
         var HI = ''; // 見せる 日（'zenbu'＝期間を 全部）
-        // その日 動いた 車（自分の 車は 除く）で 乗った人が 0人の 車
-        //   既定が 1日だけに なったので、入れ漏れの 日が 目に 入らない（対立役）。帯に 日を 並べて 知らせる
+        // 給料の 計算（payroll-daily の dayInput）と 同じ 数え方で、その日の 確かめが 要る 所を 返す
+        //   cars ＝ 動いた 車（自分の 車は 除く・売上か 時間が 在る）なのに 給料が 出る 人が 0人
+        //          （乗った人が 居ない／居ても 時間が 0＝計算は 行を 作らない）
+        //   hito ＝ 車の 記録が 無い 車（車が 空も）に 乗った 人で 給料が 出ている
+        //          （売上の 母数に 入らない 車の 人へ 他の 車の 稼ぎから 払う）
+        //   既定が 1日だけに なったので、帯で 知らせる（対立役 2回：乗った人の 行が 在るかだけ
+        //   見ると、払いが 0 の 日や 記録の 無い 車への 払いが「入れ漏れ無し」に 隠れた）
         function noriNashi(date) {
           var cars = (CTX && CTX.byDate && CTX.byDate[date]) || {};
           var own = (CTX && CTX.settings && CTX.settings.ownerDeviceId) || '';
-          var nori = {};
-          RAW.workHours.forEach(function (w) {
-            if (w.work_date === date) nori[w.device_id || ''] = true;
+          var wh = (CTX && CTX.hoursByDate && CTX.hoursByDate[date]) || {};
+          var deru = {};
+          var hito = [];
+          Object.keys(wh).forEach(function (empId) {
+            if (!CTX.empById[empId]) return; // 計算も 知らない 人は 入れない
+            var w = wh[empId];
+            var car = cars[w.device_id];
+            var h = w.hours > 0 ? w.hours : car ? car.hours : 0;
+            if (!(h > 0)) return; // 計算は 行を 作らない
+            if (car) deru[w.device_id] = true;
+            else hito.push(empId);
           });
-          return Object.keys(cars).filter(function (dev) {
+          var nashi = Object.keys(cars).filter(function (dev) {
             var c = cars[dev] || {};
-            if (dev === own || nori[dev]) return false;
+            if (dev === own || deru[dev]) return false;
             return num(c.hours) > 0 || num(c.sales) > 0;
           });
+          return { cars: nashi, hito: hito };
+        }
+        function mondai(date) {
+          var r = noriNashi(date);
+          return r.cars.length + r.hito.length > 0;
         }
         function hibar() {
           var n = $('hibar');
@@ -5188,7 +5207,7 @@
           var i = ds.indexOf(HI);
           // 乗った人が 居ない 車が ある 日（入れ漏れ）
           var more = ds.filter(function (d) {
-            return noriNashi(d).length > 0;
+            return mondai(d);
           });
           var you = '';
           if (!zen) {
@@ -5212,7 +5231,7 @@
             (more.length ? 'nnari' : '') +
             '">' +
             (more.length
-              ? '乗った人が居ない車がある日：' +
+              ? '給料が出る人の居ない車・記録の無い車の人がいる日：' +
                 more
                   .map(function (d) {
                     var w2 = new Date(d + 'T00:00:00');
@@ -5425,8 +5444,12 @@
                         ? 'この日 この車の 記録が ありません。乗っていないなら ✕ で外し、乗ったなら 下の「＋ 手で車を足す」で この車を 足してください'
                         : 'どの車に 乗ったか 決まっていません。✕ で外して、乗った車の「＋ 乗った人」から 足し直してください') +
                       '</span>'
-                    : !crew.length && !own && c && (num(c.hours) > 0 || num(c.sales) > 0)
-                      ? '<span class="keikoku">乗った人が 居ません</span>'
+                    : noriNashi(date).cars.indexOf(dev) >= 0
+                      ? '<span class="keikoku">' +
+                        (crew.length
+                          ? '乗った人の 時間が 0 なので 給料が 出ません'
+                          : '乗った人が 居ません') +
+                        '</span>'
                       : '') +
                   '</div>';
 
@@ -5586,7 +5609,9 @@
         //   （成功なら 描き直しで 新しい 物に 替わる。失敗の 時に 押せないまま 残らないように）
         function tomeru(on) {
           Array.prototype.forEach.call(
-            document.querySelectorAll('[data-chip-emp],[data-add-date]'),
+            // 札・選ぶ箱だけで なく 時数の 画面の 打つ所 全部（対立役：保存中に 他を 変えると
+            //   描き直しで 押せる 札が 作り直され、同じ 人が 後の 車へ 移る 道が 開いた）
+            document.querySelectorAll('#days input, #days select, #days button'),
             function (x) {
               x.disabled = on;
             }

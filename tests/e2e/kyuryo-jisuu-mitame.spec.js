@@ -222,7 +222,7 @@ test('既定は 今日（日本時間）・乗った人が 居ない 車の 日�
   await expect(page.locator('#hiSel')).toHaveValue('2026-08-05');
   await expect(page.locator('#days .day[data-date]')).toHaveCount(1);
   const obi = page.locator('#hibar .hizen');
-  await expect(obi).toContainText('乗った人が居ない車がある日');
+  await expect(obi).toContainText('給料が出る人の居ない車');
   await expect(obi.locator('[data-nn-hi]')).toHaveCount(1);
   await obi.locator('[data-nn-hi="2026-08-01"]').click();
   await expect(page.locator('#hiSel')).toHaveValue('2026-08-01');
@@ -281,3 +281,49 @@ test('札の 保存に 失敗したら 札が 押せる形に 戻る', async ({ 
   );
   expect(dis, '失敗の 後も 札が 押せないまま').toBe(false);
 });
+
+// 帯の 数え方は 給料の 計算と 同じ（対立役 2回目の P1・P4）
+for (const [na, tweak, hiD] of [
+  [
+    '手入力の 車に 売上が 在り 時間 0・乗った人の 時間も 空＝給料が 出ない',
+    (F) => {
+      F.manualDays = F.manualDays.map((m) =>
+        m.work_date === '2026-08-02' ? Object.assign({}, m, { sales_yen: 20000 }) : m
+      );
+    },
+    '2026-08-02',
+  ],
+  [
+    '記録の 無い 車に 乗った人が 時間 5＝売上の 母数に 入らない 車で 払う',
+    (F) => {
+      F.workHours.push({
+        company_id: CO,
+        work_date: '2026-08-03',
+        employee_id: SABURO,
+        device_id: CAR2,
+        hours: 5,
+      });
+    },
+    '2026-08-03',
+  ],
+  [
+    '車が 空の 人が 時間 3',
+    (F) => {
+      F.workHours.push({
+        company_id: CO,
+        work_date: '2026-08-04',
+        employee_id: SABURO,
+        device_id: '',
+        hours: 3,
+      });
+    },
+    '2026-08-04',
+  ],
+]) {
+  test('帯に 出す：' + na, async ({ page }) => {
+    await hiraku(page, { ichinichi: true, tweak });
+    const obi = page.locator('#hibar .hizen');
+    await expect(obi).not.toContainText('入れ漏れはありません');
+    await expect(obi.locator('[data-nn-hi="' + hiD + '"]')).toHaveCount(1);
+  });
+}
