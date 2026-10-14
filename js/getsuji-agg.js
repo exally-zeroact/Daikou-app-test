@@ -114,6 +114,7 @@
       // 売上の 直しが 読めない 業務が 在れば 止める 2026-10-14（その 業務の 売上が 抜けた 額で 税・現金を 出さない）
       if (ctx.uriageDame && ctx.uriageDame.length) {
         out.dame = true;
+        out.uriage = true; // 払い方の 設定とは 別の 止め（画面の 字を 分ける 印・字で 分けない）
         out.riyuu =
           '売上の 直しが 読めない 業務が ' +
           ctx.uriageDame.length +
@@ -214,6 +215,7 @@
           out.total.dame = true;
           out.total.riyuu = mm.riyuu;
           out.total.tsushin = mm.tsushin === true;
+          if (mm.uriage) out.total.uriage = true;
         }
       });
       const byIdx = {};

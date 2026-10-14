@@ -665,6 +665,8 @@
         }
         function kamiTsukuru(shu) {
           if (KAMI_TSUKI !== ymKey(MONTH)) return null;
+          // 売上の 直しが 読めない 業務が 在れば 紙を 作らない（その 業務の 売上が 抜けた 額で 出さない）2026-10-14
+          if (URIAGE_DAME) return null;
           var k = kamiK();
           var mm = k.year + '-' + ('0' + k.month).slice(-2);
           var na = k.name || 'ダイコメ';
@@ -736,7 +738,11 @@
           var r = kamiTsukuru(KAMI_SHU);
           if (!r) {
             $('kamiMado').innerHTML = '';
-            return kamiMsg('読み込み中…');
+            return kamiMsg(
+              URIAGE_DAME
+                ? '売上の 直しが 読めない 業務が 在るので 紙は 出せません（給料の「時数を入れる」で 直してください）'
+                : '読み込み中…'
+            );
           }
           KamiPdf.mise($('kamiMado'), r.mai, function () {
             var r2 = kamiTsukuru(KAMI_SHU);
