@@ -426,3 +426,56 @@ test('保存中は 日を 選ぶ 帯も 押せない（描き直しで 札が �
   );
   expect(wh).toHaveLength(1);
 });
+
+test('保存中に 月を 行き来して 描き直されても 札は 止まった まま', async ({ page }) => {
+  await hiraku(page);
+  await page.evaluate(() => {
+    const S = window.DKSession;
+    const moto = S.rest;
+    S.rest = function (s, p, o) {
+      const r = moto(s, p, o);
+      return (o && o.method) === 'POST' ? new Promise((ok) => setTimeout(() => ok(r), 2500)) : r;
+    };
+  });
+  await page
+    .locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + SABURO + '"]')
+    .first()
+    .click();
+  await page.click('#nextM');
+  await page.waitForTimeout(300);
+  await page.click('#prevM');
+  await page.waitForTimeout(300);
+  const mid = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('#days [data-chip-emp]')];
+    return { n: b.length, dis: b.filter((x) => x.disabled).length };
+  });
+  expect(mid.n).toBeGreaterThan(0);
+  expect(mid.dis, '描き直しで 札が 押せる形に 戻った').toBe(mid.n);
+});
+
+test('保存の 返事が 来ない 時は 15秒で 戻して 字で 知らせる', async ({ page }) => {
+  test.setTimeout(60000);
+  await hiraku(page);
+  await page.evaluate(() => {
+    const S = window.DKSession;
+    const moto = S.rest;
+    S.rest = function (s, p, o) {
+      return (o && o.method) === 'POST' ? new Promise(() => {}) : moto(s, p, o);
+    };
+  });
+  await page
+    .locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + SABURO + '"]')
+    .first()
+    .click();
+  const mae = await page.evaluate(() => document.getElementById('hiZen').disabled);
+  expect(mae).toBe(true);
+  await page.waitForTimeout(16000);
+  const ato = await page.evaluate(() => ({
+    zen: document.getElementById('hiZen').disabled,
+    chip: [...document.querySelectorAll('[data-chip-emp]')].some((b) => b.disabled),
+    err: (document.getElementById('err') || {}).textContent || '',
+  }));
+  expect(ato.zen, '返事が 来ないまま 固まった').toBe(false);
+  expect(ato.chip).toBe(false);
+  expect(ato.err).toContain('保存の 返事が 来ません');
+});

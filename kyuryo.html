@@ -5639,30 +5639,35 @@
           if (HOZON < 0) HOZON = 0;
           kakeru();
         }
-        function modosu(pr) {
-          if (pr && pr.then) {
-            pr.then(
-              function () {
-                tomeru(false);
-              },
-              function () {
-                tomeru(false);
-              }
-            );
-          } else {
-            tomeru(false);
-          }
-        }
         // 保存を 1つ 始める（止めてから 保存し、済んだら 1つ 戻す）
+        //   返事が 15秒 来ない 時は 戻して 字で 知らせる（対立役 4回：電波の 悪い 所で 返事が 返らないと
+        //   画面と 帯が 全部 押せないまま 黙って 固まった。fetch に 時間切れが 無い）
+        var HOZON_MATSU_MS = 15000;
         function hozonSuru(fn) {
           tomeru(true);
+          var sumi = false;
+          var owari = function () {
+            if (sumi) return;
+            sumi = true;
+            clearTimeout(t);
+            tomeru(false);
+          };
+          var t = setTimeout(function () {
+            if (sumi) return;
+            owari();
+            showErr(
+              '保存の 返事が 来ません。電波を 確かめて、画面を 読み込み直して 保存されたか 確かめてください。'
+            );
+          }, HOZON_MATSU_MS);
           var pr;
           try {
             pr = fn();
           } catch (e) {
             pr = null;
+            showErr('保存できませんでした。');
           }
-          modosu(pr);
+          if (pr && pr.then) pr.then(owari, owari);
+          else owari();
         }
 
         function wireDays() {
