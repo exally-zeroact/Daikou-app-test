@@ -212,10 +212,12 @@ test('既定は 今日（日本時間）・乗った人が 居ない 車の 日�
 }) => {
   await hiraku(page, {
     ichinichi: true,
-    // 8/1 2号車の 次郎を 外す＝乗った人が 0人の 車
+    // 8/1 2号車の 次郎を 外す＝乗った人が 0人の 車（8/2 の 次郎も 外して 帯の 日を 1つに）
     tweak: (F) => {
       F.workHours = F.workHours.filter(
-        (w) => !(w.work_date === '2026-08-01' && w.employee_id === JIRO)
+        (w) =>
+          !(w.work_date === '2026-08-01' && w.employee_id === JIRO) &&
+          !(w.work_date === '2026-08-02' && w.employee_id === JIRO)
       );
     },
   });
@@ -231,7 +233,15 @@ test('既定は 今日（日本時間）・乗った人が 居ない 車の 日�
 });
 
 test('入れ漏れの 無い 期間は「入れ漏れはありません」', async ({ page }) => {
-  await hiraku(page, { ichinichi: true });
+  await hiraku(page, {
+    ichinichi: true,
+    // 8/2 2号車（売上0・時間0）の 次郎を 外す＝入れ漏れの 無い 期間
+    tweak: (F) => {
+      F.workHours = F.workHours.filter(
+        (w) => !(w.work_date === '2026-08-02' && w.employee_id === JIRO)
+      );
+    },
+  });
   await expect(page.locator('#hibar .hizen')).toContainText('乗った人の入れ漏れはありません');
 });
 
@@ -362,3 +372,57 @@ for (const [na, tweak, hiD] of [
     await expect(obi.locator('[data-nn-hi="' + hiD + '"]')).toHaveCount(1);
   });
 }
+
+test('帯に 出す：＋手で車を足す で 作った 売上0・時間0 の 車に 時間 空の 人', async ({ page }) => {
+  // 材料の 8/2 2号車＝手入力・売上 0・時間 0・次郎（時間 空）
+  await hiraku(page, { ichinichi: true });
+  await expect(page.locator('#hibar .hizen [data-nn-hi="2026-08-02"]')).toHaveCount(1);
+});
+
+test('保存中は 日を 選ぶ 帯も 押せない（描き直しで 札が 押せる形に 戻らない）・済んだら 戻る', async ({
+  page,
+}) => {
+  await hiraku(page, { ichinichi: true });
+  await page.evaluate(() => {
+    const i = document.getElementById('hiSel');
+    i.value = '2026-08-01';
+    i.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const S = window.DKSession;
+    const moto = S.rest;
+    S.rest = function (s, p, o) {
+      const r = moto(s, p, o);
+      return (o && o.method) === 'POST' ? new Promise((ok) => setTimeout(() => ok(r), 1500)) : r;
+    };
+  });
+  await page
+    .locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + SABURO + '"]')
+    .first()
+    .click();
+  const mid = await page.evaluate(() => ({
+    next: document.getElementById('nextD').disabled,
+    sel: document.getElementById('hiSel').disabled,
+    zen: document.getElementById('hiZen').disabled,
+    chips: [...document.querySelectorAll('[data-chip-emp]')].every((b) => b.disabled),
+  }));
+  expect(mid, '保存中に 帯か 札が 押せる').toEqual({
+    next: true,
+    sel: true,
+    zen: true,
+    chips: true,
+  });
+  await page.waitForTimeout(2200);
+  const ato = await page.evaluate(() => ({
+    next: document.getElementById('nextD').disabled,
+    prev: document.getElementById('prevD').disabled,
+    sel: document.getElementById('hiSel').disabled,
+  }));
+  // 済んだら 戻る（8/1 は 期間の 最初の 日なので 前の日 は もとから 押せない）
+  expect(ato).toEqual({ next: false, prev: true, sel: false });
+  const wh = await page.evaluate(() =>
+    window.__calls.filter((c) => c.p.indexOf('dk_work_hours') === 0)
+  );
+  expect(wh).toHaveLength(1);
+});

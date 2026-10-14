@@ -5166,10 +5166,12 @@
           var own = (CTX && CTX.settings && CTX.settings.ownerDeviceId) || '';
           var wh = (CTX && CTX.hoursByDate && CTX.hoursByDate[date]) || {};
           var deru = {};
+          var noru = {};
           var hito = [];
           Object.keys(wh).forEach(function (empId) {
             if (!CTX.empById[empId]) return; // 計算も 知らない 人は 入れない
             var w = wh[empId];
+            noru[w.device_id] = true;
             var car = cars[w.device_id];
             var h = w.hours > 0 ? w.hours : car ? car.hours : 0;
             if (!(h > 0)) return; // 計算は 行を 作らない
@@ -5179,7 +5181,9 @@
           var nashi = Object.keys(cars).filter(function (dev) {
             var c = cars[dev] || {};
             if (dev === own || deru[dev]) return false;
-            return num(c.hours) > 0 || num(c.sales) > 0;
+            // 乗った人が 居るのに 給料が 出る 人が 0人 なら 売上・時間 0 でも 数える（対立役 3回：
+            //   ＋手で車を足す で 作った 車に 時間 空の 人を 乗せた 日が「入れ漏れ無し」に なった）
+            return num(c.hours) > 0 || num(c.sales) > 0 || !!noru[dev];
           });
           return { cars: nashi, hito: hito };
         }
@@ -5603,19 +5607,37 @@
             });
           box.innerHTML = html;
           wireDays();
+          if (HOZON > 0) kakeru();
         }
 
-        // 乗った人を 足す 札・選ぶ箱を 保存中は 押せなくする／保存が 済んだら 戻す
-        //   （成功なら 描き直しで 新しい 物に 替わる。失敗の 時に 押せないまま 残らないように）
-        function tomeru(on) {
+        // 保存中は 時数の 画面の 打つ所と 日を 選ぶ 帯を 押せなくする（保存中の 数＝HOZON）
+        //   対立役 3回：止めて いても 帯の「次の日」等で 描き直すと 押せる 札が 作り直され、
+        //   同じ 人が 2回 送られて 後の 車へ 黙って 移った。先に 済んだ 保存が 全部を 戻す 道も 在った。
+        //   ⇒ 数で 持ち、描き直す 度に（renderDays の 最後）数を 見て 止め直す。0 に 戻った 時だけ 戻す
+        var HOZON = 0;
+        function kakeru() {
+          var off = HOZON > 0;
           Array.prototype.forEach.call(
-            // 札・選ぶ箱だけで なく 時数の 画面の 打つ所 全部（対立役：保存中に 他を 変えると
-            //   描き直しで 押せる 札が 作り直され、同じ 人が 後の 車へ 移る 道が 開いた）
-            document.querySelectorAll('#days input, #days select, #days button'),
+            document.querySelectorAll(
+              '#days input, #days select, #days button, #hibar input, #hibar button'
+            ),
             function (x) {
-              x.disabled = on;
+              if (off) {
+                if (!x.disabled) {
+                  x.disabled = true;
+                  x.setAttribute('data-tomete', '1');
+                }
+              } else if (x.hasAttribute('data-tomete')) {
+                x.disabled = false;
+                x.removeAttribute('data-tomete');
+              }
             }
           );
+        }
+        function tomeru(on) {
+          HOZON += on ? 1 : -1;
+          if (HOZON < 0) HOZON = 0;
+          kakeru();
         }
         function modosu(pr) {
           if (pr && pr.then) {
@@ -5631,70 +5653,87 @@
             tomeru(false);
           }
         }
+        // 保存を 1つ 始める（止めてから 保存し、済んだら 1つ 戻す）
+        function hozonSuru(fn) {
+          tomeru(true);
+          var pr;
+          try {
+            pr = fn();
+          } catch (e) {
+            pr = null;
+          }
+          modosu(pr);
+        }
 
         function wireDays() {
           // 車の時数
           Array.prototype.forEach.call(document.querySelectorAll('[data-sid]'), function (i) {
             i.onchange = function () {
-              saveCarHours(i.getAttribute('data-sid'), i.value);
+              hozonSuru(function () {
+                return saveCarHours(i.getAttribute('data-sid'), i.value);
+              });
             };
           });
           // 人ごとの時数の直し
           Array.prototype.forEach.call(document.querySelectorAll('[data-wh-emp]'), function (i) {
             i.onchange = function () {
-              saveWorkHour(
-                i.getAttribute('data-wh-date'),
-                i.getAttribute('data-wh-emp'),
-                i.getAttribute('data-wh-dev'),
-                i.value
-              );
+              hozonSuru(function () {
+                return saveWorkHour(
+                  i.getAttribute('data-wh-date'),
+                  i.getAttribute('data-wh-emp'),
+                  i.getAttribute('data-wh-dev'),
+                  i.value
+                );
+              });
             };
           });
           // 乗った人を足す
           Array.prototype.forEach.call(document.querySelectorAll('[data-add-date]'), function (s) {
             s.onchange = function () {
               if (!s.value) return;
-              tomeru(true);
-              modosu(
-                saveWorkHour(
+              hozonSuru(function () {
+                return saveWorkHour(
                   s.getAttribute('data-add-date'),
                   s.value,
                   s.getAttribute('data-add-dev'),
                   ''
-                )
-              );
+                );
+              });
             };
           });
           // 乗った人を足す（札）＝選ぶ箱と同じ保存。保存中は 他の 札を 押せなくする
           //   （対立役：描き直しの前に 別の 車の 札で 同じ 人を 押すと 黙って 後の 車へ 移る）
           Array.prototype.forEach.call(document.querySelectorAll('[data-chip-emp]'), function (b) {
             b.onclick = function () {
-              tomeru(true);
-              modosu(
-                saveWorkHour(
+              hozonSuru(function () {
+                return saveWorkHour(
                   b.getAttribute('data-chip-date'),
                   b.getAttribute('data-chip-emp'),
                   b.getAttribute('data-chip-dev'),
                   ''
-                )
-              );
+                );
+              });
             };
           });
           // 外す
           Array.prototype.forEach.call(document.querySelectorAll('[data-del-emp]'), function (b) {
             b.onclick = function () {
-              delWorkHour(b.getAttribute('data-del-date'), b.getAttribute('data-del-emp'));
+              hozonSuru(function () {
+                return delWorkHour(b.getAttribute('data-del-date'), b.getAttribute('data-del-emp'));
+              });
             };
           });
           // 手で入れた1日分：直す
           Array.prototype.forEach.call(document.querySelectorAll('[data-man-f]'), function (i) {
             i.onchange = function () {
-              saveManual(
-                i.getAttribute('data-man-date'),
-                i.getAttribute('data-man-dev'),
-                i.getAttribute('data-man-f'),
-                i.value
-              );
+              hozonSuru(function () {
+                return saveManual(
+                  i.getAttribute('data-man-date'),
+                  i.getAttribute('data-man-dev'),
+                  i.getAttribute('data-man-f'),
+                  i.value
+                );
+              });
             };
           });
           // 手で入れた1日分：消す
@@ -5715,7 +5754,9 @@
                     : '') +
                   'よろしいですか？';
                 if (!window.confirm(msg)) return;
-                delManual(b.getAttribute('data-man-del-date'), dev);
+                hozonSuru(function () {
+                  return delManual(b.getAttribute('data-man-del-date'), dev);
+                });
               };
             }
           );
@@ -5766,7 +5807,7 @@
             updated_at: new Date().toISOString(),
           };
           body[field] = v;
-          upsert('dk_manual_days', 'company_id,work_date,device_id', body)
+          return upsert('dk_manual_days', 'company_id,work_date,device_id', body)
             .then(function (r) {
               if (!r.ok) return saveErr('手で入れた分を保存できませんでした。', r);
               showErr('');
@@ -5789,7 +5830,7 @@
 
         function delManual(date, dev) {
           if (!COMPANY) return;
-          DKSession.rest(
+          return DKSession.rest(
             SESS,
             'dk_manual_days?company_id=eq.' +
               encodeURIComponent(COMPANY.company_id) +
@@ -5825,7 +5866,7 @@
             hours: isFinite(v) && v > 0 ? v : null, // 空 = メーターの記録から自動
             updated_at: new Date().toISOString(),
           };
-          upsert('dk_shift_edits', 'shift_id', body)
+          return upsert('dk_shift_edits', 'shift_id', body)
             .then(function (r) {
               if (!r.ok) return saveErr('時間を保存できませんでした。', r);
               showErr('');
@@ -5882,7 +5923,7 @@
         }
 
         function delWorkHour(date, employeeId) {
-          DKSession.rest(
+          return DKSession.rest(
             SESS,
             'dk_work_hours?company_id=eq.' +
               encodeURIComponent(COMPANY.company_id) +
