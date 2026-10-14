@@ -139,5 +139,34 @@ Deno.serve(async (req: Request) => {
     .eq('shift_id', shift.shift_id);
   if (sErr) return json({ ok: false, reason: 'shift_update_failed' }, 500);
 
-  return json({ ok: true, updated: count || 0, shift_total: goukei });
+  // ⑤ 事務所が 給料の 画面で 直した 売上（dk_shift_edits.uriage_yen）を 外す 2026-10-14
+  //   司さん「請求書や給料のとこの売上かえたら変えた最後のやつで合わせろや」
+  //   ＝請求書の 一覧で 直した（今）＝こちらが 後＝事務所の 直しより 勝つ。出来事の 順で 決める
+  //   （時刻や 値で 比べると 運転手の 端末の 送り直しで 事務所の 直しが 黙って 消える＝対立役 10-14）
+  //   ★外せなかった 時は 黙らない★（売上が 請求書の 直しに 揃わない）＝返事に 出し、関数の ログにも 残す
+  const { data: hazushita, error: uErr } = await sb
+    .from('dk_shift_edits')
+    .update({ uriage_yen: null, uriage_at: null })
+    .eq('shift_id', shift.shift_id)
+    .not('uriage_yen', 'is', null)
+    .select('shift_id');
+  if (uErr) {
+    console.warn(
+      '[dk-fix-fare] uriage_yen を 外せなかった ' +
+        shift.shift_id +
+        ' ' +
+        String(uErr.message || uErr).slice(0, 80)
+    );
+    return json(
+      { ok: false, reason: 'uriage_reset_failed', updated: count || 0, shift_total: goukei },
+      500
+    );
+  }
+
+  return json({
+    ok: true,
+    updated: count || 0,
+    shift_total: goukei,
+    uriage_hazushita: (hazushita || []).length,
+  });
 });
