@@ -9,10 +9,15 @@
 //     sw.js は GET 以外を 触らない（sw.js:391）ので、アプリの 送りは ブラウザが そのまま 出す。
 //   ⇒ shuryo-tsuzukeru-okuru は service worker を 止めて 中身を 数える 形に した。
 //     ★代わりに ここで「service worker が 握っていても POST が 出る」を 縛る★（page.route を 使わず、出て行く 要求を 見る）。
-//   ★本物の 倉庫には 届かない★ chromium は host-resolver-rules、webkit は 届かない 代理で 止まる（要求の 中身は 見える）。
+//   ★外の 網まで 出た 事も 見る★ 画面が 要求を 出した だけでは 足りない。service worker が 偽の 返事で 飲むと
+//     客の 画面は 送れた 形に なるのに 事務所へ 届かない（対立役 10-17・前の 形は それでも 緑だった）。
+//     ＝返事が service worker から 来ていない 事と、送りが 外の 網で 落ちた（＝外まで 出た）事を 数える。
+//   ★本物の 倉庫には 届かない★ 試験の 設定が 外を 止めている（chromium＝playwright.config.js の host-resolver-rules、
+//     webkit の 組が 在る 時は その 設定の 届かない 代理）。止めが 無い 設定で 回すと 本物の 倉庫へ 出るので、その 形では 回さない。
 //
 //   ★わざと壊して 赤に なった 記録（2026-10-17）★
 //     js/job-sync.js の 送り（fetch の 呼び出し）を 止める ⇒ この 試験と shuryo-tsuzukeru-okuru が 赤（chromium・webkit とも 4本中 4本）。戻すと 緑。
+//     sw.js の fetch の 頭で POST dk-sync-jobs に 偽の 200 を 返す ⇒ この 試験が chromium・webkit とも 赤（「service worker が 返事を 作った」）。shuryo-tsuzukeru-okuru は 緑の まま＝ここだけが 捕まえる。
 // ============================================================
 const { test, expect } = require('@playwright/test');
 
@@ -32,8 +37,10 @@ test('service worker が 握っていても 業務終了の POST が 3件 入っ
     localStorage.setItem('DAIKOME_DEVICE_ID', 'e2e-tanmatsu');
   });
   const deta = [];
+  const yokyu = [];
+  const okuriKa = (r) => r.method() === 'POST' && r.url().includes('/dk-sync-jobs');
   page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().includes('/dk-sync-jobs')) {
+    if (okuriKa(r)) {
       let b = {};
       try {
         b = JSON.parse(r.postData() || '{}');
@@ -41,7 +48,14 @@ test('service worker が 握っていても 業務終了の POST が 3件 入っ
         b = {};
       }
       deta.push(b);
+      yokyu.push(r);
     }
+  });
+  // ★外の 網まで 出たか★（service worker が 偽の 返事で 飲み込むと、画面は 送れた 形に なるが 事務所へ 届かない）
+  //   試験の 中では 本物の 倉庫へ 届かない 様に 止めてある ので、外まで 出た 送りは「網で 落ちた」形で 見える。
+  const amiMadeDeta = [];
+  page.on('requestfailed', (r) => {
+    if (okuriKa(r)) amiMadeDeta.push(r);
   });
 
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -82,4 +96,21 @@ test('service worker が 握っていても 業務終了の POST が 3件 入っ
     .toBeGreaterThan(0);
   const s = (deta[0].shifts || [])[0] || {};
   expect((s.trips || []).length, '★出て行った POST に 代行が 3件 入っていない★').toBe(3);
+
+  // ★service worker が 返事を 作っていない★（対立役 10-17：sw.js が POST を 偽の 200 で 飲むと、前の 形は 緑だった）
+  const swNoHenji = [];
+  for (const r of yokyu) {
+    const res = await r.response().catch(() => null);
+    if (res && res.fromServiceWorker()) swNoHenji.push(r.url());
+  }
+  expect(
+    swNoHenji,
+    '★業務終了の 送りに service worker が 返事を 作った＝事務所へ 届いていない★'
+  ).toEqual([]);
+  await expect
+    .poll(() => amiMadeDeta.length, {
+      timeout: 10000,
+      message: '★業務終了の 送りが 外の 網まで 出ていない★',
+    })
+    .toBeGreaterThan(0);
 });
