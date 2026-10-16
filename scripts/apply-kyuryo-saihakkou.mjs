@@ -25,10 +25,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readToken, whereWeLooked } from './db-token.mjs';
+import { HONBAN_REF, honbanNoTome } from './honban-tome.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SQL_FILE = path.join(ROOT, 'supabase', 'apply-kyuryo-haifu.sql');
-const HONBAN_REF = 'tnfwipbgfgjaymlszeid';
 
 export const ARU = [
   ["'not_yours'", 'よその 会社の 人は 作り直さない'],
@@ -38,7 +38,8 @@ export const ARU = [
 
 export function kiridasu(sql) {
   const s = String(sql).replace(/\r\n/g, '\n');
-  const re = /create or replace function public\.dk_kyuryo_saihakkou\(p_employee_id uuid\)\n[\s\S]*?\n\$fn\$;/;
+  const re =
+    /create or replace function public\.dk_kyuryo_saihakkou\(p_employee_id uuid\)\n[\s\S]*?\n\$fn\$;/;
   const m = s.match(re);
   if (!m) throw new Error('dk_kyuryo_saihakkou の 塊が 見つからない');
   const block = m[0];
@@ -102,31 +103,40 @@ async function yomimodosu(ref, token) {
 async function main() {
   const args = process.argv.slice(2);
   const ateru = args.includes('--ateru');
-  const honban = args.includes('--honban');
   const t = readToken();
   if (!t) {
     console.error('NG: 鍵が無い（探した所: ' + whereWeLooked().join(' / ') + '）');
     process.exit(2);
   }
   const ref = readProjectRef();
-  console.log('向き先: ' + (ref === HONBAN_REF ? '★本番★' : 'テスト') + ' ' + ref + ' ／ 鍵: ' + t.from);
+  // ★本番の 止め★ 判じは scripts/honban-tome.mjs の 1か所（白名簿・知らない 倉庫も 止める・10-17）。--ateru の 時は 倉庫に 届く 前に 止める
+  const tome = honbanNoTome(ref, process.argv.slice(2), !ateru);
+  if (tome) {
+    console.error(tome);
+    process.exit(3);
+  }
+  console.log(
+    '向き先: ' + (ref === HONBAN_REF ? '★本番★' : 'テスト') + ' ' + ref + ' ／ 鍵: ' + t.from
+  );
   const mae = kazoeru(await yomimodosu(ref, t.token));
-  mae.aru.forEach((x) => console.log('  前 ' + (x.ok ? '在り' : '★無し★') + '  ' + x.k + '  … ' + x.w));
+  mae.aru.forEach((x) =>
+    console.log('  前 ' + (x.ok ? '在り' : '★無し★') + '  ' + x.k + '  … ' + x.w)
+  );
   if (!ateru) {
     console.log('\n見るだけ（当てるには --ateru）。KAKUNIN: ' + (mae.ok ? 'OK' : 'まだ'));
     return;
   }
-  if (ref === HONBAN_REF && !honban) {
-    console.error('\nNG: 向き先が 本番。本番に 当てるのは --honban を 付けた 時だけ');
-    process.exit(3);
-  }
   const r = await runSql(ref, t.token, kiridasu(fs.readFileSync(SQL_FILE, 'utf8')));
   if (!r.ok) {
-    console.error('\nNG: 当てられなかった ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 300));
+    console.error(
+      '\nNG: 当てられなかった ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 300)
+    );
     process.exit(4);
   }
   const ato = kazoeru(await yomimodosu(ref, t.token));
-  ato.aru.forEach((x) => console.log('  後 ' + (x.ok ? '在り' : '★無し★') + '  ' + x.k + '  … ' + x.w));
+  ato.aru.forEach((x) =>
+    console.log('  後 ' + (x.ok ? '在り' : '★無し★') + '  ' + x.k + '  … ' + x.w)
+  );
   console.log('\nKAKUNIN: ' + (ato.ok ? 'OK' : '★NG★'));
   if (!ato.ok) process.exit(5);
 }

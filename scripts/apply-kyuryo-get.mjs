@@ -26,10 +26,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readToken, whereWeLooked } from './db-token.mjs';
+import { HONBAN_REF, honbanNoTome } from './honban-tome.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SQL_FILE = path.join(ROOT, 'supabase', 'apply-kyuryo-honnin-kansuu.sql');
-const HONBAN_REF = 'tnfwipbgfgjaymlszeid';
 
 // ★当てた 後に 在って ほしい 字／無くて ほしい 字★（倉庫から 読み戻した 関数で 数える）
 export const ARU = [
@@ -58,7 +58,8 @@ export const NAI = [
 // ★dk_kyuryo_get の 1本だけを 切り出す★（他の 文が 紛れていたら 投げる）
 export function kiridasu(sql) {
   const s = String(sql).replace(/\r\n/g, '\n');
-  const re = /create or replace function public\.dk_kyuryo_get\(p_token text, p_pw text, p_from date, p_to date\)\n[\s\S]*?\n\$fn\$;/;
+  const re =
+    /create or replace function public\.dk_kyuryo_get\(p_token text, p_pw text, p_from date, p_to date\)\n[\s\S]*?\n\$fn\$;/;
   const m = s.match(re);
   if (!m) throw new Error('dk_kyuryo_get の 塊が 見つからない');
   const block = m[0];
@@ -118,7 +119,10 @@ async function yomimodosu(ref, token) {
     token,
     "select pg_get_functiondef('public.dk_kyuryo_get(text,text,date,date)'::regprocedure) as d"
   );
-  if (!r.ok) throw new Error('関数を 読み戻せない: ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 200));
+  if (!r.ok)
+    throw new Error(
+      '関数を 読み戻せない: ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 200)
+    );
   return (r.body && r.body[0] && r.body[0].d) || '';
 }
 
@@ -130,13 +134,18 @@ function dasu(k) {
 async function main() {
   const args = process.argv.slice(2);
   const ateru = args.includes('--ateru');
-  const honban = args.includes('--honban');
   const t = readToken();
   if (!t) {
     console.error('NG: 鍵が無い（探した所: ' + whereWeLooked().join(' / ') + '）');
     process.exit(2);
   }
   const ref = readProjectRef();
+  // ★本番の 止め★ 判じは scripts/honban-tome.mjs の 1か所（白名簿・知らない 倉庫も 止める・10-17）。--ateru の 時は 倉庫に 届く 前に 止める
+  const tome = honbanNoTome(ref, process.argv.slice(2), !ateru);
+  if (tome) {
+    console.error(tome);
+    process.exit(3);
+  }
   const basho = ref === HONBAN_REF ? '★本番★' : 'テスト';
   console.log('向き先: ' + basho + ' ' + ref + ' ／ 鍵: ' + t.from);
 
@@ -147,14 +156,12 @@ async function main() {
     console.log('\n見るだけ（当てるには --ateru）。KAKUNIN: ' + (mae.ok ? 'OK' : 'まだ'));
     return;
   }
-  if (ref === HONBAN_REF && !honban) {
-    console.error('\nNG: 向き先が 本番。本番に 当てるのは --honban を 付けた 時だけ');
-    process.exit(3);
-  }
   const block = kiridasu(fs.readFileSync(SQL_FILE, 'utf8'));
   const r = await runSql(ref, t.token, block);
   if (!r.ok) {
-    console.error('\nNG: 当てられなかった ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 300));
+    console.error(
+      '\nNG: 当てられなかった ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 300)
+    );
     process.exit(4);
   }
   console.log('\n■ 当てた 後（倉庫から 読み戻した 関数）');
