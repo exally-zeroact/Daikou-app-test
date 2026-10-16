@@ -5,8 +5,9 @@
 //   ①わざと 当たりを 1つ 入れた repo で 走らせると 赤 ②ログ（標準出力）に「一覧の」と 番号の 組が 0回
 //   ③判じは 全文で 行う（終わり値が 0 で ない 命令は「✓」の 行が 在っても 赤）
 //   作り物の 語で、本体（tests/kinshi-ji.test.mjs）を 一時 repo に 写して 動かす。
-//   ★わざと壊して 赤に なった 記録（2026-10-16）★：番号を 伏せる 置き換え（sed）を そのまま 出す（cat）に 替えると ① が 1本 赤。
-//     伏せる 置き換えを「ふつうの 行」の 形（数字: 一覧の）だけに 狭めると、行またぎ・zip の 部品名・PDF の 字・道の 名前 の 4本が 赤。
+//   ★わざと壊して 赤に なった 記録（2026-10-16）★（どれも 19本中 15本 赤）
+//     直す 前の 台本（番号の 形を sed で 並べて 伏せる・ubuntu で 落ちた 物）／「一覧」の 行も そのまま 出す／赤の まとめを 出さない
+//   ★locale★ CI（ubuntu）と 同じ C.UTF-8 と C の 両方で 走らせる（前は locale を 渡さず 別の 世界で 緑だった・対立役）
 // ============================================================
 const fs = require('fs');
 const os = require('os');
@@ -33,23 +34,50 @@ function tukuru(naka) {
   execFileSync('git', ['add', '-A'], { cwd: d, env: ENV0() });
   return d;
 }
-function hashiru(d, cmd) {
+function hashiru(d, cmd, loc = 'C.UTF-8') {
   return spawnSync('bash', [TSUTSUMI, ...cmd], {
     cwd: d,
     encoding: 'utf8',
-    // CI の 印（GITHUB_*）は 渡さない＝本体を 手元の 形で 走らせる
-    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, KINSHI_JI: GO.join('\n') },
+    // CI の 印（GITHUB_*）は 渡さない＝本体を 手元の 形で 走らせる。
+    //   locale は CI（ubuntu）と 同じ C.UTF-8 を 既定に する（渡さないと 試験の 中だけ 別の 世界で 緑に なった・対立役）
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      KINSHI_JI: GO.join('\n'),
+      LANG: loc,
+      LC_ALL: loc,
+    },
   });
 }
 const BANGOU = /一覧の\s*[0-9０-９]+/;
+// ログ（標準出力）の 確かめ：「一覧」を 含む 行は 指紋の 行と 包みの まとめ だけ・
+//   赤の まとめ（伏せた行 N 本）と 道ごとの 件数が 在る（赤なのに ログが 空 を 捕まえる）・awk/sed の 誤り 0
+function logWoMiru(r, michi) {
+  const log = r.stdout + r.stderr;
+  const nokori = log
+    .split(/\r?\n/)
+    .filter(
+      (l) =>
+        l.includes('一覧') &&
+        !l.includes('指紋') &&
+        !l.includes('一覧の 番号と 当たった 場所は') &&
+        !l.includes('一覧を 含む 行')
+    );
+  expect(nokori, 'ログに 一覧の 行が 残った').toEqual([]);
+  expect(BANGOU.test(log), 'ログに 番号が 出た').toBe(false);
+  expect(/awk:|sed:|Invalid/.test(log), 'awk か sed が 落ちた: ' + r.stderr).toBe(false);
+  const m = log.match(/✗ 実在の字の見張りが 赤・伏せた行 (\d+) 本/);
+  expect(m, '赤の まとめが ログに 無い（赤なのに ログが 空）').not.toBe(null);
+  expect(Number(m[1])).toBeGreaterThanOrEqual(1);
+  expect(log, '道ごとの 件数が 無い').toContain('  伏せた行: ' + michi + ' ');
+}
 
 describe('★見張りの 包み★', () => {
   it('① 当たりの 在る repo は 赤 ② ログに 一覧の 番号が 0回（全文には 在る）', () => {
     const d = tukuru('ここに 見本太郎 と Zorgoxa\n');
     const r = hashiru(d, [process.execPath, 'tests/kinshi-ji.test.mjs']);
     expect(r.status, r.stdout).toBe(1);
-    expect(BANGOU.test(r.stdout + r.stderr), 'ログに 番号が 出た').toBe(false);
-    expect(r.stdout).toContain('一覧の（番号は伏せた）');
+    logWoMiru(r, 'a.txt');
     const zen = fs.readFileSync(path.join(d, 'kinshi.out'), 'utf8');
     expect(BANGOU.test(zen), '全文に 当たりが 無い＝試験が 何も 見ていない').toBe(true);
     expect(
@@ -176,27 +204,70 @@ function tukuruFiles(files) {
   return d;
 }
 
-describe('★本体の 5つの 出しの 形 それぞれで ログに 番号が 0回★', () => {
-  for (const [na, files, katachi] of [
-    ['ふつうの 行', [['a.txt', 'ここに Zorgoxa\n']], /:\d+: 一覧の \d+ 番目/],
-    ['行またぎ（つないだ 字）', [['a.txt', 'Zorgo\nxa\n']], /:\([^)]*\): 一覧の \d+ 番目/],
-    ['zip の 部品名', [['a.zip', zipOf('Zorgoxa.txt', 'ふつう')]], /部品名: 一覧の \d+ 番目/],
-    [
-      'PDF の 字',
-      [['a.pdf', pdfOf(['BT (Zor) Tj', '(goxa) Tj ET'])]],
-      /PDF の 字を つないだ 物\): 一覧の \d+ 番目/,
-    ],
-    ['追跡物の 道・名前', [['Zorgoxa/x.txt', 'ふつう\n']], /道・名前: 一覧の \d+ 番目/],
-  ]) {
-    it(na + '：段は 赤・ログに 番号 0回・全文には その 形が 在る', () => {
-      const d = tukuruFiles(files);
-      const r = hashiru(d, [process.execPath, 'tests/kinshi-ji.test.mjs']);
-      expect(r.status, r.stdout).toBe(1);
-      expect(BANGOU.test(r.stdout + r.stderr), 'ログに 番号が 出た').toBe(false);
-      const zen = fs.readFileSync(path.join(d, 'kinshi.out'), 'utf8');
-      expect(katachi.test(zen), '全文に この 形の 当たりが 無い＝試験が 何も 見ていない').toBe(
-        true
+describe('★本体の 5つの 出しの 形 それぞれで ログに 一覧の 行が 0本・赤の まとめと 道ごとの 件数が 出る★', () => {
+  const NANASHI = '（名前に当たる道・道は出さない）';
+  for (const loc of ['C.UTF-8', 'C']) {
+    for (const [na, files, katachi, michi] of [
+      ['ふつうの 行', [['a.txt', 'ここに Zorgoxa\n']], /:\d+: 一覧の \d+ 番目/, 'a.txt'],
+      [
+        '行またぎ（つないだ 字）',
+        [['a.txt', 'Zorgo\nxa\n']],
+        /:\([^)]*\): 一覧の \d+ 番目/,
+        'a.txt',
+      ],
+      [
+        'zip の 部品名',
+        [['a.zip', zipOf('Zorgoxa.txt', 'ふつう')]],
+        /部品名: 一覧の \d+ 番目/,
+        'a.zip',
+      ],
+      [
+        'PDF の 字',
+        [['a.pdf', pdfOf(['BT (Zor) Tj', '(goxa) Tj ET'])]],
+        /PDF の 字を つないだ 物\): 一覧の \d+ 番目/,
+        'a.pdf',
+      ],
+      ['追跡物の 道・名前', [['Zorgoxa/x.txt', 'ふつう\n']], /道・名前: 一覧の \d+ 番目/, NANASHI],
+    ]) {
+      it(
+        loc +
+          '・' +
+          na +
+          '：段は 赤・ログに 一覧の 行 0本・まとめと 道ごとの 件数・全文には その 形',
+        () => {
+          const d = tukuruFiles(files);
+          const r = hashiru(d, [process.execPath, 'tests/kinshi-ji.test.mjs'], loc);
+          expect(r.status, r.stdout).toBe(1);
+          logWoMiru(r, michi);
+          const zen = fs.readFileSync(path.join(d, 'kinshi.out'), 'utf8');
+          expect(katachi.test(zen), '全文に この 形の 当たりが 無い＝試験が 何も 見ていない').toBe(
+            true
+          );
+        }
       );
+    }
+  }
+});
+
+describe('★番号の 形が 少し 変わっても 伏せる（形を 並べない 作り）・指紋の 行は 残す★', () => {
+  for (const gyou of [
+    'b.js:3: 一覧 12 番',
+    'b.js:3: 一覧の　12　番目',
+    'b.js:3: 一覧の No.12',
+    'b.js:3: 一覧の 1,234 番目',
+  ]) {
+    it('「' + gyou + '」', () => {
+      const d = tukuru('ふつう\n');
+      const r = hashiru(d, [
+        'bash',
+        '-c',
+        'echo "  赤: ' + gyou + '"; echo "一覧 69語・指紋 abcd1234"; exit 1',
+      ]);
+      expect(r.status).toBe(1);
+      expect(r.stdout).not.toContain(gyou);
+      expect(r.stdout).toContain('一覧 69語・指紋 abcd1234');
+      expect(r.stdout).toContain('伏せた行 1 本');
+      expect(r.stdout).toContain('  伏せた行: b.js 1 本');
     });
   }
 });

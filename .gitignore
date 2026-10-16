@@ -78,3 +78,7 @@ supabase/.temp/
 # ★見せる ための 絵（その場で 作り直せる）＝repo に 置かない★ 2026-10-01
 #   tests/e2e/kyuryo-honnin-shashin.spec.js / kyuryo-meisai-miseru.spec.js が 作る。
 data/shashin/
+
+# 実在の字の見張りの 全文（一覧の 番号・場所を 含む）＝どこにも 出さない 2026-10-16
+kinshi.out
+kinshi24.out
