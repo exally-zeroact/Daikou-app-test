@@ -3,8 +3,11 @@
 // ★秘密の 一覧（KINSHI_JI）を 持つ workflow の 段は 全部 包み（scripts/kinshi-tsutsumu.sh）を 通る★ 2026-10-16
 //   本体（他の 席の 写し）は 赤の 時に 一覧の 番号と 場所を 出す＝包まない 段が 1つでも 在れば 公開の ログに 出る
 //   （対立役：test.yml の node24 の 段を 包み 忘れていた）。
-//   ★外す 物★ commit 文の 門（scripts/kinshi-commit-msg.mjs）＝出すのは sha の 頭・語の 数・本数だけ（番号を 出さない・中身を 読んで 確かめた）。
-//   ★わざと壊して 赤に なった 記録（2026-10-16）★：test.yml の node24 の 段を 元の `node … | tee` に 戻すと 1本 赤。
+//   ★見る 所★ 段の run: の 中身から 注釈（# の 後ろ）を 外した 字で、包みを 呼んでいるか（字を 探すだけだと
+//     注釈に 包みの 名前を 書いた だけで 通った・対立役）。job の 高さの env: に 一覧を 置くのは 赤（段を 選べない）。
+//   ★外す 物★ commit 文の 門（scripts/kinshi-commit-msg.mjs）＝出すのは sha の 頭・語の 数・本数だけ（番号を 出さない）。
+//   ★わざと壊して 赤に なった 記録（2026-10-16）★
+//     node24 の 段を 元の `node … | tee` に 戻す→1本 赤／戻した 上で 注釈に「# kinshi-tsutsumu.sh」を 書く→1本 赤
 // ============================================================
 const fs = require('fs');
 const path = require('path');
@@ -12,23 +15,77 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const WF = path.join(ROOT, '.github', 'workflows');
 
+const fukasa = (l) => l.length - l.replace(/^ +/, '').length;
+
+// 1本の yml を 段に 分ける：steps: の 下の「- 」で 始まる 行から 次の 同じ 深さの「- 」まで
+function danNi(s) {
+  const gyou = s.split(/\r?\n/);
+  const out = [];
+  const jobEnv = [];
+  let stepsFukasa = -1;
+  let cur = null;
+  for (let i = 0; i < gyou.length; i++) {
+    const l = gyou[i];
+    if (/^\s*steps:\s*$/.test(l)) {
+      stepsFukasa = fukasa(l);
+      cur = null;
+      continue;
+    }
+    if (stepsFukasa >= 0 && l.trim() && fukasa(l) <= stepsFukasa && !/^\s*-/.test(l)) {
+      stepsFukasa = -1; // steps の 外へ 出た
+      cur = null;
+    }
+    if (stepsFukasa >= 0 && /^\s*- /.test(l) && fukasa(l) >= stepsFukasa) {
+      cur = { gyou: [l], i };
+      out.push(cur);
+      continue;
+    }
+    if (cur) cur.gyou.push(l);
+    else if (/secrets\.KINSHI_JI\b/.test(l)) jobEnv.push(i + 1);
+  }
+  return { dan: out, jobEnv };
+}
+// 段の run: の 中身（注釈を 外す）
+function runNoNakami(d) {
+  const t = [];
+  let inRun = -1;
+  for (const l of d.gyou) {
+    const m = l.match(/^(\s*)(?:- )?run:\s*(.*)$/);
+    if (m) {
+      inRun = fukasa(l);
+      if (m[2] && m[2] !== '|' && m[2] !== '>') t.push(m[2]);
+      continue;
+    }
+    if (inRun >= 0) {
+      if (l.trim() && fukasa(l) <= inRun) inRun = -1;
+      else t.push(l);
+    }
+  }
+  return t.map((x) => x.replace(/(^|\s)#.*$/, '')).join('\n');
+}
+
 describe('★KINSHI_JI を 持つ 段は 包みを 通る★', () => {
   const dan = [];
+  const jobEnv = [];
   for (const f of fs.readdirSync(WF).filter((x) => /\.ya?ml$/.test(x))) {
-    const s = fs.readFileSync(path.join(WF, f), 'utf8');
-    s.split(/\n\s*- name:/).forEach((chunk, i) => {
-      if (/secrets\.KINSHI_JI\b/.test(chunk)) dan.push({ f, i, chunk });
-    });
+    const r = danNi(fs.readFileSync(path.join(WF, f), 'utf8'));
+    for (const d of r.dan)
+      if (d.gyou.some((l) => /secrets\.KINSHI_JI\b/.test(l))) dan.push({ f, d });
+    for (const n of r.jobEnv) jobEnv.push(f + ':' + n);
   }
   it('数えた 段（0本を 見て 緑に しない）', () => {
     expect(dan.length).toBeGreaterThanOrEqual(5);
   });
-  it('全部 kinshi-tsutsumu.sh を 通る（commit 文の 門は 外す）', () => {
+  it('job の 高さに 一覧を 置かない（段を 選べない）', () => {
+    expect(jobEnv).toEqual([]);
+  });
+  it('全部 run: の 中身で kinshi-tsutsumu.sh を 呼ぶ（commit 文の 門は 外す）', () => {
     const warui = dan
-      .filter(
-        (d) => !/kinshi-tsutsumu\.sh/.test(d.chunk) && !/kinshi-commit-msg\.mjs/.test(d.chunk)
-      )
-      .map((d) => d.f + ' の ' + d.i + ' 番目の 段');
+      .filter(({ d }) => {
+        const run = runNoNakami(d);
+        return !/kinshi-tsutsumu\.sh/.test(run) && !/kinshi-commit-msg\.mjs/.test(run);
+      })
+      .map(({ f, d }) => f + ':' + (d.i + 1) + ' の 段');
     expect(warui, '★包まずに 一覧を 持つ 段が 在る＝赤の 日に 番号が 公開の ログに 出る★').toEqual(
       []
     );

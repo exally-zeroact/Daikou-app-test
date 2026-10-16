@@ -59,7 +59,8 @@ function logWoMiru(r, michi) {
     .filter(
       (l) =>
         l.includes('一覧') &&
-        !l.includes('指紋') &&
+        !l.startsWith('node v') &&
+        !l.startsWith('✗ 一覧の 指紋が 違う') &&
         !l.includes('一覧の 番号と 当たった 場所は') &&
         !l.includes('一覧を 含む 行')
     );
@@ -261,13 +262,22 @@ describe('★番号の 形が 少し 変わっても 伏せる（形を 並べ�
       const r = hashiru(d, [
         'bash',
         '-c',
-        'echo "  赤: ' + gyou + '"; echo "一覧 69語・指紋 abcd1234"; exit 1',
+        'echo "  赤: ' + gyou + '"; echo "node v24.0.0 ／ 一覧＝x・69語・指紋 abcd1234"; exit 1',
       ]);
       expect(r.status).toBe(1);
       expect(r.stdout).not.toContain(gyou);
-      expect(r.stdout).toContain('一覧 69語・指紋 abcd1234');
+      expect(r.stdout).toContain('node v24.0.0 ／ 一覧＝x・69語・指紋 abcd1234');
       expect(r.stdout).toContain('伏せた行 1 本');
       expect(r.stdout).toContain('  伏せた行: b.js 1 本');
     });
   }
+});
+
+describe('★道の 名前に「指紋」が 在っても 当たりの 行は 伏せる★', () => {
+  it('docs/指紋の手順.md の 当たり：ログに 出ない・道ごとの 件数は 出る', () => {
+    const d = tukuruFiles([['docs/指紋の手順.md', 'ここに Zorgoxa\n']]);
+    const r = hashiru(d, [process.execPath, 'tests/kinshi-ji.test.mjs']);
+    expect(r.status).toBe(1);
+    logWoMiru(r, 'docs/指紋の手順.md');
+  });
 });
