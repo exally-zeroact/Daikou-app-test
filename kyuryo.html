@@ -5917,6 +5917,20 @@
           );
         }
 
+        // ★書けた 後の 描き直し★ 2026-10-16（対立役：描き直しが 転ぶと 書けたのに「保存できませんでした」と 出た／
+        //   前の 赤字を 次の 保存の showErr('') が 消した）。転んだ 字は BYOGA_NG に 残し、後の 保存でも 消さない
+        var BYOGA_NG = '';
+        function byogaSuru(mae) {
+          try {
+            recalc();
+            renderDays();
+            if (BYOGA_NG) showErr(BYOGA_NG);
+          } catch (e) {
+            if (window.console) console.warn('[描き直し]', e);
+            BYOGA_NG = mae + '画面の計算で問題が出ました。画面を読み込み直してください。';
+            showErr(BYOGA_NG);
+          }
+        }
         function saveManual(date, dev, field, value) {
           if (!COMPANY) return;
           var cur = manualRow(date, dev) || {};
@@ -5948,8 +5962,7 @@
                 return m;
               });
               if (!found) RAW.manualDays.push(body);
-              recalc();
-              renderDays();
+              byogaSuru('手で入れた分は保存しましたが、');
             })
             .catch(function () {
               showErr('手で入れた分を保存できませんでした。');
@@ -5974,8 +5987,7 @@
               RAW.manualDays = RAW.manualDays.filter(function (m) {
                 return !(m.work_date === date && m.device_id === dev);
               });
-              recalc();
-              renderDays();
+              byogaSuru('消しましたが、');
             })
             .catch(function () {
               showErr('消せませんでした。');
@@ -6697,9 +6709,9 @@
                 flash('carSaved', '保存しました');
               } catch (e) {
                 if (window.console) console.warn('[saveCar] 描き直し', e);
-                showErr(
-                  '車の名前は保存しましたが、画面の計算で問題が出ました。画面を読み込み直してください。'
-                );
+                BYOGA_NG =
+                  '車の名前は保存しましたが、画面の計算で問題が出ました。画面を読み込み直してください。';
+                showErr(BYOGA_NG);
               }
               return true;
             })

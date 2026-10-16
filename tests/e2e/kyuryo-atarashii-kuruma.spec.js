@@ -141,3 +141,43 @@ test('名前は 書けて その日の 行だけ 書けない＝赤字を 出し
   await expect(page.locator('#err')).toContainText('手で入れた分を保存できませんでした');
   await expect(page.locator('#days select[data-man-add]').first()).toHaveValue('');
 });
+
+// ── 本番前の 対立役（42c560eb9）の 指摘：描き直しが 転んだ 時 ──
+test('設定の 車の 名前欄：描き直しが 転ぶ＝「保存しましたが…読み込み直して」と 出る（黙らない）', async ({
+  page,
+}) => {
+  const ochita = await hiraku(page);
+  await page.evaluate(() => {
+    const b = document.querySelector('.tab[data-tab="set"]');
+    if (b && b.onclick) b.onclick();
+  });
+  await page.waitForTimeout(500);
+  const ran = page.locator('#carBody input[data-f="label"]').first();
+  await expect(ran).toHaveCount(1);
+  await page.evaluate(() => document.getElementById('carSaved').remove()); // flash を 転ばせる
+  await ran.fill('名前替え号');
+  await ran.dispatchEvent('change');
+  await page.waitForTimeout(800);
+  expect(ochita).toEqual([]);
+  await expect(page.locator('#err')).toContainText('車の名前は保存しましたが');
+});
+
+test('「＋新しい車…」で 描き直しが 転ぶ＝書けた 行を「保存できませんでした」と 言わず、赤字は 消えない', async ({
+  page,
+}) => {
+  const ochita = await hiraku(page);
+  await page.evaluate(() => {
+    window.PayrollDaily.buildCtx = function () {
+      throw new Error('わざと');
+    };
+  });
+  const sel = page.locator('#days select[data-man-add]').first();
+  page.once('dialog', (d) => d.accept('6号車'));
+  await sel.selectOption('__new__');
+  await page.waitForTimeout(1000);
+  const kaita = await page.evaluate(() => window.__kaita);
+  expect(ochita).toEqual([]);
+  expect(kaita.filter((k) => k.p.indexOf('dk_manual_days') === 0).length).toBe(1);
+  await expect(page.locator('#err')).toContainText('保存しましたが');
+  await expect(page.locator('#err')).not.toContainText('保存できませんでした');
+});
