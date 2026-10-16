@@ -39,8 +39,8 @@ describe('★git を 呼ぶ 試験は kari-git を 通す★', () => {
   it('見た ファイルの 数（0本を 見て 緑に しない）', () => {
     expect(files.length).toBeGreaterThan(200);
     expect(yobu.length, 'git を 呼ぶ 試験が 見つからない＝探し方が 壊れた').toBeGreaterThanOrEqual(
-      4
-    );
+      3
+    ); // git の 木で 数えて 3本（手元の 未 commit の 物で 数えて CI を 赤に した・10-16）
   });
 
   it('git を 呼ぶ ファイルは kari-git を require し、process.env を そのまま 広げない', () => {
