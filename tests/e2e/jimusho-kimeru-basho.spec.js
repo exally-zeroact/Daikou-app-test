@@ -48,6 +48,10 @@ function kyuryoSess() {
     'S.rememberedCompanyId=function(){return co.company_id;};S.pickCompany=function(){return {mode:"one",company:co};};' +
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve([co]);}});};' +
     'S.rest=function(s,p,o){var x={ok:true,status:200,json:function(){return Promise.resolve(rows(p));}};' +
+    // ⑬ の 為：__EMP_NG__ が "0gyou" なら 0行、"400" なら 倉庫が 断った 形（列が 無い）で 返す
+    'if(o&&o.method==="PATCH"&&String(p).indexOf("dk_employees?employee_id=eq.")===0&&window.__EMP_NG__){window.__EMP_PATCH__=(window.__EMP_PATCH__||[]).concat([JSON.parse(o.body)]);' +
+    'if(window.__EMP_NG__==="0gyou")return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve([]);}});' +
+    'return Promise.resolve({ok:false,status:400,text:function(){return Promise.resolve(JSON.stringify({code:"PGRST204",message:"Could not find the retired_on column of dk_employees"}));},json:function(){return Promise.resolve({});}});}' +
     // ⑪ の 為：dk_employees の PATCH は 書いた 1行を 返す（return=representation と 同じ 形）
     'if(o&&o.method==="PATCH"&&String(p).indexOf("dk_employees?employee_id=eq.")===0){var id=decodeURIComponent(String(p).split("eq.")[1]);var e0=(F.emps||[]).filter(function(e){return e.employee_id===id;})[0];var b=JSON.parse(o.body);var row=Object.assign({},e0,b);window.__EMP_PATCH__=(window.__EMP_PATCH__||[]).concat([b]);return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve(e0?[row]:[]);}});}' +
     // ⑧ の 為：__PATCH_OSOKU__ が 立つ 時だけ PATCH を 遅らせ、書けた 時刻を 残す
@@ -587,4 +591,97 @@ test('★★⑫ 辞めた 人の 明細には QR・送るが 無く、訳が 出
   } finally {
     e0.active = moto;
   }
+});
+
+// ★★⑬ 退職が 書けない 時は 訳を 分けて 出し、ボタンを 戻す／先の 日は 送らない★★ 2026-10-17（対立役 N1・N2・N3・N4）
+//   前は 倉庫が 断っても 0行でも「通信を 確かめて」と 出し、押した ボタンが 灰色の まま だった。
+//   1行の 確かめを 外しても ⑪ は 緑だった（偽物が いつも 1行 返す）＝0行の 道を ここで 縛る。
+async function taishokuOsu(page, hi) {
+  await page.locator('#empBody [data-taishoku]').first().click();
+  await page.locator('#empBody .taishoku-hi').fill(hi);
+  await page.locator('#empBody [data-kakutei]').click();
+  await page.waitForTimeout(500);
+  return page.evaluate(() => ({
+    err: (document.getElementById('err') || {}).textContent || '',
+    nin: document.querySelectorAll('#empBody input[data-f="name"]').length,
+    kakuteiOseru: !!document.querySelector('#empBody [data-kakutei]:not([disabled])'),
+    okutta: (window.__EMP_PATCH__ || []).length,
+  }));
+}
+test('★★⑬ 退職が 書けない 時は 訳を 分けて 出し、ボタンを 戻す★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#emp');
+  const nin = await page.evaluate(
+    () => document.querySelectorAll('#empBody input[data-f="name"]').length
+  );
+  // 0行
+  await page.evaluate(() => {
+    window.__EMP_NG__ = '0gyou';
+  });
+  const a = await taishokuOsu(page, '2026-09-30');
+  expect(a.okutta, '★送っていない★').toBe(1);
+  expect(a.err, '★0行の 訳が 出ていない★').toContain('書けた 行が ありません');
+  expect(a.err).not.toContain('通信');
+  expect(a.nin, '★書けていないのに 従業員から 消えた★').toBe(nin);
+  expect(a.kakuteiOseru, '★失敗の 後も ボタンが 押せない★').toBe(true);
+  // 倉庫が 断った（列が 無い）＝倉庫の 言い分を 出す
+  await page.evaluate(() => {
+    window.__EMP_NG__ = '400';
+  });
+  await page.locator('#empBody [data-kakutei]').click();
+  await page.waitForTimeout(500);
+  const b = await page.evaluate(() => ({
+    err: (document.getElementById('err') || {}).textContent || '',
+    kakuteiOseru: !!document.querySelector('#empBody [data-kakutei]:not([disabled])'),
+  }));
+  expect(b.err, '★倉庫の 言い分が 出ていない★').toContain('retired_on');
+  expect(b.err).toContain('[400]');
+  expect(b.kakuteiOseru, '★失敗の 後も ボタンが 押せない★').toBe(true);
+});
+test('★★⑬-2 先の 日は 辞めた日に できない（送らない）★★', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-10-17T03:00:00Z'));
+  await kyuryoHiraku(page, '?henshu=1#emp');
+  const nin = await page.evaluate(
+    () => document.querySelectorAll('#empBody input[data-f="name"]').length
+  );
+  const max = await page.evaluate(() => {
+    document.querySelector('#empBody [data-taishoku]').click();
+    return document.querySelector('#empBody .taishoku-hi').getAttribute('max');
+  });
+  expect(max, '★日付の 欄に 上限が 無い★').toBe('2026-10-17');
+  await page.locator('#empBody .taishoku-hi').fill('2026-10-18');
+  await page.locator('#empBody [data-kakutei]').click();
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => ({
+    err: (document.getElementById('err') || {}).textContent || '',
+    okutta: (window.__EMP_PATCH__ || []).length,
+    nin: document.querySelectorAll('#empBody input[data-f="name"]').length,
+  }));
+  expect(r.okutta, '★先の 日を 送った★').toBe(0);
+  expect(r.err).toContain('今日より 先に できません');
+  expect(r.nin).toBe(nin);
+});
+
+// ★★⑭ 退職者の 辞めた 日は 押すと 直せる★★ 2026-10-17（対立役 N5＝前は 復職して 退職し直すしか 無く、元の 日が 今日に 戻った）
+test('★★⑭ 退職者の 辞めた 日を 押して 直す★★', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-10-17T03:00:00Z'));
+  await kyuryoHiraku(page, '?henshu=1#emp');
+  await page.locator('#empBody [data-taishoku]').first().click();
+  await page.locator('#empBody .taishoku-hi').fill('2026-09-30');
+  await page.locator('#empBody [data-kakutei]').click();
+  await page.waitForTimeout(500);
+  await page.locator('[data-kiri="yame"]').click();
+  await page.locator('#empBody [data-hi-naosu]').first().click();
+  const mae = await page.locator('#empBody [data-hi-naosu] .taishoku-hi').inputValue();
+  expect(mae, '★今の 辞めた 日が 入っていない★').toBe('2026-09-30');
+  await page.locator('#empBody [data-hi-naosu] .taishoku-hi').fill('2026-09-01');
+  await page.locator('#empBody [data-hi-kakutei]').click();
+  await page.waitForTimeout(500);
+  const r = await page.evaluate(() => ({
+    okutta: window.__EMP_PATCH__ || [],
+    hi: [...document.querySelectorAll('#empBody .yame-hi')].map((d) => d.textContent),
+    fuku: document.querySelectorAll('#empBody [data-fukushoku]').length,
+  }));
+  expect(r.okutta[r.okutta.length - 1]).toMatchObject({ active: false, retired_on: '2026-09-01' });
+  expect(r.hi, '★直した 日が 出ていない★').toContain('2026/09/01');
+  expect(r.fuku, '★退職者から 消えた★').toBeGreaterThan(0);
 });

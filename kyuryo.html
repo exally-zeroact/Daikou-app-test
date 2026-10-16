@@ -1289,6 +1289,10 @@
       .yame-hi {
         color: #555;
         font-size: 13px;
+
+        /* 押すと 辞めた 日を 直せる（10-17） */
+        cursor: pointer;
+        text-decoration: underline dotted;
       }
 
       .yame-na {
@@ -3265,7 +3269,12 @@
                 .then(function (j) {
                   t.disabled = false;
                   if (!j || j.ok !== true) {
-                    haifuErr('作り直せませんでした（' + ((j && j.reason) || '理由不明') + '）。');
+                    // 倉庫の 内側の 名前（taishoku 等）を そのまま 出さない（10-17 対立役 K2）
+                    haifuErr(
+                      j && j.reason === 'taishoku'
+                        ? '辞めた 人なので 作り直せません。'
+                        : '作り直せませんでした（' + ((j && j.reason) || '理由不明') + '）。'
+                    );
                     return;
                   }
                   // ★作り直した後の 札を 出し直す★（その人だけ）
@@ -6426,7 +6435,11 @@
           return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
         }
         // 退職・復職を 書く（返った 行が 1件で、active が 送った 値の 時だけ 画面を 移す＝0行の 黙りを 防ぐ）
+        //   ★書けた かを true/false で 返す★（押した ボタンを 戻す 為・10-17 対立役 N2＝失敗の 後も 灰色の まま 押せなかった）
+        //   ★訳を 分けて 出す★（10-17 対立役 N1＝倉庫が 断っても 0行でも いつも「通信を 確かめて」だった）
+        //     倉庫が 断った＝倉庫の 言い分（saveErr）／0行＝書けた 行が 無い／届かない＝通信
         function empTaishoku(id, active, hi) {
+          var nani = active ? '復職' : '退職';
           var body = {
             active: active,
             retired_on: active ? null : hi,
@@ -6437,16 +6450,35 @@
             headers: { Prefer: 'return=representation' },
             body: JSON.stringify(body),
           })
-            .then(function (r) {
-              if (!r || !r.ok) throw new Error('書けない');
-              return r.json();
-            })
+            .then(
+              function (r) {
+                if (!r || !r.ok) {
+                  saveErr(nani + 'に できませんでした。', r);
+                  return null;
+                }
+                return r.json();
+              },
+              function () {
+                showErr(nani + 'に できませんでした。通信を 確かめて もう一度 押してください。');
+                return null;
+              }
+            )
             .then(function (rows) {
-              if (!Array.isArray(rows) || rows.length !== 1 || rows[0].active !== active)
-                throw new Error('書けた 行が 無い');
+              if (rows === null) return false;
+              if (!Array.isArray(rows) || rows.length !== 1 || rows[0].active !== active) {
+                showErr(
+                  nani +
+                    'に できませんでした。倉庫に 書けた 行が ありません（' +
+                    (Array.isArray(rows) ? rows.length : '?') +
+                    '行）。会社が 合っているか 確かめて、開き直してください。'
+                );
+                return false;
+              }
               showErr('');
+              var hiDake = false; // 辞めた 人の 日付だけを 直した
               RAW.employees.forEach(function (e) {
                 if (e.employee_id === id) {
+                  hiDake = !active && e.active === false;
                   e.active = active;
                   e.retired_on = body.retired_on;
                 }
@@ -6455,13 +6487,15 @@
               renderEmp();
               // 配る 一覧も 描き直す（前は 開き直すまで 辞めた 人の「配る・作り直す」が 残った・対立役）
               if (!HONNIN) renderHaifu();
-              flash('empSaved', active ? '復職しました' : '退職にしました');
+              flash(
+                'empSaved',
+                active ? '復職しました' : hiDake ? '辞めた日を直しました' : '退職にしました'
+              );
+              return true;
             })
             .catch(function () {
-              showErr(
-                (active ? '復職' : '退職') +
-                  'に できませんでした。通信を 確かめて もう一度 押してください。'
-              );
+              showErr(nani + 'に できませんでした。通信を 確かめて もう一度 押してください。');
+              return false;
             });
         }
         function renderYame() {
@@ -6475,7 +6509,10 @@
           var html = yame
             .map(function (e) {
               return (
-                '<tr><td colspan="7"><div class="yame-hi">' +
+                // 辞めた 日は 押すと 直せる（10-17 対立役 N5＝前は 復職して 退職し直すしか 無く、元の 日が 今日に 戻った）
+                '<tr><td colspan="7"><div class="yame-hi" role="button" tabindex="0" data-hi-naosu="' +
+                esc(e.employee_id) +
+                '">' +
                 (e.retired_on ? esc(String(e.retired_on).replace(/-/g, '/')) : '日付なし') +
                 '</div><div class="yame-na"><span>' +
                 esc(e.name) +
@@ -6491,7 +6528,40 @@
           Array.prototype.forEach.call(document.querySelectorAll('[data-fukushoku]'), function (b) {
             b.onclick = function () {
               b.disabled = true;
-              empTaishoku(b.getAttribute('data-fukushoku'), true, null);
+              empTaishoku(b.getAttribute('data-fukushoku'), true, null).then(function (ok) {
+                if (!ok) b.disabled = false;
+              });
+            };
+          });
+          Array.prototype.forEach.call(document.querySelectorAll('[data-hi-naosu]'), function (d) {
+            d.onclick = function () {
+              if (d.querySelector('input')) return;
+              var id = d.getAttribute('data-hi-naosu');
+              var e0 = RAW.employees.filter(function (e) {
+                return e.employee_id === id;
+              })[0];
+              d.innerHTML =
+                '<label>辞めた日 <input type="date" class="taishoku-hi" max="' +
+                kyouJst() +
+                '" value="' +
+                esc((e0 && e0.retired_on) || kyouJst()) +
+                '"></label> <button class="btn" type="button" data-hi-kakutei>直す</button> ' +
+                '<button class="btn ghost" type="button" data-hi-yameru>やめる</button>';
+              d.querySelector('[data-hi-yameru]').onclick = function (ev) {
+                ev.stopPropagation();
+                renderYame();
+              };
+              d.querySelector('[data-hi-kakutei]').onclick = function (ev) {
+                ev.stopPropagation();
+                var hi = d.querySelector('.taishoku-hi').value;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(hi)) return showErr('辞めた日を 入れてください。');
+                if (hi > kyouJst()) return showErr('辞めた日は 今日より 先に できません。');
+                var kb = this;
+                kb.disabled = true;
+                empTaishoku(id, false, hi).then(function (ok) {
+                  if (!ok) kb.disabled = false;
+                });
+              };
             };
           });
         }
@@ -6557,7 +6627,10 @@
               '">退職</button></td></tr>';
           });
           if (!html) {
-            html = '<tr><td colspan="7" class="empty">まだ誰も登録されていません。</td></tr>';
+            // 全員が 辞めた 時に「まだ誰も」と 出していた（10-17 対立役 K3）
+            html = RAW.employees.length
+              ? '<tr><td colspan="7" class="empty">今いる人は 居ません（辞めた 人は「退職者」に 居ます）。</td></tr>'
+              : '<tr><td colspan="7" class="empty">まだ誰も登録されていません。</td></tr>';
           }
           // ★打つ時の候補★（決まりが在る役割を出す・打ちたければ そのまま打てる）
           html +=
@@ -6575,7 +6648,10 @@
               var id = b.getAttribute('data-taishoku');
               var td = b.parentNode;
               td.innerHTML =
-                '<label>辞めた日 <input type="date" class="taishoku-hi" value="' +
+                // ★先の 日は 選べない★（10-17 対立役 N4＝選んだ 時点で 今いる人から 消え、残りの 日の 時間を 入れられなかった）
+                '<label>辞めた日 <input type="date" class="taishoku-hi" max="' +
+                kyouJst() +
+                '" value="' +
                 kyouJst() +
                 '"></label> <button class="btn" type="button" data-kakutei>退職にする</button> ' +
                 '<button class="btn ghost" type="button" data-yameru>やめる</button>';
@@ -6585,8 +6661,15 @@
               td.querySelector('[data-kakutei]').onclick = function () {
                 var hi = td.querySelector('.taishoku-hi').value;
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(hi)) return showErr('辞めた日を 入れてください。');
-                this.disabled = true;
-                empTaishoku(id, false, hi);
+                if (hi > kyouJst())
+                  return showErr(
+                    '辞めた日は 今日より 先に できません。その日まで 働く 人は、辞めた 後に 押してください。'
+                  );
+                var kb = this;
+                kb.disabled = true;
+                empTaishoku(id, false, hi).then(function (ok) {
+                  if (!ok) kb.disabled = false;
+                });
               };
             };
           });
