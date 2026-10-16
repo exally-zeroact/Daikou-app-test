@@ -151,7 +151,8 @@
         flex-wrap: wrap;
       }
 
-      .tab {
+      .tab,
+      .kiri {
         background: #fff;
         border: 1px solid var(--line);
         border-radius: 999px;
@@ -165,7 +166,8 @@
         font-family: inherit;
       }
 
-      .tab.on {
+      .tab.on,
+      .kiri.on {
         background: var(--blue);
         border-color: var(--blue);
         color: #fff;
@@ -1270,6 +1272,33 @@
       }
 
       /* ★★会社設定から 来た時の 戻る帯★★ 2026-09-06（司さん） */
+      .emp-kiri {
+        display: flex;
+        gap: 8px;
+        margin: 0 0 10px;
+      }
+
+      table.yame-miru thead {
+        display: none;
+      }
+
+      td.taishoku-ran {
+        text-align: right;
+      }
+
+      .yame-hi {
+        color: #555;
+        font-size: 13px;
+      }
+
+      .yame-na {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 4px;
+        font-weight: 700;
+      }
+
       .modoru-bar {
         display: flex;
         gap: 10px;
@@ -1616,6 +1645,12 @@
 
       <!-- 従業員 -->
       <div id="paneEmp" class="emp-pane" style="display: none">
+        <!-- ★★従業員／退職者の 切り替え★★ 2026-10-16（司さん「赤丸の所に退職者のボタンを作って（従業員もボタンにする）
+             切り替えれるようにして」）＝会社設定から 来た 時は 見出しの 横（赤丸）へ 移す -->
+        <div class="emp-kiri" id="empKiri" role="tablist">
+          <button type="button" class="kiri on" data-kiri="ima" role="tab">従業員</button>
+          <button type="button" class="kiri" data-kiri="yame" role="tab">退職者</button>
+        </div>
         <div class="card">
           <div class="scroller">
             <table>
@@ -1629,7 +1664,6 @@
                   <th>歩合<span class="th-sub">空欄=役割どおり</span></th>
                   <th>最低保証<span class="th-sub">空欄=役割どおり</span></th>
                   <th>並び</th>
-                  <th>今いる人</th>
                   <!-- ★その人だけの車 (2026-08-25・司さん指示)★
                        司さん「個人個人で給料明細に載せるかも選びたいんや
                                山田太郎は車1、山田花子は車2と3とかカスタムしたい」
@@ -1639,6 +1673,7 @@
                       >この人だけ／何も付けない=会社の決まりどおり</span
                     >
                   </th>
+                  <th>退職</th>
                 </tr>
               </thead>
               <tbody id="empBody" class="emp-body"></tbody>
@@ -1652,7 +1687,8 @@
             ふつうは<b>役割ごとの決まり</b>で計算します（「給料の設定」で変えられます）。<br />
             <b>その人だけ違う</b>ときだけ、歩合・最低保証を打ってください。
             <b>空欄にすれば役割どおりに戻ります。</b><br />
-            辞めた人は「今いる人」のチェックを外します。<b>過去の明細と金額はそのまま残ります。</b
+            辞めた人は「退職」を押します（「退職者」へ 移ります・戻す時は「復職」）。<b
+              >過去の明細と金額はそのまま残ります。</b
             ><br />
             <!-- ★その人だけの車 (2026-08-25・司さん指示)★ -->
             <b>明細に出す車</b>は、<b>その人の給料明細にだけ</b>きく設定です。
@@ -3729,6 +3765,7 @@
                   if (mi)
                     mi.textContent =
                       doko === 'emp' ? '従業員' : kurumaDake ? '車' : '給料の設定（車）';
+                  if (doko === 'emp') empKiriWoMidashiE();
                 }
               }
             }
@@ -3818,6 +3855,7 @@
             var mi = document.getElementById('modoruMidashi');
             if (mi && mi.textContent) {
               mi.textContent = '従業員';
+              empKiriWoMidashiE();
               try {
                 history.replaceState(null, '', location.pathname + location.search + '#emp');
               } catch (_) {
@@ -6329,10 +6367,108 @@
           return Object.keys(st.roles);
         }
 
+        // ★★従業員／退職者★★ 2026-10-16（司さん）＝退職は active=false ＋ 辞めた日（retired_on）
+        var EMP_MIRU = 'ima';
+        function empKiriWoMidashiE() {
+          // 会社設定から 来た 時は 見出しの 横（赤丸）に 切り替えを 置き、見出しの 字は 消す（ボタンが 同じ 字）
+          var k = document.getElementById('empKiri');
+          var bar = document.getElementById('modoruSet');
+          var mi = document.getElementById('modoruMidashi');
+          if (k && bar && k.parentNode !== bar) bar.appendChild(k);
+          if (mi) mi.textContent = '';
+        }
+        (function empKiriWoTsunagu() {
+          Array.prototype.forEach.call(document.querySelectorAll('[data-kiri]'), function (b) {
+            b.onclick = function () {
+              EMP_MIRU = b.getAttribute('data-kiri');
+              Array.prototype.forEach.call(document.querySelectorAll('[data-kiri]'), function (x) {
+                x.className = 'kiri' + (x === b ? ' on' : '');
+              });
+              renderEmp();
+            };
+          });
+        })();
+        function kyouJst() {
+          return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        }
+        // 退職・復職を 書く（返った 行が 1件で、active が 送った 値の 時だけ 画面を 移す＝0行の 黙りを 防ぐ）
+        function empTaishoku(id, active, hi) {
+          var body = {
+            active: active,
+            retired_on: active ? null : hi,
+            updated_at: new Date().toISOString(),
+          };
+          return DKSession.rest(SESS, 'dk_employees?employee_id=eq.' + encodeURIComponent(id), {
+            method: 'PATCH',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify(body),
+          })
+            .then(function (r) {
+              if (!r || !r.ok) throw new Error('書けない');
+              return r.json();
+            })
+            .then(function (rows) {
+              if (!Array.isArray(rows) || rows.length !== 1 || rows[0].active !== active)
+                throw new Error('書けた 行が 無い');
+              showErr('');
+              RAW.employees.forEach(function (e) {
+                if (e.employee_id === id) {
+                  e.active = active;
+                  e.retired_on = body.retired_on;
+                }
+              });
+              recalc();
+              renderEmp();
+              flash('empSaved', active ? '復職しました' : '退職にしました');
+            })
+            .catch(function () {
+              showErr(
+                (active ? '復職' : '退職') +
+                  'に できませんでした。通信を 確かめて もう一度 押してください。'
+              );
+            });
+        }
+        function renderYame() {
+          var yame = RAW.employees
+            .filter(function (e) {
+              return e.active === false;
+            })
+            .sort(function (a, b) {
+              return String(b.retired_on || '').localeCompare(String(a.retired_on || ''));
+            });
+          var html = yame
+            .map(function (e) {
+              return (
+                '<tr><td colspan="7"><div class="yame-hi">' +
+                (e.retired_on ? esc(String(e.retired_on).replace(/-/g, '/')) : '日付なし') +
+                '</div><div class="yame-na"><span>' +
+                esc(e.name) +
+                '</span><button class="btn ghost" type="button" data-fukushoku="' +
+                esc(e.employee_id) +
+                '">復職</button></div></td></tr>'
+              );
+            })
+            .join('');
+          if (!yame.length)
+            html = '<tr><td colspan="7" class="empty">退職者は 居ません。</td></tr>';
+          $('empBody').innerHTML = html;
+          Array.prototype.forEach.call(document.querySelectorAll('[data-fukushoku]'), function (b) {
+            b.onclick = function () {
+              b.disabled = true;
+              empTaishoku(b.getAttribute('data-fukushoku'), true, null);
+            };
+          });
+        }
         function renderEmp() {
+          var tbl = $('empBody') && $('empBody').closest('table');
+          if (tbl) tbl.classList.toggle('yame-miru', EMP_MIRU === 'yame');
+          var tasu = document.getElementById('btnAddEmp');
+          if (tasu) tasu.style.display = EMP_MIRU === 'yame' ? 'none' : '';
+          if (EMP_MIRU === 'yame') return renderYame();
           var roles = roleNames();
           var html = '';
           RAW.employees.forEach(function (e) {
+            if (e.active === false) return; // 辞めた 人は「退職者」に 出す
             // data-l は★スマホで1人1枚にした時の見出し★（横スクロールさせないため）
             html +=
               '<tr><td data-l="名前"><input class="txt" data-emp="' +
@@ -6375,17 +6511,16 @@
               '" data-f="sort_order" value="' +
               (e.sort_order || 0) +
               '"></td>' +
-              '<td data-l="今いる人"><input type="checkbox" style="width:17px;height:17px" data-emp="' +
-              esc(e.employee_id) +
-              '" data-f="active"' +
-              (e.active !== false ? ' checked' : '') +
-              '></td>' +
               // ★その人だけの車 (2026-08-25)★ 何も付けなければ 会社の決まりどおり
               '<td data-l="明細に出す車" class="empcars">' +
               _empCarBoxes(e) +
-              '</td></tr>';
+              '</td>' +
+              // ★★退職★★ 2026-10-16（司さん「青丸の所に退職ボタンを作って 従業員のページから消せるように」）＝箱の 右下
+              '<td data-l="退職" class="taishoku-ran"><button class="btn ghost" type="button" data-taishoku="' +
+              esc(e.employee_id) +
+              '">退職</button></td></tr>';
           });
-          if (!RAW.employees.length) {
+          if (!html) {
             html = '<tr><td colspan="7" class="empty">まだ誰も登録されていません。</td></tr>';
           }
           // ★打つ時の候補★（決まりが在る役割を出す・打ちたければ そのまま打てる）
@@ -6398,6 +6533,27 @@
               .join('') +
             '</datalist>';
           $('empBody').innerHTML = html;
+          // 退職：押すと 辞めた 日（既定は 日本時間の 今日・遡って 直せる）と「退職にする」「やめる」を 出す
+          Array.prototype.forEach.call(document.querySelectorAll('[data-taishoku]'), function (b) {
+            b.onclick = function () {
+              var id = b.getAttribute('data-taishoku');
+              var td = b.parentNode;
+              td.innerHTML =
+                '<label>辞めた日 <input type="date" class="taishoku-hi" value="' +
+                kyouJst() +
+                '"></label> <button class="btn" type="button" data-kakutei>退職にする</button> ' +
+                '<button class="btn ghost" type="button" data-yameru>やめる</button>';
+              td.querySelector('[data-yameru]').onclick = function () {
+                renderEmp();
+              };
+              td.querySelector('[data-kakutei]').onclick = function () {
+                var hi = td.querySelector('.taishoku-hi').value;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(hi)) return showErr('辞めた日を 入れてください。');
+                this.disabled = true;
+                empTaishoku(id, false, hi);
+              };
+            };
+          });
           Array.prototype.forEach.call(document.querySelectorAll('[data-emp]'), function (i) {
             i.onchange = function () {
               var f = i.getAttribute('data-f');

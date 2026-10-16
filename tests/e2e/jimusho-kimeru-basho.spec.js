@@ -48,6 +48,8 @@ function kyuryoSess() {
     'S.rememberedCompanyId=function(){return co.company_id;};S.pickCompany=function(){return {mode:"one",company:co};};' +
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve([co]);}});};' +
     'S.rest=function(s,p,o){var x={ok:true,status:200,json:function(){return Promise.resolve(rows(p));}};' +
+    // ⑪ の 為：dk_employees の PATCH は 書いた 1行を 返す（return=representation と 同じ 形）
+    'if(o&&o.method==="PATCH"&&String(p).indexOf("dk_employees?employee_id=eq.")===0){var id=decodeURIComponent(String(p).split("eq.")[1]);var e0=(F.emps||[]).filter(function(e){return e.employee_id===id;})[0];var b=JSON.parse(o.body);var row=Object.assign({},e0,b);window.__EMP_PATCH__=(window.__EMP_PATCH__||[]).concat([b]);return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve(e0?[row]:[]);}});}' +
     // ⑧ の 為：__PATCH_OSOKU__ が 立つ 時だけ PATCH を 遅らせ、書けた 時刻を 残す
     // ⑨ の 為：__PATCH_NG__ が 立つ 時は PATCH を 書けなかった 形で 返す
     'if(o&&o.method==="PATCH"&&window.__PATCH_NG__)return new Promise(function(ok){setTimeout(function(){ok({ok:false,status:500,json:function(){return Promise.resolve({});}});},300);});' +
@@ -112,7 +114,8 @@ test('★★② 会社設定から 来たら 入口は 1つ＋戻るが 在る�
       tabMieru: !!(t && t.offsetHeight > 0),
       modoruMieru: !!(m && m.offsetHeight > 0),
       iki: a ? a.getAttribute('href') : null,
-      midashi: (document.getElementById('modoruMidashi') || {}).textContent || '',
+      // 2026-10-16 見出しの 字は「従業員／退職者」の 切り替えの ボタンに 替えた（司さん）＝見出しの 帯の 中の 字で 見る
+      midashi: (m || {}).textContent || '',
       empAru: !!emp,
     };
   });
@@ -496,4 +499,51 @@ test('★★⑩b 会社設定の チップは 書けなければ 移らずに �
   }));
   expect(r.url, '★書けなかったのに 移った★').toContain('dashboard');
   expect(r.msg).toContain('画面を 移りませんでした');
+});
+
+// ★★⑪ 従業員／退職者の 切り替え・退職・復職★★ 2026-10-16（司さん）
+test('★★⑪ 退職で 従業員から 消えて 退職者に 移り、復職で 戻る★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#emp');
+  const mae = await page.evaluate(() => ({
+    kiriMieru: !!(document.querySelector('#modoruSet #empKiri') || {}).offsetHeight,
+    nin: document.querySelectorAll('#empBody [data-taishoku]').length,
+  }));
+  expect(mae.kiriMieru, '★見出しの 横に 従業員／退職者の 切り替えが 無い★').toBe(true);
+  expect(mae.nin, '従業員が 居ない').toBeGreaterThan(0);
+  const na = await page.evaluate(() => {
+    const b = document.querySelector('#empBody [data-taishoku]');
+    return b.closest('tr').querySelector('input[data-f="name"]').value;
+  });
+  await page.locator('#empBody [data-taishoku]').first().click();
+  await page.locator('#empBody .taishoku-hi').fill('2026-09-30');
+  await page.locator('#empBody [data-kakutei]').click();
+  await page.waitForTimeout(500);
+  const ato = await page.evaluate(() => ({
+    nin: document.querySelectorAll('#empBody [data-taishoku]').length,
+    okutta: window.__EMP_PATCH__ || [],
+  }));
+  expect(ato.nin, '★退職しても 従業員に 残っている★').toBe(mae.nin - 1);
+  expect(ato.okutta[0]).toMatchObject({ active: false, retired_on: '2026-09-30' });
+  // 退職者：1行目に 辞めた日、2行目に 名前と 復職
+  await page.locator('[data-kiri="yame"]').click();
+  const yame = await page.evaluate(() =>
+    [...document.querySelectorAll('#empBody tr')].map((tr) => ({
+      hi: (tr.querySelector('.yame-hi') || {}).textContent || '',
+      na: (tr.querySelector('.yame-na span') || {}).textContent || '',
+      fuku: !!tr.querySelector('[data-fukushoku]'),
+    }))
+  );
+  const r = yame.find((x) => x.na === na);
+  expect(r, '★退職者に 出ていない★').toBeTruthy();
+  expect(r.hi).toBe('2026/09/30');
+  expect(r.fuku).toBe(true);
+  await page.locator('#empBody [data-fukushoku]').first().click();
+  await page.waitForTimeout(500);
+  const fuku = await page.evaluate(() => window.__EMP_PATCH__);
+  expect(fuku[fuku.length - 1]).toMatchObject({ active: true, retired_on: null });
+  await page.locator('[data-kiri="ima"]').click();
+  const modori = await page.evaluate(
+    () => document.querySelectorAll('#empBody [data-taishoku]').length
+  );
+  expect(modori, '★復職しても 従業員に 戻らない★').toBe(mae.nin);
 });
