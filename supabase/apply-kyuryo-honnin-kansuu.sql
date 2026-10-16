@@ -89,6 +89,7 @@ set search_path = daikome, public, extensions
 as $fn$
 declare
   r daikome.dk_kyuryo_pub;
+  v_saigo date; -- 辞めた 人の 最後に 働いた 日
 begin
   select * into r from daikome.dk_kyuryo_pub where token = p_token;
   if not found or r.pw_hash is null then
@@ -116,6 +117,14 @@ begin
     ) then
       return json_build_object('ok', false, 'reason', 'taishoku');
     end if;
+    -- ★返す 行は「最後に 働いた 月の 次の 月の 末日」まで★ 2026-10-16（指示役・対立役）
+    --   窓の 93 日を 全部 返すと、直に 呼べば 辞めた 後の 約3か月の 会社の 売上が 見えた。
+    --   最後に 働いた 日を 含む 給料の 期間（締めが 月を またいでも 1か月 以内）は 次の 月の 末日 までに 必ず 終わる
+    --   ＝最後の 明細の 額は 変わらない。以下の 全部の 問い合わせは この p_to で 切られる
+    select max(w.work_date) into v_saigo
+      from daikome.dk_work_hours w
+      where w.company_id = r.company_id and w.employee_id = r.employee_id;
+    p_to := least(p_to, (date_trunc('month', v_saigo) + interval '2 month' - interval '1 day')::date);
   end if;
 
   return json_build_object(
