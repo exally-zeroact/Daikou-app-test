@@ -100,6 +100,22 @@ begin
   if p_from is null or p_to is null or p_to < p_from or (p_to - p_from) > 400 then
     return json_build_object('ok', false, 'reason', 'bad_range');
   end if;
+  -- ★★辞めた 人（今いる人で ない・名簿に 居ない）は「自分が 働いた 日を 含む 62 日 以内」だけ★★ 2026-10-16
+  --   前は active を 見ず、外した 人も QR で 会社の 売上（shifts）を 見続けられた（対立役・指示役）。
+  --   本人の 明細は 会社の 売上から 計算する ので 全部は 止めず、働いた 時の 明細だけ 見られる 形に する
+  --   （本人の 画面は 前の 月の 1日〜見る 月の 末日＝最長 61 日 を 頼む）
+  if not exists (
+    select 1 from daikome.dk_employees e
+    where e.employee_id = r.employee_id and e.company_id = r.company_id and e.active
+  ) then
+    if (p_to - p_from) > 62 or not exists (
+      select 1 from daikome.dk_work_hours w
+      where w.company_id = r.company_id and w.employee_id = r.employee_id
+        and w.work_date between p_from and p_to
+    ) then
+      return json_build_object('ok', false, 'reason', 'taishoku');
+    end if;
+  end if;
 
   return json_build_object(
     'ok', true,

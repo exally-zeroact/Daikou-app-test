@@ -40,6 +40,7 @@ export const ARU = [
   ['m.actual_total_m, m.total_distance_m', '手入力の日の 距離を 返す（距離歩合・10-06）'],
   ['jsonb_agg(coalesce(e.role', '乗った 人の 役だけ 返す（回数・距離を 1台で 分ける・10-06）'],
   ['and a.employee_id = r.employee_id', '手当・控除は 本人の 分だけ（10-06）'],
+  ["'taishoku'", '辞めた 人は 働いた 日を 含む 62 日 以内 だけ（会社の 売上を 見続けない・10-16）'],
 ];
 export const NAI = [
   ['to_jsonb(ed)', '直しを 行ごと 丸ごと'],
