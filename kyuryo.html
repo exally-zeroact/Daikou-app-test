@@ -6689,12 +6689,17 @@
                 RAW.labels.push(hit);
               }
               hit[field] = value;
+              // 名前は 書けた＝true を 返す。描き直しが 転んだら 黙らず 赤字で 知らせる（対立役：console だけだと
+              //   給料の 計算が 古い まま 何も 出なかった）
               try {
                 recalc();
                 renderCars();
                 flash('carSaved', '保存しました');
               } catch (e) {
                 if (window.console) console.warn('[saveCar] 描き直し', e);
+                showErr(
+                  '車の名前は保存しましたが、画面の計算で問題が出ました。画面を読み込み直してください。'
+                );
               }
               return true;
             })

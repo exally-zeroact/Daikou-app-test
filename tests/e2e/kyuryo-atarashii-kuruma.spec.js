@@ -128,3 +128,16 @@ for (const [na, ire] of [
     if (ire.trim()) await expect(page.locator('#err')).toContainText('もう あります');
   });
 }
+
+test('名前は 書けて その日の 行だけ 書けない＝赤字を 出し、選ぶ 欄は 戻る（もう一度 選べる）', async ({
+  page,
+}) => {
+  const ochita = await hiraku(page, 'dk_manual_days');
+  const sel = page.locator('#days select[data-man-add]').first();
+  page.once('dialog', (d) => d.accept('7号車'));
+  await sel.selectOption('__new__');
+  await page.waitForTimeout(800);
+  expect(ochita, '画面で 落ちた').toEqual([]);
+  await expect(page.locator('#err')).toContainText('手で入れた分を保存できませんでした');
+  await expect(page.locator('#days select[data-man-add]').first()).toHaveValue('');
+});
