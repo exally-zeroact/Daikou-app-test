@@ -716,6 +716,21 @@ test('★★⑮ 退職者の ページの「配る」で 配る 札が 開き、
   });
   expect(aki.mieru, '★配る 札が 開かない★').toBe(true);
   expect(aki.botan, '★配る 札に 配る・送る・見せる・作り直すの どれも 無い★').toBe(true);
+  // 配れなかった 時は 訳が 見える（前は 隠れた 設定の 枠の 箱にだけ 書いた・対立役 N1）。
+  //   偽の 倉庫は 1人ぶんの 道に 何も 返さない＝配れない 形
+  const hhito = page.locator('#empBody [data-yame-box] [data-hhito]');
+  expect(
+    await hhito.count(),
+    '★配る 札に「配る」が 無い（見本の 辞めた 人は まだ 配っていない筈）★'
+  ).toBe(1);
+  await hhito.first().click();
+  await page.waitForTimeout(500);
+  const err = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    return { mieru: !!e && e.offsetParent !== null, ji: (e && e.textContent) || '' };
+  });
+  expect(err.mieru, '★配れなかった 訳が 見えない★').toBe(true);
+  expect(err.ji.length, '★訳の 字が 空★').toBeGreaterThan(0);
   await page.locator('#empBody [data-yame-haifu]').first().click();
   const toji = await page.evaluate(
     () => (document.querySelector('#empBody [data-yame-box]') || {}).style.display

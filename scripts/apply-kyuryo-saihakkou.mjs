@@ -171,33 +171,33 @@ async function main() {
   console.log(
     '向き先: ' + (ref === HONBAN_REF ? '★本番★' : 'テスト') + ' ' + ref + ' ／ 鍵: ' + t.from
   );
-  // 当てる 前に 3本とも 切り出せる 事を 確かめる（途中まで 当たるのを 避ける）
+  // 当てる 前に 3本とも 切り出し、3本とも 読み戻す（途中まで 当たるのを 避ける）
   const blocks = KANSUU.map((k) => kiridasu(fs.readFileSync(path.join(ROOT, k.file), 'utf8'), k));
-  let ng = 0;
-  for (let i = 0; i < KANSUU.length; i++) {
-    const k = KANSUU[i];
+  for (const k of KANSUU) {
     console.log('\n■ ' + k.na);
     dasu('前', kazoeru(await yomimodosu(ref, t.token, k), k));
-    if (!ateru) continue;
-    const r = await runSql(ref, t.token, blocks[i]);
-    if (!r.ok) {
-      console.error(
-        'NG: ' +
-          k.na +
-          ' を 当てられなかった ' +
-          r.status +
-          ' ' +
-          JSON.stringify(r.body).slice(0, 300)
-      );
-      process.exit(4);
-    }
-    const ato = kazoeru(await yomimodosu(ref, t.token, k), k);
-    dasu('後', ato);
-    if (!ato.ok) ng++;
   }
   if (!ateru) {
     console.log('\n見るだけ（当てるには --ateru）');
     return;
+  }
+  // ★3本を 1つの 取引で 当てる★（1本目だけ 新しい版に なって 止まるのを 避ける・対立役 N2）
+  const r = await runSql(ref, t.token, 'begin;\n' + blocks.join('\n') + '\ncommit;');
+  if (!r.ok) {
+    console.error(
+      'NG: 当てられなかった（1つの 取引なので 1本も 変わっていない筈） ' +
+        r.status +
+        ' ' +
+        JSON.stringify(r.body).slice(0, 300)
+    );
+    process.exit(4);
+  }
+  let ng = 0;
+  for (const k of KANSUU) {
+    console.log('\n■ ' + k.na);
+    const ato = kazoeru(await yomimodosu(ref, t.token, k), k);
+    dasu('後', ato);
+    if (!ato.ok) ng++;
   }
   console.log('\nKAKUNIN: ' + (ng ? '★NG★ ' + ng + '本' : 'OK'));
   if (ng) process.exit(5);

@@ -2876,9 +2876,13 @@
 
         function haifuErr(t) {
           var e = $('haifuErr');
-          if (!e) return;
-          e.style.display = t ? '' : 'none';
-          e.textContent = t || '';
+          if (e) {
+            e.style.display = t ? '' : 'none';
+            e.textContent = t || '';
+          }
+          // ★配る 一覧が 見えていない 画面（退職者ページ 等）でも 訳を 出す★ 2026-10-17（対立役 N1）
+          //   前は 設定の 枠の 中の 箱だけに 書き、従業員の 画面では 枠が 隠れていて 何も 見えなかった
+          if (t && (!e || e.offsetParent === null)) showErr(t);
         }
 
         // ★★一覧は 従業員 全員★★ 2026-09-04（司さん「従業員毎に 配るんやないんか」）
@@ -3258,10 +3262,10 @@
                 .then(function (j) {
                   t.disabled = false;
                   if (!j || j.ok !== true) {
-                    // 倉庫の 内側の 名前（taishoku 等）を そのまま 出さない（10-17 対立役 K2）
+                    // 倉庫の 内側の 名前を そのまま 出さない（10-17 対立役 K2。辞めた 人も 作り直せる 様に なったので taishoku は 来ない）
                     haifuErr(
-                      j && j.reason === 'taishoku'
-                        ? '辞めた 人なので 作り直せません。'
+                      j && j.reason === 'not_yours'
+                        ? 'この 会社の 人では ないので 作り直せません。開き直してください。'
                         : '作り直せませんでした（' + ((j && j.reason) || '理由不明') + '）。'
                     );
                     return;
