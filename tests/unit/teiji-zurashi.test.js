@@ -37,6 +37,12 @@ describe('★店データと 道の 定時は ずらす★', () => {
     expect(osm.length, 'osm-update の 定時が 無い').toBeGreaterThan(0);
     for (const t of [...poi, ...osm]) {
       expect(Number.isFinite(t.fun), '分・時・日が 数で ない: ' + t.cron).toBe(true);
+      // 字の 範囲（GitHub が 受け付けない cron は 定時が 1度も 走らない）・日は 28 まで（月の 境目を またがない）
+      const [mi, h, d] = String(t.cron).trim().split(/\s+/).map(Number);
+      expect(
+        mi >= 0 && mi <= 59 && h >= 0 && h <= 23 && d >= 1 && d <= 28,
+        '分・時・日が 範囲の 外: ' + t.cron
+      ).toBe(true);
       expect(t.mo + ' ' + t.w, '月・曜日の 指定が 在る: ' + t.cron).toBe('* *');
     }
     for (const p of poi)
