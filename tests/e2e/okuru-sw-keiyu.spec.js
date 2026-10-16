@@ -18,7 +18,11 @@
 //   ★わざと壊して 赤に なった 記録（2026-10-17）★
 //     js/job-sync.js の 送り（fetch の 呼び出し）を 止める ⇒ この 試験と shuryo-tsuzukeru-okuru が 赤（chromium・webkit とも 4本中 4本）。戻すと 緑。
 //     sw.js の fetch の 頭で POST dk-sync-jobs に 偽の 200 を 返す ⇒ この 試験が chromium・webkit とも 赤（「service worker が 返事を 作った」）。shuryo-tsuzukeru-okuru は 緑の まま＝ここだけが 捕まえる。
+//     止め（host-resolver-rules）の 無い chromium の 設定で 回す ⇒ 送る 前の 確かめで 赤（「倉庫の 住所へ 届いてしまう」・POST は 出ない）。
+//     sw.js が POST を Response.error() で 飲む ⇒ chromium・webkit とも 赤（「試験の 止めで 落ちていない」）。
 // ============================================================
+const fs = require('fs');
+const path = require('path');
 const { test, expect } = require('@playwright/test');
 
 test.use({ viewport: { width: 390, height: 844 } });
@@ -70,6 +74,23 @@ test('service worker が 握っていても 業務終了の POST が 3件 入っ
     )
     .toBe(true);
 
+  // ★送る 前に、倉庫の 住所へ 届かない 事を 確かめる★ 2026-10-17（対立役 N1）
+  //   前は「届いた 後で 赤」だけで、止め（chromium の host-resolver-rules・webkit の 代理）が 無い 設定で 回すと
+  //   本番の 倉庫へ 代行 3件 入りの POST が 出た。害の 無い GET（無い 関数の 名前）で 落ちる 事を 見て、落ちなければ 送らずに 赤。
+  const sbUrl = (fs
+    .readFileSync(path.join(__dirname, '..', '..', 'js', 'dk-config.js'), 'utf8')
+    .match(/https:\/\/[a-z0-9]{20}\.supabase\.co/) || [])[0];
+  expect(sbUrl, '★js/dk-config.js から 倉庫の 住所が 読めない★').toBeTruthy();
+  const todoita = await page.evaluate(async (u) => {
+    try {
+      await fetch(u + '/functions/v1/zz-todokanai-kakunin', { mode: 'no-cors', cache: 'no-store' });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }, sbUrl);
+  expect(todoita, '★倉庫の 住所へ 届いてしまう（止めの 無い 設定）＝送らずに 止める★').toBe(false);
+
   await page.evaluate(() => {
     ['dlOverlay', 'trainingConsentBanner', 'pwaBanner', 'apkBanner', 'sensorRestoreBanner'].forEach(
       (id) => {
@@ -113,4 +134,12 @@ test('service worker が 握っていても 業務終了の POST が 3件 入っ
       message: '★業務終了の 送りが 外の 網まで 出ていない★',
     })
     .toBeGreaterThan(0);
+  // ★落ちた 訳が 試験の 止めの 字で ある 事★ 2026-10-17（対立役 N2）
+  //   service worker が Response.error() 等で 偽の 失敗を 返しても「網で 落ちた」に 数えて 緑に なった。
+  //   chromium＝住所を 引かせない（ERR_NAME_NOT_RESOLVED）・webkit＝届かない 代理（Could not connect）だけを 外まで 出た 証しに する。
+  const wake = amiMadeDeta.map((r) => (r.failure() || {}).errorText || '');
+  expect(
+    wake.some((w) => /ERR_NAME_NOT_RESOLVED|Could not connect/.test(w)),
+    '★送りが 試験の 止めで 落ちていない（別の 所で 飲まれた）：' + JSON.stringify(wake) + '★'
+  ).toBe(true);
 });
