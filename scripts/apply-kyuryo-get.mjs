@@ -43,11 +43,26 @@ export const ARU = [
   ["'taishoku'", '辞めた 人は 働いた 日を 含む 93 日 以内 だけ（会社の 売上を 見続けない・10-16）'],
   // ★'taishoku' の 字だけでは 62 日の 古い 版・p_to を 切らない 版・直しを 絞らない 版でも OK に なった（対立役 N7・10-17）★
   ['(p_to - p_from) > 93', '辞めた 人の 窓は 93 日まで（62 日の 古い 版で ない）'],
-  [
-    "p_to := least(p_to, (date_trunc('month', v_saigo)",
-    '辞めた 人は 最後に 働いた 月の 次の 月の 末で 切る',
-  ],
   ['select sh2.shift_id from daikome.dk_shifts sh2', '直し（edits）は 窓の 中の 勤務の 分だけ'],
+  // 2026-10-17 司さん「向こうが URL 消すまで 見れないかん」＝手当・控除だけの 月も 通し、会社の 物と 手当・控除で 切る 日を 分ける（対立役 S2）
+  ['select 1 from daikome.dk_pay_adjustments a', '辞めた 人は 手当・控除だけの 月も 通す'],
+  [
+    "p_to := least(p_to, (date_trunc('month', v_saigo_a)",
+    '手当・控除は 最後に 働いたか 手当・控除が 在った 月の 次の 月の 末で 切る',
+  ],
+  [
+    "v_kaisha_to := least(p_to, (date_trunc('month', v_saigo)",
+    '会社の 物は 最後に 働いた 月の 次の 月の 末で 切る',
+  ],
+  [
+    'v_kaisha_to := p_from - 1',
+    '働いた 日が 無い 人は 会社の 物を 返さない（NULL で 全部 返る 穴を 塞ぐ）',
+  ],
+  [
+    "and (sh.started_at at time zone 'Asia/Tokyo')::date between p_from and v_kaisha_to",
+    '勤務（会社の 売上）は 会社の 物の 終わりの 日で 切る',
+  ],
+  ['m.work_date between p_from and v_kaisha_to', '手入力の 日も 会社の 物の 終わりの 日で 切る'],
 ];
 export const NAI = [
   ['to_jsonb(ed)', '直しを 行ごと 丸ごと'],

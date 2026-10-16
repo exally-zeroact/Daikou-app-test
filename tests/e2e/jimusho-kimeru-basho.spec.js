@@ -528,12 +528,15 @@ test('★★⑪ 退職で 従業員から 消えて 退職者に 移り、復職
   }));
   expect(ato.nin, '★退職しても 従業員に 残っている★').toBe(mae.nin - 1);
   expect(ato.okutta[0]).toMatchObject({ active: false, retired_on: '2026-09-30' });
-  // 配る 一覧からも その 場で 消える（前は 開き直すまで「配る・作り直す」が 残った）
-  const haifu = await page.evaluate(
-    (na) => ((document.getElementById('haifuList') || {}).textContent || '').includes(na),
-    na
-  );
-  expect(haifu, '★退職したのに 配る 一覧に 残っている★').toBe(false);
+  // 配る 一覧には 残り、その 場で（退職）の 印が 付く 2026-10-17 司さん「退職者のページからでもURLの配付ができないかん」
+  //   （10-16 は「消える」だった。わざと壊す：一覧の 描き直しを 外す・印を 外す ⇒ 赤）
+  const haifu = await page.evaluate((na) => {
+    const fuda = [...document.querySelectorAll('#haifuList .card')].find((c) =>
+      c.textContent.includes(na)
+    );
+    return fuda ? fuda.textContent.includes('（退職）') : null;
+  }, na);
+  expect(haifu, '★退職した 人が 配る 一覧に 居ない／（退職）の 印が 付いていない★').toBe(true);
   // 退職者：1行目に 辞めた日、2行目に 名前と 復職
   await page.locator('[data-kiri="yame"]').click();
   const yame = await page.evaluate(() =>
@@ -558,8 +561,9 @@ test('★★⑪ 退職で 従業員から 消えて 退職者に 移り、復職
   expect(modori, '★復職しても 従業員に 戻らない★').toBe(mae.nin);
 });
 
-// ★★⑫ 辞めた 人の 明細には QR・送るを 出さない★★ 2026-10-16（押すと「今居るか 確かめて」と 出て、辞めた 人を 戻させた）
-test('★★⑫ 辞めた 人の 明細には QR・送るが 無く、訳が 出る★★', async ({ page }) => {
+// ★★⑫ 辞めた 人の 明細にも QR・送るが 出る★★ 2026-10-17 司さん「向こうが URL 消すまで 見れないかん・退職者のページからでもURLの配付ができないかん」
+//   （10-16 は「出さない」だった＝逆に した。倉庫の 1人ぶん・作り直しも 辞めた 人を 通す。わざと壊す：yameBtnKesu を 戻す ⇒ 赤）
+test('★★⑫ 辞めた 人の 明細にも QR・送るが 出る★★', async ({ page }) => {
   const hataraita = [...new Set((FIX.workHours || []).map((w) => w.employee_id))][0];
   const e0 = FIX.emps.find((e) => e.employee_id === hataraita);
   const moto = e0.active;
@@ -585,8 +589,8 @@ test('★★⑫ 辞めた 人の 明細には QR・送るが 無く、訳が 出
         wake: document.body.innerText.includes('辞めた人には 新しく リンクを 作れません'),
       };
     }, hataraita);
-    expect(r.qr, '★辞めた 人に QR・送るが 出ている★').toBe(0);
-    expect(r.wake, '★訳が 出ていない★').toBe(true);
+    expect(r.qr, '★辞めた 人に QR・送るが 出ていない★').toBe(2);
+    expect(r.wake, '★前の「作れません」の 訳が 残っている★').toBe(false);
     expect(r.hoka, '★今いる人の QR・送るまで 消えた★').toBeGreaterThan(0);
   } finally {
     e0.active = moto;
@@ -684,4 +688,37 @@ test('★★⑭ 退職者の 辞めた 日を 押して 直す★★', async ({ 
   expect(r.okutta[r.okutta.length - 1]).toMatchObject({ active: false, retired_on: '2026-09-01' });
   expect(r.hi, '★直した 日が 出ていない★').toContain('2026/09/01');
   expect(r.fuku, '★退職者から 消えた★').toBeGreaterThan(0);
+});
+
+// ★★⑮ 退職者の ページから リンクを 配れる★★ 2026-10-17 司さん「退職者のページからでもURLの配付ができないかん」
+//   2行（辞めた日／名前と 復職）は そのままに、名前の 横の「配る」で 配る 札を 下に 開く・もう一度 押すと 閉じる。
+//   わざと壊して 赤に なった 記録（2026-10-17）：「配る」の ボタンを 消す ⇒ 赤／開く 箱を 描かない ⇒ 赤。戻すと 緑。
+test('★★⑮ 退職者の ページの「配る」で 配る 札が 開き、2行の 形は そのまま★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#emp');
+  await page.locator('[data-kiri="yame"]').click();
+  const mae = await page.evaluate(() => ({
+    gyo: document.querySelectorAll('#empBody .yame-hi').length,
+    na: document.querySelectorAll('#empBody .yame-na span').length,
+    fuku: document.querySelectorAll('#empBody [data-fukushoku]').length,
+    haifu: document.querySelectorAll('#empBody [data-yame-haifu]').length,
+  }));
+  expect(mae.gyo, '★退職者が 居ない（見本に 辞めた 人が 1人 居る筈）★').toBeGreaterThan(0);
+  expect(mae.na, '★2行目の 名前が 無い★').toBe(mae.gyo);
+  expect(mae.fuku, '★復職の ボタンが 無い★').toBe(mae.gyo);
+  expect(mae.haifu, '★配る ボタンが 無い★').toBe(mae.gyo);
+  await page.locator('#empBody [data-yame-haifu]').first().click();
+  const aki = await page.evaluate(() => {
+    const b = document.querySelector('#empBody [data-yame-box]');
+    return {
+      mieru: !!b && b.style.display !== 'none' && b.offsetHeight > 0,
+      botan: !!b && !!b.querySelector('[data-hhito], [data-hokuru], [data-hmise], [data-hsai]'),
+    };
+  });
+  expect(aki.mieru, '★配る 札が 開かない★').toBe(true);
+  expect(aki.botan, '★配る 札に 配る・送る・見せる・作り直すの どれも 無い★').toBe(true);
+  await page.locator('#empBody [data-yame-haifu]').first().click();
+  const toji = await page.evaluate(
+    () => (document.querySelector('#empBody [data-yame-box]') || {}).style.display
+  );
+  expect(toji, '★もう一度 押しても 閉じない★').toBe('none');
 });

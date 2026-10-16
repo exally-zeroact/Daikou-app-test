@@ -38,6 +38,10 @@ function ne(ref) {
   NOKOSU.push(d);
   fs.mkdirSync(path.join(d, 'scripts'));
   fs.mkdirSync(path.join(d, 'js'));
+  // 当てる 前に SQL を 切り出す 道具（配る 関数 3本・10-17）の 為に、読む SQL も 写す
+  fs.mkdirSync(path.join(d, 'supabase'));
+  for (const f of ['apply-kyuryo-haifu.sql', 'apply-kyuryo-haifu-hitori.sql'])
+    fs.copyFileSync(path.join(ROOT, 'supabase', f), path.join(d, 'supabase', f));
   for (const f of [...DOUGU.map((x) => x.f), 'db-token.mjs', 'sql-guard.mjs', 'honban-tome.mjs'])
     fs.copyFileSync(path.join(ROOT, 'scripts', f), path.join(d, 'scripts', f));
   const conf = fs
