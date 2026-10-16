@@ -47,7 +47,10 @@ function kyuryoSess() {
     'var S=window.DKSession;S.ensure=function(){return Promise.resolve({token:"d"});};S.goLogin=function(){};S.logout=function(){};' +
     'S.rememberedCompanyId=function(){return co.company_id;};S.pickCompany=function(){return {mode:"one",company:co};};' +
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve([co]);}});};' +
-    'S.rest=function(s,p){return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve(rows(p));}});};' +
+    'S.rest=function(s,p,o){var x={ok:true,status:200,json:function(){return Promise.resolve(rows(p));}};' +
+    // ⑧ の 為：__PATCH_OSOKU__ が 立つ 時だけ PATCH を 遅らせ、書けた 時刻を 残す
+    'if(o&&o.method==="PATCH"&&window.__PATCH_OSOKU__)return new Promise(function(ok){setTimeout(function(){localStorage.setItem("__kaketa__",String(Date.now()));ok(x);},window.__PATCH_OSOKU__);});' +
+    'return Promise.resolve(x);};' +
     'S.softList=function(s,p,st){if(st)st.tried++;return Promise.resolve(rows(p));};})();'
   );
 }
@@ -362,7 +365,8 @@ test('★★⑦ 「載せる」の 枝（keepalive・書けない・行が 無�
     await matsu();
     out.modotta = sc.checked === mae;
     out.ngAizu = (document.getElementById('carSaved') || {}).textContent || '';
-    // ③ 行が 無い（0行）＝全部の 保存で 作り、車の 箱に 合図
+    // ③ 行が 無い（0行）＝全部の 保存へ 倒さない（隠れた 率が 丸まる）＝送らず 印を 戻して 知らせる
+    const mae3 = sc.checked;
     let post = 0;
     S.rest = function (s, p, o) {
       if (o && o.method === 'PATCH')
@@ -373,6 +377,7 @@ test('★★⑦ 「載せる」の 枝（keepalive・書けない・行が 無�
     sc.click();
     await matsu();
     out.post = post;
+    out.modotta3 = sc.checked === mae3;
     out.zeroAizu = (document.getElementById('carSaved') || {}).textContent || '';
     S.rest = r0;
     return out;
@@ -382,6 +387,24 @@ test('★★⑦ 「載せる」の 枝（keepalive・書けない・行が 無�
   );
   expect(kekka.modotta, '★書けなかったのに 印が 変わった まま★').toBe(true);
   expect(kekka.ngAizu).toContain('保存できませんでした');
-  expect(kekka.post, '★行が 無い 会社で 設定を 作って いない★').toBe(1);
-  expect(kekka.zeroAizu).toContain('保存しました');
+  expect(kekka.post, '★行が 無い 時に 全部の 保存へ 倒した（隠れた 率が 丸まる）★').toBe(0);
+  expect(kekka.modotta3, '★行が 無いのに 印が 変わった まま★').toBe(true);
+  expect(kekka.zeroAizu).toContain('保存できませんでした');
+});
+
+// ★★⑧「← 会社設定へ 戻る」は 書いている 最中の 保存が 済んでから 移る★★ 2026-10-16（対立役 S-B）
+//   keepalive では、別の 住所への 問い合わせの 最中に 画面を 移ると 書き込みが 届かなかった
+test('★★⑧ 戻るは 書き終わってから 移る★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#kuruma');
+  await page.evaluate(() => {
+    localStorage.removeItem('__kaketa__');
+    window.__PATCH_OSOKU__ = 900;
+  });
+  await page.locator('#showCarSales').click();
+  const oshita = await page.evaluate(() => Date.now());
+  await page.locator('#modoruSet a').click();
+  await page.waitForURL(/dashboard\.html/, { timeout: 15000 });
+  const kaketa = Number(await page.evaluate(() => localStorage.getItem('__kaketa__') || '0'));
+  expect(kaketa, '★書き終わる 前に 画面を 移った（書き込みが 消える）★').toBeGreaterThan(0);
+  expect(kaketa - oshita, '★待たずに 移った★').toBeGreaterThanOrEqual(800);
 });

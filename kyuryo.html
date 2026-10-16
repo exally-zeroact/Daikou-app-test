@@ -3758,9 +3758,11 @@
             .then(function (rows) {
               if (!Array.isArray(rows)) throw new Error('返りが 読めない');
               if (rows.length === 0) {
-                var bs = document.getElementById('btnSaveSet');
-                if (bs && bs.onclick) bs.onclick(); // 行が まだ 無い＝既定の 値で 作る
-                flash('carSaved', '保存しました（設定を 新しく 作りました）');
+                // 設定の 行が まだ 無い（または 当たらない）＝ここでは 作らない（全部の 保存へ 倒すと 隠れた 率が
+                //   画面の 丸めで 書き換わり、結果も 待たずに「保存しました」と 出した・対立役 S-A）
+                modosu(
+                  'まだ 給料の 設定が 保存されていません。給料の 画面の「給料の 設定」で 一度 保存してから 選んでください。'
+                );
                 return;
               }
               showErr('');
@@ -3815,6 +3817,67 @@
         function afterLoad(retry) {
           DKSession.showUnknownBar(LOAD, retry);
         }
+        // ★書いている 最中の 物★ 2026-10-16（「← 会社設定へ 戻る」は これが 済んでから 移る）
+        var KAKI_CHU = [];
+        function kakiNoseru(p) {
+          KAKI_CHU.push(p);
+          var owari = function () {
+            var i = KAKI_CHU.indexOf(p);
+            if (i >= 0) KAKI_CHU.splice(i, 1);
+          };
+          p.then(owari, owari);
+          return p;
+        }
+        (function kakiWoMiru() {
+          var S = window.DKSession;
+          if (S && S.rest) {
+            var r0 = S.rest;
+            S.rest = function (s, p, o) {
+              var x = r0.apply(this, arguments);
+              return o && o.method && o.method !== 'GET' && x && x.then ? kakiNoseru(x) : x;
+            };
+          }
+          var f0 = window.fetch;
+          if (f0)
+            window.fetch = function (u, o) {
+              var x = f0.apply(this, arguments);
+              return o && o.method && o.method !== 'GET' && x && x.then ? kakiNoseru(x) : x;
+            };
+        })();
+        // 欄を 離れた 時の 保存も 拾う ため 先に 欄を 離し、書き終わって（最長 10 秒）から 移る
+        function kakiOwattekara(go) {
+          var a = document.activeElement;
+          if (a && a.blur) a.blur();
+          setTimeout(function () {
+            var owari = false;
+            var iku = function () {
+              if (owari) return;
+              owari = true;
+              go();
+            };
+            Promise.all(
+              KAKI_CHU.slice().map(function (p) {
+                return p.then(
+                  function () {},
+                  function () {}
+                );
+              })
+            ).then(iku);
+            setTimeout(iku, 10000);
+          }, 0);
+        }
+        (function modoruWaMatsu() {
+          var a = document.querySelector('#modoruSet a');
+          if (!a) return;
+          a.addEventListener('click', function (e) {
+            e.preventDefault();
+            var iki = a.href;
+            a.textContent = '保存の 終わりを 待っています…';
+            kakiOwattekara(function () {
+              location.href = iki;
+            });
+          });
+        })();
         function upsert(table, conflict, body) {
           return DKSession.rest(SESS, table + '?on_conflict=' + conflict, {
             method: 'POST',

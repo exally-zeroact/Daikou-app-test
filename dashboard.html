@@ -1096,7 +1096,26 @@
               // 決める 画面が 別に 在る チップ（車・従業員）は そのまま そこへ（覚える 場所は 変えない）
               var iki = b.getAttribute('data-href');
               if (iki) {
-                location.href = iki;
+                // 欄を 離れた 時の 保存（車の 名前・実費）を 先に 出し、書き終わって（最長 10 秒）から 移る
+                var a = document.activeElement;
+                if (a && a.blur) a.blur();
+                setTimeout(function () {
+                  var owari = false;
+                  var go = function () {
+                    if (owari) return;
+                    owari = true;
+                    location.href = iki;
+                  };
+                  Promise.all(
+                    DASH_KAKI_CHU.slice().map(function (p) {
+                      return p.then(
+                        function () {},
+                        function () {}
+                      );
+                    })
+                  ).then(go);
+                  setTimeout(go, 10000);
+                }, 0);
                 return;
               }
               dasu(b.getAttribute('data-chip'));
@@ -1124,6 +1143,7 @@
         }
 
         // ---------- REST ----------
+        var DASH_KAKI_CHU = [];
         function api(path, opts) {
           opts = opts || {};
           var h = {
@@ -1137,7 +1157,18 @@
           //   名前を 打って すぐ 押すと、欄を 離れた 時の 保存が 切られた・対立役 M-a）
           if (opts.method && opts.method !== 'GET' && opts.keepalive === undefined)
             opts.keepalive = true;
-          return fetch(REST + path, opts);
+          var x = fetch(REST + path, opts);
+          // 書いている 最中の 物を 数える（チップで 画面を 移る 時は これが 済んでから・keepalive だけでは
+          //   問い合わせの 最中に 移ると 届かなかった＝対立役 S-B）
+          if (opts.method && opts.method !== 'GET') {
+            DASH_KAKI_CHU.push(x);
+            var owari = function () {
+              var i = DASH_KAKI_CHU.indexOf(x);
+              if (i >= 0) DASH_KAKI_CHU.splice(i, 1);
+            };
+            x.then(owari, owari);
+          }
+          return x;
         }
 
         function getUser() {
