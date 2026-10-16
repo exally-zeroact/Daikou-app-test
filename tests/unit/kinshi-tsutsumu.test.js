@@ -11,13 +11,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { gitKankyo } = require('../lib/kari-git');
 const { spawnSync, execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 // ★git を 呼ぶ 時は GIT_* を 外す★（worktree から 押すと 門に GIT_DIR が 渡り、一時 repo の git init・add が
 //   本体の repo を 書き換えた＝bare=true・index が 2本に なった 2026-10-16 実測）
-const ENV0 = () =>
-  Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+const ENV0 = () => gitKankyo();
 const TSUTSUMI = path.join(ROOT, 'scripts', 'kinshi-tsutsumu.sh');
 const GO = ['見本太郎', 'Zorgoxa'];
 
