@@ -18,13 +18,13 @@ data/addresses-fine-yamagata.js	当たり1	a33f947ae41be8c9	公の地図デー�
 data/bridges-nagano.js	当たり10	c4297135097774fd	公の地図データ・偶然の一致
 data/peaks-jp.js	当たり3	5ece41a66c4cf36c	公の地図データ・偶然の一致
 data/poi-akita.js	当たり1	61842d8fba2835ab	公の地図データ・偶然の一致
-data/poi-ehime.js	当たり3	2f0217595e9c5acd	公の地図データ・偶然の一致
+data/poi-ehime.js	当たり3	25f35ed2ce24337d	公の地図データ・偶然の一致
 data/poi-fukuoka.js	当たり1	588b9084910d1108	公の地図データ・偶然の一致
 data/poi-fukushima.js	当たり1	2ee5374e6c08a7a8	公の地図データ・偶然の一致
 data/poi-hiroshima.js	当たり2	5df14bf1dbd2d5db	公の地図データ・偶然の一致
 data/poi-hokkaido.js	当たり1	fc78a97cd9ca7ea0	公の地図データ・偶然の一致
 data/poi-hyogo.js	当たり1	e63970393000d7f3	公の地図データ・偶然の一致
-data/poi-kagawa.js	当たり1	f11736fe93486c7a	公の地図データ・偶然の一致
+data/poi-kagawa.js	当たり1	bf820068af603969	公の地図データ・偶然の一致
 data/poi-kanagawa.js	当たり1	e080d726bbfa65fa	公の地図データ・偶然の一致
 data/poi-kumamoto.js	当たり2	adc072c6596acac0	公の地図データ・偶然の一致
 data/poi-kyoto.js	当たり3	8aa1212714114560	公の地図データ・偶然の一致
@@ -39,7 +39,7 @@ data/poi-saga.js	当たり1	602c72f9536fa769	公の地図データ・偶然の�
 data/poi-saitama.js	当たり2	536fcaec88ee95a7	公の地図データ・偶然の一致
 data/poi-shizuoka.js	当たり2	ca7a0f00c82c469c	公の地図データ・偶然の一致
 data/poi-tochigi.js	当たり2	4bf07437f7957bb5	公の地図データ・偶然の一致
-data/poi-tokushima.js	当たり1	8f3a3918561006a4	公の地図データ・偶然の一致
+data/poi-tokushima.js	当たり1	d12fd39eb85ce813	公の地図データ・偶然の一致
 data/poi-tokyo.js	当たり6	8b35b8ec17965462	公の地図データ・偶然の一致
 data/poi-yamagata.js	当たり2	b939c38fe9b8c55e	公の地図データ・同じ名の施設が地図に載る
 data/shelters-jp.js	当たり6	7a8c2b57546aedae	公の地図データ・偶然の一致
