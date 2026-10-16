@@ -15,6 +15,8 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..', '..');
 const WF = path.join(ROOT, '.github', 'workflows');
 
+// 一覧の secret の 書き方（secrets.KINSHI_JI と secrets['KINSHI_JI'] の 両方）
+const SECRET = /secrets(?:\.KINSHI_JI\b|\[\s*['"]KINSHI_JI['"]\s*\])/;
 const fukasa = (l) => l.length - l.replace(/^ +/, '').length;
 
 // 1本の yml を 段に 分ける：steps: の 下の「- 」で 始まる 行から 次の 同じ 深さの「- 」まで
@@ -41,7 +43,7 @@ function danNi(s) {
       continue;
     }
     if (cur) cur.gyou.push(l);
-    else if (/secrets\.KINSHI_JI\b/.test(l)) jobEnv.push(i + 1);
+    else if (SECRET.test(l)) jobEnv.push(i + 1);
   }
   return { dan: out, jobEnv };
 }
@@ -67,10 +69,12 @@ function runNoNakami(d) {
 describe('★KINSHI_JI を 持つ 段は 包みを 通る★', () => {
   const dan = [];
   const jobEnv = [];
+  const zenbu = [];
   for (const f of fs.readdirSync(WF).filter((x) => /\.ya?ml$/.test(x))) {
-    const r = danNi(fs.readFileSync(path.join(WF, f), 'utf8'));
-    for (const d of r.dan)
-      if (d.gyou.some((l) => /secrets\.KINSHI_JI\b/.test(l))) dan.push({ f, d });
+    const s = fs.readFileSync(path.join(WF, f), 'utf8');
+    zenbu.push({ f, s });
+    const r = danNi(s);
+    for (const d of r.dan) if (d.gyou.some((l) => SECRET.test(l))) dan.push({ f, d });
     for (const n of r.jobEnv) jobEnv.push(f + ':' + n);
   }
   it('数えた 段（0本を 見て 緑に しない）', () => {
@@ -79,15 +83,36 @@ describe('★KINSHI_JI を 持つ 段は 包みを 通る★', () => {
   it('job の 高さに 一覧を 置かない（段を 選べない）', () => {
     expect(jobEnv).toEqual([]);
   });
-  it('全部 run: の 中身で kinshi-tsutsumu.sh を 呼ぶ（commit 文の 門は 外す）', () => {
-    const warui = dan
-      .filter(({ d }) => {
-        const run = runNoNakami(d);
-        return !/kinshi-tsutsumu\.sh/.test(run) && !/kinshi-commit-msg\.mjs/.test(run);
-      })
-      .map(({ f, d }) => f + ':' + (d.i + 1) + ' の 段');
+  it('run: の 中身で 包みを 呼ぶ・包まずに 本体を 呼ばない・終わり値を 捨てない（commit 文の 門は 外す）', () => {
+    const warui = [];
+    for (const { f, d } of dan) {
+      const run = runNoNakami(d);
+      const na = f + ':' + (d.i + 1) + ' の 段';
+      // 包みの 外で 本体を 呼ぶ 行（同じ 行に 包みが 無い）
+      const soto = run
+        .split('\n')
+        .filter(
+          (l) => /kinshi-ji\.test\.mjs|npm run kinshi\b/.test(l) && !/kinshi-tsutsumu\.sh/.test(l)
+        );
+      if (soto.length) warui.push(na + '（包まずに 本体を 呼ぶ）');
+      if (!/kinshi-tsutsumu\.sh/.test(run) && !/kinshi-commit-msg\.mjs/.test(run))
+        warui.push(na + '（包みを 呼ばない）');
+      // 終わり値を 捨てる（|| true・|| :・continue-on-error）
+      if (/kinshi-tsutsumu\.sh[^\n]*\|\|\s*(true|:)/.test(run))
+        warui.push(na + '（包みの 終わり値を 捨てる）');
+      if (d.gyou.some((l) => /^\s*continue-on-error:\s*true/.test(l)))
+        warui.push(na + '（continue-on-error）');
+    }
     expect(warui, '★包まずに 一覧を 持つ 段が 在る＝赤の 日に 番号が 公開の ログに 出る★').toEqual(
       []
     );
+  });
+  it('一覧を GITHUB_ENV に 流して 後の 段へ 渡さない', () => {
+    const warui = [];
+    for (const { f, s } of zenbu)
+      s.split(/\r?\n/).forEach((l, i) => {
+        if (/KINSHI_JI/.test(l) && /GITHUB_ENV/.test(l)) warui.push(f + ':' + (i + 1));
+      });
+    expect(warui).toEqual([]);
   });
 });

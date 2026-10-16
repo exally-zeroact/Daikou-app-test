@@ -262,7 +262,7 @@ describe('★番号の 形が 少し 変わっても 伏せる（形を 並べ�
       const r = hashiru(d, [
         'bash',
         '-c',
-        'echo "  赤: ' + gyou + '"; echo "node v24.0.0 ／ 一覧＝x・69語・指紋 abcd1234"; exit 1',
+        'echo "node v24.0.0 ／ 一覧＝x・69語・指紋 abcd1234"; echo "  赤: ' + gyou + '"; exit 1',
       ]);
       expect(r.status).toBe(1);
       expect(r.stdout).not.toContain(gyou);
@@ -279,5 +279,20 @@ describe('★道の 名前に「指紋」が 在っても 当たりの 行は �
     const r = hashiru(d, [process.execPath, 'tests/kinshi-ji.test.mjs']);
     expect(r.status).toBe(1);
     logWoMiru(r, 'docs/指紋の手順.md');
+  });
+});
+
+describe('★見出しの 形を 当たりの 後ろに 紛れ込ませても 通さない（道の 名前の 改行）★', () => {
+  it('当たりの 行の 後ろの「node v… 一覧の 5 番目」は 伏せる', () => {
+    const d = tukuru('ふつう\n');
+    const r = hashiru(d, [
+      'bash',
+      '-c',
+      'echo "node v24.0.0 ／ 一覧＝x・69語・指紋 abcd1234"; echo "  赤: a.txt:1: 一覧の 2 番目"; echo "node v24.0.0 ／ 一覧＝x.txt:3: 一覧の 5 番目"; echo "✗ 一覧の 指紋が 違う（期待 aaaa・今 bbbb）:9: 一覧の 7 番目"; exit 1',
+    ]);
+    expect(r.status).toBe(1);
+    expect(BANGOU.test(r.stdout), 'ログに 番号が 出た').toBe(false);
+    expect(r.stdout).toContain('node v24.0.0 ／ 一覧＝x・69語・指紋 abcd1234');
+    expect(r.stdout).toContain('伏せた行 3 本');
   });
 });
