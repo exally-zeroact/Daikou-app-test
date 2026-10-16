@@ -577,6 +577,7 @@ test('★★⑫ 辞めた 人の 明細には QR・送るが 無く、訳が 出
     }, hataraita);
     expect(r.qr, '★辞めた 人に QR・送るが 出ている★').toBe(0);
     expect(r.wake, '★訳が 出ていない★').toBe(true);
+    expect(r.hoka, '★今いる人の QR・送るまで 消えた★').toBeGreaterThan(0);
   } finally {
     e0.active = moto;
   }
