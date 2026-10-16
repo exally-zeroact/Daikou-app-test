@@ -182,12 +182,16 @@ test('★★③ 会社設定に チップ 4つと 入口が 在る★★', async
   expect(r.mieru.length, '★出ているのが 1つでは ありません★').toBe(1);
 
   // ★入口の 行き先★（ここが 崩れると 決められなく なる）
-  const iki = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pane] a.btn')].map((a) => a.getAttribute('href'))
-  );
+  //   ★2026-10-16★ 車・従業員は 間の 札を 消し、★チップ そのものが 入口★（司さん「決めるボタン押さないかんのは めんどくさい」）
+  const iki = await page.evaluate(() => [
+    ...[...document.querySelectorAll('[data-pane] a.btn')].map((a) => a.getAttribute('href')),
+    ...[...document.querySelectorAll('[data-chip][data-href]')].map((b) =>
+      b.getAttribute('data-href')
+    ),
+  ]);
   // eslint-disable-next-line no-console
   console.log('★入口★ ' + JSON.stringify(iki));
-  expect(iki, '★車の 入口が ありません★').toContain('kyuryo.html?henshu=1#set');
+  expect(iki, '★車の 入口が ありません★').toContain('kyuryo.html?henshu=1#kuruma');
   // ★★料金の 入口は 窓の 中へ 移しました★★ 2026-09-09
   //   ★司さん★「料金を決めるは 被るから いらん」「紙に出すも」
   //   ⇒ 窓の 外の 札は 消し、★窓の 中の 見出しの 右横★ 1つに まとめた。
@@ -215,4 +219,84 @@ test('★★③ 会社設定に チップ 4つと 入口が 在る★★', async
   expect(iki, '★従業員の 入口が ありません★').toContain('kyuryo.html?henshu=1#emp');
 
   expect(err, '★画面が 落ちました★').toEqual([]);
+
+  // ★車の チップを 押すと 間の 札を 通らず そのまま 車を 決める 画面へ★ 2026-10-16（司さん）
+  await page.locator('[data-chip="kuruma"]').click();
+  await page.waitForURL(/kyuryo\.html\?henshu=1#kuruma$/, { timeout: 8000 });
+});
+
+// ★★会社設定の「車」から 来たら 車の 箱だけ★★ 2026-10-16（司さん「車の決めるとこに なんで 関係ないものが あるんど」）
+//   前は 給料の 設定を まるごと 開き、役割ごとの決まり・売上の分け方・明細の期間・従業員へ配る が 並んでいた。
+//   ★守る 事★ 車の 箱と 保存（車ごとの売上を載せる の 印を 保存する）は 見え、他の 箱は 見えない。見出しは「車」。
+//   ★#set（給料の 設定 ぜんぶ）は 今までどおり★
+test('★★④ 会社設定の「車」から 来たら 車の 箱だけ★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#kuruma');
+  const r = await page.evaluate(() => {
+    const ps = document.getElementById('paneSet');
+    const cards = [...ps.querySelectorAll(':scope > .card')];
+    return {
+      tabMieru: !!(document.getElementById('tabs') || {}).offsetHeight,
+      paneMieru: !!ps.offsetHeight,
+      carMieru: cards
+        .filter((c) => c.classList.contains('car-pane'))
+        .every((c) => c.offsetHeight > 0),
+      hokaMieru: cards.filter((c) => !c.classList.contains('car-pane') && c.offsetHeight > 0)
+        .length,
+      hokaKazu: cards.filter((c) => !c.classList.contains('car-pane')).length,
+      hozonObi: !!(document.getElementById('saveBar') || {}).offsetHeight,
+      midashi: (document.getElementById('modoruMidashi') || {}).textContent || '',
+    };
+  });
+  // eslint-disable-next-line no-console
+  console.log('★車だけ★ ' + JSON.stringify(r));
+  expect(r.tabMieru, '★タブの 行が 出ています★').toBe(false);
+  expect(r.paneMieru && r.carMieru, '★車の 箱が 見えません★').toBe(true);
+  expect(r.hokaKazu, '★他の 箱を 数えていない（0本を 見て 緑に しない）★').toBeGreaterThanOrEqual(
+    3
+  );
+  expect(r.hokaMieru, '★車と 関係ない 箱が 出ています★').toBe(0);
+  // 車だけの 時は 下の 保存の 帯を 出さない（下の 帯に 覆われて 押せなかった）＝「載せる」の 印は その場で 保存（⑤）
+  expect(r.hozonObi, '★押せない 保存の 帯が 出ています★').toBe(false);
+  expect(r.midashi).toBe('車');
+
+  // #set（給料の 設定 ぜんぶ）は 今までどおり 他の 箱も 出る
+  await kyuryoHiraku(page, '?henshu=1#set');
+  const z = await page.evaluate(
+    () =>
+      [...document.getElementById('paneSet').querySelectorAll(':scope > .card')].filter(
+        (c) => c.offsetHeight > 0
+      ).length
+  );
+  expect(z, '★給料の 設定 ぜんぶ の 方まで 隠しています★').toBeGreaterThanOrEqual(4);
+});
+
+// ★★⑤ 車だけの 画面で「載せる」を 変えたら その場で 保存し、見えない「自分の車」を 空に しない★★ 2026-10-16（対立役）
+//   前：「載せる」は 保存を 押さないと 黙って 消えた／保存すると、名簿に 無い 自分の 車が「決めていない」で 空に なった
+test('★★⑤ 車だけの 画面の「載せる」は その場で 保存・自分の車は 空に しない★★', async ({
+  page,
+}) => {
+  const moto = FIX.settings[0].owner_device_id;
+  FIX.settings[0].owner_device_id = 'zz-meibo-ni-nai-kuruma';
+  try {
+    await kyuryoHiraku(page, '?henshu=1#kuruma');
+    await page.evaluate(() => {
+      window.__okutta__ = [];
+      const r0 = window.DKSession.rest;
+      window.DKSession.rest = function (s, p, o) {
+        if (o && o.method === 'POST' && String(p).indexOf('dk_payroll_settings') === 0)
+          window.__okutta__.push(JSON.parse(o.body));
+        return r0.apply(this, arguments);
+      };
+    });
+    await page.locator('#showCarSales').click();
+    await page.waitForTimeout(600);
+    const okutta = await page.evaluate(() => window.__okutta__);
+    expect(okutta.length, '★「載せる」を 変えても 保存して いません★').toBe(1);
+    const b = Array.isArray(okutta[0]) ? okutta[0][0] : okutta[0];
+    expect(b.owner_device_id, '★見えない 自分の 車を 空に しました★').toBe(
+      'zz-meibo-ni-nai-kuruma'
+    );
+  } finally {
+    FIX.settings[0].owner_device_id = moto;
+  }
 });
