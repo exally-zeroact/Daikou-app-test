@@ -6,6 +6,7 @@
 //   ③判じは 全文で 行う（終わり値が 0 で ない 命令は「✓」の 行が 在っても 赤）
 //   作り物の 語で、本体（tests/kinshi-ji.test.mjs）を 一時 repo に 写して 動かす。
 //   ★わざと壊して 赤に なった 記録（2026-10-16）★：番号を 伏せる 置き換え（sed）を そのまま 出す（cat）に 替えると ① が 1本 赤。
+//     伏せる 置き換えを「ふつうの 行」の 形（数字: 一覧の）だけに 狭めると、行またぎ・zip の 部品名・PDF の 字・道の 名前 の 4本が 赤。
 // ============================================================
 const fs = require('fs');
 const os = require('os');
@@ -100,4 +101,102 @@ describe('★GIT_DIR を 付けて 走らせても 親の repo を 書き換え�
     expect(fs.readFileSync(cfg).equals(mae[0]), '親の config が 変わった').toBe(true);
     expect(fs.readFileSync(idx).equals(mae[1]), '親の index が 変わった').toBe(true);
   });
+});
+
+// ── 本体が 番号を 出す 5つの 形（指示役：Castally が nomiya の 本体で 数えた）それぞれで 伏せる ──
+const zlib = require('zlib');
+function crc32(buf) {
+  let c = ~0;
+  for (const b of buf) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
+function zipOf(name, content) {
+  const raw = Buffer.from(content, 'utf8');
+  const comp = zlib.deflateRawSync(raw);
+  const nb = Buffer.from(name, 'utf8');
+  const lh = Buffer.alloc(30);
+  lh.writeUInt32LE(0x04034b50, 0);
+  lh.writeUInt16LE(20, 4);
+  lh.writeUInt16LE(0x800, 6);
+  lh.writeUInt16LE(8, 8);
+  lh.writeUInt32LE(crc32(raw), 14);
+  lh.writeUInt32LE(comp.length, 18);
+  lh.writeUInt32LE(raw.length, 22);
+  lh.writeUInt16LE(nb.length, 26);
+  const cd = Buffer.alloc(46);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt16LE(20, 4);
+  cd.writeUInt16LE(20, 6);
+  cd.writeUInt16LE(0x800, 8);
+  cd.writeUInt16LE(8, 10);
+  cd.writeUInt32LE(crc32(raw), 16);
+  cd.writeUInt32LE(comp.length, 20);
+  cd.writeUInt32LE(raw.length, 24);
+  cd.writeUInt16LE(nb.length, 28);
+  const cdBuf = Buffer.concat([cd, nb]);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(cdBuf.length, 12);
+  end.writeUInt32LE(30 + nb.length + comp.length, 16);
+  return Buffer.concat([lh, nb, comp, cdBuf, end]);
+}
+function pdfOf(streams) {
+  const parts = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
+  streams.forEach((s, i) => {
+    const body = zlib.deflateSync(Buffer.from(s, 'latin1'));
+    parts.push(
+      Buffer.from(
+        i + 1 + ' 0 obj\n<< /Filter /FlateDecode /Length ' + body.length + ' >>\nstream\n',
+        'latin1'
+      )
+    );
+    parts.push(body, Buffer.from('\nendstream\nendobj\n', 'latin1'));
+  });
+  parts.push(Buffer.from('trailer\n<< >>\n%%EOF\n', 'latin1'));
+  return Buffer.concat(parts);
+}
+function tukuruFiles(files) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'tsutsumu5-'));
+  fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
+  fs.copyFileSync(
+    path.join(ROOT, 'tests', 'kinshi-ji.test.mjs'),
+    path.join(d, 'tests', 'kinshi-ji.test.mjs')
+  );
+  for (const [rel, buf] of files) {
+    fs.mkdirSync(path.dirname(path.join(d, rel)), { recursive: true });
+    fs.writeFileSync(path.join(d, rel), buf);
+  }
+  execFileSync('git', ['init', '-q'], { cwd: d, env: ENV0() });
+  execFileSync('git', ['add', '-A'], { cwd: d, env: ENV0() });
+  return d;
+}
+
+describe('★本体の 5つの 出しの 形 それぞれで ログに 番号が 0回★', () => {
+  for (const [na, files, katachi] of [
+    ['ふつうの 行', [['a.txt', 'ここに Zorgoxa\n']], /:\d+: 一覧の \d+ 番目/],
+    ['行またぎ（つないだ 字）', [['a.txt', 'Zorgo\nxa\n']], /:\([^)]*\): 一覧の \d+ 番目/],
+    ['zip の 部品名', [['a.zip', zipOf('Zorgoxa.txt', 'ふつう')]], /部品名: 一覧の \d+ 番目/],
+    [
+      'PDF の 字',
+      [['a.pdf', pdfOf(['BT (Zor) Tj', '(goxa) Tj ET'])]],
+      /PDF の 字を つないだ 物\): 一覧の \d+ 番目/,
+    ],
+    ['追跡物の 道・名前', [['Zorgoxa/x.txt', 'ふつう\n']], /道・名前: 一覧の \d+ 番目/],
+  ]) {
+    it(na + '：段は 赤・ログに 番号 0回・全文には その 形が 在る', () => {
+      const d = tukuruFiles(files);
+      const r = hashiru(d, [process.execPath, 'tests/kinshi-ji.test.mjs']);
+      expect(r.status, r.stdout).toBe(1);
+      expect(BANGOU.test(r.stdout + r.stderr), 'ログに 番号が 出た').toBe(false);
+      const zen = fs.readFileSync(path.join(d, 'kinshi.out'), 'utf8');
+      expect(katachi.test(zen), '全文に この 形の 当たりが 無い＝試験が 何も 見ていない').toBe(
+        true
+      );
+    });
+  }
 });
