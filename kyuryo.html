@@ -6453,6 +6453,8 @@
               });
               recalc();
               renderEmp();
+              // 配る 一覧も 描き直す（前は 開き直すまで 辞めた 人の「配る・作り直す」が 残った・対立役）
+              if (!HONNIN) renderHaifu();
               flash('empSaved', active ? '復職しました' : '退職にしました');
             })
             .catch(function () {

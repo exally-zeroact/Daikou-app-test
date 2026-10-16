@@ -95,6 +95,14 @@ begin
   ) then
     return json_build_object('ok', false, 'reason', 'not_yours');
   end if;
+  -- ★辞めた 人（今いる人で ない）には 作り直さない★ 2026-10-16（前は active を 見ず、辞めた 人にも 新しい
+  --   初回コードを 作れた＝閉じた 本人リンクを また 開ける 道・対立役・指示役）
+  if exists (
+    select 1 from daikome.dk_employees e
+     where e.employee_id = p_employee_id and e.company_id = cid and coalesce(e.active, true) = false
+  ) then
+    return json_build_object('ok', false, 'reason', 'taishoku');
+  end if;
 
   atarashii := upper(substr(encode(extensions.gen_random_bytes(8), 'hex'), 1, 8));
   update daikome.dk_kyuryo_pub

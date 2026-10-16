@@ -524,6 +524,12 @@ test('★★⑪ 退職で 従業員から 消えて 退職者に 移り、復職
   }));
   expect(ato.nin, '★退職しても 従業員に 残っている★').toBe(mae.nin - 1);
   expect(ato.okutta[0]).toMatchObject({ active: false, retired_on: '2026-09-30' });
+  // 配る 一覧からも その 場で 消える（前は 開き直すまで「配る・作り直す」が 残った）
+  const haifu = await page.evaluate(
+    (na) => ((document.getElementById('haifuList') || {}).textContent || '').includes(na),
+    na
+  );
+  expect(haifu, '★退職したのに 配る 一覧に 残っている★').toBe(false);
   // 退職者：1行目に 辞めた日、2行目に 名前と 復職
   await page.locator('[data-kiri="yame"]').click();
   const yame = await page.evaluate(() =>
