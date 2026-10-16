@@ -181,3 +181,31 @@ test('「＋新しい車…」で 描き直しが 転ぶ＝書けた 行を「�
   await expect(page.locator('#err')).toContainText('保存しましたが');
   await expect(page.locator('#err')).not.toContainText('保存できませんでした');
 });
+
+test('描き直しが 転んだ 後、次の 保存で 描けたら「読み込み直して」は 消える（直った 後まで 出さない）', async ({
+  page,
+}) => {
+  await hiraku(page);
+  const moto = await page.evaluate(() => {
+    window.__motoCtx = window.PayrollDaily.buildCtx;
+    window.PayrollDaily.buildCtx = function () {
+      throw new Error('わざと');
+    };
+    return true;
+  });
+  expect(moto).toBe(true);
+  const sel = page.locator('#days select[data-man-add]').first();
+  page.once('dialog', (d) => d.accept('5号車'));
+  await sel.selectOption('__new__');
+  await page.waitForTimeout(1000);
+  await expect(page.locator('#err')).toContainText('読み込み直して');
+  // 直った（転ばない）状態で もう 1台 足す
+  await page.evaluate(() => {
+    window.PayrollDaily.buildCtx = window.__motoCtx;
+  });
+  const sel2 = page.locator('#days select[data-man-add]').first();
+  page.once('dialog', (d) => d.accept('4号車'));
+  await sel2.selectOption('__new__');
+  await page.waitForTimeout(1000);
+  await expect(page.locator('#err')).not.toContainText('読み込み直して');
+});
