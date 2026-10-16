@@ -3746,6 +3746,8 @@
             {
               method: 'PATCH',
               headers: { Prefer: 'return=representation' },
+              // 押して すぐ「戻る」でも 切らない（倉庫は 別の 住所＝問い合わせを 挟む 間に 切られた・対立役 S-2）
+              keepalive: true,
               body: JSON.stringify({ show_car_sales: ima, updated_at: new Date().toISOString() }),
             }
           )
@@ -3758,6 +3760,7 @@
               if (rows.length === 0) {
                 var bs = document.getElementById('btnSaveSet');
                 if (bs && bs.onclick) bs.onclick(); // 行が まだ 無い＝既定の 値で 作る
+                flash('carSaved', '保存しました（設定を 新しく 作りました）');
                 return;
               }
               showErr('');

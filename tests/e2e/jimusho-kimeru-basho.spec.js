@@ -332,3 +332,56 @@ test('★★⑥ 給料の 設定 ぜんぶの 保存でも 名簿に 無い 自�
     FIX.settings[0].owner_device_id = moto;
   }
 });
+
+// ★★⑦ 「載せる」の 書き込みは keepalive（押して すぐ 戻っても 切らない）・書けなければ 印を 戻す・行が 無ければ 作る★★
+test('★★⑦ 「載せる」の 枝（keepalive・書けない・行が 無い）★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#kuruma');
+  const kekka = await page.evaluate(async () => {
+    const S = window.DKSession;
+    const r0 = S.rest;
+    const sc = document.getElementById('showCarSales');
+    const matsu = () => new Promise((ok) => setTimeout(ok, 400));
+    const out = {};
+    // ① keepalive が 付く
+    let opt = null;
+    S.rest = function (s, p, o) {
+      if (o && o.method === 'PATCH') opt = o;
+      return r0.apply(this, arguments);
+    };
+    sc.click();
+    await matsu();
+    out.keepalive = !!(opt && opt.keepalive);
+    // ② 書けない＝印を 戻し、合図を 出す
+    const mae = sc.checked;
+    S.rest = function (s, p, o) {
+      if (o && o.method === 'PATCH')
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+      return r0.apply(this, arguments);
+    };
+    sc.click();
+    await matsu();
+    out.modotta = sc.checked === mae;
+    out.ngAizu = (document.getElementById('carSaved') || {}).textContent || '';
+    // ③ 行が 無い（0行）＝全部の 保存で 作り、車の 箱に 合図
+    let post = 0;
+    S.rest = function (s, p, o) {
+      if (o && o.method === 'PATCH')
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
+      if (o && o.method === 'POST' && String(p).indexOf('dk_payroll_settings') === 0) post++;
+      return r0.apply(this, arguments);
+    };
+    sc.click();
+    await matsu();
+    out.post = post;
+    out.zeroAizu = (document.getElementById('carSaved') || {}).textContent || '';
+    S.rest = r0;
+    return out;
+  });
+  expect(kekka.keepalive, '★「載せる」の 書き込みに keepalive が 無い＝戻ると 切られる★').toBe(
+    true
+  );
+  expect(kekka.modotta, '★書けなかったのに 印が 変わった まま★').toBe(true);
+  expect(kekka.ngAizu).toContain('保存できませんでした');
+  expect(kekka.post, '★行が 無い 会社で 設定を 作って いない★').toBe(1);
+  expect(kekka.zeroAizu).toContain('保存しました');
+});
