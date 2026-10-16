@@ -1133,6 +1133,10 @@
           };
           if (opts.headers) for (var k in opts.headers) h[k] = opts.headers[k];
           opts.headers = h;
+          // ★書く 時は 画面を 移っても 切らない★ 2026-10-16（車・従業員の チップは 押すと すぐ 画面を 移る＝
+          //   名前を 打って すぐ 押すと、欄を 離れた 時の 保存が 切られた・対立役 M-a）
+          if (opts.method && opts.method !== 'GET' && opts.keepalive === undefined)
+            opts.keepalive = true;
           return fetch(REST + path, opts);
         }
 

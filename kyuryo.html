@@ -3678,12 +3678,10 @@
                 if (ps) ps.classList.add('kuruma-dake');
                 // ★「載せる」の 印も 変えたら その場で 保存★（車ごとの 印・名前と 同じ。保存を 押し忘れて 戻ると
                 //   黙って 消えた・保存の 帯は 下の 帯に 覆われて 押せなかった＝対立役）
+                //   ★送るのは この 印 だけ★（設定 ぜんぶを 送ると、隠れた 積立・段階の 率が 画面の 丸めで
+                //     0.0525→0.053 に 書き換わった＝お金の 決まりが 黙って 変わる・対立役）
                 var sc = document.getElementById('showCarSales');
-                if (sc)
-                  sc.addEventListener('change', function () {
-                    var bs = document.getElementById('btnSaveSet');
-                    if (bs && bs.onclick) bs.onclick();
-                  });
+                if (sc) sc.addEventListener('change', noseruDakeHozon);
               }
               if (b2) {
                 TAB = doko;
@@ -3727,6 +3725,56 @@
             render();
           };
         });
+        // ★車だけの 画面の「載せる」＝この 印 だけを 書く★ 2026-10-16（対立役 S-1・M-b・軽1）
+        //   保存している 間は 押せない／書けたら 車の 箱の 中に「保存しました」／書けなければ 印を 戻して 知らせる。
+        //   まだ 設定の 行が 無い 会社（1行も 当たらない）は 今までの 保存（既定の 値）で 行を 作る
+        function noseruDakeHozon() {
+          var sc = document.getElementById('showCarSales');
+          if (!sc || !COMPANY) return;
+          var ima = sc.checked;
+          var modosu = function (msg) {
+            sc.checked = !ima;
+            showErr(msg);
+            flash('carSaved', '保存できませんでした');
+          };
+          if (SET && SET.yomenai)
+            return modosu('給料の 設定を 読めていないので 保存しません。もう一度 開いてください。');
+          sc.disabled = true;
+          DKSession.rest(
+            SESS,
+            'dk_payroll_settings?company_id=eq.' + encodeURIComponent(COMPANY.company_id),
+            {
+              method: 'PATCH',
+              headers: { Prefer: 'return=representation' },
+              body: JSON.stringify({ show_car_sales: ima, updated_at: new Date().toISOString() }),
+            }
+          )
+            .then(function (r) {
+              if (!r || !r.ok) throw new Error('保存できない');
+              return r.json();
+            })
+            .then(function (rows) {
+              if (!Array.isArray(rows)) throw new Error('返りが 読めない');
+              if (rows.length === 0) {
+                var bs = document.getElementById('btnSaveSet');
+                if (bs && bs.onclick) bs.onclick(); // 行が まだ 無い＝既定の 値で 作る
+                return;
+              }
+              showErr('');
+              if (SET) SET.show_car_sales = ima;
+              RAW.payrollSettings = SET;
+              flash('carSaved', '保存しました');
+              recalc();
+            })
+            .catch(function () {
+              modosu(
+                '「給料明細に 車ごとの売上を 載せる」を 保存できませんでした。通信を 確かめて もう一度 押してください。'
+              );
+            })
+            .then(function () {
+              sc.disabled = false;
+            });
+        }
         // ★「人ごとに 変えたい」から 従業員タブへ 1押しで 飛ぶ★ 2026-09-03（司さん）
         //   ★探し回らせない為★＝設定が 2つのタブに 分かれているのを 埋める。
         //   ★タブの押し方は 上と 同じ物を 使う★（決まりを 2か所に 書かない）

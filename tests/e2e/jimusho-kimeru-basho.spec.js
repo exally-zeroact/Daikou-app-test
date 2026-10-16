@@ -270,29 +270,61 @@ test('★★④ 会社設定の「車」から 来たら 車の 箱だけ★★'
   expect(z, '★給料の 設定 ぜんぶ の 方まで 隠しています★').toBeGreaterThanOrEqual(4);
 });
 
-// ★★⑤ 車だけの 画面で「載せる」を 変えたら その場で 保存し、見えない「自分の車」を 空に しない★★ 2026-10-16（対立役）
-//   前：「載せる」は 保存を 押さないと 黙って 消えた／保存すると、名簿に 無い 自分の 車が「決めていない」で 空に なった
-test('★★⑤ 車だけの 画面の「載せる」は その場で 保存・自分の車は 空に しない★★', async ({
+// ★★⑤ 車だけの 画面の「載せる」は その場で、この 印 だけを 書く★★ 2026-10-16（対立役）
+//   前：設定 ぜんぶを 送り、隠れた 積立 0.0525 が 画面の 丸めで 0.053 に 書き換わった／自分の 車が 空に なった
+function okuttaMiru(page) {
+  return page.evaluate(() => {
+    window.__okutta__ = [];
+    const r0 = window.DKSession.rest;
+    window.DKSession.rest = function (s, p, o) {
+      if (o && o.method && o.method !== 'GET' && String(p).indexOf('dk_payroll_settings') === 0)
+        window.__okutta__.push({ m: o.method, p: String(p), b: JSON.parse(o.body) });
+      return r0.apply(this, arguments);
+    };
+  });
+}
+test('★★⑤ 車だけの 画面の「載せる」は この 印 だけを その場で 書く★★', async ({ page }) => {
+  const moto = { ...FIX.settings[0] };
+  Object.assign(FIX.settings[0], {
+    owner_device_id: 'zz-meibo-ni-nai-kuruma',
+    reserve_pool_rate: 0.0525,
+    reserve_owner_rate: 0.0515,
+  });
+  try {
+    await kyuryoHiraku(page, '?henshu=1#kuruma');
+    await okuttaMiru(page);
+    await page.locator('#showCarSales').click();
+    await page.waitForTimeout(600);
+    const okutta = await page.evaluate(() => window.__okutta__);
+    expect(okutta.length, '★「載せる」を 変えても 保存して いない／2本 以上 送った★').toBe(1);
+    expect(okutta[0].m).toBe('PATCH');
+    expect(
+      Object.keys(okutta[0].b).sort(),
+      '★「載せる」 以外も 送っています（隠れた 率が 丸まる）★'
+    ).toEqual(['show_car_sales', 'updated_at']);
+    const saved = await page.evaluate(
+      () => (document.getElementById('carSaved') || {}).textContent || ''
+    );
+    expect(saved, '★車の 箱の 中に 保存の 合図が 出ていません★').toContain('保存しました');
+  } finally {
+    Object.keys(FIX.settings[0]).forEach((k) => delete FIX.settings[0][k]);
+    Object.assign(FIX.settings[0], moto);
+  }
+});
+
+test('★★⑥ 給料の 設定 ぜんぶの 保存でも 名簿に 無い 自分の 車を 空に しない★★', async ({
   page,
 }) => {
   const moto = FIX.settings[0].owner_device_id;
   FIX.settings[0].owner_device_id = 'zz-meibo-ni-nai-kuruma';
   try {
-    await kyuryoHiraku(page, '?henshu=1#kuruma');
-    await page.evaluate(() => {
-      window.__okutta__ = [];
-      const r0 = window.DKSession.rest;
-      window.DKSession.rest = function (s, p, o) {
-        if (o && o.method === 'POST' && String(p).indexOf('dk_payroll_settings') === 0)
-          window.__okutta__.push(JSON.parse(o.body));
-        return r0.apply(this, arguments);
-      };
-    });
-    await page.locator('#showCarSales').click();
+    await kyuryoHiraku(page, '?henshu=1#set');
+    await okuttaMiru(page);
+    await page.evaluate(() => document.getElementById('btnSaveSet').onclick());
     await page.waitForTimeout(600);
     const okutta = await page.evaluate(() => window.__okutta__);
-    expect(okutta.length, '★「載せる」を 変えても 保存して いません★').toBe(1);
-    const b = Array.isArray(okutta[0]) ? okutta[0][0] : okutta[0];
+    expect(okutta.length).toBe(1);
+    const b = Array.isArray(okutta[0].b) ? okutta[0].b[0] : okutta[0].b;
     expect(b.owner_device_id, '★見えない 自分の 車を 空に しました★').toBe(
       'zz-meibo-ni-nai-kuruma'
     );
