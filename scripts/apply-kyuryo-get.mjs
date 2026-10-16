@@ -41,6 +41,13 @@ export const ARU = [
   ['jsonb_agg(coalesce(e.role', '乗った 人の 役だけ 返す（回数・距離を 1台で 分ける・10-06）'],
   ['and a.employee_id = r.employee_id', '手当・控除は 本人の 分だけ（10-06）'],
   ["'taishoku'", '辞めた 人は 働いた 日を 含む 93 日 以内 だけ（会社の 売上を 見続けない・10-16）'],
+  // ★'taishoku' の 字だけでは 62 日の 古い 版・p_to を 切らない 版・直しを 絞らない 版でも OK に なった（対立役 N7・10-17）★
+  ['(p_to - p_from) > 93', '辞めた 人の 窓は 93 日まで（62 日の 古い 版で ない）'],
+  [
+    "p_to := least(p_to, (date_trunc('month', v_saigo)",
+    '辞めた 人は 最後に 働いた 月の 次の 月の 末で 切る',
+  ],
+  ['select sh2.shift_id from daikome.dk_shifts sh2', '直し（edits）は 窓の 中の 勤務の 分だけ'],
 ];
 export const NAI = [
   ['to_jsonb(ed)', '直しを 行ごと 丸ごと'],
