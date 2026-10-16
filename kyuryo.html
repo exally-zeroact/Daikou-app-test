@@ -5122,8 +5122,10 @@
           // ★名前の 選ぶ欄を 今の 人で 作り直す★（いなくなった人を 選んだままに しない・0人の 時も）
           hitoErabiTsukuru();
           if (!REP || !REP.employees.length) {
-            box.innerHTML =
-              '<div class="card"><div class="msg">まず「従業員」で人を登録してください。</div></div>';
+            // 本人の 画面で 0人＝その 月に 働いた 日も 手当・控除も 無い（辞めた 人など）＝「登録して」は 嘘に なる
+            box.innerHTML = HONNIN
+              ? '<div class="card"><div class="msg">この 月は 働いた 日が ありません。</div></div>'
+              : '<div class="card"><div class="msg">まず「従業員」で人を登録してください。</div></div>';
             return;
           }
           var ubDame = uriageDameBun(CTX);
