@@ -56,6 +56,23 @@ describe('★積み直した 後の 見張り★', () => {
     ).toBe(false);
   });
 
+  it('1b. cherry-pick が ぶつかった 枝（else）でも abort の 後に break（抜けないと 次の git push が up-to-date で 0 を 返し 押した 事に なる）', () => {
+    const a = dan.indexOf('if git cherry-pick "$MY_COMMIT"');
+    const b = dan.indexOf('\n            else\n', a);
+    const c = dan.indexOf('\n            fi\n', b);
+    expect(b > a && c > b, 'ぶつかった 枝が 読めない').toBe(true);
+    const naka = dan
+      .slice(b, c)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    expect(naka, '★ぶつかった 時に break で 抜けていない★').toContain('break');
+    expect(
+      naka.some((l) => /\bcontinue\b|^exit 0\b/.test(l)),
+      '★ぶつかった 枝に continue・exit 0★'
+    ).toBe(false);
+  });
+
   it('2. push の やり直しの 輪の 中に continue が 無い', () => {
     const a = dan.indexOf('for i in');
     const b = dan.indexOf('\n          done', a);
