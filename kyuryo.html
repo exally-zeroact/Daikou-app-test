@@ -4084,6 +4084,7 @@
             LOAD.failed += SET_YOMI.failed;
             if (SET_YOMI.failed > 0) SET = { yomenai: true }; // ★止める 印★（PayrollPeriod.yomu が dame に する）
             SET_YONDA = true;
+            yakuMotoKesu(); // 役割の 名前の 直しの 控えを 読み込んだ 名前から 始め直す
             LOAD_KIHON = { tried: LOAD.tried, failed: LOAD.failed };
             RAW.payrollSettings = SET;
             RAW.salesSettings = (res[3] && res[3][0]) || null;
@@ -7113,7 +7114,22 @@
             b.onclick = function () {
               var r = b.getAttribute('data-role-del');
               var st2 = PayrollDaily.normSettings(SET);
+              // ★最後の 1つは 消させない★（空に すると 既定の 役割に 黙って 戻る）2026-10-17
+              if (Object.keys(st2.roles).length <= 1)
+                return showErr('役割を 全部 消す 事は できません。1つは 残してください。');
+              // ★その 役割の 人（辞めた 人も）が 居れば 消させない★（消すと その人の 給料が 計算できない）
+              var hito = yakuNoHito(r);
+              if (hito.length)
+                return showErr(
+                  '「' +
+                    r +
+                    '」の 人が 居るので 消せません：' +
+                    hito.slice(0, 5).join('・') +
+                    (hito.length > 5 ? ' ほか ' + (hito.length - 5) + '人' : '') +
+                    '。先に「従業員」で その 人の 役割を 変えてください。'
+                );
               delete st2.roles[r];
+              delete YAKU_MOTO[r];
               stageRoles(st2.roles);
               renderSet();
             };
@@ -7125,9 +7141,35 @@
               var f = i.getAttribute('data-f');
               var cur = st2.roles[old] || { rate: 0, floor: 0 };
               if (f === 'name') {
-                if (!i.value || i.value === old) return;
+                var nv = String(i.value || '').trim();
+                if (!nv || nv === old) {
+                  i.value = old;
+                  return;
+                }
+                // ★在る 名前には 直させない★（その 役割の 決まりが 上書きされる）2026-10-17
+                if (Object.prototype.hasOwnProperty.call(st2.roles, nv)) {
+                  i.value = old;
+                  return showErr('「' + nv + '」は もう 在る 役割です。同じ 名前には できません。');
+                }
                 delete st2.roles[old];
-                st2.roles[i.value] = cur;
+                st2.roles[nv] = cur;
+                // ★日給・段階歩合も 新しい 名前へ 一緒に 移す★（前は 古い 名前の まま 残り、保存で 消えた）
+                var px = hokaYomu();
+                if (px && px.roles && px.roles[old]) {
+                  px = JSON.parse(JSON.stringify(px));
+                  px.roles[nv] = px.roles[old];
+                  delete px.roles[old];
+                }
+                if (px) {
+                  SET = SET || {};
+                  SET.pay_extra = px;
+                }
+                // 読み込んだ 時の 名前を 控える（保存の 時に 人の 役割も 倉庫で 一緒に 直す）
+                var moto = Object.prototype.hasOwnProperty.call(YAKU_MOTO, old)
+                  ? YAKU_MOTO[old]
+                  : old;
+                delete YAKU_MOTO[old];
+                YAKU_MOTO[nv] = moto;
               } else {
                 cur[f] = num(i.value);
                 st2.roles[old] = cur;
@@ -7474,6 +7516,48 @@
           return out;
         }
 
+        // ★★役割の 名前の 直しの 控え★★ 2026-10-17
+        //   前は 名前を 直すと 決まりの 鍵だけ 変わり、人の 役割（辞めた 人も）は 古い 名前の まま＝
+        //   歩合0・保証0で 計算されていた。保存の 時に 倉庫の 関数 dk_yaku_namae_naoshi が
+        //   決まり・日給/段階歩合・人の 役割を 1つの 取引で 一緒に 直す。
+        //   YAKU_MOTO＝{ 今の 名前: 読み込んだ 時の 名前 }（A→B→C や 入れ替えも 読み込んだ 名前から 数える）
+        var YAKU_MOTO = {};
+        var YAKU_YOMI = []; // 読み込んだ 時の 役割の 名前
+        function yakuMotoKesu() {
+          YAKU_MOTO = {};
+          YAKU_YOMI = SET && !SET.yomenai ? Object.keys(PayrollDaily.normSettings(SET).roles) : [];
+        }
+        // その 役割の 人（辞めた 人も）の 名前。人の 役割は 保存までは 読み込んだ 時の 名前の まま
+        function yakuNoHito(r) {
+          var moto = Object.prototype.hasOwnProperty.call(YAKU_MOTO, r) ? YAKU_MOTO[r] : r;
+          return (RAW.employees || [])
+            .filter(function (e) {
+              return e && (e.role || '') === moto;
+            })
+            .map(function (e) {
+              return (e.name || '名前の 無い 人') + (e.active === false ? '（退職）' : '');
+            });
+        }
+        // 倉庫へ 送る { 読み込んだ 時の 名前: 今の 名前 }（この 画面で 足した 役割は 倉庫に 無いので 入れない）
+        function yakuMap() {
+          var m = {};
+          Object.keys(YAKU_MOTO).forEach(function (ima) {
+            var moto = YAKU_MOTO[ima];
+            if (moto !== ima && YAKU_YOMI.indexOf(moto) >= 0) m[moto] = ima;
+          });
+          return m;
+        }
+        var YAKU_NAOSHI_WAKE = {
+          not_yours: '自分の 会社では ありません',
+          exists: '直さない 役割と 同じ 名前に なります',
+          dup: '同じ 名前が 2つ に なります',
+          not_found:
+            '直す 前の 役割が 見つかりません（他の 画面で 変わった かも しれません。開き直してください）',
+          blank: '名前が 空です',
+          empty: '直す 物が ありません',
+          no_roles: '役割の 決まりが 読めません',
+        };
+
         function stageRoles(roles) {
           SET = SET || {};
           SET.roles = roles;
@@ -7535,8 +7619,49 @@
             pay_extra: hokaYomu(),
             updated_at: new Date().toISOString(),
           };
-          upsert('dk_payroll_settings', 'company_id', body)
+          // ★役割の 名前を 直した 時は 先に 倉庫で 決まり・日給/段階歩合・人の 役割を 一緒に 直す★ 2026-10-17
+          //   （1つの 取引。ここで 断られたら 設定も 保存しない＝名前だけ 変わって 人が 取り残されない）
+          var yMap = yakuMap();
+          var yakuMae = Object.keys(yMap).length
+            ? DKSession.rest(SESS, 'rpc/dk_yaku_namae_naoshi', {
+                method: 'POST',
+                body: JSON.stringify({ p_company_id: COMPANY.company_id, p_map: yMap }),
+              }).then(function (r) {
+                return r
+                  .json()
+                  .catch(function () {
+                    return null;
+                  })
+                  .then(function (j) {
+                    if (!r.ok || !j || j.ok !== true) {
+                      var w = (j && YAKU_NAOSHI_WAKE[j.reason]) || '倉庫に 届きませんでした';
+                      throw new Error(
+                        '役割の 名前を 直せませんでした（' + w + '）。設定も 保存していません。'
+                      );
+                    }
+                    // 倉庫は もう 直った＝控えを 今の 名前から 始め直し、手元の 人の 役割も 揃える
+                    (RAW.employees || []).forEach(function (e) {
+                      if (e && Object.prototype.hasOwnProperty.call(yMap, e.role || ''))
+                        e.role = yMap[e.role];
+                    });
+                    YAKU_MOTO = {};
+                    YAKU_YOMI = Object.keys(st.roles);
+                    return j;
+                  });
+              })
+            : Promise.resolve(null);
+          yakuMae
+            .then(
+              function () {
+                return upsert('dk_payroll_settings', 'company_id', body);
+              },
+              function (e) {
+                showErr(e && e.message ? e.message : '役割の 名前を 直せませんでした。');
+                return null;
+              }
+            )
             .then(function (r) {
+              if (r === null) return;
               if (!r.ok) return saveErr('給料の設定を保存できませんでした。', r);
               showErr('');
               SET = body;
