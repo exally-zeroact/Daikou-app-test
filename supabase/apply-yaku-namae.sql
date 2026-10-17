@@ -124,7 +124,9 @@ begin
      and p_map ? e.role;
   get diagnostics n_hito = row_count;
 
-  return json_build_object('ok', true, 'hito', n_hito, 'roles', v_new_roles);
+  -- 書いた 時刻も 返す（画面が 手元の updated_at を 揃える＝次の 保存で 自分を「他の 画面で 変わった」と 止めない）
+  return json_build_object('ok', true, 'hito', n_hito, 'roles', v_new_roles,
+    'updated_at', (select s.updated_at from daikome.dk_payroll_settings s where s.company_id = p_company_id));
 end;
 $fn$;
 

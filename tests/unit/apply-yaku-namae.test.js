@@ -32,8 +32,8 @@ describe('apply-yaku-namae の 守り', () => {
   ]) {
     it('② 中に ' + na + ' が 在れば 止まる', () => {
       const s = SQL.replace(
-        '  get diagnostics n_hito = row_count;\n\n  return',
-        '  ' + ire + '\n  get diagnostics n_hito = row_count;\n\n  return'
+        '  get diagnostics n_hito = row_count;\n\n',
+        '  ' + ire + '\n  get diagnostics n_hito = row_count;\n\n'
       );
       expect(s).not.toBe(SQL);
       expect(() => M.kiridasu(s, M.K)).toThrow(na);
@@ -41,14 +41,15 @@ describe('apply-yaku-namae の 守り', () => {
   }
   it('③ 他の 表を 書き換えたら 止まる', () => {
     const s = SQL.replace(
-      'update daikome.dk_employees e\n     set role = p_map ->> e.role\n   where e.company_id = p_company_id\n     and p_map ? e.role;\n  get diagnostics n_hito = row_count;\n\n  return',
-      'update daikome.dk_kyuryo_pub e set token = null;\n  get diagnostics n_hito = row_count;\n\n  return'
+      'update daikome.dk_employees e\n     set role = p_map ->> e.role\n   where e.company_id = p_company_id\n     and p_map ? e.role;\n  get diagnostics n_hito = row_count;\n\n',
+      'update daikome.dk_kyuryo_pub e set token = null;\n  get diagnostics n_hito = row_count;\n\n'
     );
     expect(s).not.toBe(SQL);
     expect(() => M.kiridasu(s, M.K)).toThrow('dk_kyuryo_pub');
   });
   // ★抜け道 3つ（対立役 2026-10-17 本番前）★ 直す 前は どれも 通った
-  const SHIRI = '  get diagnostics n_hito = row_count;\n\n  return';
+  // ★目印は return の 前の 空行まで★（return の 上に 注釈が 入っても 外れない・10-18 2件目の 小さい 直しで 8件 外れた）
+  const SHIRI = '  get diagnostics n_hito = row_count;\n\n';
   for (const [na, ire, kotae] of [
     ['引用符で 囲んだ 表', 'update "daikome"."dk_companies" c set name = name;', 'dk_companies'],
     ['空白を 挟んだ 表', 'update daikome . dk_companies c set name = name;', 'dk_companies'],

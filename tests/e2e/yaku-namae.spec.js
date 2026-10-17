@@ -45,11 +45,17 @@ function sess(F, rpcKotae) {
     'S.rememberedCompanyId=function(){return co.company_id;};S.pickCompany=function(){return {mode:"one",company:co};};' +
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve([co]);}});};' +
     'S.rest=function(s,p,o){var m=(o&&o.method)||"GET";if(m!=="GET")window.__calls.push({p:p,m:m,b:o&&o.body?JSON.parse(o.body):null});' +
+    // window.__UPSERT_NG＝設定の 保存を その 回数だけ 落とす（倉庫に 残さない）
+    'if(m==="POST"&&p.indexOf("dk_payroll_settings")===0&&window.__UPSERT_NG>0){window.__UPSERT_NG--;' +
+    'return Promise.resolve({ok:false,status:500,text:function(){return Promise.resolve("{}");},json:function(){return Promise.resolve({});}});}' +
     // 設定の 保存は 偽の 倉庫に 残す（本物の 倉庫と 同じく 次の 読みで 保存した 時刻が 返る）
     'if(m==="POST"&&p.indexOf("dk_payroll_settings")===0){F.settings=[Object.assign({},F.settings[0]||{},JSON.parse(o.body))];}' +
-    'var j=p.indexOf("rpc/dk_yaku_namae_naoshi")===0?RPC:rows(p);' +
+    // 名前を 直す 関数は 本物と 同じく 倉庫の updated_at を 書き換え、その 時刻を 返す
+    'if(p.indexOf("rpc/dk_yaku_namae_naoshi")===0&&RPC.ok&&RPC.updated_at&&F.settings[0])F.settings[0].updated_at=RPC.updated_at;' +
+    // 本物の 倉庫と 同じく 毎回 写しを 返す（画面の 手元と 倉庫の 中が 同じ 物を 指さない）
+    'var j=JSON.parse(JSON.stringify(p.indexOf("rpc/dk_yaku_namae_naoshi")===0?RPC:rows(p)));' +
     'return Promise.resolve({ok:true,status:200,text:function(){return Promise.resolve(JSON.stringify(j));},json:function(){return Promise.resolve(j);}});};' +
-    'S.softList=function(s,p,st){if(st)st.tried++;return Promise.resolve(rows(p));};})();'
+    'S.softList=function(s,p,st){if(st)st.tried++;return Promise.resolve(JSON.parse(JSON.stringify(rows(p))));};})();'
   );
 }
 
@@ -247,4 +253,38 @@ test('⑨ 保存を 続けて 2回 押しても 倉庫の 関数は 1回だけ',
   const c = await calls(page);
   expect(rpcPost(c)).toHaveLength(1);
   expect(setteiPost(c)).toHaveLength(1);
+});
+
+// ★本番前 対立 2回目（2026-10-17）の 直す 件★
+test('⑩ この 画面で 消した 名前には 保存の 前に 直させない（倉庫には まだ 在る）', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.settings[0].roles['丁'] = { rate: 0.2, floor: 800 };
+    },
+  });
+  await page.click('[data-role-del="丁"]');
+  await namae(page, '甲', '丁');
+  await expect(page.locator('#err')).toContainText('この 画面で 消した 名前');
+  await expect(page.locator('[data-role="甲"][data-f="name"]')).toHaveValue('甲');
+});
+
+test('⑪ 名前の 直しは 通り 設定の 保存だけ 落ちても、次の 保存で 自分を「他の 画面で 変わった」と 止めない', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    rpc: { ok: true, hito: 1, updated_at: '2026-08-05T03:00:01.123456+00:00' },
+  });
+  await namae(page, '甲', '丙');
+  await page.evaluate(() => {
+    window.__UPSERT_NG = 1;
+  });
+  await hozon(page);
+  await expect(page.locator('#err')).toContainText('保存できませんでした');
+  await hozon(page);
+  const c = await calls(page);
+  await expect(page.locator('#err')).not.toContainText('他の 画面で');
+  expect(rpcPost(c), '倉庫は もう 直った＝2回目は 名前の 直しを 送らない').toHaveLength(1);
+  expect(setteiPost(c)).toHaveLength(2);
 });
