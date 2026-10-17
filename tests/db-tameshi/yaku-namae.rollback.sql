@@ -8,6 +8,8 @@
 --       4 同じ 新しい 名前が 2つ＝dup／5 決まりに 無い 名前＝not_found／6 空＝blank
 --       7 よその 会社＝not_yours
 --       8 設定の 行が まだ 無い 会社＝true/乙/0（人の 役割だけ 直る・行は 作らない）
+--       9 決まりが 空（{}）の 会社＝true/丙（人の 役割だけ 直る）
+--       9b 直さない 名前が 日給・段階歩合の 鍵に だけ 残る＝exists
 begin;
 create temp table co as
   select c.company_id, c.owner_id
@@ -71,6 +73,16 @@ insert into k select '8 行の 無い 会社 ok/D/行',
   (r8.x->>'ok') || '/' || pg_temp.yaku('zz-yaku-D') || '/'
   || (select count(*) from daikome.dk_payroll_settings s where s.company_id = (select company_id from co2))::text
   from r8;
+-- 9 設定の 行は 在るが 決まりが 空（{}）＝人の 役割だけ 直る（前は no_roles で 二度と 直せなかった）
+insert into daikome.dk_payroll_settings (company_id, roles) select company_id, '{}'::jsonb from co2;
+create temp table r9 as select public.dk_yaku_namae_naoshi(company_id, '{"乙":"丙"}'::jsonb)::jsonb x from co2;
+insert into k select '9 決まりが 空 ok/D', (r9.x->>'ok') || '/' || pg_temp.yaku('zz-yaku-D') from r9;
+-- 9b 直さない 名前が 日給・段階歩合の 鍵に だけ 残って いる＝ぶつかる（日給を 黙って 上書きしない）
+create temp table c3 as select set_config('request.jwt.claims', json_build_object('sub', owner_id::text, 'role', 'authenticated')::text, true) x from co;
+update daikome.dk_payroll_settings s
+   set pay_extra = jsonb_build_object('roles', jsonb_build_object('Q', jsonb_build_object('nikkyu', 7000)))
+ where s.company_id = (select company_id from co);
+insert into k select '9b 日給の 鍵と ぶつかる', public.dk_yaku_namae_naoshi(company_id, '{"甲":"Q"}'::jsonb)::jsonb->>'reason' from co;
 create temp table yoso as select set_config('request.jwt.claims', json_build_object('sub', gen_random_uuid()::text, 'role', 'authenticated')::text, true) x;
 insert into k select '7 よその 会社', public.dk_yaku_namae_naoshi(company_id, '{"甲":"Z"}'::jsonb)::jsonb->>'reason' from co;
 select n, v from k order by n;

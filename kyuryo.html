@@ -3880,6 +3880,8 @@
               }
               showErr('');
               if (SET) SET.show_car_sales = ima;
+              // 倉庫の 更新の 時刻も 手元に 揃える（給料の 設定の 保存の 前の「他の 画面で 変わったか」の 比べに 使う）
+              if (SET && rows[0] && rows[0].updated_at) SET.updated_at = rows[0].updated_at;
               RAW.payrollSettings = SET;
               flash('carSaved', '保存しました');
               recalc();
@@ -7537,7 +7539,8 @@
         var YAKU_YOMI = []; // 読み込んだ 時の 役割の 名前
         function yakuMotoKesu() {
           YAKU_MOTO = {};
-          YAKU_YOMI = SET && !SET.yomenai ? Object.keys(PayrollDaily.normSettings(SET).roles) : [];
+          // 設定の 行が まだ 無い 会社も 画面は 既定の 役割を 出している＝その 名前を 直したら 人も 直す（対立役 S2）
+          YAKU_YOMI = SET && SET.yomenai ? [] : Object.keys(PayrollDaily.normSettings(SET).roles);
         }
         // その 役割の 人（辞めた 人も）の 名前。人の 役割は 保存までは 読み込んだ 時の 名前の まま
         function yakuNoHito(r) {
@@ -7558,6 +7561,17 @@
             if (moto !== ima && YAKU_YOMI.indexOf(moto) >= 0) m[moto] = ima;
           });
           return m;
+        }
+        // ★倉庫の 時刻を ミリ秒に★（'2026-08-06 14:59:12.00606+00' と ISO の 'Z' を 同じ 数に 読む・空は null）
+        //   読めない 字は 字の まま 返す（数に ならない 物どうしを 同じと 見ない＝NaN !== NaN で 毎回 止まらない 様に）
+        function tokiMs(v) {
+          if (v === null || v === undefined || v === '') return null;
+          var t = String(v)
+            .replace(' ', 'T')
+            .replace(/([+-]\d\d)$/, '$1:00')
+            .replace(/(\.\d{3})\d+/, '$1');
+          var ms = Date.parse(t);
+          return isNaN(ms) ? String(v) : ms;
         }
         var YAKU_NAOSHI_WAKE = {
           not_yours: '自分の 会社では ありません',
@@ -7631,38 +7645,89 @@
             pay_extra: hokaYomu(),
             updated_at: new Date().toISOString(),
           };
+          // ★保存中は 押せない★ 2026-10-17（二度 押すと 2回目の 名前の 直しが「見つからない」で 赤く 出た・対立役）
+          var hozonBtn = [$('btnSaveSet'), document.getElementById('btnSaveSet2')].filter(Boolean);
+          if (
+            hozonBtn.some(function (b) {
+              return b.disabled;
+            })
+          )
+            return;
+          hozonBtn.forEach(function (b) {
+            b.disabled = true;
+          });
+          var hozonOwari = function () {
+            hozonBtn.forEach(function (b) {
+              b.disabled = false;
+            });
+          };
           // ★役割の 名前を 直した 時は 先に 倉庫で 決まり・日給/段階歩合・人の 役割を 一緒に 直す★ 2026-10-17
           //   （1つの 取引。ここで 断られたら 設定も 保存しない＝名前だけ 変わって 人が 取り残されない）
           var yMap = yakuMap();
-          var yakuMae = Object.keys(yMap).length
-            ? DKSession.rest(SESS, 'rpc/dk_yaku_namae_naoshi', {
-                method: 'POST',
-                body: JSON.stringify({ p_company_id: COMPANY.company_id, p_map: yMap }),
-              }).then(function (r) {
-                return r
-                  .json()
-                  .catch(function () {
-                    return null;
-                  })
-                  .then(function (j) {
-                    if (!r.ok || !j || j.ok !== true) {
-                      var w = (j && YAKU_NAOSHI_WAKE[j.reason]) || '倉庫に 届きませんでした';
-                      throw new Error(
-                        '役割の 名前を 直せませんでした（' + w + '）。設定も 保存していません。'
-                      );
-                    }
-                    // 倉庫は もう 直った＝控えを 今の 名前から 始め直し、手元の 人の 役割も 揃える
-                    (RAW.employees || []).forEach(function (e) {
-                      if (e && Object.prototype.hasOwnProperty.call(yMap, e.role || ''))
-                        e.role = yMap[e.role];
-                    });
-                    YAKU_MOTO = {};
-                    YAKU_YOMI = Object.keys(st.roles);
-                    return j;
+          // ★★保存の 前に「他の 画面で 設定が 変わって いないか」を 倉庫で 確かめる★★ 2026-10-17（対立役 S1）
+          //   この 保存は 決まり（roles）を 丸ごと 上書きする。開いた 後に 別の 画面が 役割の 名前を 直していたら、
+          //   古い 名前に 戻し、人だけ 新しい 名前で 取り残す（歩合0・保証0）。変わって いたら 止めて 開き直して もらう
+          var kawariMae = DKSession.rest(
+            SESS,
+            kaishaDake('dk_payroll_settings?select=updated_at&limit=1')
+          )
+            .then(function (r) {
+              if (!r || !r.ok) throw new Error('yomenai');
+              return r.json();
+            })
+            .then(function (rows) {
+              if (!Array.isArray(rows)) throw new Error('yomenai');
+              var mae = tokiMs(SET && SET.updated_at);
+              var ima = tokiMs(rows[0] && rows[0].updated_at);
+              if (mae !== ima)
+                throw new Error(
+                  '給料の 設定が 他の 画面で 変わりました。上書き しない 様に 止めました。画面を 開き直してから もう一度 直してください。'
+                );
+            })
+            .catch(function (e) {
+              throw new Error(
+                e && e.message && e.message !== 'yomenai'
+                  ? e.message
+                  : '給料の 設定を 確かめられませんでした（通信）。保存していません。もう一度 押してください。'
+              );
+            });
+          var yakuMae = function () {
+            if (!Object.keys(yMap).length) return Promise.resolve(null);
+            return DKSession.rest(SESS, 'rpc/dk_yaku_namae_naoshi', {
+              method: 'POST',
+              body: JSON.stringify({ p_company_id: COMPANY.company_id, p_map: yMap }),
+            }).then(function (r) {
+              return r
+                .json()
+                .catch(function () {
+                  return null;
+                })
+                .then(function (j) {
+                  if (!r.ok || !j || j.ok !== true) {
+                    var w =
+                      (j && YAKU_NAOSHI_WAKE[j.reason]) ||
+                      (r.status === 401 || r.status === 403
+                        ? 'ログインが 切れました。ログインし直してください'
+                        : r.status === 404
+                          ? '倉庫に 名前を 直す 仕組みが まだ ありません'
+                          : '倉庫に 届きませんでした');
+                    throw new Error(
+                      '役割の 名前を 直せませんでした（' + w + '）。設定も 保存していません。'
+                    );
+                  }
+                  // 倉庫は もう 直った＝控えを 今の 名前から 始め直し、手元の 人の 役割も 揃える
+                  (RAW.employees || []).forEach(function (e) {
+                    if (e && Object.prototype.hasOwnProperty.call(yMap, e.role || ''))
+                      e.role = yMap[e.role];
                   });
-              })
-            : Promise.resolve(null);
-          yakuMae
+                  YAKU_MOTO = {};
+                  YAKU_YOMI = Object.keys(st.roles);
+                  return j;
+                });
+            });
+          };
+          kawariMae
+            .then(yakuMae)
             .then(
               function () {
                 return upsert('dk_payroll_settings', 'company_id', body);
@@ -7686,7 +7751,8 @@
             })
             .catch(function () {
               showErr('給料の設定を保存できませんでした。');
-            });
+            })
+            .then(hozonOwari);
         };
       })();
     </script>

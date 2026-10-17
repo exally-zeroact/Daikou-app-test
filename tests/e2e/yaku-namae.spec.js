@@ -35,7 +35,9 @@ function sess(F, rpcKotae) {
     ';var RPC=' +
     JSON.stringify(rpcKotae || { ok: true, hito: 1 }) +
     ';window.__calls=[];' +
-    'function rows(p){ if(p.indexOf("dk_employees")===0)return F.emps||[]; if(p.indexOf("dk_device_labels")===0)return F.labels||[];' +
+    // window.__KAWARU＝別の 画面が 設定を 保存した（倉庫の 更新の 時刻が 変わった）
+    'function rows(p){ if(window.__KAWARU&&p.indexOf("dk_payroll_settings?select=updated_at")===0)return [{updated_at:"2099-01-01T00:00:00+00:00"}];' +
+    ' if(p.indexOf("dk_employees")===0)return F.emps||[]; if(p.indexOf("dk_device_labels")===0)return F.labels||[];' +
     ' if(p.indexOf("dk_payroll_settings")===0)return F.settings||[]; if(p.indexOf("dk_shifts")===0)return F.shifts||[];' +
     ' if(p.indexOf("dk_shift_edits")===0)return F.edits||[]; if(p.indexOf("dk_work_hours")===0)return F.workHours||[];' +
     ' if(p.indexOf("dk_manual_days")===0)return F.manualDays||[]; return [];}' +
@@ -43,6 +45,8 @@ function sess(F, rpcKotae) {
     'S.rememberedCompanyId=function(){return co.company_id;};S.pickCompany=function(){return {mode:"one",company:co};};' +
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve([co]);}});};' +
     'S.rest=function(s,p,o){var m=(o&&o.method)||"GET";if(m!=="GET")window.__calls.push({p:p,m:m,b:o&&o.body?JSON.parse(o.body):null});' +
+    // 設定の 保存は 偽の 倉庫に 残す（本物の 倉庫と 同じく 次の 読みで 保存した 時刻が 返る）
+    'if(m==="POST"&&p.indexOf("dk_payroll_settings")===0){F.settings=[Object.assign({},F.settings[0]||{},JSON.parse(o.body))];}' +
     'var j=p.indexOf("rpc/dk_yaku_namae_naoshi")===0?RPC:rows(p);' +
     'return Promise.resolve({ok:true,status:200,text:function(){return Promise.resolve(JSON.stringify(j));},json:function(){return Promise.resolve(j);}});};' +
     'S.softList=function(s,p,st){if(st)st.tried++;return Promise.resolve(rows(p));};})();'
@@ -182,4 +186,65 @@ test('⑥ 入れ替え（甲→X・乙→甲・X→乙）は 読み込んだ 名
   const c = await calls(page);
   expect(rpcPost(c)).toHaveLength(1);
   expect(rpcPost(c)[0].b.p_map).toEqual({ 甲: '乙', 乙: '甲' });
+});
+
+// ★本番前の 対立役（2026-10-17）の 止める 2件と 二度押し★
+test('⑦ 設定の 行が まだ 無い 会社でも 既定の 役割の 名前を 直すと 倉庫で 人も 直す', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.settings = [];
+    },
+  });
+  await namae(page, '1種', '丙');
+  await hozon(page);
+  const c = await calls(page);
+  expect(rpcPost(c), '行の 無い 会社で 倉庫の 関数を 呼ばなかった').toHaveLength(1);
+  expect(rpcPost(c)[0].b.p_map).toEqual({ '1種': '丙' });
+  expect(Object.keys(setteiPost(c)[0].b.roles).sort()).toEqual(['2種', '丙']);
+});
+
+test('⑧ 開いた 後に 別の 画面が 設定を 保存して いたら 止める（名前の 直しも 設定の 保存も しない）', async ({
+  page,
+}) => {
+  await hiraku(page);
+  await namae(page, '甲', '丙');
+  await page.evaluate(() => {
+    window.__KAWARU = true;
+  });
+  await hozon(page);
+  const c = await calls(page);
+  expect(rpcPost(c), '変わったのに 名前を 直した').toHaveLength(0);
+  expect(setteiPost(c), '変わったのに 上書きした').toHaveLength(0);
+  await expect(page.locator('#err')).toContainText('他の 画面で 変わりました');
+  // 保存の ボタンは 戻る（押せない まま に しない）
+  await expect(page.locator('#btnSaveSet')).toBeEnabled();
+});
+
+test('⑧-2 変わって いなければ 保存する（自分の 前の 保存・車ごとの 売上の 保存の 後も 止めない）', async ({
+  page,
+}) => {
+  await hiraku(page);
+  await namae(page, '甲', '丙');
+  await hozon(page);
+  await namae(page, '乙', '丁');
+  await hozon(page);
+  const c = await calls(page);
+  expect(setteiPost(c)).toHaveLength(2);
+  await expect(page.locator('#err')).not.toContainText('他の 画面で');
+});
+
+test('⑨ 保存を 続けて 2回 押しても 倉庫の 関数は 1回だけ', async ({ page }) => {
+  await hiraku(page);
+  await namae(page, '甲', '丙');
+  await page.evaluate(() => {
+    const b = document.getElementById('btnSaveSet');
+    b.onclick();
+    b.onclick();
+  });
+  await page.waitForTimeout(800);
+  const c = await calls(page);
+  expect(rpcPost(c)).toHaveLength(1);
+  expect(setteiPost(c)).toHaveLength(1);
 });

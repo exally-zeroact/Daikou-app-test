@@ -59,15 +59,25 @@ export function kiridasu(sql, k) {
   if (a < 0 || a === b) throw new Error('$fn$ の 囲いが 読めない');
   const soto = block.slice(0, a) + block.slice(b + 4);
   if ((soto.match(/;/g) || []).length !== 1) throw new Error('囲いの 外に 別の 文が 在る');
-  if (!/security definer/.test(block.slice(0, a))) throw new Error('security definer が 無い');
-  if (!/set search_path = daikome, public, extensions/.test(block.slice(0, a)))
+  // ★注釈を 外してから 判じる★（「security invoker -- security definer」の 様に 注釈の 字で 通さない・対立役 2026-10-17）
+  const kesu = (x) => x.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, '');
+  const atama = kesu(block.slice(0, a));
+  if (!/\bsecurity\s+definer\b/i.test(atama)) throw new Error('security definer が 無い');
+  if (/\bsecurity\s+invoker\b/i.test(atama)) throw new Error('security invoker が 在る');
+  if (!/set search_path = daikome, public, extensions/.test(atama))
     throw new Error('search_path を 固定していない');
-  const naka = block.slice(a + 4, b).replace(/--[^\n]*/g, '');
-  const ng = naka.match(/\b(delete|drop|truncate|alter|grant|revoke|create|insert)\b/i);
+  const naka = kesu(block.slice(a + 4, b));
+  // execute（字を つないで 別の 文を 走らせる）も 断る
+  const ng = naka.match(/\b(delete|drop|truncate|alter|grant|revoke|create|insert|execute)\b/i);
   if (ng) throw new Error(k.na + ' に ' + ng[0] + ' が 在る');
-  const ups = naka.match(/\bupdate\s+([a-z_.]+)/gi) || [];
+  // 書き換える 表は 引用符・空白を 外して 名前で 比べる（"daikome"."dk_companies" 等で すり抜けない）
+  const ups =
+    naka.match(/\bupdate\s+(?:only\s+)?(?:"[^"]+"|\w+)(?:\s*\.\s*(?:"[^"]+"|\w+))?/gi) || [];
   for (const u of ups) {
-    const t = u.replace(/^update\s+/i, '').toLowerCase();
+    const t = u
+      .replace(/^update\s+(?:only\s+)?/i, '')
+      .replace(/["\s]/g, '')
+      .toLowerCase();
     if (t !== 'daikome.dk_payroll_settings' && t !== 'daikome.dk_employees')
       throw new Error(k.na + ' が ' + t + ' を 書き換える');
   }

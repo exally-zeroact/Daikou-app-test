@@ -14,8 +14,9 @@
 --
 --   ★断る 時★（何も 変えない）
 --     ・自分の 会社で ない（dk_companies.owner_id = auth.uid() で 確かめる）
---     ・名前が 空・同じ 新しい 名前が 2つ・直さない 役割の 名前と ぶつかる（決まりが 上書きされる）
---     ・直す 前の 名前が 決まりに 無い（設定の 行が まだ 無い 会社は 人の 役割だけ 直す＝決まりは 後の 保存が 作る）
+--     ・名前が 空・同じ 新しい 名前が 2つ・直さない 役割の 名前と ぶつかる（決まりが 上書きされる。
+--       直さない 名前が 日給・段階歩合の 鍵に だけ 残って いる 時も ぶつかる 扱い）
+--     ・直す 前の 名前が 決まりに 無い（設定の 行が まだ 無い・決まりが 空の 会社は 人の 役割だけ 直す＝決まりは 後の 保存が 作る）
 --
 --   ★守り★ security definer ＋ search_path 固定。anon・PUBLIC には 呼ばせない（authenticated だけ）
 -- ============================================================
@@ -67,9 +68,9 @@ begin
     from daikome.dk_payroll_settings s
    where s.company_id = p_company_id
    for update;
-  -- ★設定の 行が まだ 無い 会社★（画面は 既定の 1種・2種 を 出している）＝人の 役割だけ 直す。
-  --   決まりは この 後の 保存（upsert）が 新しい 名前で 作る
-  if not found then
+  -- ★設定の 行が まだ 無い・決まり（roles）が 空の 会社★（画面は 既定の 1種・2種 を 出している）＝人の 役割だけ 直す。
+  --   決まりは この 後の 保存（upsert）が 新しい 名前で 作る（前は 空の 決まりで no_roles＝二度と 直せなかった・対立役）
+  if not found or v_roles is null or jsonb_typeof(v_roles) <> 'object' or v_roles = '{}'::jsonb then
     update daikome.dk_employees e
        set role = p_map ->> e.role
      where e.company_id = p_company_id
@@ -77,19 +78,20 @@ begin
     get diagnostics n_hito = row_count;
     return json_build_object('ok', true, 'hito', n_hito, 'roles', null);
   end if;
-  if v_roles is null or jsonb_typeof(v_roles) <> 'object' then
-    return json_build_object('ok', false, 'reason', 'no_roles');
-  end if;
-
   -- 直す 前の 名前が 決まりに 無い
   if exists (select 1 from jsonb_object_keys(p_map) k0 where not (v_roles ? k0)) then
     return json_build_object('ok', false, 'reason', 'not_found');
   end if;
 
-  -- 直さない 役割の 名前と ぶつかる（決まりが 上書きされる）
+  v_ex_roles := case
+    when v_extra is not null and jsonb_typeof(v_extra -> 'roles') = 'object' then v_extra -> 'roles'
+    else null
+  end;
+
+  -- 直さない 役割の 名前と ぶつかる（決まり・日給/段階歩合が 上書きされる）
   if exists (
     select 1 from jsonb_each(p_map) m
-     where v_roles ? (m.value #>> '{}')
+     where (v_roles ? (m.value #>> '{}') or coalesce(v_ex_roles ? (m.value #>> '{}'), false))
        and not (p_map ? (m.value #>> '{}'))
   ) then
     return json_build_object('ok', false, 'reason', 'exists');
@@ -102,10 +104,6 @@ begin
   end loop;
 
   -- 日給・段階歩合（pay_extra.roles）も 同じに
-  v_ex_roles := case
-    when v_extra is not null and jsonb_typeof(v_extra -> 'roles') = 'object' then v_extra -> 'roles'
-    else null
-  end;
   if v_ex_roles is not null then
     for k in select jsonb_object_keys(v_ex_roles) loop
       v_new_ex := v_new_ex || jsonb_build_object(coalesce(p_map ->> k, k), v_ex_roles -> k);

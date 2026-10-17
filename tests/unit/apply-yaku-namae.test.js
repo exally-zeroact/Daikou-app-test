@@ -47,6 +47,24 @@ describe('apply-yaku-namae の 守り', () => {
     expect(s).not.toBe(SQL);
     expect(() => M.kiridasu(s, M.K)).toThrow('dk_kyuryo_pub');
   });
+  // ★抜け道 3つ（対立役 2026-10-17 本番前）★ 直す 前は どれも 通った
+  const SHIRI = '  get diagnostics n_hito = row_count;\n\n  return';
+  for (const [na, ire, kotae] of [
+    ['引用符で 囲んだ 表', 'update "daikome"."dk_companies" c set name = name;', 'dk_companies'],
+    ['空白を 挟んだ 表', 'update daikome . dk_companies c set name = name;', 'dk_companies'],
+    ['execute で 字を つなぐ', "execute 'dro' || 'p table daikome.dk_employees';", 'execute'],
+  ]) {
+    it('③-2 ' + na + ' も 止まる', () => {
+      const s = SQL.replace(SHIRI, '  ' + ire + '\n' + SHIRI);
+      expect(s).not.toBe(SQL);
+      expect(() => M.kiridasu(s, M.K)).toThrow(kotae);
+    });
+  }
+  it('③-3 注釈の 字では security definer に ならない', () => {
+    const s = SQL.replace('security definer\n', 'security invoker -- security definer\n');
+    expect(s).not.toBe(SQL);
+    expect(() => M.kiridasu(s, M.K)).toThrow('security');
+  });
   it('④ 本物の SQL は 在って ほしい 字を 全部 持つ', () => {
     expect(M.kazoeru(M.kiridasu(SQL, M.K), M.K).ok).toBe(true);
     expect(M.kazoeru('', M.K).ok).toBe(false);
