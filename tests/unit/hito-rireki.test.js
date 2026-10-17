@@ -140,3 +140,24 @@ describe('呼び口', () => {
     expect(n).toBe(5);
   });
 });
+
+// ★記録の 読みは 1000行で 切れない★（limit が 無いと softList は 1回しか 頼まない＝新しい 記録が 落ちる・10-18 対立役 N1）
+describe('記録の 読みの 全部', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const yomu = (f) => fs.readFileSync(path.join(__dirname, '..', '..', f), 'utf8');
+  it('kyuryo・shukei の 記録の 読みは 全部 limit が 1000 より 大きい・並びの 鍵が 在る', () => {
+    let n = 0;
+    for (const f of ['kyuryo.html', 'shukei.html']) {
+      const re = /'dk_hito_rireki\?select=[^']*'/g;
+      let m;
+      while ((m = re.exec(yomu(f)))) {
+        n++;
+        const l = /[?&]limit=(\d+)/.exec(m[0]);
+        expect(l && Number(l[1]) > 1000, f + ' の ' + m[0] + ' は 1000行で 切れる').toBe(true);
+      }
+    }
+    expect(n).toBe(3);
+    expect(yomu('js/dk-session.js')).toMatch(/dk_hito_rireki: 'from_date\.asc,rireki_id\.asc'/);
+  });
+});

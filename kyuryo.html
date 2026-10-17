@@ -4109,7 +4109,7 @@
             ((RIREKI_YOMI = { tried: 0, failed: 0 }),
             DKSession.softList(
               SESS,
-              kaishaDake('dk_hito_rireki?select=*&order=from_date.asc'),
+              kaishaDake('dk_hito_rireki?select=*&order=from_date.asc&limit=100000'),
               RIREKI_YOMI
             )),
           ]).then(function (res) {
@@ -6916,7 +6916,7 @@
           var y = { tried: 0, failed: 0 };
           return DKSession.softList(
             SESS,
-            kaishaDake('dk_hito_rireki?select=*&order=from_date.asc'),
+            kaishaDake('dk_hito_rireki?select=*&order=from_date.asc&limit=100000'),
             y
           ).then(function (rows) {
             RAW.rireki = y.failed > 0 ? null : rows || [];
@@ -8065,7 +8065,7 @@
                   return rirekiNoYakuNaoshi(yMap).then(function (ok) {
                     if (!ok)
                       yakuRirekiChui =
-                        '役割の 名前と 設定は 保存しましたが、変えた 記録の 役割の 名前を 直しきれませんでした。従業員の「記録」で 直してください（直すまで その 日から 後の 給料は 止めて 知らせます）。';
+                        '役割の 名前と 設定は 保存しましたが、変えた 記録の 役割の 名前を 直しきれませんでした。今すぐ 従業員の「記録」で 直してください（直すまで、その 日から 後の 給料は 止まるか、名前を 入れ替えた 時は 前の 役割の 決まりで 出ます）。';
                     return rirekiYomiNaoshi().then(function () {
                       return j;
                     });

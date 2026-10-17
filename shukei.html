@@ -1458,7 +1458,7 @@
             ((RIREKI_YOMI = { tried: 0, failed: 0 }),
             DKSession.softList(
               SESS,
-              kaishaDake('dk_hito_rireki?select=*&order=from_date.asc'),
+              kaishaDake('dk_hito_rireki?select=*&order=from_date.asc&limit=100000'),
               RIREKI_YOMI
             )),
           ]).then(function (res) {
