@@ -48,6 +48,8 @@ function kyuryoSess() {
     'S.rememberedCompanyId=function(){return co.company_id;};S.pickCompany=function(){return {mode:"one",company:co};};' +
     'S.myCompanies=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve([co]);}});};' +
     'S.rest=function(s,p,o){var x={ok:true,status:200,json:function(){return Promise.resolve(rows(p));}};' +
+    // ⑮ の 為：__HITORI_OK__ が 立つ 時だけ 1人ぶんの 配るが 通る（立たない 時は 何も 返さない＝配れない）
+    'if(o&&o.method==="POST"&&String(p).indexOf("rpc/dk_kyuryo_haifu_hitori")===0&&window.__HITORI_OK__){var bb=JSON.parse(o.body||"{}");return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve({ok:true,hito:{employee_id:bb.p_employee_id,name:"仮",token:"zz-tok",init_code:"ZZ",pw_ari:false,active:false}});}});}' +
     // ⑬ の 為：__EMP_NG__ が "0gyou" なら 0行、"400" なら 倉庫が 断った 形（列が 無い）で 返す
     'if(o&&o.method==="PATCH"&&String(p).indexOf("dk_employees?employee_id=eq.")===0&&window.__EMP_NG__){window.__EMP_PATCH__=(window.__EMP_PATCH__||[]).concat([JSON.parse(o.body)]);' +
     'if(window.__EMP_NG__==="0gyou")return Promise.resolve({ok:true,status:200,json:function(){return Promise.resolve([]);}});' +
@@ -730,7 +732,24 @@ test('★★⑮ 退職者の ページの「配る」で 配る 札が 開き、
     return { mieru: !!e && e.offsetParent !== null, ji: (e && e.textContent) || '' };
   });
   expect(err.mieru, '★配れなかった 訳が 見えない★').toBe(true);
-  expect(err.ji.length, '★訳の 字が 空★').toBeGreaterThan(0);
+  expect(err.ji, '★配れなかった 訳の 字で ない★').toContain('配');
+  // 押し直して 通ったら 赤字は 消える（前は 残り、客が 作り直すを 押して 渡した リンクを 殺す 恐れ・対立役 直す1）
+  await page.evaluate(() => {
+    window.__HITORI_OK__ = true;
+  });
+  await page.locator('#empBody [data-yame-box] [data-hhito]').first().click();
+  await page.waitForTimeout(500);
+  const ato = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    return {
+      ji: (e && e.offsetParent !== null && e.textContent) || '',
+      fuda: !!document.querySelector(
+        '#empBody [data-yame-box] [data-hokuru], #empBody [data-yame-box] [data-hmise]'
+      ),
+    };
+  });
+  expect(ato.ji, '★押し直して 通ったのに 赤字が 残っている★').toBe('');
+  expect(ato.fuda, '★通った 後に 配る 札（見せる・送る）が 出ない★').toBe(true);
   await page.locator('#empBody [data-yame-haifu]').first().click();
   const toji = await page.evaluate(
     () => (document.querySelector('#empBody [data-yame-box]') || {}).style.display

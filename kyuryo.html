@@ -2882,7 +2882,8 @@
           }
           // ★配る 一覧が 見えていない 画面（退職者ページ 等）でも 訳を 出す★ 2026-10-17（対立役 N1）
           //   前は 設定の 枠の 中の 箱だけに 書き、従業員の 画面では 枠が 隠れていて 何も 見えなかった
-          if (t && (!e || e.offsetParent === null)) showErr(t);
+          //   消す 時（t が 空）も 同じ 所を 消す（前は 押し直して 通っても 赤字が 残った・対立役 直す1）
+          if (!e || e.offsetParent === null) showErr(t || '');
         }
 
         // ★★一覧は 従業員 全員★★ 2026-09-04（司さん「従業員毎に 配るんやないんか」）
@@ -3252,6 +3253,7 @@
             var sai = t.getAttribute && t.getAttribute('data-hsai');
             if (sai) {
               t.disabled = true;
+              haifuErr('');
               DKSession.rest(SESS, 'rpc/dk_kyuryo_saihakkou', {
                 method: 'POST',
                 body: JSON.stringify({ p_employee_id: sai }),
