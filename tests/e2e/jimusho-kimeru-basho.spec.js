@@ -756,3 +756,33 @@ test('★★⑮ 退職者の ページの「配る」で 配る 札が 開き、
   );
   expect(toji, '★もう一度 押しても 閉じない★').toBe('none');
 });
+
+// ★★⑮-2 配るの 訳を 消す 時に、保存の 失敗 等 他の 訳を 消さない★★ 2026-10-17（対立役：前の 直しは 他の 訳まで 消し、直った 様に 見えた）
+//   わざと壊して 赤に なった 記録（2026-10-17）：消す 時に いつも showErr('') を 呼ぶ 形に 戻す ⇒ 赤。戻すと 緑。
+test('★★⑮-2 配るの 訳を 消しても 他の 訳は 残る★★', async ({ page }) => {
+  await kyuryoHiraku(page, '?henshu=1#emp');
+  await page.locator('[data-kiri="yame"]').click();
+  // 保存の 失敗 等 他の 所が 画面の 上に 出した 訳（showErr と 同じ 形で 置く）
+  await page.evaluate(() => {
+    window.__HITORI_OK__ = true;
+    const e = document.getElementById('err');
+    e.textContent = '保存できませんでした（試し）';
+    e.style.display = 'block';
+  });
+  await page.locator('#empBody [data-yame-haifu]').first().click();
+  await page.locator('#empBody [data-yame-box] [data-hhito]').first().click();
+  await page.waitForTimeout(500);
+  const r = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    return {
+      ji: (e && e.textContent) || '',
+      fuda: !!document.querySelector(
+        '#empBody [data-yame-box] [data-hokuru], #empBody [data-yame-box] [data-hmise]'
+      ),
+    };
+  });
+  expect(r.fuda, '★配る 札が 出ない（配るが 通っていない）★').toBe(true);
+  expect(r.ji, '★配るを 押したら 保存の 失敗の 訳が 消えた★').toContain(
+    '保存できませんでした（試し）'
+  );
+});

@@ -2874,16 +2874,30 @@
           });
         }
 
+        // 配るの 訳を 画面の 上（#err）に 出した 時の 字（消す 時は、この 字が まだ 出ている 時だけ 消す）
+        var HAIFU_TOP = '';
         function haifuErr(t) {
           var e = $('haifuErr');
+          // ★見えるかは 箱の 親で 書き換える 前に 取る★（箱を none に した 後は いつも 見えない に なる・対立役 10-17）
+          var kakure = !e || !e.parentElement || e.parentElement.offsetParent === null;
           if (e) {
             e.style.display = t ? '' : 'none';
             e.textContent = t || '';
           }
           // ★配る 一覧が 見えていない 画面（退職者ページ 等）でも 訳を 出す★ 2026-10-17（対立役 N1）
           //   前は 設定の 枠の 中の 箱だけに 書き、従業員の 画面では 枠が 隠れていて 何も 見えなかった
-          //   消す 時（t が 空）も 同じ 所を 消す（前は 押し直して 通っても 赤字が 残った・対立役 直す1）
-          if (!e || e.offsetParent === null) showErr(t || '');
+          if (t) {
+            if (kakure) {
+              showErr(t);
+              HAIFU_TOP = t;
+            }
+            return;
+          }
+          // ★消す 時は 自分が 出した 字だけ 消す★（押し直して 通っても 赤字が 残った・対立役 直す1。
+          //   前の 直しは 保存の 失敗 等 他の 訳まで 消し、直った 様に 見えた・対立役 10-17）
+          var top = $('err');
+          if (HAIFU_TOP && top && top.textContent === HAIFU_TOP) showErr('');
+          HAIFU_TOP = '';
         }
 
         // ★★一覧は 従業員 全員★★ 2026-09-04（司さん「従業員毎に 配るんやないんか」）
