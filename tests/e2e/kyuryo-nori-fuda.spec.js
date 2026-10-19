@@ -161,3 +161,44 @@ test('2人の 車で ✕ を 押して 1人に すると 札が 戻る', async (
   );
   expect(del.length).toBeGreaterThan(0);
 });
+
+// ★勤め始める 前の 日には 札を 出さない★ 2026-10-19（司さん「新しい従業員（1人）を10/19で選んだらみんなこれが反映されとんはなぜ？」）
+test('8/2 に 登録した 人は 8/1 の 札に 出ず 8/2 には 出る', async ({ page }) => {
+  const ATARA = '00000000-0000-4000-c000-000000000001';
+  await hiraku(page, {
+    tweak: (F) => {
+      F.emps.push({
+        employee_id: ATARA,
+        company_id: CO,
+        name: 'テスト新入り',
+        role: F.emps[0].role,
+        active: true,
+        sort_order: 200,
+        created_at: '2026-08-02T01:00:00Z', // 日本の 8/2 10時
+      });
+    },
+  });
+  // 8/1：いつもの 札には 出ず、畳んだ「勤め始める 前の 人」の 中に だけ 居る（見えない）
+  const d1 = hi(page, '2026-08-01');
+  await expect(d1.locator('.chips > [data-chip-emp="' + ATARA + '"]')).toHaveCount(0);
+  await expect(
+    d1.locator('details.mada [data-chip-dev="' + CAR2 + '"][data-chip-emp="' + ATARA + '"]')
+  ).toBeHidden();
+  // 開けば 押せる＝登録日より 前の 日にも 乗せられる（8/2〜 と 出る）
+  await d1
+    .locator('details.mada', { has: page.locator('[data-chip-dev="' + CAR2 + '"]') })
+    .locator('summary')
+    .click();
+  const fuda = d1.locator(
+    'details.mada [data-chip-dev="' + CAR2 + '"][data-chip-emp="' + ATARA + '"]'
+  );
+  await expect(fuda).toBeVisible();
+  await expect(fuda).toContainText('08/02〜');
+  await expect(
+    hi(page, '2026-08-02').locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + ATARA + '"]')
+  ).toHaveCount(1);
+  // 前から 居る 人は まとめて 作った 登録日（8/6・倉庫の 引っ越し）を 使わない＝8/1 に 三郎の 札
+  await expect(
+    hi(page, '2026-08-01').locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + SABURO + '"]')
+  ).toHaveCount(1);
+});
