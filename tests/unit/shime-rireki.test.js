@@ -28,6 +28,8 @@ const KATA = [
   { kind: 'shuu', youbi: 0, nazuke: 'shime' },
   { kind: 'shuu', youbi: 3, nazuke: 'hajime' },
   { kind: 'hi' },
+  { kind: 'tsuki', hi: [1], nazuke: 'shime' },
+  { kind: 'tsuki', hi: [30], nazuke: 'hajime' },
 ];
 const k = (v) => P.seiki(v).kata;
 const tsuki = [];
@@ -141,7 +143,8 @@ describe('締めの 何日から', () => {
       for (let i = 0; i < nRec; i++) {
         const y = 2026 + rnd(2);
         const m = 1 + rnd(12);
-        const d = 1 + rnd(28);
+        const d = 1 + rnd(31);
+        if (d > new Date(y, m, 0).getDate()) continue;
         const hi = y + '-' + pad(m) + '-' + pad(d);
         if (used[hi]) continue;
         used[hi] = 1;
@@ -156,6 +159,9 @@ describe('締めの 何日から', () => {
         const y = 2026 + Math.floor((i + 12) / 12) - 1;
         const m = (((i % 12) + 12) % 12) + 1;
         const ps = P.periodsOf(y, m, { kata: kt });
+        // ★月の 中で 期の 名前が 重ならない★（紙の 列の 見出し・対立役 4回目 直1）
+        const na = ps.map((p) => p.name);
+        if (new Set(na).size !== na.length) zure.push([t, y, m, 'namae', na.join(',')]);
         ps.forEach((p, j) => {
           if (p.dame) zure.push([t, y, m, 'dame']);
           // 月の 中の 期は 日付順で 重ならない

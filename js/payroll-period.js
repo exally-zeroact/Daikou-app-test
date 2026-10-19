@@ -493,7 +493,8 @@
         const naka = ymKey(p.start) === me && ymKey(p.end) === me;
         const rangeLabel = md(p.start) + ' 〜 ' + md(p.end);
         let name;
-        if (k.kind === 'hi') name = p.start.getDate() + '日';
+        // 毎日払いで よその 月の 日は 月/日（同じ 月の 中で「25日」が 2つ 並ばない・対立役 4回目 直1）
+        if (k.kind === 'hi') name = naka ? p.start.getDate() + '日' : md(p.start);
         else if (!naka) name = rangeLabel;
         else if (p.end.getDate() === last) name = p.start.getDate() + '日〜末日';
         else name = p.start.getDate() + '〜' + p.end.getDate() + '日';

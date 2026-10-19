@@ -7612,8 +7612,10 @@
               )
                 .then(shimeRirekiOwari('日付を 直せませんでした。', '日付を 直しました'))
                 .catch(function () {
-                  showErr('日付を 直せませんでした。');
-                  return shimeRirekiYomiNaoshi();
+                  // 訳は 読み直し（loadPeriod が 字を 消す）の 後に 出す
+                  return shimeRirekiYomiNaoshi().then(function () {
+                    showErr('日付を 直せませんでした。');
+                  });
                 });
             };
           });
@@ -7625,8 +7627,10 @@
               )
                 .then(shimeRirekiOwari('消せませんでした。', '消しました'))
                 .catch(function () {
-                  showErr('消せませんでした。');
-                  return shimeRirekiYomiNaoshi();
+                  // 訳は 読み直し（loadPeriod が 字を 消す）の 後に 出す
+                  return shimeRirekiYomiNaoshi().then(function () {
+                    showErr('消せませんでした。');
+                  });
                 });
             };
           });
