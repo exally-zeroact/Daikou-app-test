@@ -3055,10 +3055,6 @@
 
         function meisaiQr(eid) {
           if (!eid) return;
-          var aru = false;
-          for (var i = 0; i < HAIFU.length; i++) {
-            if (String(HAIFU[i].employee_id) === String(eid)) aru = true;
-          }
           // ★控えに 居ても 見せる 前に 取り直す★ 2026-10-20（対立役 本番前 N1）
           haifuMiseruAtarashiku(eid);
         }
@@ -3417,7 +3413,7 @@
                 b.disabled = false;
                 b.textContent = '配る';
               }
-              if (HAIFU_BAN[eid] !== ban) return false; // もっと 新しい 取り直し か 作り直しが 在る
+              if (HAIFU_BAN[eid] !== ban) return 'atarashii'; // もっと 新しい 取り直し か 作り直しが 在る（落ちたのでは ない）
               if (!j || j.ok !== true) {
                 // ★出来なかった事を 0件で 隠さない★（「0人 配った」に 見せない）
                 if (!damatte)
@@ -3457,6 +3453,7 @@
         function haifuMiseruAtarashiku(eid) {
           return haifuHitori(eid).then(function (toreta) {
             haifuMiseru(eid);
+            // 'atarashii'＝別の 取り直しが 先に 走って いた（落ちたのでは ない＝警告を 出さない・対立役 本番前 D5）
             if (toreta) return;
             var m = document.getElementById('haifuMiseQr');
             if (m && m.parentNode) {
@@ -3464,7 +3461,7 @@
               n.className = 'rolewarn';
               n.id = 'haifuMiseFurui';
               n.textContent =
-                'この QR が 新しいか 確かめられませんでした（通信）。別の 画面で 作り直して いれば 使えません。';
+                'この QR が 新しいか 確かめられませんでした。別の 画面で 作り直して いれば 使えません。';
               m.parentNode.insertBefore(n, m);
             }
           });

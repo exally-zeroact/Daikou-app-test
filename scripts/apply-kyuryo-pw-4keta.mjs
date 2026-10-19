@@ -243,7 +243,17 @@ export function maeNoMon(atoList) {
       `  if (select md5(prosrc) from pg_proc where oid = 'public.${k.sig}'::regprocedure) not in ('${k.mae}', '${atoList[i]}') then\n` +
       `    raise exception 'mae-mon: ${k.na} が 前の 版でも 直した 版でも ない';\n  end if;`
   ).join('\n');
-  return `do $mae$\nbegin\n${kumi}\n  if exists (select 1 from information_schema.columns where table_schema = 'daikome' and table_name = 'dk_kyuryo_pub' and column_name = 'pw_miss' and data_type <> 'integer') then\n    raise exception 'mae-mon: pw_miss の 型が 違う';\n  end if;\n  if exists (select 1 from information_schema.columns where table_schema = 'daikome' and table_name = 'dk_kyuryo_pub' and column_name = 'tomatta_at' and data_type <> 'timestamp with time zone') then\n    raise exception 'mae-mon: tomatta_at の 型が 違う';\n  end if;\nend\n$mae$;`;
+  return `do $mae$\nbegin\n${kumi}\n  -- ★本番に だけ 在る 物★（対立役 本番前 D2）：表を 読む invoker の 関数・別の 窓が 在れば、revoke の 後に 客の 画面が 落ちる
+  if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+              where n.nspname in ('public', 'daikome') and p.prosrc ilike '%dk_kyuryo_pub%' and not p.prosecdef) then
+    raise exception 'mae-mon: 表を 読む security invoker の 関数が 在る';
+  end if;
+  --   窓は pg_depend で 数える（information_schema.view_table_usage は 本番で 0行を 返した＝持ち主の 見え方で 割れる・10-20 実測）
+  if (select count(distinct rw.ev_class) from pg_depend d join pg_rewrite rw on rw.oid = d.objid
+       where d.refobjid = 'daikome.dk_kyuryo_pub'::regclass and rw.ev_class <> 'daikome.dk_kyuryo_pub'::regclass) <> 1 then
+    raise exception 'mae-mon: 表に 頼る 窓が 1つで ない';
+  end if;
+  if exists (select 1 from information_schema.columns where table_schema = 'daikome' and table_name = 'dk_kyuryo_pub' and column_name = 'pw_miss' and data_type <> 'integer') then\n    raise exception 'mae-mon: pw_miss の 型が 違う';\n  end if;\n  if exists (select 1 from information_schema.columns where table_schema = 'daikome' and table_name = 'dk_kyuryo_pub' and column_name = 'tomatta_at' and data_type <> 'timestamp with time zone') then\n    raise exception 'mae-mon: tomatta_at の 型が 違う';\n  end if;\nend\n$mae$;`;
 }
 
 // ★commit の 前に 見る★（窓の security_invoker・6本の volatile・作り物の 行で 1周）
@@ -257,11 +267,21 @@ declare
   t text := 'zz-pw4keta-tameshi-' || md5(random()::text);
   j json;
 begin
-  if has_table_privilege('authenticated', 'daikome.dk_kyuryo_pub', 'SELECT')
-     or has_table_privilege('authenticated', 'daikome.dk_kyuryo_pub', 'UPDATE')
-     or has_table_privilege('anon', 'daikome.dk_kyuryo_pub', 'SELECT')
-     or has_table_privilege('authenticated', 'public.dk_kyuryo_pub', 'UPDATE') then
-    raise exception 'ato-mon: 画面の 鍵が 表か 窓を 直に 読み書き できる';
+  -- ★画面の 鍵（anon・authenticated・public）が 表と 窓に 1つも 権限を 持たない★（列ごとの grant も・対立役 本番前 D1）
+  if exists (
+    select 1
+      from unnest(array['anon', 'authenticated', 'public']) as y(yaku),
+           unnest(array['daikome.dk_kyuryo_pub', 'public.dk_kyuryo_pub']) as h(hyou),
+           unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']) as k(ken)
+     where has_table_privilege(y.yaku, h.hyou, k.ken)
+  ) or exists (
+    select 1
+      from unnest(array['anon', 'authenticated', 'public']) as y(yaku),
+           unnest(array['daikome.dk_kyuryo_pub', 'public.dk_kyuryo_pub']) as h(hyou),
+           unnest(array['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']) as k(ken)
+     where has_any_column_privilege(y.yaku, h.hyou, k.ken)
+  ) then
+    raise exception 'ato-mon: 画面の 鍵が 表か 窓を 直に 読み書き できる（表・列の どこかの 権限）';
   end if;
   if not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                   where n.nspname = 'public' and c.relname = 'dk_kyuryo_pub'

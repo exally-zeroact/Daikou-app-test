@@ -52,6 +52,19 @@ describe('★4桁・3回 続けて 間違えたら 止める★', () => {
     expect(mado).toMatch(/\(p\.tomatta_at \+ interval '0 second'\) as tomatta_at/);
     expect(alt).toMatch(/check \(pw_miss between 0 and 3\)/);
   });
+  // わざと壊す：apply-kyuryo-honnin.sql の revoke を 1つ 消す ⇒ ③b 赤（道具が 投げる）
+  it('③b 表と 窓の 直の 権限を 外す 2文が 在る（道具が 当てる）', () => {
+    const src = yomu('supabase/apply-kyuryo-honnin.sql');
+    const { revoke } = hyouToMado(src);
+    expect(revoke).toContain('revoke all on table daikome.dk_kyuryo_pub from anon, authenticated;');
+    expect(revoke).toContain('revoke all on table public.dk_kyuryo_pub from anon, authenticated;');
+    const nashi = src.replace(
+      'revoke all on table daikome.dk_kyuryo_pub from anon, authenticated;\n',
+      ''
+    );
+    expect(nashi).not.toBe(src);
+    expect(() => hyouToMado(nashi)).toThrow(/直の 権限/);
+  });
   it('④ 理由の 字が SQL と 画面で 同じ 組', () => {
     const sql = yomu('supabase/apply-kyuryo-honnin-kansuu.sql');
     const html = yomu('kyuryo.html');
