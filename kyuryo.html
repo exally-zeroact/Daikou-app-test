@@ -7387,9 +7387,13 @@
         //   月3回は null（昔の 列 period_end_mode='thirds' の まま＝今の 本番の 1社と 同じ 読み）
         // ★28・29・30日締めは「締めた 日の 月の 分」で 書く★（読む 側 seiki と 同じ・司さん 10-19）
         function nijuhachiShime(k) {
-          var nijuhachi = (k.hi || []).some(function (h) {
-            return Number(h) >= 28 && Number(h) <= 30;
-          });
+          //   締め日が 全部 28〜30 の 時だけ（seiki と 同じ。31・末＝0 は 末日締め）
+          var hh = k.hi || [];
+          var nijuhachi =
+            hh.length > 0 &&
+            hh.every(function (h) {
+              return Number(h) >= 28 && Number(h) <= 30;
+            });
           return nijuhachi ? Object.assign({}, k, { nazuke: 'shime' }) : k;
         }
         function shimeKataYomu() {
@@ -7442,7 +7446,7 @@
               (t.kata.kind === 'shuu' ||
                 (t.kata.kind === 'tsuki' &&
                   t.kata.hi[t.kata.hi.length - 1] !== 0 &&
-                  !t.kata.hi.some(function (h) {
+                  !t.kata.hi.every(function (h) {
                     return h >= 28;
                   })));
           }
