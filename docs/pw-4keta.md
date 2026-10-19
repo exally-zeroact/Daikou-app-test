@@ -16,7 +16,7 @@
 
 ## 作り
 ### 倉庫（元の ファイルの 中で 直す＝古い 版が ファイルに 残らない・対立役 S4）
-- 表に 2列（apply-kyuryo-honnin.sql に 書く）：`pw_miss int not null default 0`（パスワードを 決めてから 間違えた 数）・`tomatta_at timestamptz`（止めた 時刻）。窓に 2列とも 出す（窓の 見張りの 決まり。事務所は 自分の 会社の 行を 窓から 0 に 戻せるが、それは 作り直しと 同じ 事を する 権限の 内）。
+- 表に 2列（apply-kyuryo-honnin.sql に 書く）：`pw_miss int not null default 0`（パスワードを 決めてから 間違えた 数）・`tomatta_at timestamptz`（止めた 時刻）。窓に 2列とも 出す（窓の 見張りの 決まり）。★窓は 式の 列（書き換えられない）・表と 窓は 画面の 鍵（anon・authenticated）から 直に 読み書き させない★（10-20 対立役 本番前 S1：前は 事務所の ログインで 表から pw_hash を 読め、止めも 外せた）。
 - 照らし方（verify・get で 同じ・★最初に 行を 鍵で 取る★＝`select … for update`・対立役 S1/S2）：
   1. 行が 無い・pw_hash が 無い ＝ no_token（数えない）。
   2. tomatta_at が 在る ＝ reason 'tomatta'（照らさない）。

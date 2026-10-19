@@ -3041,13 +3041,8 @@
           for (var i = 0; i < HAIFU.length; i++) {
             if (String(HAIFU[i].employee_id) === String(eid)) aru = true;
           }
-          if (aru) {
-            haifuMiseru(eid);
-            return;
-          }
-          haifuHitori(eid).then(function () {
-            haifuMiseru(eid);
-          });
+          // ★控えに 居ても 見せる 前に 取り直す★ 2026-10-20（対立役 本番前 N1）
+          haifuMiseruAtarashiku(eid);
         }
 
         // 配るの 訳を 画面の 上（#err）に 出した 時の 字（消す 時は、この 字が まだ 出ている 時だけ 消す）
@@ -3095,7 +3090,7 @@
           if (Date.now() - HAIFU_TORINAOSHI < 30000) return;
           HAIFU_TORINAOSHI = Date.now();
           HAIFU.slice().forEach(function (x) {
-            if (x && x.employee_id) haifuHitori(x.employee_id);
+            if (x && x.employee_id) haifuHitori(x.employee_id, true);
           });
         });
         function renderHaifu() {
@@ -3380,9 +3375,14 @@
         // ★★1人ぶんだけ 配る★★ 2026-09-04（司さん「従業員毎に 配るんやないんか」）
         //   ★渡していない 人の 鍵まで 作らない★（鍵は 渡す 相手 1人にだけ）
         //   ★もう 在る人は そのまま★（作り直しでは ない＝押しても 壊れない）
-        function haifuHitori(eid) {
-          haifuErr('');
-          var b = document.querySelector('[data-hhito="' + eid + '"]');
+        // ★取り直しの 番号★ 2026-10-20（後から 着いた 古い 返りで 新しい token を 上書きしない・対立役 本番前 N5）
+        var HAIFU_BAN = {};
+        //   damatte＝画面に 戻った 時の 取り直し（赤字を 出さない・ボタンも 触らない・対立役 本番前 N3）
+        //   返り：true＝取れた／false＝取れなかった（見せる 側が 訳を 出す・対立役 本番前 N4）
+        function haifuHitori(eid, damatte) {
+          var ban = (HAIFU_BAN[eid] = (HAIFU_BAN[eid] || 0) + 1);
+          if (!damatte) haifuErr('');
+          var b = damatte ? null : document.querySelector('[data-hhito="' + eid + '"]');
           if (b) {
             b.disabled = true;
             b.textContent = '用意中…';
@@ -3399,14 +3399,16 @@
                 b.disabled = false;
                 b.textContent = '配る';
               }
+              if (HAIFU_BAN[eid] !== ban) return false; // もっと 新しい 取り直し か 作り直しが 在る
               if (!j || j.ok !== true) {
                 // ★出来なかった事を 0件で 隠さない★（「0人 配った」に 見せない）
-                haifuErr(
-                  '配れませんでした（' +
-                    ((j && j.reason) || '理由不明') +
-                    '）。もう一度 お試しください。'
-                );
-                return;
+                if (!damatte)
+                  haifuErr(
+                    '配れませんでした（' +
+                      ((j && j.reason) || '理由不明') +
+                      '）。もう一度 お試しください。'
+                  );
+                return false;
               }
               // ★その人ぶんだけ 差し替える★（他の 人は 触らない）
               var h = j.hito;
@@ -3421,14 +3423,33 @@
                 if (!atta) HAIFU.push(h);
               }
               renderHaifu();
+              return true;
             })
             .catch(function () {
               if (b) {
                 b.disabled = false;
                 b.textContent = '配る';
               }
-              haifuErr('配れませんでした（通信）。もう一度 お試しください。');
+              if (!damatte) haifuErr('配れませんでした（通信）。もう一度 お試しください。');
+              return false;
             });
+        }
+        // ★見せる 前に 取り直してから 大きく 見せる★ 2026-10-20（別の 端末で 作り直すと token が 替わる・対立役 本番前 直2・N1・N4）
+        //   取れなかった 時は 前の 控えで 見せるが、窓の 中に その 事を 出す（黙って 古い QR を 見せない）
+        function haifuMiseruAtarashiku(eid) {
+          return haifuHitori(eid).then(function (toreta) {
+            haifuMiseru(eid);
+            if (toreta) return;
+            var m = document.getElementById('haifuMiseQr');
+            if (m && m.parentNode) {
+              var n = document.createElement('div');
+              n.className = 'rolewarn';
+              n.id = 'haifuMiseFurui';
+              n.textContent =
+                'この QR が 新しいか 確かめられませんでした（通信）。別の 画面で 作り直して いれば 使えません。';
+              m.parentNode.insertBefore(n, m);
+            }
+          });
         }
 
         (function () {
@@ -3441,14 +3462,7 @@
             if (mi) {
               // ★見せる 前に その人を 取り直す★ 2026-10-20（別の 端末で 作り直すと token が 替わる＝古い QR を 見せない・対立役 本番前 直2）
               //   取り直しが 落ちても 前の 控えで 見せる（前と 同じ）
-              haifuHitori(mi).then(
-                function () {
-                  haifuMiseru(mi);
-                },
-                function () {
-                  haifuMiseru(mi);
-                }
-              );
+              haifuMiseruAtarashiku(mi);
               return;
             }
             var hh = t.getAttribute && t.getAttribute('data-hhito');
@@ -3484,6 +3498,8 @@
                     );
                     return;
                   }
+                  // 走って いる 取り直しの 古い 返りは 捨てる（対立役 本番前 N5）
+                  HAIFU_BAN[sai] = (HAIFU_BAN[sai] || 0) + 1;
                   // ★作り直すと token も 替わる★ 2026-10-20＝返りの token・初回コードで すぐ 控えを 差し替える
                   //   （1人ぶんの 取り直しが 落ちても、古い 死んだ リンクを 黙って 送らない・対立役 小）
                   for (var hi = 0; hi < HAIFU.length; hi++) {

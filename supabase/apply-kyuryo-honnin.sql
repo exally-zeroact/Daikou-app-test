@@ -99,3 +99,10 @@ select
 from daikome.dk_kyuryo_pub p;
 
 alter view public.dk_kyuryo_pub set (security_invoker = on);
+
+-- ★★表と 窓を 画面の 鍵（anon・authenticated）から 直に 読み書き させない★★ 2026-10-20（対立役 本番前 S1）
+--   前は 事務所の ログインで daikome の 表を REST から 直に 読め（pw_hash）、止め（pw_miss・tomatta_at）も 書けた。
+--   4桁は 1万通り＝pw_hash を 読めれば 手元で 当てられる。画面と js は この 表も 窓も 読まない（関数 6本だけ・grep 0件）
+--   関数は security definer＝持ち主の 権限で 動く＝これで 壊れない
+revoke all on table daikome.dk_kyuryo_pub from anon, authenticated;
+revoke all on table public.dk_kyuryo_pub from anon, authenticated;

@@ -220,7 +220,16 @@ export function hyouToMado(sql) {
   if (ng) throw new Error('表と 窓の 文に ' + ng[0] + ' が 在る');
   if ((alt.match(/;/g) || []).length !== 1 || (mado.match(/;/g) || []).length !== 1)
     throw new Error('表と 窓の 文が 1つずつで ない');
-  return { alt, mado };
+  // ★表と 窓の 直の 権限を 外す 2文★（対立役 本番前 S1）＝字が ちょうど この 2文で ある 事を 見る
+  const REVOKE = [
+    'revoke all on table daikome.dk_kyuryo_pub from anon, authenticated;',
+    'revoke all on table public.dk_kyuryo_pub from anon, authenticated;',
+  ];
+  REVOKE.forEach((r) => {
+    if (!s.includes('\n' + r + '\n') && !s.endsWith('\n' + r))
+      throw new Error('直の 権限を 外す 文が 見つからない: ' + r);
+  });
+  return { alt, mado, revoke: REVOKE.join('\n') };
 }
 
 export function blocksOf(root) {
@@ -248,6 +257,12 @@ declare
   t text := 'zz-pw4keta-tameshi-' || md5(random()::text);
   j json;
 begin
+  if has_table_privilege('authenticated', 'daikome.dk_kyuryo_pub', 'SELECT')
+     or has_table_privilege('authenticated', 'daikome.dk_kyuryo_pub', 'UPDATE')
+     or has_table_privilege('anon', 'daikome.dk_kyuryo_pub', 'SELECT')
+     or has_table_privilege('authenticated', 'public.dk_kyuryo_pub', 'UPDATE') then
+    raise exception 'ato-mon: 画面の 鍵が 表か 窓を 直に 読み書き できる';
+  end if;
   if not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
                   where n.nspname = 'public' and c.relname = 'dk_kyuryo_pub'
                     and coalesce(array_to_string(c.reloptions, ','), '') like '%security_invoker=on%') then
@@ -330,7 +345,7 @@ async function main() {
   );
   const blocks = blocksOf(ROOT);
   const atoList = blocks.map(honbunMd5);
-  const { alt, mado } = hyouToMado(
+  const { alt, mado, revoke } = hyouToMado(
     fs.readFileSync(path.join(ROOT, 'supabase', 'apply-kyuryo-honnin.sql'), 'utf8')
   );
   let mon = 0;
@@ -364,7 +379,9 @@ async function main() {
     console.log('見るだけ（当てるには --ateru）');
     return;
   }
-  const q = ['begin;', maeNoMon(atoList), alt, mado, ...blocks, atoNoMon(), 'commit;'].join('\n');
+  const q = ['begin;', maeNoMon(atoList), alt, mado, revoke, ...blocks, atoNoMon(), 'commit;'].join(
+    '\n'
+  );
   const r = await runSql(ref, t.token, q);
   if (!r.ok) {
     console.error(

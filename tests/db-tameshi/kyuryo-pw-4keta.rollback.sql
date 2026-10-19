@@ -59,6 +59,26 @@ begin
 end
 $t$;
 insert into k values ('22b 窓から 数を 書けない', pg_temp.mado_kaku(), 'kakenai');
+-- C3 事務所の 鍵（authenticated）は 表を 直に 読めない・書けない（pw_hash を 手元で 当てさせない・止めを 外させない・対立役 本番前 S1）
+create function pg_temp.hyou_kagi(nani text) returns text language plpgsql as $t$
+declare v text;
+begin
+  begin
+    set local role authenticated;
+    if nani = 'yomu' then
+      select pw_hash into v from daikome.dk_kyuryo_pub limit 1;
+    else
+      update daikome.dk_kyuryo_pub set pw_miss = 0 where token = 'zz-4keta-a';
+    end if;
+    reset role;
+    return 'dekita';
+  exception when insufficient_privilege then
+    return 'kotowatta';
+  end;
+end
+$t$;
+insert into k values ('22c 事務所の 鍵で 表を 読めない', pg_temp.hyou_kagi('yomu'), 'kotowatta');
+insert into k values ('22d 事務所の 鍵で 表に 書けない', pg_temp.hyou_kagi('kaku'), 'kotowatta');
 -- E 事務所の 作り直し（持ち主として 呼ぶ）＝token が 替わり、古い token は 開かず、止めと 数が 消える
 insert into daikome.dk_employees (company_id, name, role, active)
   select company_id, 'zz-4keta-hito', '2種', true from daikome.dk_companies where owner_id is not null order by company_id limit 1;
