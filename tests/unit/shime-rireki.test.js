@@ -29,9 +29,21 @@ const KATA = [
   { kind: 'shuu', youbi: 3, nazuke: 'hajime' },
   { kind: 'hi' },
   { kind: 'tsuki', hi: [1], nazuke: 'shime' },
-  { kind: 'tsuki', hi: [30], nazuke: 'hajime' },
+  { kind: 'tsuki', hi: [30], nazuke: 'hajime' }, // 28〜30日締めは 締めた 日の 月の 分に 読む（司さん 10-19）
+  { kind: 'tsuki', hi: [27], nazuke: 'hajime' },
 ];
 const k = (v) => P.seiki(v).kata;
+// ★乱数＝mulberry32★（前の seed % n は 下の 桁が 短く 回り、形の 組が 偏った＝空く 組が 600通りで 0・2026-10-19 対立役 小2）
+function ranSu(seed) {
+  let a = seed >>> 0;
+  return (n) => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((((t ^ (t >>> 14)) >>> 0) / 4294967296) * n) | 0;
+  };
+}
 const tsuki = [];
 for (let i = 0; i < 24; i++) tsuki.push({ y: 2026 + Math.floor(i / 12), m: (i % 12) + 1 });
 const kugiri = (ps) => ps.map((p) => p.start + '〜' + p.end + (p.kiri ? '*' : ''));
@@ -128,11 +140,7 @@ describe('締めの 何日から', () => {
   });
 
   it('④ どの 日も ちょうど 1つの 期・1つの 月（乱数の 歴 600通り）', () => {
-    let seed = 12345;
-    const rnd = (n) => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed % n;
-    };
+    const rnd = ranSu(12345);
     const pad = (x) => String(x).padStart(2, '0');
     const zure = [];
     let nichi = 0;
@@ -323,11 +331,7 @@ describe('締めの 何日から', () => {
 
   // わざと壊す：rirekiPeriods の 窓を その 月だけに 狭める（madoA を m-1・madoB を m）⇒ 赤（期が 違う 月が 出る）。前後1か月 までは 同じ＝5か月は 余り
   it('⑩ 遠い 区間を 見ない 速い 道は 全部 見る 道と 一字一句 同じ（記録 1〜30件 100通り×40か月）', () => {
-    let seed = 7;
-    const rnd = (n) => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed % n;
-    };
+    const rnd = ranSu(7);
     const pad = (x) => String(x).padStart(2, '0');
     const zure = [];
     for (let t = 0; t < 100; t++) {
