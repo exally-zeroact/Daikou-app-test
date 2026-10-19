@@ -2531,7 +2531,9 @@
                 box.innerHTML =
                   '<div class="card"><div class="msg">' +
                   esc(
-                    kikanBun(PERIODS) === KIKAN_AKI_BUN
+                    PERIODS.some(function (p) {
+                      return p && p.aki;
+                    })
                       ? '締めの 変え方で この 月の 給料が 無くなっています。会社に 知らせてください。'
                       : '締めの 変えた 記録から 期を 区切れないので 出せません。会社に 知らせてください。'
                   ) +
@@ -7820,7 +7822,15 @@
                 })
                 .concat([{ from_date: d, value: mine }]);
             };
-            var f = shimeAkiFueta(retsu, rows, retsu, ato(hi));
+            // 前の 側（今の 記録）は 候補ごとに 変わらない＝1回だけ 数える（対立役 本番前3 直A）
+            var akiIma = shimeAkiNo(retsu, rows) || [];
+            var fuetaKa = function (d) {
+              var aa = shimeAkiNo(retsu, ato(d));
+              return (aa || []).filter(function (x) {
+                return akiIma.indexOf(x) < 0;
+              });
+            };
+            var f = fuetaKa(hi);
             if (!f.length) return '';
             // ★空かない 一番 近い 日を 出す★（「選び直して」だけだと 当てずっぽう・対立役 直2）
             var chika = '';
@@ -7828,9 +7838,9 @@
             var owari = Date.now() + 600;
             for (var k = 1; k <= 62 && !chika && Date.now() < owari; k++) {
               [k, -k].forEach(function (z) {
-                if (chika) return;
+                if (chika || Date.now() >= owari) return;
                 var d = shimeHiTasu(hi, z);
-                if (!shimeAkiFueta(retsu, rows, retsu, ato(d)).length) chika = d;
+                if (!fuetaKa(d).length) chika = d;
               });
             }
             return (
@@ -7857,7 +7867,7 @@
           });
         }
         // ★保存の 後に 締めの 記録を 書く★（倉庫の 今の 記録を 読み直して 比べる・同じ 形なら 書かない＝対立役 直4）
-        //   返り：'' ＝書いた／書かなくて よかった ・ 字＝書けなかった 訳
+        //   返り：'' ＝書いた／書かなくて よかった ・ 字＝書けなかった 訳 ・ {aki}＝空く 月が 増える＝書かなかった
         function shimeKirokuKaku(hi, rawKata) {
           var y = { tried: 0, failed: 0 };
           var mine = rawKata || { kind: 'tsuki', hi: [10, 20, 0] };

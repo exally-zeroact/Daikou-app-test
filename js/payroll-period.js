@@ -110,7 +110,7 @@
       // ★★締めの 形（kata）が 来たら そちらだけ★★ 2026-10-07（画面・集計は 全部 これ）
       if (opts && opts.kata)
         return opts.kata.kind === 'rireki'
-          ? rirekiPeriods(y, m, opts.kata).ps
+          ? rirekiPeriods(y, m, opts.kata, opts.zenbuMiru === true).ps
           : kataPeriods(y, m, opts.kata);
       const raw = opts && opts.endMode;
       const endMode = raw === 'days' || raw === 'month_end' ? raw : DEFAULT_END_MODE;
@@ -450,15 +450,21 @@
   }
   // ★記録の 在る 会社の その月の 期★＝{ps, hitotsu（月が 1つの 形だけで 切られずに 出来た 時の 形・他は null）}
   //   ★転んだら 止める★（[] は「この 月に 締める 給料は 無い」と 読まれる＝対立役 止3）
-  function rirekiPeriods(y, m, kata) {
+  //   zenbu＝遠い 区間も 見る（試験で 比べる 時だけ）
+  function rirekiPeriods(y, m, kata, zenbu) {
     try {
       const me = y * 12 + (m - 1);
       const segs = kata.segs;
       const zen = [];
+      // ★この 月から 遠い 区間は 見ない★（soKikan は 前後 4か月の 期しか 作らない＝5か月の 外の 区間からは 1つも 出ない・
+      //   記録が 多いと 重かった＝対立役 本番前3 直A 2026-10-19。結果は 1日も 変えない＝単体 ⑩ が 縛る）
+      const madoA = new Date(y, m - 1 - 5, 1);
+      const madoB = new Date(y, m + 5, 0);
       segs.forEach(function (sg, i) {
         const a = sg.kara ? hiDate(sg.kara) : null;
         const b = i + 1 < segs.length ? addDays(hiDate(segs[i + 1].kara), -1) : null;
         if (a && b && b < a) return;
+        if (!zenbu && ((a && a > madoB) || (b && b < madoA))) return;
         soKikan(sg.kata, y, m).forEach(function (p) {
           const st = a && p.start < a ? a : p.start;
           const en = b && p.end > b ? b : p.end;
@@ -552,18 +558,24 @@
   //   返り：['YYYY-MM', …]（日付順）。記録の 無い 形は 空く 月が 無い（tsukiKey）＝[]
   function akiTsuki(kata) {
     if (!kata || kata.dame || kata.kind !== 'rireki') return [];
-    const out = {};
+    // 見る 月を 先に 集める（近い 記録で 同じ 月を 何回も 区切らない）
+    const tsuki = {};
     kata.segs.forEach(function (sg) {
       if (!sg.kara) return;
       const y = Number(sg.kara.slice(0, 4));
       const m = Number(sg.kara.slice(5, 7));
       for (let d = -3; d <= 3; d++) {
         const t = shift({ year: y, month: m }, d);
-        const ps = rirekiPeriods(t.year, t.month, kata).ps;
-        if (ps.length === 1 && ps[0].aki) out[t.year + '-' + pad(t.month)] = 1;
+        tsuki[t.year + '-' + pad(t.month)] = t;
       }
     });
-    return Object.keys(out).sort();
+    return Object.keys(tsuki)
+      .sort()
+      .filter(function (key) {
+        const t = tsuki[key];
+        const ps = rirekiPeriods(t.year, t.month, kata).ps;
+        return ps.length === 1 && ps[0].aki;
+      });
   }
   // その月の 形（記録の 道で 月が 混ざる 時は null）＝月3回・毎日・年の 期ごとの 合計 を 決める 所が 見る
   function tsukiNoKata(kata, y, m) {

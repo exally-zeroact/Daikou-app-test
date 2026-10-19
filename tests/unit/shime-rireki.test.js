@@ -321,6 +321,38 @@ describe('締めの 何日から', () => {
     });
   });
 
+  // わざと壊す：rirekiPeriods の 窓を その 月だけに 狭める（madoA を m-1・madoB を m）⇒ 赤（期が 違う 月が 出る）。前後1か月 までは 同じ＝5か月は 余り
+  it('⑩ 遠い 区間を 見ない 速い 道は 全部 見る 道と 一字一句 同じ（記録 1〜30件 100通り×40か月）', () => {
+    let seed = 7;
+    const rnd = (n) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    const pad = (x) => String(x).padStart(2, '0');
+    const zure = [];
+    for (let t = 0; t < 100; t++) {
+      const rows = [];
+      const used = {};
+      const nRec = 1 + rnd(30);
+      for (let i = 0; i < nRec; i++) {
+        const d = new Date(2025 + rnd(3), rnd(12), 1 + rnd(28));
+        const hi = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        if (used[hi]) continue;
+        used[hi] = 1;
+        rows.push({ from_date: hi, value: KATA[rnd(KATA.length)] });
+      }
+      const kt = P.rirekiKata(k(KATA[rnd(KATA.length)]), rows);
+      for (let i = 0; i < 40; i++) {
+        const y = 2024 + Math.floor(i / 12);
+        const m = (i % 12) + 1;
+        const a = JSON.stringify(P.periodsOf(y, m, { kata: kt }));
+        const b = JSON.stringify(P.periodsOf(y, m, { kata: kt, zenbuMiru: true }));
+        if (a !== b) zure.push([t, y, m]);
+      }
+    }
+    expect(zure.slice(0, 5)).toEqual([]);
+  }, 60000); // ★全部 見る 道は 重い（並べて 回すと 20秒 近く かかった＝1回 時間切れで 赤・2026-10-19）★
+
   it('⑧ 画面の 呼び口が 全部 記録を 渡す（呼び忘れると 黙って 列の 形で 区切る・対立役 止2）', () => {
     const ky = fs.readFileSync(path.join(__dirname, '../../kyuryo.html'), 'utf8');
     const sk = fs.readFileSync(path.join(__dirname, '../../shukei.html'), 'utf8');
