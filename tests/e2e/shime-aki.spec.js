@@ -193,3 +193,31 @@ test('⑧ 門の 読み直しが 通信で 落ちる ⇒ 何も 書かず「保�
   await page.waitForTimeout(300);
   expect(await kaki(page)).toEqual([]);
 });
+
+// わざと壊す：shimeKirokuKaku の 書く 直前の 比べ直し（if (aki.length) return …）を 外す ⇒ 赤（空く 記録を 書いた）
+test('⑨ 門の 後に 別の タブが 記録を 消して 空く ⇒ 締めの 記録は 書かない・訳', async ({
+  page,
+}) => {
+  await settaiAke(page, [{ from_date: '2026-08-01', value: MATSU }]);
+  // 1回目（門）は 今の 記録・2回目から（書く 直前・読み直し）は 別の タブが 消した 後＝[]
+  await page.evaluate(() => {
+    const S = window.DKSession;
+    const moto = S.softList;
+    let n = 0;
+    S.softList = function (s, p) {
+      if (String(p).indexOf('dk_shime_rireki') >= 0 && ++n >= 2) return Promise.resolve([]);
+      return moto.apply(this, arguments);
+    };
+  });
+  await page.fill('#pHi', '2026-09-10');
+  await page.dispatchEvent('#pHi', 'change');
+  await page.selectOption('#pMode', 'tsuki1');
+  await page.fill('#pShimeHi', '1');
+  await page.dispatchEvent('#pShimeHi', 'input');
+  await page.selectOption('#pNazuke', 'shime');
+  await page.click('#btnSaveSet');
+  await expect(page.locator('#err')).toContainText(
+    '2026年9月分の 給料が 無くなります（給料は 毎月 払う 決まり）。締めの 払い方は 保存していません（他は 保存しました）。'
+  );
+  expect(await kaki(page)).toEqual([['POST', 'dk_payroll_settings']]);
+});

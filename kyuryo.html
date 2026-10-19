@@ -2533,7 +2533,7 @@
                   esc(
                     kikanBun(PERIODS) === KIKAN_AKI_BUN
                       ? '締めの 変え方で この 月の 給料が 無くなっています。会社に 知らせてください。'
-                      : kikanBun(PERIODS)
+                      : '締めの 変えた 記録から 期を 区切れないので 出せません。会社に 知らせてください。'
                   ) +
                   '</div></div>';
               return;
@@ -7824,7 +7824,9 @@
             if (!f.length) return '';
             // ★空かない 一番 近い 日を 出す★（「選び直して」だけだと 当てずっぽう・対立役 直2）
             var chika = '';
-            for (var k = 1; k <= 62 && !chika; k++) {
+            //   ★探すのは 0.6秒 まで★（1回の 比べは 記録の 数の 2乗で 重い＝記録 20件で 1回 約0.1秒・全部 試すと 十数秒 固まる・対立役 本番前2 直A）
+            var owari = Date.now() + 600;
+            for (var k = 1; k <= 62 && !chika && Date.now() < owari; k++) {
               [k, -k].forEach(function (z) {
                 if (chika) return;
                 var d = shimeHiTasu(hi, z);
@@ -7887,7 +7889,7 @@
                 })
                 .concat([{ from_date: hi, value: mine }])
             );
-            if (aki.length) return shimeAkiBun(aki).replace(/。$/, '');
+            if (aki.length) return { aki: shimeAkiBun(aki) };
             return DKSession.rest(SESS, 'dk_shime_rireki?on_conflict=company_id,from_date', {
               method: 'POST',
               headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
@@ -9100,7 +9102,13 @@
                   if (!wake) SHIME_SAWATTA = false; // 書けた＝読み直しで 欄を 倉庫の 形へ
                   // ★訳は 読み直し（loadPeriod が 字を 消す）の 後に 出す★
                   return shimeRirekiYomiNaoshi(!!wake).then(function () {
-                    if (wake)
+                    // ★書く 直前の 比べ直しで 空く 月＝押し直しでは 通らない＝日を 選び直して もらう★（対立役 本番前2 小1）
+                    if (wake && wake.aki)
+                      showErr(
+                        wake.aki +
+                          '締めの 払い方は 保存していません（他は 保存しました）。変える 日か 何月分の 呼び方を 選び直してください。'
+                      );
+                    else if (wake)
                       showErr(
                         '締めの 払い方は 保存できませんでした（' +
                           wake +
