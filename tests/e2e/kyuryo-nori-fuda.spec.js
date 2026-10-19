@@ -201,4 +201,20 @@ test('8/2 に 登録した 人は 8/1 の 札に 出ず 8/2 には 出る', asyn
   await expect(
     hi(page, '2026-08-01').locator('[data-chip-dev="' + CAR2 + '"][data-chip-emp="' + SABURO + '"]')
   ).toHaveCount(1);
+  // 最後に：畳んだ 札を 押すと その 日に 乗せて しまう（2026-10-20 本番前の 叩き N5）
+  await fuda.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) =>
+          window.__calls.filter(
+            (c) =>
+              c.p.indexOf('dk_work_hours') === 0 &&
+              c.m !== 'DELETE' &&
+              JSON.stringify(c.b || '').indexOf(id) >= 0
+          ).length,
+        ATARA
+      )
+    )
+    .toBeGreaterThan(0);
 });

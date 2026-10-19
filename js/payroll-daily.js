@@ -507,8 +507,9 @@
   // ★★勤め始めの 日★★ 2026-10-19（司さん「新しい従業員（1人）を10/19で選んだらみんなこれが反映されとんはなぜ？」）
   //   ①登録した 日（created_at の 日本の 日付）。②「何日から」の 記録が それより 前なら その 日。登録日が 無い・使えない 人は ''（＝いつも 出す・前と 同じ）
   //   ★登録した 日が 2人 以上 同じ 時刻★は 倉庫の 引っ越しで まとめて 作った 行＝本当の 登録日で ない ⇒ 使わない
-  //   ★乗った 記録は 使わない★（対立：記録で 決めると、間違えた 記録を ✕ で 消した 時に その人が 消えた）
-  //   後から 登録した 人の 前の 日を 入れる 時は、その人の「何日から」を 前の 日に すれば 出る
+  //   ③乗った 記録（dk_work_hours）が 登録日より 前に 在れば その 日（★前へ 動かす だけ★）2026-10-20（本番前の 叩き N2）
+  //     前は 使わなかった（記録で 決めると ✕ で 消した 時に 人が 消えた）。今は 勤め始める 前の 人も 札を 畳んで 置くので 消えない
+  //   同じ 時刻かは 字で なく 時刻の 値で 比べる（書き方の 違う 同じ 時刻を 別と 見ない・N3）
   function hajimeOf(ctx, empId) {
     try {
       if (!ctx) return '';
@@ -523,13 +524,27 @@
           ctx._hajime = h;
           return '';
         }
+        const kagi = function (e) {
+          const s = String(e.created_at)
+            .trim()
+            .replace(' ', 'T')
+            .replace(/(\.\d{3})\d+/, '$1')
+            .replace(/([+-]\d\d)$/, '$1:00');
+          const t = Date.parse(s);
+          return isNaN(t) ? 'x' + String(e.created_at) : 't' + t;
+        };
         const kazu = {};
         arr(ctx.employees).forEach(function (e) {
-          if (e && e.created_at) kazu[String(e.created_at)] = (kazu[String(e.created_at)] || 0) + 1;
+          if (e && e.created_at) kazu[kagi(e)] = (kazu[kagi(e)] || 0) + 1;
         });
         arr(ctx.employees).forEach(function (e) {
-          if (e && e.created_at && kazu[String(e.created_at)] === 1)
-            mae(e.employee_id, dateOf(e.created_at));
+          if (e && e.created_at && kazu[kagi(e)] === 1) mae(e.employee_id, dateOf(e.created_at));
+        });
+        // 乗った 記録は 登録日より 前に する 時だけ 使う（登録日が 使えない 人には 使わない＝いつも 出す まま）
+        Object.keys(ctx.hoursByDate || {}).forEach(function (d) {
+          Object.keys(ctx.hoursByDate[d] || {}).forEach(function (id) {
+            if (h[id]) mae(id, d);
+          });
         });
         // 「何日から」は 登録日より 前に する 時だけ 使う（後から 登録した 人の 前の 日を 入れる 道）
         //   ★登録日が 使えない 人には 使わない★：前から 居る 人に 先の 日付で 率を 変えた 記録を 入れても 消えない様に

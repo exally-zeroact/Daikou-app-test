@@ -5,7 +5,7 @@
 //     ①勤め始めより 前の 期間の 明細には 今いる人でも 出さない（働いた 日・手当・控除が 在れば 出す）
 //     ②登録した 時刻が 2人 以上 同じ（倉庫の 引っ越しで まとめて 作った）人は 登録日を 使わない＝いつも 出す
 //     ③「何日から」を 登録日より 前の 日に すれば その 日から（登録日が 使えない 人には 使わない）
-//     ④乗った 記録では 決めない（✕ で 記録を 消しても 人が 消えない）
+//     ④乗った 記録が 登録日より 前に 在れば その 日から（前へ 動かす だけ・2026-10-20 本番前の 叩き N2）
 // ============================================================
 import { describe, it, expect } from 'vitest';
 const D = require('../../js/payroll-daily.js');
@@ -74,7 +74,7 @@ describe('勤め始めの 日', () => {
     expect(ids(D.report(tooka(1, 10), ctx))).toEqual(['atara', 'mae', 'mae2', 'nazo']);
   });
 
-  it('④乗った 記録では 決めない・前の 期間に 手当・控除が 在れば 明細には 出す', () => {
+  it('④乗った 記録が 登録日より 前に 在れば その 日から・前の 期間に 手当・控除が 在れば 明細には 出す', () => {
     const ctx = D.buildCtx(
       raw({
         workHours: [
@@ -98,8 +98,50 @@ describe('勤め始めの 日', () => {
         ],
       })
     );
-    expect(D.hajimeOf(ctx, 'atara')).toBe('2026-10-19');
+    expect(D.hajimeOf(ctx, 'atara')).toBe('2026-10-05');
     expect(ids(D.report(tooka(1, 10), ctx))).toContain('atara');
+    // 前から 居る 人（登録日が 使えない）は 乗った 記録で 遅れない
+    const ctx2 = D.buildCtx(
+      raw({
+        workHours: [
+          {
+            company_id: CO,
+            work_date: '2026-10-05',
+            employee_id: 'mae',
+            device_id: 'car1',
+            hours: 3,
+          },
+        ],
+      })
+    );
+    expect(D.hajimeOf(ctx2, 'mae')).toBe('');
+    // 乗った 記録が 登録日より 後なら 動かない
+    const ctx3 = D.buildCtx(
+      raw({
+        workHours: [
+          {
+            company_id: CO,
+            work_date: '2026-10-25',
+            employee_id: 'atara',
+            device_id: 'car1',
+            hours: 3,
+          },
+        ],
+      })
+    );
+    expect(D.hajimeOf(ctx3, 'atara')).toBe('2026-10-19');
+  });
+
+  it('⑦同じ 時刻を 違う 書き方で 返されても まとめて 作った 人と 見る（N3）', () => {
+    const r = raw();
+    r.employees[0].created_at = '2026-08-06T14:59:12.00606+00:00';
+    r.employees[1].created_at = '2026-08-06 14:59:12.006060+00';
+    r.employees[3].created_at = '2026-08-06T14:59:12.006Z';
+    const ctx = D.buildCtx(r);
+    expect(D.hajimeOf(ctx, 'mae')).toBe('');
+    expect(D.hajimeOf(ctx, 'mae2')).toBe('');
+    expect(D.hajimeOf(ctx, 'nazo')).toBe('');
+    expect(D.hajimeOf(ctx, 'atara')).toBe('2026-10-19');
   });
 
   it('⑤前から 居る 人に 先の 日付で 率を 変えた 記録を 入れても 消えない・新しい 人も 後ろの 記録で 遅れない', () => {
