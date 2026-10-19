@@ -125,6 +125,17 @@ test('②b 30日締めを 選ぶ ⇒ 何月分の 欄は 出ない・締めた �
   await page.fill('#pShimeHi', '30');
   await page.dispatchEvent('#pShimeHi', 'input');
   await expect(page.locator('#pNazukeRow')).toBeHidden();
+  // 締め日を 並べる 欄でも 28〜30 を 含めば 隠れる（[10,30]・2026-10-19 対立役 本番前6 直B）
+  await page.selectOption('#pMode', 'narabe');
+  await page.fill('#pNarabe', '10,30');
+  await page.dispatchEvent('#pNarabe', 'input');
+  await expect(page.locator('#pNazukeRow')).toBeHidden();
+  await page.fill('#pNarabe', '10,27');
+  await page.dispatchEvent('#pNarabe', 'input');
+  await expect(page.locator('#pNazukeRow')).toBeVisible();
+  await page.selectOption('#pMode', 'tsuki1');
+  await page.fill('#pShimeHi', '30');
+  await page.dispatchEvent('#pShimeHi', 'input');
   await page.click('#btnSaveSet');
   await page.waitForTimeout(800);
   const o = await page.evaluate(() => window.__okutta);

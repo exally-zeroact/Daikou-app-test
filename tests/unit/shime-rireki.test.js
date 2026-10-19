@@ -322,6 +322,9 @@ describe('締めの 何日から', () => {
       '2026-09-21〜2026-09-30*',
     ]);
     expect(kugiri(P.periodsOf(2026, 10, { kata: kAt }))).toEqual(['2026-10-01〜2026-10-31']);
+    // 28〜30 を 1つでも 含めば 締めた 日の 月の 分（[10,30] も・2026-10-19 対立役 本番前6 直B）
+    expect(P.seiki({ kind: 'tsuki', hi: [10, 30], nazuke: 'hajime' }).kata.nazuke).toBe('shime');
+    expect(P.seiki({ kind: 'tsuki', hi: [10, 27], nazuke: 'hajime' }).kata.nazuke).toBe('hajime');
     // 素の 形は どれも 空く 月が 無い（28〜30日締めの 始まった 日の 月の 分も）
     [28, 29, 30].forEach((h) => {
       const kk = k({ kind: 'tsuki', hi: [h], nazuke: 'hajime' });
