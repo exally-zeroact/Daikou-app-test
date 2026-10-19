@@ -2529,7 +2529,13 @@
             if (kikanKowareta(PERIODS)) {
               if (box)
                 box.innerHTML =
-                  '<div class="card"><div class="msg">' + esc(kikanBun(PERIODS)) + '</div></div>';
+                  '<div class="card"><div class="msg">' +
+                  esc(
+                    kikanBun(PERIODS) === KIKAN_AKI_BUN
+                      ? '締めの 変え方で この 月の 給料が 無くなっています。会社に 知らせてください。'
+                      : kikanBun(PERIODS)
+                  ) +
+                  '</div></div>';
               return;
             }
             // ★期が 取った 幅の 外へ 出る（締めの 形が 変わる 月・始まった 日の 月の 分）＝1回だけ 広げて 取り直す★ 2026-10-19
@@ -7803,7 +7809,8 @@
             if (!hi) {
               var f0 = shimeAkiFueta(retsu, rows, t.kata, rows);
               return f0.length
-                ? shimeAkiBun(f0) + '最初からの 払い方か 何月分の 呼び方を 選び直してください。'
+                ? shimeAkiBun(f0) +
+                    '最初からの 払い方か 何月分の 呼び方を 選び直してください。設定も 保存していません。'
                 : '';
             }
             var ato = function (d) {
@@ -7833,7 +7840,7 @@
                   Number(chika.slice(8, 10)) +
                   ' に すると 空きません。'
                 : '') +
-              '変える 日か 何月分の 呼び方を 選び直してください。'
+              '変える 日か 何月分の 呼び方を 選び直してください。設定も 保存していません。'
             );
           });
         }
@@ -7869,6 +7876,18 @@
               JSON.stringify(PayrollPeriod.kataNoHi(k, hi)) === JSON.stringify(t.kata)
             )
               return '';
+            // ★書く 直前の 記録で もう一度 空く 月を 比べる★（門の 後に 別の タブが 書いた 時・対立役 本番前 直3）
+            var aki = shimeAkiFueta(
+              b,
+              RAW.shimeRireki,
+              b,
+              RAW.shimeRireki
+                .filter(function (x) {
+                  return x && String(x.from_date).slice(0, 10) !== hi;
+                })
+                .concat([{ from_date: hi, value: mine }])
+            );
+            if (aki.length) return shimeAkiBun(aki).replace(/。$/, '');
             return DKSession.rest(SESS, 'dk_shime_rireki?on_conflict=company_id,from_date', {
               method: 'POST',
               headers: { Prefer: 'resolution=merge-duplicates,return=representation' },

@@ -73,6 +73,8 @@ test('① 20日締め(始) を 9/10 から 1日締め(締) ⇒ 9月分が 無く
   await expect(page.locator('#err')).toContainText(
     'この 変え方だと 2026年9月分の 給料が 無くなります（給料は 毎月 払う 決まり）。変える 日を'
   );
+  // わざと壊す：訳から「設定も 保存していません」を 外す ⇒ 赤（他の 欄は 保存できたと 思い込む・対立役 本番前 直2）
+  await expect(page.locator('#err')).toContainText('設定も 保存していません。');
   await page.waitForTimeout(300);
   expect(await kaki(page), '★空く 変え方を 書いた★').toEqual([]);
   expect(err).toEqual([]);
@@ -152,4 +154,42 @@ test('⑥ 空いた 月を 開く ⇒ 明細を 出さずに 訳', async ({ page
     '締めの 変え方で この 月の 給料が 無くなっています'
   );
   expect(await page.locator('#slips').innerHTML()).toBe('');
+});
+
+// わざと壊す：shimeAkiMon の「触って いない＝通す」と「今 空いて いる 月を 引く」を 両方 外す ⇒ 赤（設定も 書かなかった）
+test('⑦ 日付在りで 締めの 欄を 触らずに 保存 ⇒ 設定だけ 書く（門は 止めない）', async ({
+  page,
+}) => {
+  await settaiAke(page, [{ from_date: '2026-09-10', value: TSUITACHI }]);
+  await page.click('#btnSaveSet');
+  await page.waitForTimeout(800);
+  expect(await kaki(page)).toEqual([['POST', 'dk_payroll_settings']]);
+});
+
+// わざと壊す：shimeRowsYomu の 通信の 止めを 外す（failed でも 行を 返す）⇒ 赤（設定を 書いた）
+test('⑧ 門の 読み直しが 通信で 落ちる ⇒ 何も 書かず「保存していません」', async ({ page }) => {
+  await settaiAke(page, []);
+  await page.evaluate(() => {
+    const S = window.DKSession;
+    const moto = S.softList;
+    S.softList = function (s, p, y) {
+      if (String(p).indexOf('dk_shime_rireki') >= 0) {
+        if (y) {
+          y.tried++;
+          y.failed++;
+        }
+        return Promise.resolve([]);
+      }
+      return moto.apply(this, arguments);
+    };
+  });
+  await page.fill('#pHi', '2026-10-01');
+  await page.dispatchEvent('#pHi', 'change');
+  await page.selectOption('#pMode', 'matsu');
+  await page.click('#btnSaveSet');
+  await expect(page.locator('#err')).toContainText(
+    '締めの 変えた 記録を 読み直せませんでした（通信）。保存していません。'
+  );
+  await page.waitForTimeout(300);
+  expect(await kaki(page)).toEqual([]);
 });
