@@ -136,7 +136,9 @@ fs.mkdirSync(TILE_CACHE, { recursive: true });
 
 const TILE_URL = (z, x, y) =>
   `https://disaportal.gsi.go.jp/data/raster/${CONF.layer}/${z}/${x}/${y}.png`;
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 
 function loadPrefBbox() {
   const fp = path.join(PROJECT_ROOT, 'data', `roads-${PREF}.js`);
@@ -343,6 +345,7 @@ function extractRectangles(pngBuffer) {
   let body = JSON.stringify(out);
   // AKID 誤検出回避
   let secretSplits = 0;
+  // eslint-disable-next-line no-constant-condition -- 中で break する 回し
   while (true) {
     const m = body.match(/AKID[A-Za-z0-9]{32,}/);
     if (!m) break;

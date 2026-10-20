@@ -61,7 +61,9 @@ function log(...args) {
 // ────────────────────────────────────────────────────────────
 // HTTP helper
 // ────────────────────────────────────────────────────────────
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 
 async function fetchText(url, opts = {}) {
   const ctrl = new AbortController();
@@ -130,7 +132,7 @@ function classifyPOI(tags) {
     hw = tags.highway,
     ay = tags.aeroway,
     em = tags.emergency,
-    gl = tags.geological;
+    _gl = tags.geological;
   const cu = tags.cuisine || '';
   const name = tags.name || '';
 

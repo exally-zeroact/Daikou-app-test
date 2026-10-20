@@ -85,7 +85,9 @@ const PREFS = {
 };
 
 const PROJECT_ROOT = path.join(__dirname, '..');
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 
 const PREF = process.argv[2];
 if (!PREF || !PREFS[PREF]) {
@@ -360,7 +362,7 @@ async function fetchA31() {
   const geojsons = findFiles(extractDir, /^A31-.*\.geojson$/i);
   console.log(`  A31: ${geojsons.length} 河川別 GEOJSON 発見`);
   const features = [];
-  let counts = { 0: 0, 1: 0, 2: 0, 3: 0 };
+  const counts = { 0: 0, 1: 0, 2: 0, 3: 0 };
   for (const gp of geojsons) {
     let text;
     try {
@@ -440,11 +442,12 @@ async function fetchA40() {
     return 0;
   }
   const features = [];
-  let counts = { 0: 0, 1: 0, 2: 0, 3: 0 };
+  const counts = { 0: 0, 1: 0, 2: 0, 3: 0 };
   for (const shpPath of shps) {
     const dbfPath = shpPath.replace(/\.shp$/i, '.dbf');
     if (!fs.existsSync(dbfPath)) continue;
     const src = await shapefile.open(shpPath, dbfPath);
+    // eslint-disable-next-line no-constant-condition -- 中で break する 回し
     while (true) {
       const r = await src.read();
       if (r.done) break;
@@ -506,7 +509,7 @@ async function fetchA48() {
     return 0;
   }
   const features = [];
-  let counts = { red: 0, yellow: 0 };
+  const counts = { red: 0, yellow: 0 };
   for (const gp of geojsons) {
     let text;
     try {

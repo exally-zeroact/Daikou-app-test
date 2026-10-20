@@ -158,8 +158,8 @@ node scripts/gen-license-keypair.js
 
 差出人を「ダイコメ」にして本番メールを送るための設定です。**独立が済んでからで構いません。**
 
-- Brevo でログイン済（`zeroact24.729@outlook.com`）。必要な値：
-  - Host `smtp-relay.brevo.com` / Port `587` / Username `b3bc88001@smtp-brevo.com`
+- Brevo でログイン済（司さんの いつもの 受信の アドレス）。必要な値：
+  - Host `smtp-relay.brevo.com` / Port `587` / Username＝Brevo の SMTP の 画面に 出る物
   - パスワード＝**Brevo の SMTP キー（`xsmtpsib-` で始まる）を新しく発行して貼る**
     ★保管してある「APIキー（`xkeysib-`）」は SMTP には使えません。別物です。★
   - 差出人名：**ダイコメ**

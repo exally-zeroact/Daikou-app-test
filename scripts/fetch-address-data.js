@@ -102,7 +102,9 @@ const PREFS = {
 };
 
 const PROJECT_ROOT = path.join(__dirname, '..');
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 
 const args = process.argv.slice(2);
 const PREF = args[0];

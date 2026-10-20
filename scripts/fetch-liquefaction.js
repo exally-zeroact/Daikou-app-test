@@ -106,7 +106,9 @@ fs.mkdirSync(TILE_CACHE, { recursive: true });
 
 const TILE_URL = (z, x, y) =>
   `https://disaportal.gsi.go.jp/data/raster/08_03_ekijoka_zenkoku/${z}/${x}/${y}.png`;
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 
 // ─── 県 bbox (roads-{pref}.js から復元) ────────────────────────────
 function loadPrefBbox() {
@@ -127,7 +129,7 @@ function lat2ty(lat, z) {
   const r = (lat * Math.PI) / 180;
   return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * Math.pow(2, z);
 }
-function tx2lng(tx, z) {
+function _tx2lng(tx, z) {
   return (tx / Math.pow(2, z)) * 360 - 180;
 }
 function ty2lat(ty, z) {

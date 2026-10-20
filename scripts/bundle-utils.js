@@ -25,7 +25,9 @@ const {
   encodePolygonsBytes,
 } = require('./encoding-utils.js');
 
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 
 // ─── HTTP ─────────────────────────────────────────────────────
 async function fetchBuffer(url, timeoutMs = 240000) {
@@ -105,6 +107,7 @@ function gmlSplitByFeatureTag(gmlText, featureTagName) {
   const close = `</${featureTagName}>`;
   const blocks = [];
   let i = 0;
+  // eslint-disable-next-line no-constant-condition -- 中で break する 回し
   while (true) {
     const s = gmlText.indexOf(open, i);
     if (s === -1) break;

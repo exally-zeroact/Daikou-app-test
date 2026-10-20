@@ -93,7 +93,9 @@ const RAW_DIR = path.join(INPUT_DIR, 'raw');
 fs.mkdirSync(INPUT_DIR, { recursive: true });
 fs.mkdirSync(RAW_DIR, { recursive: true });
 
-const UA = { 'User-Agent': 'Daikou-app-test/0.1 (zeroact24.729@outlook.com)' };
+const UA = {
+  'User-Agent': 'Daikou-app-test/0.1 (+https://github.com/exally-zeroact/Daikou-app-test)',
+};
 const TOLERANCE_M = 30; // 道路マッチング許容距離
 const PRECISION = 1e5;
 const GRID_INT = 1000; // grid cell = 0.01 deg
@@ -152,6 +154,7 @@ async function fetchN10() {
     const dbfPath = shpPath.replace(/\.shp$/i, '.dbf');
     if (!fs.existsSync(dbfPath)) continue;
     const src = await shapefile.open(shpPath, dbfPath);
+    // eslint-disable-next-line no-constant-condition -- 中で break する 回し
     while (true) {
       const r = await src.read();
       if (r.done) break;
@@ -236,6 +239,7 @@ function osmToFeatures(elements) {
 function readVarint(buf, pos) {
   let n = 0,
     shift = 0;
+  // eslint-disable-next-line no-constant-condition -- 中で break する 回し
   while (true) {
     const b = buf[pos++];
     n |= (b & 0x7f) << shift;
@@ -275,15 +279,17 @@ function decodeRoadsJs(jsPath) {
       roads[i] = { idx: i, bitmap, points };
       continue;
     }
+    // eslint-disable-next-line prefer-const -- lat は 後で 足し直す
     let [lat, p1] = readSignedVarint(buf, pos);
     pos = p1;
+    // eslint-disable-next-line prefer-const -- lng は 後で 足し直す
     let [lng, p2] = readSignedVarint(buf, pos);
     pos = p2;
     points[0] = [lat, lng];
     for (let j = 1; j < numPts; j++) {
-      let [dLat, q1] = readSignedVarint(buf, pos);
+      const [dLat, q1] = readSignedVarint(buf, pos);
       pos = q1;
-      let [dLng, q2] = readSignedVarint(buf, pos);
+      const [dLng, q2] = readSignedVarint(buf, pos);
       pos = q2;
       lat += dLat;
       lng += dLng;
@@ -333,7 +339,7 @@ function buildRoadGrid(roads) {
 }
 
 // 1e5 整数座標での点-線分距離 2 乗 (近似 Euclid)
-function ptSegDist2(px, py, ax, ay, bx, by) {
+function _ptSegDist2(px, py, ax, ay, bx, by) {
   const dx = bx - ax,
     dy = by - ay;
   const len2 = dx * dx + dy * dy;
@@ -355,7 +361,7 @@ function ptSegDist2(px, py, ax, ay, bx, by) {
 // 1e5 整数距離平方 → メートル
 // 緯度方向: 1e5 unit = 0.00001 deg ≈ 1.11 m  (実測 111000m/deg)
 // 経度方向: cos(lat) で補正必要だが日本緯度帯では概ね 0.81-0.91. 簡易 fixed 0.83 で近似.
-function intDist2ToM(d2, latI) {
+function _intDist2ToM(d2, _latI) {
   // d2 は (lat int)^2 + (lng int)^2 = (deg×1e5)^2 だが,
   // 経度方向は緯度依存なので両軸ごとに補正したい. しかし呼出側は lat/lng の差分単位を分けていない.
   // → 簡易: 1e5 unit ≒ 1.0m として cos 補正は呼出側で.
