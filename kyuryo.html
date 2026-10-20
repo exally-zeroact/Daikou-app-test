@@ -1572,6 +1572,18 @@
         }
       }
 
+      /* ★300px 未満（折りたたみの 閉じた 画面）は 3つが 1行に 入らない★＝字を 潰さず 折り返す（対立役 D1：280px で 字が はみ出した） */
+      @media (max-width: 299px) {
+        .hn-kikan.sukunai {
+          flex-wrap: wrap;
+        }
+
+        .hn-kikan.sukunai .hn-chip {
+          flex: 1 1 auto;
+          max-width: none;
+        }
+      }
+
       .hn-chip.on {
         background: #0a5fd0;
         border-color: #0a5fd0;

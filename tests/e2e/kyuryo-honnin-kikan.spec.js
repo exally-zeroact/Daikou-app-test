@@ -13,7 +13,8 @@
 //     380px 以下の 段（11px・空き 詰め）を 外す ……………… ★5本 赤★
 //     選んだ 期間を 真ん中へ 送らない ……………………………… ★4本 赤★
 //     「〜」の 前後の 空きを 残す ……………………………………… ★6本 赤★
-//     戻した 後 … ★11本 緑★
+//     300px 未満の 折り返しを 外す ………………………………… ★1本 赤★（280px で 字が はみ出す）
+//     戻した 後 … ★12本 緑★
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const { hiraku, hakaru, jitaiKotei } = require('./honnin-harness');
@@ -89,3 +90,19 @@ for (const [na, set] of KATA) {
     });
   }
 }
+
+// ★300px 未満（折りたたみの 閉じた 画面）は 1行に しない＝折り返して 字を はみ出させない★（対立役 D1）
+test('★期間の ボタン：締め日 10・20・25 の 12月・280px は 折り返して 字が はみ出さない★', async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date('2025-12-15T12:00:00+09:00'));
+  await page.setViewportSize({ width: 280, height: 653 });
+  await hiraku(page, { period_shime: { kind: 'tsuki', hi: [10, 20, 25], nazuke: 'shime' } });
+  await jitaiKotei(page);
+  const m = await hakaru(page);
+  expect(m.chips).toBe(3);
+  expect(m.jiHami, '★期間の ボタンの 字が はみ出している★').toBe(0);
+  expect(m.jiYoyuu, '★iPhone と 同じ 幅の 字だと ボタンに 入らない★').toBe(0);
+  expect(m.chipMigi, '★期間の ボタンが 画面の 右へ はみ出している★').toBeLessThanOrEqual(0);
+  expect(m.page, '★ページが 横に はみ出している★').toBeLessThanOrEqual(0);
+});
