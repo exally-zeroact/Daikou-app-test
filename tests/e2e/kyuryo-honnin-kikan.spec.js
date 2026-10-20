@@ -151,6 +151,14 @@ for (const [na, hi, set, hiroi] of SCAN) {
       );
       const m = await hakaru(page);
       const haba = await page.evaluate(() => document.documentElement.clientWidth);
+      // ★字の 大きさは 1px 刻み（半端な 大きさは CI の Linux だけで 崩れた・fd4f830）★
+      const hanpa = await page.evaluate(
+        () =>
+          Array.from(document.querySelectorAll('#slips .hn-chip')).filter(
+            (c) => parseFloat(getComputedStyle(c).fontSize) % 1 !== 0
+          ).length
+      );
+      if (hanpa) dame.push(`${w}px 字の 大きさが 半端 ${hanpa}`);
       // ★その 幅で 開けた 回数を 数える（setViewportSize が 効かずに 430px の まま 測るのを 緑に しない・対立役 直2）★
       if (haba === w) mita++;
       else dame.push(`${w}px のはずが ${haba}px`);

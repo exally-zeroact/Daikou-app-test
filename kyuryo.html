@@ -1560,6 +1560,12 @@
         padding: 0 2px;
         font-size: clamp(9px, calc(100vw / 26.4 - 2.35px), 13px);
         font-size: clamp(9px, calc(100cqw / 26.4 - 0.985px), 13px);
+
+        /* ★字の 大きさは 1px 刻みに 切り下げる★ 半端な 大きさ（11.5px 等）だと CI の Linux の chromium だけ
+           9.5・11.5・12.5px を 越えた すぐ 上の 幅（313〜318・366〜369・393〜396px 等）で ゆとりが 消えた（fd4f830 の CI・Windows と webkit は 緑）。
+           見立て＝Linux は 半端な 大きさを 整数の 大きさで 描く（測っていない）。
+           切り下げなので 入る 側に しか 動かない。round() が 読めない 古い 中身は 上の 行が 効く */
+        font-size: round(down, clamp(9px, calc(100cqw / 26.4 - 0.985px), 13px), 1px);
       }
 
       /* ★300px 未満（折りたたみの 閉じた 画面）は 3つが 1行に 入らない★＝必ず 2つ＋1つに 折る（対立役 D1：280px で 字が はみ出した）
@@ -1574,6 +1580,7 @@
           max-width: none;
           font-size: min(12px, calc(100vw / 17.6 - 2.95px));
           font-size: min(12px, calc(100cqw / 17.6 - 0.909px));
+          font-size: round(down, min(12px, calc(100cqw / 17.6 - 0.909px)), 1px);
         }
       }
 
