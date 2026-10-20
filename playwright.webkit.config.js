@@ -53,6 +53,9 @@ export const WEBKIT_KUMI = [
   'kyuryo-honnin-shashin.spec.js',
   // 従業員の 明細の 期間の ボタン（iPhone の 中身でも 1行に 入るか・対立役 M1 2026-10-20）
   'kyuryo-honnin-kikan.spec.js',
+  // 従業員の 明細の 紙が 幅ぴったり（iPhone の 中身でも 右が 切れないか・本番前の 対立役 N1 2026-10-20）
+  //   makibou は chromium の 巻き棒を 隠す 前提なので 入れない
+  'kyuryo-honnin-haba.spec.js',
   'kyuryo-meisai-miseru.spec.js',
 ];
 
