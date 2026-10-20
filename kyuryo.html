@@ -1336,10 +1336,16 @@
 
       .yame-na {
         display: flex;
+        flex-wrap: wrap; /* ボタンが 3つに なっても 字を 縦に 割らない（10-20） */
         align-items: center;
         gap: 10px;
         margin-top: 4px;
         font-weight: 700;
+      }
+
+      .yame-na > span,
+      .yame-na .btn {
+        white-space: nowrap;
       }
 
       /* ★辞めた 人の 歩合・役割を 直す 欄★ 2026-10-20（見出し行が 無いので 欄ごとに 名前を 付ける） */
@@ -7039,6 +7045,7 @@
           Array.prototype.forEach.call(document.querySelectorAll('[data-fukushoku]'), function (b) {
             b.onclick = function () {
               b.disabled = true;
+              YAME_NAOSU[b.getAttribute('data-fukushoku')] = false; // 復職したら 閉じる（また 退職しても 勝手に 開かない・対立役 2回目）
               empTaishoku(b.getAttribute('data-fukushoku'), true, null).then(function (ok) {
                 if (!ok) b.disabled = false;
               });
@@ -7100,16 +7107,28 @@
         var YAME_HAIFU = {}; // 配る 箱
         // 辞めた 人の 歩合・役割・最低保証を 直す 欄（今いる人と 同じ 欄・同じ 押し口・復職は しない）
         //   ★何日から の 既定は 今日★（司さん 10-17「今いる人も 辞めた人も 同じ」）
-        //   今日の ままだと 今日より 後の 分だけに 効く＝前の 分を 直す 時の 日の 選び方を 字で 出す
-        //   （辞めた 日で「効きません」とは 言わない＝計算は 辞めた 日を 見ない・対立役 止1）
+        //   選んだ 日より 後の 分だけに 効く＝前の 分を 直す 時の 日の 選び方を いつも 字で 出す
+        //   （辞めた 日で「効きません」とは 言い切らない＝計算は 辞めた 日を 見ない・対立役 止1。
+        //    辞めた 日より 後を 選んだ 時に 黙らない・対立役 2回目 C）
         function yameNaosuRan(e0) {
           var hi = empHi(e0.employee_id);
+          var md = function (d) {
+            return String(d).slice(5).replace('-', '/').replace(/^0/, '').replace('/0', '/');
+          };
           return (
             '<div class="yame-naosu">' +
             hitoRan(hiNoHito(e0), 'label') +
             '</div>' +
-            (hi && hi >= kyouJst()
-              ? '<div class="th-sub">今日からの ままだと、今日より 後の 分だけに 効きます。前の 分を 直す 時は「何日から」に 直したい 初めの 日を 選んでください。</div>'
+            (hi
+              ? '<div class="th-sub yame-naosu-chui">' +
+                esc(md(hi)) +
+                ' から 後の 分だけに 効きます（前の 分は 前の 値の まま）。' +
+                (e0.retired_on && hi > e0.retired_on
+                  ? '辞めた 日（' +
+                    esc(md(e0.retired_on)) +
+                    '）より 後に 働いた 日・手当・控除が 無ければ、明細は 変わりません。'
+                  : '') +
+                '前の 分を 直す 時は「何日から」に 直したい 初めの 日を 選んでください。</div>'
               : '')
           );
         }
