@@ -2,20 +2,29 @@
 // ★★見張り：従業員の 自分の 給料明細（本人の 画面）の 期間の ボタンは 1行★★ 2026-10-20
 //
 //   司さん（スマホの 絵つき）「赤丸のところは1行にしろ」
-//   ★前★ 期間の ボタン 3つが 2行に 折れた（iPhone の 字は 試験の 字より 2割 広い）。
+//   ★前★ 期間の ボタン 3つが 2行に 折れた（iPhone の 字は Windows の 試験の 字より 2割 広い）。
+//   試験は repo の 字体（BIZ UDPゴシック＝iPhone と ほぼ 同じ 幅）に 揃えて 測る（機械の 字体に 頼らない）。
 //   ★今★ 3つ まで＝幅を 等分して 1行。4つ 以上（週1回・毎日）＝1行の まま 中で 横に 送る。
 //
 //   ★押す物の一覧（先に書く）★ 1. リンクを 開く 2. パスワードを 入れて「見る」 3. 期間の ボタン
+//   ★★わざと壊して 赤に なるのを 見た（2026-10-20 実測・字体を BIZ UDPゴシックに 揃えた 後）★★
+//     全部の 形を 等分で 詰める（4つ 以上も sukunai）……… ★4本 赤★（週1回・毎日 390/320）
+//     字の 大きさの 段（400px 12px・340px 10px）を 外す …… ★4本 赤★（月3回・締め日 10/20/25 の 390/320）
+//     380px 以下の 段（11px・空き 詰め）を 外す ……………… ★5本 赤★
+//     選んだ 期間を 真ん中へ 送らない ……………………………… ★4本 赤★
+//     「〜」の 前後の 空きを 残す ……………………………………… ★6本 赤★
+//     戻した 後 … ★11本 緑★
 // ============================================================
 const { test, expect } = require('@playwright/test');
-const { hiraku, hakaru } = require('./honnin-harness');
+const { hiraku, hakaru, jitaiKotei } = require('./honnin-harness');
 
 async function ikkou(page, kazu) {
+  await jitaiKotei(page);
   const m = await hakaru(page);
   expect(m.chips, '★期間の ボタンの 数が 違う＝この 形を 測っていない★').toBe(kazu);
   expect(m.gyou, '★期間の ボタンが 1行に 入っていない★').toBe(1);
   expect(m.jiHami, '★期間の ボタンの 字が はみ出している★').toBe(0);
-  expect(m.jiYoyuu, '★スマホの 字（2割 広い）だと ボタンに 入らない★').toBe(0);
+  expect(m.jiYoyuu, '★iPhone と 同じ 幅の 字だと ボタンに 入らない（1割の ゆとり 無し）★').toBe(0);
   expect(m.chipMigi, '★期間の ボタンが 画面の 右へ はみ出している★').toBeLessThanOrEqual(0);
   expect(m.page, '★ページが 横に はみ出している★').toBeLessThanOrEqual(0);
 }

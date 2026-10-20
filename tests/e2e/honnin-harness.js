@@ -69,6 +69,19 @@ async function hiraku(page, set, nidome) {
   await expect(page.locator('#hnKami .hn-kami-waku').first()).toBeVisible();
 }
 
+// ★期間の ボタンの 字は repo に 置いた 字体（BIZ UDPゴシック）で 測る★ 2026-10-20
+//   機械ごとの 字体で 幅が 変わる（手元の Windows「10/1 〜 10/10」13px＝79.5px・CI の Linux はもっと 広い）。
+//   司さんの iPhone の 絵では 同じ 字が 約 99px、この 字体で 97.1px ＝ ほぼ 同じ ⇒ この 字体に 揃えて 1割の ゆとりを 見る
+async function jitaiKotei(page) {
+  await page.addStyleTag({
+    content:
+      "@font-face{font-family:'KakuninBIZ';src:url('/vendor/fonts/BIZUDPGothic-Regular.ttf')}" +
+      "#slips .hn-chip{font-family:'KakuninBIZ' !important}",
+  });
+  await page.evaluate(() => document.fonts.load("13px 'KakuninBIZ'"));
+  await page.waitForFunction(() => document.fonts.check("13px 'KakuninBIZ'"));
+}
+
 // 期間の ボタンが 1行か・字が はみ出さないか・紙が 右／下で 切れないか
 async function hakaru(page) {
   return page.evaluate(() => {
@@ -80,15 +93,14 @@ async function hakaru(page) {
       chips: chips.length,
       gyou: new Set(tops).size,
       jiHami: chips.filter((c) => c.scrollWidth > c.clientWidth + 1).length,
-      // ★スマホの 字は 試験の 字より 2割 広い★（司さんの iPhone の 絵で 実測：同じ 13px で 125px と 109px）
-      //   ⇒ 字の 幅を 1.2倍 しても ボタンの 中に 入るか を 見る（試験の 機械でだけ 入る 緑に しない）
+      // ★字の 幅を 1.1倍 しても ボタンの 中に 入るか★（jitaiKotei の 字体で 測った 時の ゆとり 1割）
       jiYoyuu: chips.filter((c) => {
         const r = document.createRange();
         r.selectNodeContents(c);
         const ji = r.getBoundingClientRect().width;
         const cs = getComputedStyle(c);
         const naka = c.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-        return ji * 1.2 > naka;
+        return ji * 1.1 > naka;
       }).length,
       chipMigi: Math.max(
         0,
@@ -120,4 +132,4 @@ async function hakaru(page) {
   });
 }
 
-module.exports = { EMP, SET, hiraku, hakaru };
+module.exports = { EMP, SET, hiraku, hakaru, jitaiKotei };
