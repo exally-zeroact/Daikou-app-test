@@ -132,6 +132,30 @@ describe('勤め始めの 日', () => {
     expect(D.hajimeOf(ctx3, 'atara')).toBe('2026-10-19');
   });
 
+  it('⑧乗った 記録が 無くても 勤め始めより 前の 期間に 手当・控除が 在れば 明細に 出す（額が どの 明細にも 出ないのを 防ぐ・N1）', () => {
+    const ctx = D.buildCtx(
+      raw({
+        adjustments: [
+          {
+            adj_id: 'a1',
+            work_date: '2026-10-05',
+            employee_id: 'atara',
+            kind: 'teate',
+            label: 'x',
+            yen: 5000,
+          },
+        ],
+      })
+    );
+    // 乗った 記録が 無いので 勤め始めは 登録日の まま
+    expect(D.hajimeOf(ctx, 'atara')).toBe('2026-10-19');
+    const r = D.report(tooka(1, 10), ctx);
+    const atara = r.employees.find((e) => e.employee_id === 'atara');
+    expect(atara, '手当だけの 人が 明細から 消えた').toBeTruthy();
+    expect(atara.adj.length).toBe(1);
+    expect(atara.totalPay).toBe(5000);
+  });
+
   it('⑦同じ 時刻を 違う 書き方で 返されても まとめて 作った 人と 見る（N3）', () => {
     const r = raw();
     r.employees[0].created_at = '2026-08-06T14:59:12.00606+00:00';
