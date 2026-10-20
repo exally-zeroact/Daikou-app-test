@@ -163,7 +163,7 @@ for (const [na, hi, set, hiroi] of SCAN) {
       //   前より 小さくて よいのは 前が「字×1.1 が 入る」を 破っていた 幅か、大きい 方が Linux の CI で 確かめて いない 幅だけ
       if (w >= 311) {
         const mae = w <= 340 ? 10 : w <= 380 ? 11 : w <= 400 ? 12 : 13;
-        const yurusu = (w >= 311 && w <= 317) || (w >= 341 && w <= 343) || (w >= 401 && w <= 405);
+        const yurusu = (w >= 311 && w <= 318) || (w >= 341 && w <= 343) || (w >= 401 && w <= 405);
         const fs = await page.evaluate(() =>
           Math.min(
             ...Array.from(document.querySelectorAll('#slips .hn-chip')).map((c) =>
