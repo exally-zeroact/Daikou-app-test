@@ -159,6 +159,17 @@ for (const [na, hi, set, hiroi] of SCAN) {
           ).length
       );
       if (hanpa) dame.push(`${w}px 字の 大きさが 半端 ${hanpa}`);
+      // ★320px（iPhone SE 初代 等）は 前の 10px より 小さく しない（本番前の 対立役：8.8 で 割ると 9px に 縮んだ）★
+      if (w === 320) {
+        const fs = await page.evaluate(() =>
+          Math.min(
+            ...Array.from(document.querySelectorAll('#slips .hn-chip')).map((c) =>
+              parseFloat(getComputedStyle(c).fontSize)
+            )
+          )
+        );
+        if (fs < 10) dame.push(`320px 字が ${fs}px（前は 10px）`);
+      }
       // ★その 幅で 開けた 回数を 数える（setViewportSize が 効かずに 430px の まま 測るのを 緑に しない・対立役 直2）★
       if (haba === w) mita++;
       else dame.push(`${w}px のはずが ${haba}px`);
