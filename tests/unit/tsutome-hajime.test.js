@@ -181,7 +181,7 @@ describe('勤め始めの 日', () => {
     expect(D.hajimeOf(ctx, 'atara')).toBe('2026-10-19');
   });
 
-  it('⑥人が 1人しか 居ない（本人の 画面）時は 登録日を 使わない', () => {
+  it('⑥事務所の 画面で 人が 1人しか 居ない 時は 登録日を 使わない（本人の 画面＝ctx.honnin は 下）', () => {
     const r = raw();
     r.employees = [r.employees[2]];
     const ctx = D.buildCtx(r);
@@ -228,5 +228,21 @@ describe('勤め始めの 日・本人の 画面', () => {
     );
     ctx.honnin = true;
     expect(D.hajimeOf(ctx, 'nazo')).toBe('');
+  }); // ★登録日は 日本の 日付で 切る★（対立役 2回目 M3：UTC の 日付に しても 赤が 0本だった）
+  it('⑤-4 本人の 画面の 登録日は 日本時間の 日付（10/10 15:30Z＝10/11・14:59Z＝10/10）', () => {
+    const hi = (t) => {
+      const ctx = D.buildCtx(
+        hitori({
+          employees: [
+            { employee_id: 'atara', name: '新しい', role: '2種', active: true, created_at: t },
+          ],
+        })
+      );
+      ctx.honnin = true;
+      return D.hajimeOf(ctx, 'atara');
+    };
+    expect(hi('2026-10-10T15:30:00Z')).toBe('2026-10-11');
+    expect(hi('2026-10-10T14:59:00Z')).toBe('2026-10-10');
+    expect(hi('2026-10-19 01:00:00.123456+00')).toBe('2026-10-19');
   });
 });
