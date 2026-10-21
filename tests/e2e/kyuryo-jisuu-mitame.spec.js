@@ -80,7 +80,9 @@ function sess(F) {
     ' if(F.uriageRirekiDame&&p.indexOf("dk_uriage_rireki")===0){if(st)st.failed++;return Promise.resolve([]);}' +
     // 読めない 表を 名指し（F.dame＝["dk_shift_edits"] 等）
     ' if((F.dame||[]).some(function(t){return p.indexOf(t)===0;})){if(st)st.failed++;return Promise.resolve([]);}' +
-    'return Promise.resolve(rows(p));};})();'
+    // 読みを 遅らせる（window.__osoi ミリ秒・期を 変えた 直後の 読み込み中を 作る）
+    'if(!window.__osoi)return Promise.resolve(rows(p));' +
+    'return new Promise(function(ok){setTimeout(function(){ok(rows(p));},window.__osoi);});};})();'
   );
 }
 
@@ -1194,4 +1196,94 @@ test('読めた 期は 今まで 通り 札を 押すと 乗った人を 送る'
     window.__calls.filter((x) => x.p.indexOf('dk_work_hours') === 0)
   );
   expect(c.length, '★読めたのに 送らない★').toBeGreaterThan(0);
+});
+
+// ★★期を 読み込み中は 手で 入れた 日・乗った人 を 送らない★★ 2026-10-21（対立役 K-1 が 測った）
+//   前：読みを 遅らせて「次の月」を 押し、タブを 切り替えると 9月の 日が 8月の 記録で 描かれ、
+//   「＋ 手で車を足す」・乗った人の 札から 9/1 へ 売上 0・時間 0 を 送った（倉庫に 行が 在れば 0 で 上書き）
+//   ★わざと壊して 赤に なるのを 見た（2026-10-21 実測）★ dameNara の 読み込み中の 断りを 外す … この 1本 赤
+test('期を 変えた 読み込み中に 描き直しても 手で 入れた 日・乗った人 を 送らない', async ({
+  page,
+}) => {
+  await hiraku(page);
+  await page.evaluate(() => {
+    window.__osoi = 4000;
+  });
+  await page.click('#nextM');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    for (const t of ['slip', 'hours']) {
+      const b = document.querySelector('.tab[data-tab="' + t + '"]');
+      if (b && b.onclick) b.onclick();
+    }
+  });
+  await page.waitForTimeout(300);
+  const sel = page.locator('[data-man-add]').first();
+  const chip = page.locator('[data-chip-emp]').first();
+  expect(
+    (await sel.count()) + (await chip.count()),
+    '★読み込み中に 押せる 物が 無い＝この 形を 測っていない★'
+  ).toBeGreaterThan(0);
+  if (await sel.count()) {
+    const opt = await sel.evaluate((s) =>
+      Array.from(s.options)
+        .map((o) => o.value)
+        .find((v) => v && v !== '__new__')
+    );
+    if (opt) await sel.selectOption(opt);
+  }
+  if (await chip.count()) await chip.evaluate((b) => b.click());
+  await page.waitForTimeout(600);
+  const c = await page.evaluate(() =>
+    window.__calls.filter(
+      (x) => x.p.indexOf('dk_manual_days') === 0 || x.p.indexOf('dk_work_hours') === 0
+    )
+  );
+  expect(c, '★読み込み中に 前の 期の 記録で 描いた 欄から 送った（0 で 上書きする）★').toEqual([]);
+  await expect(page.locator('#err')).toContainText('読み込み中');
+});
+
+// ★読めない 期に「＋ 新しい車」を 選んでも 車の 名前を 倉庫に 書かない★（対立役 K-2：名前だけ 残って 次に「もう あります」で 弾かれた）
+test('手で 入れた 日が 読めない 期は「＋ 新しい車」でも 車の 名前を 書かない', async ({ page }) => {
+  page.on('dialog', (d) => d.accept('9号車'));
+  await hiraku(page, {
+    tweak: (F) => {
+      F.dame = ['dk_manual_days'];
+    },
+  });
+  const sel = page.locator('[data-man-add]').first();
+  expect(await sel.count(), '★「＋ 手で車を足す」が 無い＝この 形を 測っていない★').toBe(1);
+  await sel.selectOption('__new__');
+  await page.waitForTimeout(600);
+  const c = await page.evaluate(() =>
+    window.__calls.filter(
+      (x) => x.p.indexOf('dk_device_labels') === 0 || x.p.indexOf('dk_manual_days') === 0
+    )
+  );
+  expect(c, '★読めないのに 車の 名前か 手で 入れた 日を 送った★').toEqual([]);
+  await expect(page.locator('#err')).toContainText('読めません');
+});
+
+// ★断った 訳は 押した 所から 見える★（対立役 K-3：下の 日の 札を 押すと #err は 画面の 上の 外＝何も 起きない ように 見えた）
+test('乗った人が 読めない 期に 下の 日の 札を 押すと 断った 訳が 画面に 見える', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.dame = ['dk_work_hours'];
+    },
+  });
+  const last = page.locator('[data-chip-emp]').last();
+  expect(await last.count(), '★乗った人の 札が 無い＝この 形を 測っていない★').toBe(1);
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await page.waitForTimeout(600);
+  const r = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    const b = e.getBoundingClientRect();
+    return { top: b.top, bottom: b.bottom, vh: innerHeight, ji: e.textContent };
+  });
+  expect(r.ji).toContain('読めません');
+  expect(r.top, '★断った 訳が 画面の 上の 外★').toBeGreaterThanOrEqual(0);
+  expect(r.bottom, '★断った 訳が 画面の 下の 外★').toBeLessThanOrEqual(r.vh);
 });

@@ -4698,12 +4698,18 @@
         //   {"sales_yen":0,"hours":0,"toll_yen":0,...} を 送って 上書きした。乗った人（dk_work_hours）も 1行 丸ごと 送る 同じ 形
         var WH_DAME = false;
         var MD_DAME = false;
+        // ★期を 読み込み中も 断る★ 2026-10-21（対立役 K-1：期を 変えた 直後に 描き直すと 新しい 期の 日が 前の 期の 記録で 描かれ、
+        //   「＋ 手で車を足す」・乗った人の 札から 0 を 送った）。断った 訳は 押した 所から 見える 所へ 出す（対立役 K-3：#err は 画面の 上の 外だった）
         function dameNara(dame, na) {
-          if (!dame) return false;
+          if (!dame && !LP_YOMICHU) return false;
           showErr(
-            na +
-              'の 記録が 読めません。今 保存すると 前に 入れた 額が 消える ので 保存しません。上の「もう一度 読む」を 押してください。'
+            LP_YOMICHU
+              ? '期間の 記録を 読み込み中です。読み終えてから もう一度 入れてください。'
+              : na +
+                  'の 記録が 読めません。今 保存すると 前に 入れた 額が 消える ので 保存しません。上の「もう一度 読む」を 押してください。'
           );
+          var e = $('err');
+          if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' });
           return true;
         }
         function afterLoad(retry) {
@@ -7181,6 +7187,11 @@
               var date = sel.getAttribute('data-man-add');
               var dev = sel.value;
               if (dev === '__new__') {
+                // ★名前を 書く 前に 断る★（対立役 K-2：読めない 期は 車の 名前だけ 倉庫に 残った）
+                if (dameNara(MD_DAME, '手で 入れた 日')) {
+                  sel.value = '';
+                  return;
+                }
                 var name = String(
                   window.prompt('車の名前を入れてください（例: 2号車）') || ''
                 ).trim();
@@ -7287,6 +7298,7 @@
 
         function delManual(date, dev) {
           if (!COMPANY) return;
+          if (dameNara(MD_DAME, '手で 入れた 日')) return Promise.resolve();
           return DKSession.rest(
             SESS,
             'dk_manual_days?company_id=eq.' +
@@ -7475,6 +7487,7 @@
         }
 
         function delWorkHour(date, employeeId) {
+          if (dameNara(WH_DAME, '乗った人')) return Promise.resolve();
           return DKSession.rest(
             SESS,
             'dk_work_hours?company_id=eq.' +
