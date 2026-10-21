@@ -1080,6 +1080,9 @@
               // 前の 月の 止めの 訳を 出さない（「開き直して」で なく 読み込みの 失敗を 出す・対立役 4回目 P3）
               RIREKI_DAME = false;
               URIAGE_DAME = 0;
+              // 描いた 後に 転んだ 時も 数字と 紙の 絵を 失敗の 訳と 並べて 残さない（対立役 5回目 P7）
+              if ($('list')) $('list').innerHTML = '';
+              if ($('kamiMado')) $('kamiMado').innerHTML = '';
               RAW.shifts = [];
               RAW.edits = [];
               window.__editsById = {};

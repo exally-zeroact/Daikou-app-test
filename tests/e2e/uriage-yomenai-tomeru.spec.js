@@ -368,8 +368,49 @@ test('★読みの 後半で 計算が 転んだ 月は 表を 切り替えて�
   await page.locator('#segCar').click();
   await page.waitForTimeout(300);
   expect(await kami(page), '★計算が 転んだ 月に 紙（0円）が 出た★').toBe(0);
+  // 「記録が ありません」は #msg に 出る（#list で 見ると 空振り・対立役 5回目 見立て-3）
   await expect(
-    page.locator('#list'),
-    '★計算が 転んだ 月に「記録が ありません」の 表を 出した★'
+    page.locator('#msg'),
+    '★計算が 転んだ 月に「記録が ありません」と 出した★'
   ).not.toContainText('まだ記録がありません');
+});
+
+// P3：失敗の 後に 前の 月の「記録が 読めない（開き直して）」の 訳が 出た（対立役 4回目）＝試験で 縛って いなかった（5回目 直す-A）
+test('★前の 月で 記録が 読めず 次の 月の 読みが 失敗したら 訳は「読み込みに失敗」★', async ({
+  page,
+}) => {
+  await akeru(page, ['dk_uriage_rireki']);
+  await expect(page.locator('#err')).toContainText('売上から 引く 物の 変えた 記録');
+  await page.evaluate(() => {
+    window.__shiftsFail = true;
+  });
+  await page.locator('#nextM').click();
+  await expect(page.locator('#err')).toContainText('読み込みに失敗しました');
+  await page.locator('summary', { hasText: '一覧で 見る' }).click();
+  await page.locator('#segDay').click();
+  await page.locator('#segCar').click();
+  await page.waitForTimeout(300);
+  await expect(page.locator('#err'), '★前の 月の「開き直して」の 訳に 替わった★').toContainText(
+    '読み込みに失敗しました'
+  );
+  await expect(page.locator('#kamiMsg')).toContainText('読み込みに 失敗した');
+});
+
+// P7：表を 描いた 後に 転ぶと、数字と 紙の 絵が「読み込みに失敗」と 並んで 残った
+test('★表を 描いた 後に 転んでも 数字と 紙の 絵を 残さない★', async ({ page }) => {
+  await akeru(page, []);
+  await page.locator('summary', { hasText: '一覧で 見る' }).click();
+  await page.evaluate(() => {
+    const D = window.DKSession;
+    const o = D.showUnknownBar;
+    window.__nage = 1;
+    D.showUnknownBar = function () {
+      if (window.__nage-- > 0) throw new Error('見張り');
+      return o.apply(this, arguments);
+    };
+  });
+  await page.locator('#nextM').click();
+  await expect(page.locator('#err')).toContainText('読み込みに失敗しました');
+  expect(await kami(page), '★失敗の 訳と 紙の 絵が 並んだ★').toBe(0);
+  expect(await gyou(page), '★失敗の 訳と 表の 数字が 並んだ★').toBe(0);
 });
