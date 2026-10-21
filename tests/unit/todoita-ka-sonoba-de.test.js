@@ -111,11 +111,16 @@ describe('★届いていない事に その場で 気づく★', () => {
 
   it('★★③ 本番の ビルド（実測 約4分）を 待てる長さが 在る★★', () => {
     const s = y();
-    const kai = (s.match(/for i in ([0-9 ]+); do/) || [])[1];
-    expect(kai, '★待つ 回数が 読めません★').toBeTruthy();
-    const n = kai.trim().split(/\s+/).length;
-    expect(n, '★待ちが 短すぎます（本番の ビルドは 約4分・並ぶ事も ある）★').toBeGreaterThanOrEqual(
-      6
+    // 待つ 回数＝for の 並び か $(seq 1 N)（2026-10-22 に seq へ 変えた）
+    const m1 = s.match(/for i in ([0-9 ]+); do/);
+    const m2 = s.match(/for i in \$\(seq 1 ([0-9]+)\); do/);
+    expect(m1 || m2, '★待つ 回数が 読めません★').toBeTruthy();
+    const n = m2 ? Number(m2[1]) : m1[1].trim().split(/\s+/).length;
+    // ★15回 以上★ 2026-10-22（10-21 に Vercel の 建ちが 並んで 配信が 14.3分 遅れ、8回では 偽の 赤に なった）
+    expect(n, '★待ちが 短すぎます（10-21 に 配信が 14.3分 遅れた）★').toBeGreaterThanOrEqual(15);
+    // 最後の 回の 後は 待たない（回数と sleep の 比べが 揃っている）
+    expect(s, '★回数と「最後は 待たない」の 数が 揃っていません★').toContain(
+      `[ "$i" -lt ${n} ] && sleep 60`
     );
     const tm = Number(yaml.load(s).jobs.check['timeout-minutes']); // 突き合わせの job の 打ち切り（10-17 ochita を 足したので 最初の 字では 読まない）
     expect(tm, '★待つ 時間より 打ち切りが 短いです（★必ず 途中で 切れます★）★').toBeGreaterThan(n);
