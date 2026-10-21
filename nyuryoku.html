@@ -391,11 +391,19 @@
         //   ⇒ 時間切れでは ★字を 出すだけ★。順番と 読み直しは 本物の 返事まで 待つ（止める 側に 倒す）。字は その 送りが 返った 時に だけ 消す
         var HOZON_MATSU_MS = 20000;
         var HOZON_KIRE_JI =
-          '保存の 返事が 来ません。倉庫に 入ったか 分からない ので、画面を 読み込み直して 確かめてください（返事が 来るまで 次の 保存と 読み直しは 待っています）。';
+          '保存の 返事が 来ません。倉庫に 入ったか 分からない ので、画面を 読み込み直して 確かめてください（返事が 来るまで その 車の 次の 保存と 読み直しは 待っています）。';
         // 試験だけ 縮める（数で 1秒 以上の 時だけ 効く＝字や 0 で 毎回 すぐ 切れる 事は 無い）
         function matsuMs() {
           var m = Number(window.__DK_HOZON_MATSU_MS);
           return m >= 1000 ? m : HOZON_MATSU_MS;
+        }
+        // 返事待ちで 読み直しが 止まって いる 間は 車の 上の 字にも 時間切れの 訳と 出口を 出す
+        //   （#err は 一覧の 下＝1台でも 画面の 外。上は「読み込み中です」だけで 訳も 出口も 見えなかった・対立役 6回目 直す-2）
+        function kireUe() {
+          var aru = Object.keys(ERR_KAGI).some(function (k) {
+            return /:kire$/.test(k);
+          });
+          if (aru && YOMENAI) tomeruRan(HOZON_KIRE_JI);
         }
         function errNuru() {
           var k = Object.keys(ERR_KAGI);
@@ -419,6 +427,7 @@
             var t = setTimeout(function () {
               ERR_KAGI[kire] = HOZON_KIRE_JI;
               errNuru();
+              kireUe();
             }, matsuMs());
             var yame = function () {
               clearTimeout(t);
@@ -438,8 +447,10 @@
           errNuru();
         }
         function hozonDekinai(kagi, msg, r) {
-          ERR_KAGI[kagi] = msg;
-          saveErr(msg, r);
+          // 出した 字（401/403 の 会社名つき）を そのまま しまう（会社名の 無い 字に 置き換わった・対立役 6回目 直す-1）
+          delete ERR_KAGI[kagi]; // しまい直すと 最後に なる（残った 字は 最後の 字で 出す）
+          ERR_KAGI[kagi] = saveErrJi(msg, r);
+          errNuru();
         }
         var YOMENAI_JI =
           'の 記録が 読めません。今 打つと 前に 入れた 額が 消える ので、この 日は 打てません。上の「もう一度 読む」を 押してください。';
@@ -473,17 +484,20 @@
           $('msg').style.display = m ? 'block' : 'none';
         }
         // ★断られた 時に「どの会社に 書こうとして 断られたか」まで 出す★
-        function saveErr(msg, r) {
+        function saveErrJi(msg, r) {
           try {
             var st = r && r.status;
             if (st === 401 || st === 403) {
               var nm = (COMPANY && COMPANY.name) || '(会社が選ばれていません)';
-              return showErr(msg + ' ' + nm + ' には書き込めません。');
+              return msg + ' ' + nm + ' には書き込めません。';
             }
           } catch (_) {
             /* 名前が 出せなくても 元の 言い方は 出す */
           }
-          return showErr(msg);
+          return msg;
+        }
+        function saveErr(msg, r) {
+          return showErr(saveErrJi(msg, r));
         }
 
         // ★★日は 日本時間で 切る★★ 2026-10-08（司さん「対応させろや」）
@@ -600,6 +614,7 @@
           // 保存の 返事待ちが 残る 間は 読まない（読むと 保存 前の 写しで 記録を 置き換える）＝済んだら 読む
           if (HOZON_KAZU > 0) {
             LOAD_MACHI = true;
+            kireUe();
             return;
           }
           var r = hiRange(HI);
@@ -1156,6 +1171,7 @@
           if (v === undefined) {
             // 打ち方の 間違いも 同じ 欄の 次の 成功で 消す（対立役 4回目 直す-C：直して 書けても 残った）
             //   日を 動かすと 打った 字は 消える ので その 時も 消す（対立役 5回目 直す-3）
+            delete ERR_KAGI[kagi + ':katachi'];
             ERR_KAGI[kagi + ':katachi'] =
               '売上は 0以上の 整数で 入れてください（空に すると メーターの 額に 戻ります）。';
             errNuru();

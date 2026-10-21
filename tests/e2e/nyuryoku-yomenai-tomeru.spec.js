@@ -121,7 +121,7 @@ function stub(yomenai) {
             else MD[i] = Object.assign({}, MD[i], b);
           }
         };
-        const k = dame ? kotae(false, 503, []) : kotae(true, 200, [b]);
+        const k = dame ? kotae(false, window.__hozonDameNo || 503, []) : kotae(true, 200, [b]);
         return window.__osoiHozon
           ? new Promise((ok) =>
               setTimeout(() => {
@@ -675,4 +675,100 @@ test('★読み込み中に 欄へ 字が 入っても 送らず 字は「読み
   expect(await page.evaluate(() => window.__calls.length), '★読み込み中に 送った★').toBe(0);
   expect(await tomeJi(page)).toContain('読み込み中です');
   expect(await tomeJi(page)).not.toContain('読めません');
+});
+
+// ★★断りの 字・上の 字・字の 消え方★★ 2026-10-21（対立役 6回目 直す-1・直す-2・直す-3）
+// 直す-1：403 の「◯◯ には書き込めません」が、日を 変えると 会社名の 無い 字に 置き換わった（95d3f3e で 入った 後退）
+test('★403 で 断られた 会社名つきの 字は 日を 変えても 残る★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+    window.__hozonDameNo = 403;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  expect(await errJi(page)).toContain('には書き込めません');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  await hiErabu(page, '2026-09-03');
+  expect(await errJi(page), '★日を 変えたら 会社名の 手がかりが 消えた★').toContain(
+    'には書き込めません'
+  );
+});
+
+// 直す-2：返事待ちで 読み直しが 止まって いる 間、上の 字は「読み込み中です」だけで 訳も 出口も 無かった（#err は 一覧の 下＝画面の 外）
+test('★返事待ちで 止まって いる 間は 車の 上の 字に 時間切れの 訳と 出口が 出る★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 5000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+  });
+  await hiErabu(page, '2026-09-03');
+  await page.waitForTimeout(1200);
+  expect(await tomeJi(page), '★上の 字に 時間切れの 訳が 無い★').toContain('返事が 来ません');
+  expect(await tomeJi(page)).toContain('読み込み直して');
+  const r = await page.evaluate(() => {
+    const e = document.getElementById('tomeJi');
+    const b = e.getBoundingClientRect();
+    return { top: b.top, bottom: b.bottom, vh: innerHeight };
+  });
+  expect(r.top, '★上の 字が 画面の 外★').toBeGreaterThanOrEqual(0);
+  expect(r.bottom, '★上の 字が 画面の 外★').toBeLessThanOrEqual(r.vh);
+});
+
+// 直す-3（n2）：売上の 打ち方の 間違いの 字は 描き直す 時に 消す（日を 往復すると 欄の -5 は 消えるのに 字が 残った）
+test('★売上の 打ち方の 間違いの 字は 日を 往復したら 消える★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await utsuMuri(page, '#shaList [data-uri-sid]', '-5');
+  expect(await errJi(page)).toContain('0以上の 整数');
+  await hiErabu(page, '2026-09-03');
+  await hiErabu(page, '2026-09-02');
+  expect(await errJi(page), '★欄の 字は 消えたのに 間違いの 字が 残る★').not.toContain(
+    '0以上の 整数'
+  );
+});
+
+// 直す-3（n3）：手で 入れた 日の 失敗の 字は、日を 変えた 後に 書けても 消える
+test('★手で 入れた 日：失敗の 後 打ち直して 日を 変えた 後に 書けたら 失敗の 字が 消える★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+  });
+  await utsuMuri(page, '#shaList [data-dev][data-f="toll"]', '2500');
+  expect(await errJi(page)).toContain('保存できませんでした');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+    window.__osoiHozon = 1500;
+  });
+  await utsuMuri(page, '#shaList [data-dev][data-f="toll"]', '2500');
+  await page.fill('#hiSel', '2026-09-04');
+  await page.dispatchEvent('#hiSel', 'change');
+  await page.waitForTimeout(2500);
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+  });
+  expect(await errJi(page), '★書けたのに 失敗の 字が 残る★').not.toContain('保存できませんでした');
+});
+
+// 直す-3（n5）：字が 2つ 残る 時は 最後の 欄の 字を 出す
+test('★保存の 失敗の 後に 打ち方の 間違いが 来たら 間違いの 字を 出す★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  expect(await errJi(page)).toContain('保存できませんでした');
+  await utsuMuri(page, '#shaList [data-uri-sid]', '-5');
+  expect(await errJi(page), '★後から 来た 間違いの 字が 出ない★').toContain('0以上の 整数');
 });
