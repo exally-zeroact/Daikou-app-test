@@ -3,9 +3,11 @@
 //   ★前★ 実費（dk_shift_edits）の 読みが 失敗すると 手元の 記録が 空に なり、欄は 押せた。
 //         橋代に 500 と 打つと {"toll_yen":0,"bridge_yen":500,"other_yen":0,"denshi_yen":0,...} を 送り、
 //         倉庫の 高速代・電子決済 などを 0 で 上書きした（入力の 画面と 同じ 形・対立役が 測った）
-//   ★今★ 実費の 読みが 失敗した 月は 実費の 欄を 押せなく し、訳を 出す。保存の 口（saveEdit）も 断る
-//   ★★わざと壊して 赤に なるのを 見た（2026-10-21 実測）★★ 直す 前の uriage.html … 読めない 形 1本 赤（押せた）
-//     保存の 口（saveEdit）の 門だけ 外す … 1本 赤（押せない 欄でも 送った）
+//   ★今★ 実費の 読みが 失敗した 月は 表の 数字・紙・実費の 欄を 出さず、訳を 出す。保存の 口（saveEdit）も 断る
+//         （対立役 U-1：欄だけ 止めた 版は 紙と 合計が 引く 前の ¥40,000＝13,220円 多く 出た）
+//   ★★わざと壊して 赤に なるのを 見た（2026-10-21 実測）★★
+//     直す 前の uriage.html（5c90474 系）… 読めない 形 1本 赤（欄が 押せた・紙が 出た）
+//     欄だけ 止めた 版（7d6c420）……………… 読めない 形 1本 赤（紙と 合計が 出た）
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
@@ -86,6 +88,27 @@ function tsukuru(yomenai) {
   );
 }
 
+async function akeru(page, yomenai) {
+  await page.clock.setFixedTime(new Date('2026-01-20T12:00:00+09:00'));
+  await page.route('**/js/dk-session.js*', (r) =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/javascript; charset=utf-8',
+      body: tsukuru(yomenai),
+    })
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/uriage.html', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#monthLabel')).toContainText('1月', { timeout: 15000 });
+  // 読み終えた 印＝紙が 出た か「紙は 出せません」の 訳が 出た（描く 前に 数えて 偽の 緑に しない）
+  await page.waitForFunction(
+    () =>
+      document.querySelector('#kamiMado .kami-mise-waku') ||
+      /出せません/.test((document.getElementById('kamiMsg') || {}).textContent || ''),
+    null,
+    { timeout: 15000 }
+  );
+}
 async function hiraku(page, yomenai) {
   await page.clock.setFixedTime(new Date('2026-01-20T12:00:00+09:00'));
   await page.route('**/js/dk-session.js*', (r) =>
@@ -121,23 +144,28 @@ async function utsuMuri(page, f, v) {
 const okutta = (page) =>
   page.evaluate(() => window.__okutta.filter((x) => x.p.indexOf('dk_shift_edits') === 0));
 
-test('★実費の 記録が 読めない 時は 実費の 欄を 押せない・送らない・訳を 出す★', async ({
+test('★実費の 記録が 読めない 時は 表の 数字・紙・実費の 欄を 出さない・送らない・訳を 出す★', async ({
   page,
 }) => {
-  await hiraku(page, ['dk_shift_edits']);
+  await akeru(page, ['dk_shift_edits']);
   expect(
-    await page.locator('.dedit input.yen').count(),
-    '★欄が 無い＝この 形を 測っていない★'
-  ).toBeGreaterThan(0);
-  expect(await oseru(page), '★読めないのに 押せる 欄が 在る★').toBe(0);
-  await expect(page.locator('#err'), '★打てない 訳が 出ていない★').toContainText('読めません');
-  await utsuMuri(page, 'bridge', '500');
+    await page.locator('#kamiMado .kami-mise-waku').count(),
+    '★読めないのに 紙（引く 前の 額）が 出た★'
+  ).toBe(0);
+  expect(await oseru(page), '★読めないのに 押せる 実費の 欄が 在る★').toBe(0);
+  expect(
+    await page.locator('#list .row').count(),
+    '★読めないのに 表の 数字（引く 前の 額）が 出た★'
+  ).toBe(0);
+  await expect(page.locator('#err'), '★止めた 訳が 出ていない★').toContainText('読めません');
+  await expect(page.locator('#kamiMsg'), '★紙を 出さない 訳が 出ていない★').toContainText(
+    '実費の 記録が 読めない'
+  );
   expect(
     await okutta(page),
     '★読めないのに 倉庫へ 送った（高速代 などを 0 で 上書きする）★'
   ).toEqual([]);
 });
-
 test('★読めた 時は 今まで 通り 打てて、高速代・電子決済は 前の 額の まま 送る★', async ({
   page,
 }) => {
