@@ -290,6 +290,17 @@
         font-size: 13px;
         margin-top: 10px;
       }
+
+      /* ★★保存の 訳は 打った 所から 見える 所へ★★ 2026-10-21（対立役 8回目 直す-1・直す-2：
+         一覧の 下に 在る ので 車の 多い 日は 画面の はるか 下＝倉庫に 入らなかった 事を 客が 見ない）
+         一覧の 直後に 置き、下の 帯（62px）の すぐ 上に 貼り付ける */
+      #err,
+      #kireJi {
+        position: sticky;
+        bottom: calc(70px + env(safe-area-inset-bottom));
+        z-index: 40;
+        box-shadow: 0 2px 8px rgb(161 40 30 / 15%);
+      }
     </style>
   </head>
   <body>
@@ -422,7 +433,7 @@
             ue = document.createElement('div');
             ue.id = 'kireJi';
             ue.className = 'err';
-            $('shaList').parentNode.insertBefore(ue, $('shaList'));
+            $('shaList').parentNode.insertBefore(ue, $('err'));
           }
           ue.style.display = 'block';
           ue.textContent = HOZON_KIRE_JI;

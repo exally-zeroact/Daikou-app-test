@@ -48,6 +48,12 @@ function stub(yomenai) {
     window.__osoiHozon = 0; // 保存の 返事の 遅れ
     window.__hozonDame = false; // 保存を 断る
     const S = window.DKSession;
+    // 車の 台数を 増やす（車の 多い 日＝下の 車で 打つ 形・対立役 8回目）
+    if (window.__manyCars) {
+      L = [];
+      for (let n = 1; n <= window.__manyCars; n++)
+        L.push({ company_id: 'c1', device_id: 'd' + n, label: 'C' + n, sort_order: n });
+    }
     // 頼みの 字から「k.値」の 値を 拾う（& まで・URL の 字を 戻す）
     const atai = (p, k) => {
       const s = String(p);
@@ -823,4 +829,139 @@ test('★時間切れの 後に 日を 変えても 上の 字に 時間切れ�
   expect(await tomeJi(page), '★日を 変えた 後の 上の 字に 時間切れの 訳が 無い★').toContain(
     '返事が 来ません'
   );
+});
+
+// ★★訳は 打った 所から 見える／二重に 出ない／元の 字に 戻る★★ 2026-10-21（対立役 8回目 直す-1・直す-2・直す-3）
+const yoso = (page) =>
+  page.evaluate(() => {
+    const e = document.getElementById('err');
+    const t = document.getElementById('tomeJi');
+    const u = document.getElementById('kireJi');
+    const eb = e.getBoundingClientRect();
+    const ub = u ? u.getBoundingClientRect() : null;
+    return {
+      err: e.style.display === 'none' ? '' : e.textContent,
+      errMieru: e.style.display !== 'none' && eb.bottom > 0 && eb.top < innerHeight,
+      tome: t ? t.textContent : '',
+      ue: u ? u.textContent : null,
+      ueMieru: !!ub && ub.bottom > 0 && ub.top < innerHeight,
+      oseru: Array.from(document.querySelectorAll('#shaList input')).filter((i) => !i.disabled)
+        .length,
+    };
+  });
+
+// 直す-1：車の 多い 日に 下の 車で 打つと 時間切れの 訳が 画面の はるか 上（一覧の 前）で 見えなかった
+test('★10台の 日に 下の 車で 打っても 時間切れの 訳が 見える★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 60000;
+  });
+  const sel = '#shaList [data-dev="d8"][data-f="toll"]';
+  await page.locator(sel).scrollIntoViewIfNeeded();
+  await page.locator(sel).fill('2500');
+  await page.locator(sel).press('Tab');
+  await page.waitForTimeout(1800);
+  const o = await yoso(page);
+  expect(o.ue).toContain('返事が 来ません');
+  expect(o.ueMieru, '★時間切れの 訳が 打った 所から 見えない★').toBe(true);
+});
+
+// 直す-2：時間切れの 後に 失敗が 返ると、見えて いた 唯一の 注意が 消え、失敗の 字は 画面の 外だった
+test('★時間切れの 後に 失敗が 返ったら 失敗の 字が 見える★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 2;
+  });
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 3000;
+    window.__hozonDame = true;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  await page.waitForTimeout(3500);
+  const o = await yoso(page);
+  expect(o.err).toContain('保存できませんでした');
+  expect(o.errMieru, '★失敗の 字が 画面の 外・上の 注意は 消えた★').toBe(true);
+});
+
+// 直す-3（m5）：日を 変える 間は 上の 別の 字（#kireJi）を 消す＝二重に 出さない・読み終えた 後に 古い 訳を 残さない
+// 直す-3（m4）：時間切れが 無く なったら 読めない 日の 訳に 戻す（時間切れの 字に 置き換わった まま に しない）
+test('★時間切れ→実費が 読めない 日へ→返事：二重に 出ず、上は 読めない 訳に 戻る★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 5000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.waitForTimeout(1000);
+  expect((await yoso(page)).ue).toContain('返事が 来ません');
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+    window.__yomenai = ['dk_shift_edits'];
+  });
+  await hiErabu(page, '2026-09-03');
+  const b = await yoso(page);
+  expect(b.ue, '★日を 変えた 後も 上の 別の 字が 残り 二重に 出た★').toBeNull();
+  expect(b.tome).toContain('返事が 来ません');
+  await page.waitForTimeout(4500);
+  const c = await yoso(page);
+  expect(c.tome, '★読めない 訳が 時間切れの 字に 置き換わった まま★').toContain('実費');
+  expect(c.ue).toBeNull();
+  expect(c.oseru).toBe(0);
+});
+
+test('★時間切れ→別の 日→すぐ 元の 日→返事：上の 字は 消え 欄が 戻る★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 5000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.waitForTimeout(800);
+  await hiErabu(page, '2026-09-03');
+  await hiErabu(page, '2026-09-02');
+  await page.waitForTimeout(4500);
+  const b = await yoso(page);
+  expect(b.tome).toBe('');
+  expect(b.ue, '★読み終えた 後も 古い 時間切れの 訳が 残る★').toBeNull();
+  expect(b.oseru).toBeGreaterThan(0);
+  expect(await page.inputValue('#shaList [data-sid][data-f="toll"]')).toBe('2000');
+});
+
+// 直す-3（m4）：時間切れの 車が 返った 後、別の 車の 返事待ちで まだ 読み直せない 間も
+//   上の 字を「返事が 来ません・読み込み直して」の まま に しない（いらない 読み込み直しを 勧めない・対立役 7回目 TK7-1）
+test('★時間切れの 車が 返ったら 他の 車の 返事待ちでも 上の 字は 時間切れで なくなる★', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 2;
+  });
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 4000;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+  await page.waitForTimeout(800); // 1台目は 時間切れ
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 60000;
+    window.__osoiHozon = 9000;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d2"][data-f="toll"]', '800');
+  await hiErabu(page, '2026-09-04'); // 読み直しは 返事を 待つ
+  expect((await yoso(page)).tome).toContain('返事が 来ません');
+  await page.waitForTimeout(2500); // 1台目が 返る・2台目は まだ
+  expect(
+    (await yoso(page)).tome,
+    '★1台目は 返ったのに 上は「返事が 来ません」の まま★'
+  ).not.toContain('返事が 来ません');
 });
