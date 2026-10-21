@@ -1138,3 +1138,60 @@ for (const w of [390, 375, 360, 320]) {
     expect(m.doc, '★ページが 横に はみ出している★').toBeLessThanOrEqual(0);
   });
 }
+
+// ★★乗った人・手で 入れた 日 の 記録が 読めない 期は その 保存を 断る★★ 2026-10-21（対立役が 測った）
+//   前：手で 入れた 日が 読めないと 手入力の 車が「＋ 手で車を足す」に 戻り、選ぶと 倉庫の 行へ 売上・高速代 0 を 送って 上書きした
+//   ★わざと壊して 赤に なるのを 見た（2026-10-21 実測）★ 直す 前の kyuryo.html … 読めない 2本 赤（送った）
+test('手で 入れた 日が 読めない 期は「＋ 手で車を足す」を 選んでも 送らない・訳を 出す', async ({
+  page,
+}) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.dame = ['dk_manual_days'];
+    },
+  });
+  const sel = page.locator('[data-man-add]').first();
+  expect(await sel.count(), '★「＋ 手で車を足す」が 無い＝この 形を 測っていない★').toBe(1);
+  const opt = await sel.evaluate((s) =>
+    Array.from(s.options)
+      .map((o) => o.value)
+      .find((v) => v && v !== '__new__')
+  );
+  expect(opt, '★足せる 車が 無い＝この 形を 測っていない★').toBeTruthy();
+  await sel.selectOption(opt);
+  await page.waitForTimeout(600);
+  const c = await page.evaluate(() =>
+    window.__calls.filter((x) => x.p.indexOf('dk_manual_days') === 0)
+  );
+  expect(c, '★読めないのに 手で 入れた 日を 送った（前の 額を 0 で 上書きする）★').toEqual([]);
+  await expect(page.locator('#err')).toContainText('読めません');
+});
+
+test('乗った人が 読めない 期は 札を 押しても 送らない・訳を 出す', async ({ page }) => {
+  await hiraku(page, {
+    tweak: (F) => {
+      F.dame = ['dk_work_hours'];
+    },
+  });
+  const chip = page.locator('[data-chip-emp]').first();
+  expect(await chip.count(), '★乗った人の 札が 無い＝この 形を 測っていない★').toBe(1);
+  await chip.evaluate((b) => b.click());
+  await page.waitForTimeout(600);
+  const c = await page.evaluate(() =>
+    window.__calls.filter((x) => x.p.indexOf('dk_work_hours') === 0)
+  );
+  expect(c, '★読めないのに 乗った人を 送った（前の 車・時間を 上書きする）★').toEqual([]);
+  await expect(page.locator('#err')).toContainText('読めません');
+});
+
+test('読めた 期は 今まで 通り 札を 押すと 乗った人を 送る', async ({ page }) => {
+  await hiraku(page);
+  const chip = page.locator('[data-chip-emp]').first();
+  expect(await chip.count()).toBe(1);
+  await chip.evaluate((b) => b.click());
+  await page.waitForTimeout(600);
+  const c = await page.evaluate(() =>
+    window.__calls.filter((x) => x.p.indexOf('dk_work_hours') === 0)
+  );
+  expect(c.length, '★読めたのに 送らない★').toBeGreaterThan(0);
+});
