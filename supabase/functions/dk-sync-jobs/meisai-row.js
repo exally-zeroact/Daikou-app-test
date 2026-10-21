@@ -309,11 +309,9 @@ function planMeisaiWrite(rows, existing) {
 //     ・戻すのは ★端末が 外した 行★（ダイコメ側の 表 dk_meisai_hazushi に 記録が 在る 行）だけ。
 //       事務所が 消した 行は 今まで 通り 生き返らせない。印を extra に 置かないのは、
 //       請求書アプリの 保存（meisaiToDb）が extra を 丸ごと 作り直して 消すため。
-//     ・★請求書を 出した 月は 外さない・戻さない★
-//       入金の 画面は 明細を 読み直すので、出した 紙と ずれる。どうするかは 司さんの 決め（待ち）。
-//       「出した」は invoices（1社の PDF の 控え）か invoice_no（番号を 決めた＝全社の PDF・印刷も
-//       ここに 残る・会社名の 付け替えにも 付いて行く）の どちらかに その 会社・その 月が 在る 事
-//       （taiketsu：invoices だけでは 全社の PDF で 出した 月を 見落とす）。止めた 物は tometa。
+//     ・★請求書を 出した 月も 外す・戻す★ 2026-10-22（前は 止めていた＝司さんの 答え待ちだった）
+//       司さん 10-14「変えろ（編集したらちゃんと反映）」・10-21「よい」＝出した 月の 明細も 運転手の 直しで 変える。
+//       出した 紙（控え rows_json）との 差は 請求書アプリの 入金の 画面が「出した後に明細が変わりました」で 出す。
 //     ・★戻すのは 端末が 立てた 消した 時刻と 今の deleted_at が 同じ 行だけ★（taiketsu：
 //       記録だけ 残った 後に 事務所が 消した 行を 生き返らせて 二重請求に しない）。
 //       行が 生きているのに 記録が 在る・時刻が 違う 記録は 捨てる（sutekiroku）。
@@ -332,10 +330,8 @@ function planMeisaiHazushi(opts) {
     const n = Date.parse(String(v || ''));
     return Number.isFinite(n) ? n : null;
   };
-  const deta = new Set((Array.isArray(o.deta) ? o.deta : []).map(String));
   const hides = [];
   const restores = [];
-  const tometa = [];
   const sutekiroku = [];
   (Array.isArray(o.existing) ? o.existing : []).forEach((e) => {
     const ref = e && e.extra && e.extra.dk_ref ? String(e.extra.dk_ref) : '';
@@ -363,16 +359,10 @@ function planMeisaiHazushi(opts) {
       !!t.customer_id &&
       typeof t.customer_name === 'string' &&
       !!t.customer_name;
-    const deteiru = deta.has(String(e.company) + '|' + String(e.date || '').slice(0, 7));
-    if (!e.deleted_at && genkin) {
-      if (deteiru) tometa.push({ id: e.id, ref: ref, naze: 'hazusu' });
-      else hides.push({ id: e.id, ref: ref });
-    } else if (e.deleted_at && seikyu && onaji) {
-      if (deteiru) tometa.push({ id: e.id, ref: ref, naze: 'modosu' });
-      else restores.push({ id: e.id, ref: ref });
-    }
+    if (!e.deleted_at && genkin) hides.push({ id: e.id, ref: ref });
+    else if (e.deleted_at && seikyu && onaji) restores.push({ id: e.id, ref: ref });
   });
-  return { hides, restores, tometa, sutekiroku };
+  return { hides, restores, sutekiroku };
 }
 
 // ★★事務所が 直した 額を 送り直しで 戻さない（dk_trips の 側）★★ 2026-10-22 司さん「触ってよし」

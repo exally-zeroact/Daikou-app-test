@@ -283,7 +283,7 @@ async function main() {
     if (!String(g6.note).includes('事務所が 手で 直した'))
       warui.push('★戻した 時に 備考が 消えた★');
 
-    // ── ⑦ 請求書を 出した 月は 現金に しても 外さない（司さんの 決め待ち）──
+    // ── ⑦ 請求書を 出した 月でも 現金に したら 外す（2026-10-22 司さん「よい」・前は 外さなかった）──
     console.log('\n⑦ その 会社・その 月の 請求書を 出した ふり → 現金に 直して 送る');
     const tsuki = new Date(MS + 9 * 3600000).toISOString().slice(0, 7);
     await q(`insert into daikou.invoices (user_id, month, company, invoice_no, issued_at, total, tax)
@@ -291,9 +291,16 @@ async function main() {
     console.log('   返事 =', await okuru(2200, true));
     const g7 = await gyou();
     console.log(`   → 消した印=${g7.deleted_at ? 'あり' : 'なし'}`);
-    if (g7.deleted_at) warui.push('★請求書を 出した 月の 行を 外した★');
+    if (!g7.deleted_at)
+      warui.push('★請求書を 出した 月の 行が 外れない（出した 月の 止めが 残っている）★');
+    // ★⑦と ⑧の 間に 請求書払いで 戻す★（戻さないと ⑧が 外れた 行の まま＝空振り・対立役 直N2）
+    console.log('\n⑦b 請求書払いに 戻して 送る（出した 月でも 戻る）');
+    console.log('   返事 =', await okuru(2200));
+    const g7b = await gyou();
+    console.log(`   → 消した印=${g7b.deleted_at ? 'あり' : 'なし'}`);
+    if (g7b.deleted_at) warui.push('★出した 月で 請求書払いに 戻したのに 戻らない★');
 
-    // ── ⑧ 全社の PDF・印刷で 出した 月（番号だけ 決めた・控えは 無い）も 外さない ──
+    // ── ⑧ 全社の PDF・印刷で 出した 月（番号だけ 決めた・控えは 無い）でも 外す ──
     console.log('\n⑧ 控えを 消し、番号だけ 決めた ふり（全社の PDF）→ 現金に 直して 送る');
     await q(
       `delete from daikou.invoices where invoice_no = 'TOOSHI-1' and company = '【通し確認】お客';`
@@ -303,7 +310,8 @@ async function main() {
     console.log('   返事 =', await okuru(2200, true));
     const g8 = await gyou();
     console.log(`   → 消した印=${g8.deleted_at ? 'あり' : 'なし'}`);
-    if (g8.deleted_at) warui.push('★番号を 決めた 月の 行を 外した（全社の PDF の 道）★');
+    if (!g8.deleted_at)
+      warui.push('★番号を 決めた 月の 行が 外れない（全社の PDF の 道の 止めが 残っている）★');
   } finally {
     // ── 後片付け（★失敗しても 必ず 消す★）──
     console.log('\n★後片付け★');
@@ -335,7 +343,7 @@ async function main() {
   }
   console.log('  ①1行 増えた ②印が 付いた ③事務所の 額が 守られた ④値引きが 届いた');
   console.log(
-    '  ⑤現金で 外れた ⑥請求書払いで 戻った ⑦出した 月は 外さない ⑧番号だけの 月も 外さない'
+    '  ⑤現金で 外れた ⑥請求書払いで 戻った ⑦出した 月でも 外れ 戻った ⑧番号だけの 月でも 外れた'
   );
   console.log('TOOSHI RESULT: OK（8 / 8）');
 }

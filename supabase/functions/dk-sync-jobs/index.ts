@@ -151,7 +151,16 @@ Deno.serve(async (req: Request) => {
       //   入れる・直す より 先に 走らせる（戻した 行を 下の 直しが そのまま 直せる）
       //   ★明細の 先読みより も 前★ 2026-10-22（対立役 直A：後だと、現金→請求書払いに 戻した 乗車は 先読みの
       //   時点で まだ 消した 行に 見え、事務所が 直した 額が 売上に 乗らないまま 確定した）
-      meisai.push(await hazushiMeisai(sb, co.owner_id as string | null, device_id, s));
+      const hazushiKekka = await hazushiMeisai(sb, co.owner_id as string | null, device_id, s);
+      meisai.push(hazushiKekka);
+      // ★外しが 転んだ（読めない・書けなかった）勤務は 受け取らない★ 2026-10-22（対立役 止2：受け取ると 端末は
+      //   二度と 送らず、現金で 払った 客に 請求書の 行が 残る）＝端末が 送り直す（外しは 何度 走っても 同じ 形）
+      if (hazushiKekka.startsWith('hazushi-error') || hazushiKekka.includes('件 書けなかった')) {
+        console.warn(
+          '[dk-sync-jobs] ' + device_id + ' 外しが 転んだので 受け取らない: ' + hazushiKekka
+        );
+        continue;
+      }
       let modoshi: { bySeq: Record<string, number>; sa: number } = { bySeq: {}, sa: 0 };
       const seikyuRefs = tripsKiroku
         .filter((t) => t.payment_type === 'invoice' && t.customer_name)
@@ -328,37 +337,13 @@ async function hazushiMeisai(
       .in('meisai_id', ids);
     if (lErr)
       return 'hazushi-error:外した 記録を 読めない ' + String(lErr.message || lErr).slice(0, 60);
-    const months = Array.from(
-      new Set(exist.map((e: Record<string, unknown>) => String(e.date || '').slice(0, 7)))
-    );
-    // ★出した 月＝invoices（1社の PDF の 控え）か invoice_no（番号を 決めた）★
-    //   invoices だけでは 全社の PDF・印刷で 出した 月と、会社名を 付け替えた 月を 見落とす（taiketsu）
-    const { data: inv, error: iErr } = await sb
-      .from('invoices')
-      .select('company, month')
-      .eq('user_id', ownerId)
-      .in('month', months)
-      .is('deleted_at', null);
-    const { data: ban, error: bErr } = await sb
-      .from('invoice_no')
-      .select('company, month')
-      .eq('user_id', ownerId)
-      .in('month', months);
-    // ★出した 請求書が 読めない 時は 何も しない★（出した 月を 書き換える 恐れ）
-    if (iErr || bErr)
-      return (
-        'hazushi-error:請求書を 読めない ' +
-        String((iErr || bErr)?.message || iErr || bErr).slice(0, 60)
-      );
+    // ★出した 月も 外す・戻す★ 2026-10-22（司さん「よい」）＝請求書（invoices・invoice_no）は 読まない
     const plan = planMeisaiHazushi({
       deviceId,
       shiftStartMs: shiftStart,
       trips,
       existing: exist,
       kiroku: log || [],
-      deta: (inv || [])
-        .concat(ban || [])
-        .map((r: Record<string, unknown>) => `${r.company}|${r.month}`),
     });
     let hazushita = 0;
     let modoshita = 0;
@@ -413,20 +398,17 @@ async function hazushiMeisai(
       const { error: e5 } = await sb.from('dk_meisai_hazushi').delete().eq('meisai_id', id);
       if (e5) ochita++;
     }
+    // ★版の 印★ 2026-10-22（配ったかの 見張りが 字を 消すだけの 直しを 見分けられる 様に・対立役 直N1）
     const kekka =
-      'hazushi-ok:' +
+      'hazushi-ok(出した月も):' +
       hazushita +
       '件外した/' +
       modoshita +
       '件戻した' +
-      (plan.tometa.length
-        ? '/★請求書を 出した 月なので ' + plan.tometa.length + '件 変えていない★'
-        : '') +
       (ochita ? '/★' + ochita + '件 書けなかった★' : '');
     // ★返事の 字は 端末が 読まない★（taiketsu）＝関数の ログにも 残す（Supabase の Logs で 読める）
-    if (plan.tometa.length || ochita) console.warn('[dk-sync-jobs] ' + deviceId + ' ' + kekka);
-    if (!hazushita && !modoshita && !ochita && !plan.tometa.length)
-      return 'hazushi-skip:変わっていない';
+    if (ochita) console.warn('[dk-sync-jobs] ' + deviceId + ' ' + kekka);
+    if (!hazushita && !modoshita && !ochita) return 'hazushi-skip:変わっていない';
     return kekka;
   } catch (e) {
     console.warn(

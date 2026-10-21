@@ -1,7 +1,7 @@
 // ============================================================
 // ★現金に 戻した 代行の 明細の 行を 外す／請求書払いに 戻ったら 戻す（2026-10-12）★
 //   司さんの 決まり「外したら 外す」。決めは meisai-row.js の planMeisaiHazushi。
-//   ★分からない 時は 触らない★・★出した 月は 変えない（司さんの 決め待ち）★を 縛る。
+//   ★分からない 時は 触らない★を 縛る。★出した 月も 外す・戻す★（2026-10-22 司さん「よい」）。
 // ============================================================
 import { describe, it, expect } from 'vitest';
 import { planMeisaiHazushi } from '../../supabase/functions/dk-sync-jobs/meisai-row.js';
@@ -99,35 +99,28 @@ describe('★請求書払いに 戻ったら、端末が 外した 行だけ 戻
   });
 });
 
-describe('★請求書を 出した 月は 外さない・戻さない（司さんの 決め待ち）★', () => {
-  it('その 会社・その 月の 請求書が 在れば 外さず、止めた 物として 返す', () => {
+// ★2026-10-22 司さん「出した月の明細を運転手の直しで後から変えてよいか」＝「よい」★
+//   前は 出した 月は 外さず 戻さず 止めていた（tometa）。今は 出した 月でも 外す・戻す（deta を 渡しても 見ない）。
+//   わざと壊す：出した 月の 止めを 戻す ⇒ 赤
+describe('★請求書を 出した 月でも 外す・戻す（司さん「よい」）★', () => {
+  it('その 会社・その 月の 請求書を 出していても 外す', () => {
     const p = plan({
       trips: [genkin(1)],
       existing: [row('a', 1)],
       deta: ['見本商事|2026-10'],
     });
-    expect(p.hides).toEqual([]);
-    expect(p.tometa).toEqual([{ id: 'a', ref: ref(1), naze: 'hazusu' }]);
+    expect(p.hides).toEqual([{ id: 'a', ref: ref(1) }]);
+    expect(p.tometa, '止めた 物の 箱は もう 無い').toBeUndefined();
   });
 
-  it('戻す 時も 出した 月なら 戻さない', () => {
+  it('戻す 時も 出した 月で 戻す', () => {
     const p = plan({
       trips: [seikyu(1)],
       existing: [row('a', 1, { deleted_at: '2026-10-11T00:00:00Z' })],
       kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
       deta: ['見本商事|2026-10'],
     });
-    expect(p.restores).toEqual([]);
-    expect(p.tometa.length).toBe(1);
-  });
-
-  it('別の 会社・別の 月の 請求書では 止めない', () => {
-    const p = plan({
-      trips: [genkin(1)],
-      existing: [row('a', 1)],
-      deta: ['別商事|2026-10', '見本商事|2026-09'],
-    });
-    expect(p.hides.length).toBe(1);
+    expect(p.restores).toEqual([{ id: 'a', ref: ref(1) }]);
   });
 });
 
@@ -174,14 +167,13 @@ describe('★外す 行の 記録は 同じ 送りで 捨てない★（taiketsu
     expect(p.sutekiroku, '外す 行の 記録を 捨てた＝戻せない 行に なる').toEqual([]);
   });
 
-  it('出した 月で 止めた 行でも、現金の 間は 記録を 捨てない（後で 外す 時に 使う）', () => {
+  it('記録だけ 残った 生きた 行を 現金で 外す 時は 記録を 捨てない（同じ 送りで 外す・前の 時刻を 使う）', () => {
     const p = plan({
       trips: [genkin(1)],
       existing: [row('a', 1)],
       kiroku: [{ meisai_id: 'a', hidden_at: '2026-10-11T00:00:00.000Z' }],
-      deta: ['見本商事|2026-10'],
     });
-    expect(p.hides).toEqual([]);
+    expect(p.hides).toEqual([{ id: 'a', ref: ref(1) }]);
     expect(p.sutekiroku).toEqual([]);
   });
 });
