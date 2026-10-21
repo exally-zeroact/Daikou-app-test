@@ -7,6 +7,9 @@
 //   ★今★ 読みごとの 箱で 数え、1本でも 読めない 年は 実費と 同じ 止めの 枝（表・紙を 出さない・訳と もう一度読む）
 //   ★本物の 数え方（DKSession.softList の hitoTsu・1000行 ずつ 読む zenbuYomu）を 通す★＝倉庫の 返事（rest）だけ 差し替える（対立役 指摘3）
 //   ★押す物の一覧（先に書く）★ 1. 月次集計を 開く 2. 紙の 種類 3. 年の 送り 4. もう一度読む
+//   ★★わざと壊して 赤（2026-10-22 手元 chromium 実測・14本の時）★★ 直す 前の shukei.html＝13赤／soft を 古い 箱 LOAD へ＝11赤／
+//     recalc から KYOTSU_YOMI を 外す＝13赤／meisaiZenbu(LOAD)＝2赤／LOAD = ky を 外す＝12赤／
+//     （15本に して）帯の 数を 二重に 足す＝12赤／古い 返事を 捨てる 行を 外す＝1赤
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
@@ -130,7 +133,10 @@ function tsukuru(dame, nimaime) {
       if (plan && plan.length) {
         const x = plan.shift();
         return new Promise((r) =>
-          setTimeout(() => r(x.dame ? dameKotae() : kotae(T[n] || [])), x.ms || 0)
+          setTimeout(() => {
+            window.__planTsuita = (window.__planTsuita || 0) + 1; // 返事が 着いた 数（決め打ちの 待ちに しない・対立役 B）
+            r(x.dame ? dameKotae() : kotae(T[n] || []));
+          }, x.ms || 0)
         );
       }
       if (window.__dame.indexOf(n) >= 0) return Promise.resolve(dameKotae());
@@ -208,6 +214,8 @@ async function tomatta(page, na) {
   await expect(page.locator('#kamiMsg')).toContainText(JI);
   await expect(page.locator('#err')).toContainText(JI.replace('読めない', '読めません'));
   await expect(page.locator('#dkUnknownBarBtn'), '★もう一度読む が 出て いない★').toBeVisible();
+  // 帯の 件数は 今の 読みの 数だけ（足し算が 二重でも 見える 所は 同じ＝件数で 縛る・対立役 A）
+  await expect(page.locator('#dkUnknownBarMsg')).toContainText('（1件）');
 }
 
 test('★読めた 年は 今まで 通り 紙と 売上（62,000）を 出す（この 形で 測れて いる 印）★', async ({
@@ -273,9 +281,28 @@ test('★古い 読みが 遅く 成功し 新しい 読みが 先に 失敗し�
   });
   await page.click('#nextY');
   await page.click('#prevY');
-  await page.waitForTimeout(3500); // 古い 読みの 返事も 着いた 後
+  // 古い 読みの 返事も 着いた 後（2本 着いた 印を 待つ）
+  await page.waitForFunction(() => window.__planTsuita >= 2, null, { timeout: 10000 });
+  await page.waitForTimeout(500);
   await expect(page.locator('#yearLabel')).toContainText('2026');
   expect(await kami(page), '★古い 読みの 返事で 紙が 出た★').toBe(0);
   expect(kazu(await mieru(page), /62,000/g), '★古い 読みの 返事で 売上が 出た★').toBe(0);
   await expect(page.locator('#err')).toContainText(JI.replace('読めない', '読めません'));
+});
+
+test('★2つ 読めない 時は 帯に 2件・同じ 失敗で もう一度 読んでも 件数が 積み上がらない★', async ({
+  page,
+}) => {
+  await akeru(page, ['dk_shift_edits', 'dk_employees']);
+  expect(await kami(page)).toBe(0);
+  await expect(page.locator('#dkUnknownBarMsg')).toContainText('（2件）');
+  await page.locator('#dkUnknownBarBtn').click();
+  await page.waitForFunction(
+    () => /出せません/.test((document.getElementById('kamiMsg') || {}).textContent || ''),
+    null,
+    { timeout: 8000 }
+  );
+  await page.waitForTimeout(500);
+  await expect(page.locator('#dkUnknownBarMsg')).toContainText('（2件）');
+  expect(await kami(page)).toBe(0);
 });
