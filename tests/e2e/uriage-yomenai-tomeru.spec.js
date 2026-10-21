@@ -321,3 +321,55 @@ test('★読み込み中に 表を 切り替えても 前の 月の 額を 出�
   expect(await gyou(page), '★読み込み中に 前の 月の 表が 出た★').toBe(0);
   await expect(page.locator('#monthLabel')).toContainText('2月');
 });
+
+// ★★読みが 失敗した 時の 出口・後半で 計算が 転んだ 時★★ 2026-10-21（対立役 4回目 直す-1・直す-2）
+// 直す-2：上の 試験は 1月から 帯が 出ていて、紙の 字も 切り替えで 作られる＝読み失敗の 出口を 外しても 緑だった
+test('★読めた 月から 次の 月の 読みが 失敗すると すぐ 紙の 訳と もう一度読む が 出る★', async ({
+  page,
+}) => {
+  await akeru(page, []);
+  await expect(page.locator('#dkUnknownBar')).toBeHidden();
+  await page.evaluate(() => {
+    window.__shiftsFail = true;
+  });
+  await page.locator('#nextM').click();
+  await expect(page.locator('#err')).toContainText('読み込みに失敗しました');
+  await expect(page.locator('#kamiMsg'), '★紙の 所が「読み込み中…」の まま★').toContainText(
+    '読み込みに 失敗した'
+  );
+  await expect(page.locator('#dkUnknownBarBtn'), '★もう一度読む が 出ない★').toBeVisible();
+  // もう一度 読んで 読めたら 戻る
+  await page.evaluate(() => {
+    window.__shiftsFail = false;
+  });
+  await page.locator('#dkUnknownBarBtn').click();
+  await expect(page.locator('#dkUnknownBar')).toBeHidden({ timeout: 8000 });
+  await expect(page.locator('#err')).toBeHidden();
+});
+
+// 直す-1：読みの 後半（計算・描き）で 転ぶと、失敗した 月が「この 月の 読みは 通った」の まま 0円の 紙を 出した
+test('★読みの 後半で 計算が 転んだ 月は 表を 切り替えても 0円の 紙・表を 出さない★', async ({
+  page,
+}) => {
+  await akeru(page, []);
+  await page.evaluate(() => {
+    const A = window.UriageAgg;
+    const o = A.byDevice;
+    window.__nage = 1;
+    A.byDevice = function () {
+      if (window.__nage-- > 0) throw new Error('見張り');
+      return o.apply(this, arguments);
+    };
+  });
+  await page.locator('#nextM').click();
+  await expect(page.locator('#err')).toContainText('読み込みに失敗しました');
+  await page.locator('summary', { hasText: '一覧で 見る' }).click();
+  await page.locator('#segDay').click();
+  await page.locator('#segCar').click();
+  await page.waitForTimeout(300);
+  expect(await kami(page), '★計算が 転んだ 月に 紙（0円）が 出た★').toBe(0);
+  await expect(
+    page.locator('#list'),
+    '★計算が 転んだ 月に「記録が ありません」の 表を 出した★'
+  ).not.toContainText('まだ記録がありません');
+});
