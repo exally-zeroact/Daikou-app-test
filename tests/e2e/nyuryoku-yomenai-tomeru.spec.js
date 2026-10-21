@@ -1216,6 +1216,11 @@ test('★上へ 戻って 見て いる 時に 箱が 出ても 画面は 跳ば
       i.value = '2500';
       i.dispatchEvent(new Event('change'));
     }, sel);
+    // 箱が 出る 前に 上へ 戻れて いる 事（遅い 機械で 箱が 先に 出ると scrollTo が 跳びを 消して 偽の 緑・12回目 見立て-1）
+    expect(
+      (await yoso(page)).err,
+      '★上へ 戻る 前に 箱が 出た＝この 形を 測って いない★'
+    ).not.toContain('返事が 来ません');
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(1500); // 時間切れの 箱が 出る
     expect((await yoso(page)).err).toContain('返事が 来ません');
@@ -1326,4 +1331,49 @@ test('★箱が 無い 時も Tab で 入った 欄は 下の 帯の 裏に 潜�
     0
   );
   expect(ura, '★Tab で 入った 欄が 下の 帯の 裏に 潜った★').toBe(0);
+});
+
+// ★★箱が 出て いる 間に 画面を 回しても 見えて いる 欄で 跳ねない★★ 2026-10-21（対立役 12回目 直す-1：
+//   縦で 決めた 下の 余白が 横で 残り、Tab の たびに 見えて いた 欄で 79〜139px 跳ねた）
+test('★箱が 出て いる 間に 縦から 横へ 回しても 下の 余白は 今の 箱で 測り直す★', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  await page.setViewportSize({ width: 320, height: 568 });
+  await hiraku(page, [], '2026-09-03');
+  await page.setViewportSize({ width: 320, height: 568 });
+  // 違う 訳を 2つ（403・時間切れ）出して 箱を 高く する
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+    window.__hozonDameNo = 403;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 60000;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d2"][data-f="toll"]', '800');
+  await page.waitForTimeout(1200);
+  expect((await yoso(page)).err).toContain('返事が 来ません');
+  await page.setViewportSize({ width: 568, height: 320 });
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    const f = document.querySelector('.dk-foot');
+    const sh = parseFloat(getComputedStyle(e).bottom) || 0;
+    const soko =
+      Math.min(f ? f.getBoundingClientRect().top : innerHeight, innerHeight - sh - e.offsetHeight) -
+      8;
+    return {
+      pad: parseFloat(document.documentElement.style.scrollPaddingBottom) || 0,
+      tadashii: innerHeight - soko,
+    };
+  });
+  expect(
+    Math.abs(r.pad - r.tadashii),
+    `★回した 後も 下の 余白が 古い（${r.pad} ／ 正しくは ${r.tadashii}）★`
+  ).toBeLessThan(2);
 });

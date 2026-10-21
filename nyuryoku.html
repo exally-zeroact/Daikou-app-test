@@ -544,6 +544,8 @@
         document.addEventListener('focusin', function (ev) {
           okuriAgeru(ev.target);
         });
+        // 画面を 回す・大きさが 変わる と 箱の 高さが 変わる＝余白を 測り直す（縦で 決めた 余白が 横で 残り 見えて いる 欄で 跳ねた・対立役 12回目 直す-1）
+        window.addEventListener('resize', nigasu);
         function showMsg(m) {
           $('msg').textContent = m;
           $('msg').style.display = m ? 'block' : 'none';
