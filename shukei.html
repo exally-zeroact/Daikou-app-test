@@ -2223,6 +2223,14 @@
           ].forEach(function (id) {
             if ($(id)) $(id).innerHTML = '';
           });
+          // 前の 年の 請求書の 食い違いの 知らせ・給料の 注・内訳の 題も 残さない（対立役 2回目 直す-1：帯に 前の 年の 額が 残った）
+          ['seikyuShirase', 'kyuryoNote'].forEach(function (id) {
+            if ($(id)) {
+              $(id).textContent = '';
+              $(id).style.display = 'none';
+            }
+          });
+          if ($('oneTtl')) $('oneTtl').textContent = '1ヶ月の内訳';
         }
         function jippiKamiBun() {
           return (

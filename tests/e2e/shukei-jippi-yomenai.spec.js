@@ -53,7 +53,10 @@ const SHIFTS = [
   },
 ];
 // ★高速代（実費）★＝売上から 引かれる
-const EDITS = [{ shift_id: 's1', toll_yen: 3000, bridge_yen: 0, other_yen: 0, hours: 8 }];
+// 請求書の 額を 入力で 5,000 と 打った（請求書アプリは 6,000）＝食い違いの 知らせの 帯が 出る 形
+const EDITS = [
+  { shift_id: 's1', toll_yen: 3000, bridge_yen: 0, other_yen: 0, hours: 8, seikyu_yen: 5000 },
+];
 const LABELS = [
   { device_id: 'd1', label: '4987', sort_order: 1 },
   { device_id: 'd2', label: '1466', sort_order: 2 },
@@ -280,4 +283,44 @@ test('★古い 読みが 遅く 成功し 新しい 読みが 先に 失敗し�
   const t = await mieru(page);
   expect(kazu(t, /62,000/g), '★古い 読みの 返事で 売上が 出た★').toBe(0);
   await expect(page.locator('#err')).toContainText('実費の 記録が 読めません');
+});
+
+// ★★上の 帯（請求書の 食い違い）・読み込み中に 押した 表★★（対立役 2回目 直す-1・直す-2）
+test('★読めた 年から 止めの 年へ 送ると 請求書の 食い違いの 帯にも 前の 年の 額を 残さない★', async ({
+  page,
+}) => {
+  await akeru(page, []);
+  await expect(
+    page.locator('#seikyuShirase'),
+    '★読めた 年の 帯が 出て いない＝この 形を 測って いない★'
+  ).toContainText('5,000');
+  await page.evaluate(() => {
+    window.__yomenai = ['dk_shift_edits'];
+  });
+  await page.click('#nextY');
+  await expect(page.locator('#err')).toContainText('実費の 記録が 読めません');
+  const t = await mieru(page);
+  expect(kazu(t, /5,000円/g), '★止めた 年に 前の 年の 請求書の 額が 残った★').toBe(0);
+  expect(kazu(t, /6,000円/g), '★止めた 年に 前の 年の 請求書の 額が 残った★').toBe(0);
+});
+
+test('★読み込み中に 表を 切り替えてから 止めで 返っても 前の 年の 額を 残さない★', async ({
+  page,
+}) => {
+  await akeru(page, []);
+  await page.evaluate(() => {
+    window.__yomiPlan = { dk_shift_edits: [{ dame: true, ms: 2000 }] };
+  });
+  await page.click('#nextY');
+  await hyouOsu(page); // 読み込み中＝前の 計算で 表が 描き直される
+  await page.waitForTimeout(2500); // 止めで 返る（押し直さない）
+  await expect(page.locator('#err')).toContainText('実費の 記録が 読めません');
+  const t = await page.evaluate(() => {
+    document.querySelectorAll('details').forEach((d) => {
+      d.open = true;
+    });
+    return document.body.innerText;
+  });
+  expect(kazu(t, /62,000/g), '★止めで 返った 後に 前の 年の 売上が 残った★').toBe(0);
+  expect(kazu(t, /93,000/g), '★止めで 返った 後に 前の 年の 内訳が 残った★').toBe(0);
 });
