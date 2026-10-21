@@ -18,7 +18,7 @@ const { test, expect } = require('@playwright/test');
 const { EMP, SET } = require('./honnin-harness');
 
 async function akeru(page, emp, mazeru) {
-  await page.route('**/rest/v1/rpc/dk_kyuryo_verify', (r) =>
+  await page.route('**/rest/v1/rpc/dk_kyuryo_{verify,fuda}', (r) =>
     r.fulfill({
       status: 200,
       contentType: 'application/json',
