@@ -735,6 +735,7 @@ test('★売上の 打ち方の 間違いの 字は 日を 往復したら 消�
 });
 
 // 直す-3（n3）：手で 入れた 日の 失敗の 字は、日を 変えた 後に 書けても 消える
+//   ※ hozonDekita の 順を 入れ替えても 緑＝今の 作りでは 返事が 日の 表の 替わる 前に 返る（通らない 道・動きの 確かめ として 残す）
 test('★手で 入れた 日：失敗の 後 打ち直して 日を 変えた 後に 書けたら 失敗の 字が 消える★', async ({
   page,
 }) => {
@@ -771,4 +772,55 @@ test('★保存の 失敗の 後に 打ち方の 間違いが 来たら 間違�
   expect(await errJi(page)).toContain('保存できませんでした');
   await utsuMuri(page, '#shaList [data-uri-sid]', '-5');
   expect(await errJi(page), '★後から 来た 間違いの 字が 出ない★').toContain('0以上の 整数');
+});
+
+// ★★同じ 日に 留まる 間の 時間切れ★★ 2026-10-21（対立役 7回目 直す-A・直す-B・直す-C）
+const kireUe = (page) =>
+  page.evaluate(() => {
+    const e = document.getElementById('kireJi');
+    if (!e || getComputedStyle(e).display === 'none') return null;
+    const b = e.getBoundingClientRect();
+    return { ji: e.textContent, top: b.top, bottom: b.bottom, vh: innerHeight };
+  });
+// 直す-A・直す-C：同じ 日の 時間切れでは 欄を 止めず、訳は 一覧の 上（画面の 中）に 出す。返事が 来たら 消える
+test('★同じ 日の 時間切れ：欄は 押せる まま・訳は 上に 見える・返事で 消える★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 3500;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.waitForTimeout(1000);
+  expect(await oseruKazu(page), '★同じ 日の 時間切れで 欄が 止まった（固まる）★').toBeGreaterThan(
+    0
+  );
+  const u = await kireUe(page);
+  expect(u, '★時間切れの 訳が 上に 出ない★').not.toBeNull();
+  expect(u.ji).toContain('返事が 来ません');
+  expect(u.top, '★訳が 画面の 外★').toBeGreaterThanOrEqual(0);
+  expect(u.bottom, '★訳が 画面の 外★').toBeLessThanOrEqual(u.vh);
+  await page.waitForTimeout(2500);
+  expect(await kireUe(page), '★返事が 来たのに 上の 訳が 残る★').toBeNull();
+  expect(await oseruKazu(page)).toBeGreaterThan(0);
+});
+
+// 直す-B：時間切れの 後に 日を 変える（20秒 待ってから 日を 変える 普通の 順）でも 上の 字に 訳と 出口
+test('★時間切れの 後に 日を 変えても 上の 字に 時間切れの 訳★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 5000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.waitForTimeout(1200); // 時間切れ 済み
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+  });
+  await hiErabu(page, '2026-09-03');
+  await page.waitForTimeout(300);
+  expect(await tomeJi(page), '★日を 変えた 後の 上の 字に 時間切れの 訳が 無い★').toContain(
+    '返事が 来ません'
+  );
 });

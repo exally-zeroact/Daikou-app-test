@@ -391,7 +391,7 @@
         //   ⇒ 時間切れでは ★字を 出すだけ★。順番と 読み直しは 本物の 返事まで 待つ（止める 側に 倒す）。字は その 送りが 返った 時に だけ 消す
         var HOZON_MATSU_MS = 20000;
         var HOZON_KIRE_JI =
-          '保存の 返事が 来ません。倉庫に 入ったか 分からない ので、画面を 読み込み直して 確かめてください（返事が 来るまで その 車の 次の 保存と 読み直しは 待っています）。';
+          '保存の 返事が 来ません。倉庫に 入ったか 分からない ので、画面を 読み込み直して 確かめてください（返事が 来るまで、その 車の 次の 保存と 画面の 読み直しは 待っています）。';
         // 試験だけ 縮める（数で 1秒 以上の 時だけ 効く＝字や 0 で 毎回 すぐ 切れる 事は 無い）
         function matsuMs() {
           var m = Number(window.__DK_HOZON_MATSU_MS);
@@ -399,11 +399,33 @@
         }
         // 返事待ちで 読み直しが 止まって いる 間は 車の 上の 字にも 時間切れの 訳と 出口を 出す
         //   （#err は 一覧の 下＝1台でも 画面の 外。上は「読み込み中です」だけで 訳も 出口も 見えなかった・対立役 6回目 直す-2）
+        //   同じ 日に 留まる 間（YOMENAI が 空）は 欄を 止めずに 一覧の 上へ 字だけ 出す（対立役 7回目 直す-A：
+        //   #err は 画面の 外＝訳が 見えない まま 打ち続けた。tomeruRan は 欄を 全部 止める＝空の 時に 呼ぶと 固まる・直す-C）
+        //   返事が 来て 時間切れが 残らなく なったら 消す（読み込み中なら 元の 字に 戻す）
         function kireUe() {
           var aru = Object.keys(ERR_KAGI).some(function (k) {
             return /:kire$/.test(k);
           });
-          if (aru && YOMENAI) tomeruRan(HOZON_KIRE_JI);
+          var ue = document.getElementById('kireJi');
+          if (YOMENAI) {
+            if (ue) ue.parentNode.removeChild(ue);
+            if (aru) tomeruRan(HOZON_KIRE_JI);
+            else if ($('tomeJi') && $('tomeJi').textContent === HOZON_KIRE_JI)
+              tomeruRan(yomenaiJi());
+            return;
+          }
+          if (!aru) {
+            if (ue) ue.parentNode.removeChild(ue);
+            return;
+          }
+          if (!ue) {
+            ue = document.createElement('div');
+            ue.id = 'kireJi';
+            ue.className = 'err';
+            $('shaList').parentNode.insertBefore(ue, $('shaList'));
+          }
+          ue.style.display = 'block';
+          ue.textContent = HOZON_KIRE_JI;
         }
         function errNuru() {
           var k = Object.keys(ERR_KAGI);
@@ -434,6 +456,7 @@
               if (ERR_KAGI[kire]) {
                 delete ERR_KAGI[kire];
                 errNuru();
+                kireUe();
               }
             };
             p.then(yame, yame);
@@ -1208,7 +1231,14 @@
           var kagi = 'd:' + hi0 + ':' + deviceId;
           return junban(kagi, function () {
             // 中身は 順番が 来た 時の 記録で 作る（前の 返事を 重ねた 後）。TEBIKI が 別の 日の 表なら 送らない
-            if (TEBIKI_HI !== hi0) return;
+            //   今の 作り（返事を 待って 読み直す）では 通らない 道。通ったら 黙って 捨てずに 訳を 出す（対立役 7回目 叩く点 3）
+            if (TEBIKI_HI !== hi0) {
+              hozonDekinai(
+                kagi + ':' + field,
+                '日を 変えた ので 保存しませんでした。その 日を 開いて もう一度 入れてください。'
+              );
+              return;
+            }
             return JippiHozon.saveTebiki(
               SESS,
               COMPANY.company_id,
