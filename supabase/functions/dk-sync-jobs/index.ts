@@ -21,7 +21,13 @@
 //   ★今 動いている 物と 同じ 版に 固定する★（上げるなら 別の日に 測ってから）
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.116.0';
 // ★請求書アプリに入れる行を作る所（テストが同じ物を触れるよう外出し）★
-import { buildMeisaiRows, businessDate, planMeisaiHazushi, planMeisaiWrite } from './meisai-row.js';
+import {
+  buildMeisaiRows,
+  businessDate,
+  planMeisaiHazushi,
+  planMeisaiWrite,
+  planJimushoModoshi,
+} from './meisai-row.js';
 
 const MAX_SHIFTS = 50; // 1リクエストの勤務上限
 const MAX_TRIPS = 300; // 勤務1件あたりの代行上限
@@ -125,6 +131,57 @@ Deno.serve(async (req: Request) => {
     if (!startedAt) continue; // 識別できない勤務は飛ばす(残りは処理する)
 
     try {
+      // ★★事務所が 直した 額を 先に 読む★★ 2026-10-22（meisai-row.js の planJimushoModoshi に 訳）
+      //   ★入れる 前に 読む★（対立役 止1：入れ直した 後で 戻すと、戻しが 転んだ 時に 古い 額の まま
+      //   accepted に なり 二度と 直らない）＝読めなければ この 勤務は 受け取らない（端末が 送り直す・冪等）。
+      //   乗車は 最初から 使う 額で 1回だけ 入れ、業務の 合計にも その 差だけ 足す（途中の 形を 残さない）。
+      //   dk_shift_edits.uriage_yen（給料の 画面の 直し）には 触らない＝後から 直した 売上を 外さない。
+      const shiftStartMs = isNum(s.start_time) ? s.start_time : 0;
+      const rawTrips0 = Array.isArray(s.trips) ? (s.trips as Record<string, unknown>[]) : [];
+      const tripsKiroku = rawTrips0
+        .filter((t) => t && isNum(t.distance_m) && isNum(t.fare_yen))
+        .slice(0, MAX_TRIPS)
+        .map((t, i) => ({
+          seq: isNum(t.seq) ? Math.round(t.seq) : i + 1,
+          fare_yen: Math.round(t.fare_yen as number),
+          customer_name: str(t.customer_name),
+          payment_type: t.customer_id && t.payment_type === 'invoice' ? 'invoice' : 'cash',
+        }));
+      // ★現金に 戻した 代行の 行を 外す／請求書払いに 戻ったら 戻す（2026-10-12）★
+      //   入れる・直す より 先に 走らせる（戻した 行を 下の 直しが そのまま 直せる）
+      //   ★明細の 先読みより も 前★ 2026-10-22（対立役 直A：後だと、現金→請求書払いに 戻した 乗車は 先読みの
+      //   時点で まだ 消した 行に 見え、事務所が 直した 額が 売上に 乗らないまま 確定した）
+      meisai.push(await hazushiMeisai(sb, co.owner_id as string | null, device_id, s));
+      let modoshi: { bySeq: Record<string, number>; sa: number } = { bySeq: {}, sa: 0 };
+      const seikyuRefs = tripsKiroku
+        .filter((t) => t.payment_type === 'invoice' && t.customer_name)
+        .map((t) => `${device_id}:${shiftStartMs}:${t.seq}`);
+      if (co.owner_id && seikyuRefs.length) {
+        const { data: mRows, error: mErr } = await sb
+          .from('meisai')
+          .select('id, amount, extra, deleted_at')
+          .eq('user_id', co.owner_id as string)
+          .in('extra->>dk_ref', seikyuRefs);
+        if (mErr) {
+          meisai.push('modoshi:明細を 読めない＝この 勤務は 受け取らない（送り直し待ち）');
+          // ★関数の ログに 残す★（返事の 字は 端末が 読まない＝誰にも 見えない・対立役 軽1）
+          console.warn(
+            '[dk-sync-jobs] ' +
+              device_id +
+              ' 明細を 読めず 受け取らない: ' +
+              String(mErr.message || mErr).slice(0, 120)
+          );
+          continue;
+        }
+        modoshi = planJimushoModoshi({
+          deviceId: device_id,
+          shiftStartMs,
+          trips: tripsKiroku,
+          meisai: mRows || [],
+        });
+        if (Object.keys(modoshi.bySeq).length)
+          meisai.push('modoshi:事務所の 額を 守った ' + Object.keys(modoshi.bySeq).length + '件');
+      }
       // 勤務を入れる/更新する(冪等・鍵は company+device+開始時刻)
       const { data: shiftRow, error: sErr } = await sb
         .from('dk_shifts')
@@ -138,7 +195,10 @@ Deno.serve(async (req: Request) => {
             total_distance_m: isNum(s.total_distance_m) ? s.total_distance_m : null,
             actual_total_m: isNum(s.actual_total_m) ? s.actual_total_m : null,
             empty_distance_m: isNum(s.empty_distance_m) ? s.empty_distance_m : null,
-            fare_total_yen: isNum(s.fare_total_yen) ? Math.round(s.fare_total_yen) : null,
+            // ★事務所が 直した 乗車の 差だけ 足す★（戻しの 無い 勤務は 端末の 値の まま＝今と 同じ）
+            fare_total_yen: isNum(s.fare_total_yen)
+              ? Math.round(s.fare_total_yen) + modoshi.sa
+              : null,
             trip_count: isNum(s.trip_count) ? Math.round(s.trip_count) : null,
             // ★★見えなかった分（後から「本当に 走ったか」を 確かめる為）★★ 2026-09-01
             //   ★ここで 落としていました★… 画面側(js/job-sync.js)は 送っていたのに、
@@ -164,7 +224,10 @@ Deno.serve(async (req: Request) => {
           company_id: co.company_id,
           seq: isNum(t.seq) ? Math.round(t.seq) : i + 1,
           distance_m: t.distance_m as number, // ★そのまま★
-          fare_yen: Math.round(t.fare_yen as number), // ★そのまま(円は整数)★
+          // ★そのまま(円は整数)★・事務所が 直した 乗車だけ 明細の 額（planJimushoModoshi）
+          fare_yen:
+            modoshi.bySeq[String(isNum(t.seq) ? Math.round(t.seq) : i + 1)] ??
+            Math.round(t.fare_yen as number),
           // 掛け先(請求書払い)。変な支払区分は現金に倒す。
           customer_id: typeof t.customer_id === 'string' && t.customer_id ? t.customer_id : null,
           customer_name: str(t.customer_name),
@@ -194,16 +257,18 @@ Deno.serve(async (req: Request) => {
       //     入らない理由が7通りあるのに、全部 return で黙って抜けていたので
       //     ★立てたのに入らない時に、どこで止まったか分からなかった★（実際に踏んだ）。
       //     返事に出しておけば、事務所からでも1回叩けば理由が読める。
-      // ★現金に 戻した 代行の 行を 外す／請求書払いに 戻ったら 戻す（2026-10-12）★
-      //   入れる・直す より 先に 走らせる（戻した 行を 下の 直しが そのまま 直せる）
-      meisai.push(await hazushiMeisai(sb, co.owner_id as string | null, device_id, s));
       meisai.push(
         await pushToInvoiceApp(
           sb,
           co.owner_id as string | null,
           device_id,
           s,
-          trips,
+          // ★明細には 端末から 届いた 元の 額を 渡す★ 2026-10-22（事務所の 額を 渡すと 印 dk_meter_yen が
+          //   事務所の 額に 進み、次の 送り直しで「運転手が 直した」と 読まれて 端末の 額に 戻る）
+          trips.map((t) => {
+            const k = tripsKiroku.find((x) => x.seq === t.seq);
+            return k ? { ...t, fare_yen: k.fare_yen } : t;
+          }),
           (co.home_city as string | null) || null, // ★地元の市★
           carLabel, // ★車の名前★ 2026-09-11（渡し忘れていた）
           carNo // ★並び順★
