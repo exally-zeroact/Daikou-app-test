@@ -103,14 +103,37 @@ function stub(yomenai) {
       if (m !== 'GET') {
         const b = o && o.body ? JSON.parse(o.body) : null;
         window.__calls.push({ p: p, m: m, b: b });
-        const k = window.__hozonDame ? kotae(false, 503, []) : kotae(true, 200, [b]);
+        // 断らない 時は 偽の 倉庫に しまう（読み直すと しまった 額が 返る＝本物の 倉庫と 同じ）
+        //   しまうのは 返事を 返す 時（本物も 着くまで 倉庫に 無い＝その 前に 始めた 読みは 前の 額を 返す）
+        const dame = window.__hozonDame;
+        const shimau = () => {
+          if (dame || !b) return;
+          if (String(p).indexOf('dk_shift_edits') === 0) {
+            const i = ED.findIndex((x) => x.shift_id === b.shift_id);
+            if (i < 0) ED.push(b);
+            else ED[i] = Object.assign({}, ED[i], b);
+          }
+          if (String(p).indexOf('dk_manual_days') === 0) {
+            const i = MD.findIndex(
+              (x) => x.work_date === b.work_date && x.device_id === b.device_id
+            );
+            if (i < 0) MD.push(b);
+            else MD[i] = Object.assign({}, MD[i], b);
+          }
+        };
+        const k = dame ? kotae(false, 503, []) : kotae(true, 200, [b]);
         return window.__osoiHozon
-          ? new Promise((ok) => setTimeout(() => ok(k), window.__osoiHozon))
-          : Promise.resolve(k);
+          ? new Promise((ok) =>
+              setTimeout(() => {
+                shimau();
+                ok(k);
+              }, window.__osoiHozon)
+            )
+          : (shimau(), Promise.resolve(k));
       }
       if (String(p).indexOf('dk_shifts') === 0 && window.__shiftsDame)
         return osoku(kotae(false, 503, []), p);
-      return osoku(kotae(true, 200, rows(p)), p);
+      return osoku(kotae(true, 200, JSON.parse(JSON.stringify(rows(p)))), p); // 頼んだ 時の 写し
     };
     S.softList = (s, p, st) => {
       if (st) st.tried++;
@@ -118,7 +141,7 @@ function stub(yomenai) {
         if (st) st.failed++;
         return Promise.resolve([]);
       }
-      return osoku(rows(p), p);
+      return osoku(JSON.parse(JSON.stringify(rows(p))), p); // 頼んだ 時の 写し
     };
   };
   return (
@@ -345,4 +368,81 @@ test('★前の 日の 保存が 遅れて 返っても 今の 日の 額で 送
   expect([b.work_date, b.sales_yen, b.toll_yen], '★前の 日（9/03）の 額を 9/04 に 送った★').toEqual(
     ['2026-09-04', 9000, 7000]
   );
+});
+
+// ★★同じ 行の 保存は 1本ずつ 順に（対立役 3回目 直す-1・直す-2・直す-3・直す-4）★★ 2026-10-21
+
+// 直す-2：続けて 2つの 欄を 打つと 2つ目が 1つ目の 返事 前の 記録で 作られ、1つ目の 額を 前に 戻した
+test('★続けて 2つの 欄を 打っても、2つ目は 1つ目の 額を 前に 戻さない★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__osoiHozon = 1000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await utsuMuri(page, '#shaList [data-sid][data-f="denshi_yen"]', '300');
+  await page.waitForTimeout(2500);
+  const c = await page.evaluate(() => window.__calls);
+  expect(c.length, '★2回 送っていない★').toBe(2);
+  expect([c[1].b.toll_yen, c[1].b.denshi_yen], '★2つ目が 高速代を 前の 1000 に 戻した★').toEqual([
+    2000, 300,
+  ]);
+});
+
+// 直す-1：保存の 返事待ちの 間に 同じ 日を 読み直すと、保存 前の 写しで 読んだ 返事が 打った 額を 消した
+test('★保存の 返事待ちの 間に 読み直しても、打った 額が 消えない★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__osoiHozon = 1500; // 保存の 返事は 読み直しを 始めた 後に 返る（utsuMuri が 0.5秒 待つ）
+    window.__osoi = 2500; // 読みは 保存より 遅く 返る＝保存 前の 写しが 後から 返る
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.fill('#hiSel', '2026-09-02');
+  await page.dispatchEvent('#hiSel', 'change');
+  await page.waitForTimeout(5500);
+  await page.evaluate(() => {
+    window.__osoi = 0;
+    window.__osoiHozon = 0;
+  });
+  await expect(
+    page.locator('#shaList [data-sid][data-f="toll"]'),
+    '★画面の 高速代が 前の 1000 に 戻った★'
+  ).toHaveValue('2000');
+  await utsuMuri(page, '#shaList [data-sid][data-f="denshi_yen"]', '500');
+  const c = await page.evaluate(() => window.__calls);
+  expect(c[c.length - 1].b.toll_yen, '★打った 高速代 2000 が 前の 1000 に 戻った★').toBe(2000);
+});
+
+// 直す-3：保存の 失敗の 字が 別の 欄の 保存の 成功で 消えた（欄には 打った 額・倉庫は 前の 額＝客に 黙る）
+test('★保存の 失敗の 字は 別の 欄の 成功で 消えない★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await expect(page.locator('#err')).toContainText('保存できませんでした');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  // 別の 業務（車）の 欄は 無い＝同じ 業務の 別の 鍵（売上の 直し は 同じ 業務）でなく、同じ 業務の 別の 欄で 見る
+  await utsuMuri(page, '#shaList [data-uri-sid]', '30000');
+  await expect(page.locator('#err'), '★別の 欄の 成功で 保存の 失敗が 消えた★').toContainText(
+    '保存できませんでした'
+  );
+});
+
+// 直す-4：前の 月の「走った 日へ」を 探す 返事が 遅れて 返り、別の 月の 画面に 出た
+test('★前の 月の「走った 日へ」の 返事が 遅れて 返っても 別の 月に 出さない★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__osoiHi = { '2026-09-01': 2500 }; // 9月の 月の 探しだけ 遅らせる
+  });
+  await page.fill('#hiSel', '2026-09-03');
+  await page.dispatchEvent('#hiSel', 'change');
+  await page.waitForTimeout(300);
+  await hiErabu(page, '2026-10-05');
+  await page.waitForTimeout(2500);
+  await expect(
+    page.locator('#hashittaHi'),
+    '★10月の 画面に 9月の「走った 日へ」が 出た★'
+  ).toBeHidden();
 });

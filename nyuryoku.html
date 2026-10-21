@@ -372,6 +372,41 @@
         //   ★古い 返事は 捨てる★（LOADNO が 違う 読みの 返事・保存の 返事は 画面と 手元の 記録に 入れない）
         var YOMENAI = '';
         var LOADNO = 0;
+        // ★★同じ 行の 保存は 1本ずつ 順に 送る★★ 2026-10-21（対立役 3回目 直す-1・直す-2）
+        //   前：続けて 2つの 欄を 打つと 2つ目の 中身が 1つ目の 返事の 前の 記録で 作られ、1つ目の 額を 前の 額に 戻した
+        //       保存の 返事待ちの 間に 読み直すと、保存 前の 写しで 読んだ 返事が 記録を 置き換えて 打った 額が 消えた
+        //   今：鍵（業務／日・車）ごとに 順に 送り、中身は 前の 返事の 後で 作る。返事待ちが 残る 間は 読み直しを 始めない
+        var HOZON_Q = {};
+        var HOZON_KAZU = 0;
+        var LOAD_MACHI = false;
+        var TEBIKI_HI = ''; // TEBIKI が どの 日の 表か
+        // ★保存の 失敗の 字は 同じ 欄（行＋欄）の 次の 成功でだけ 消す★（別の 欄の 成功で 消えて 客に 黙った・対立役 3回目 直す-3）
+        var ERR_KAGI = '';
+        function junban(kagi, tsukuru) {
+          HOZON_KAZU++;
+          var owari = function () {
+            HOZON_KAZU--;
+            if (HOZON_KAZU === 0 && LOAD_MACHI) {
+              LOAD_MACHI = false;
+              load();
+            }
+          };
+          var p = (HOZON_Q[kagi] || Promise.resolve()).then(function () {
+            return tsukuru();
+          });
+          HOZON_Q[kagi] = p.then(owari, owari);
+          return p;
+        }
+        function hozonDekita(kagi) {
+          if (ERR_KAGI === kagi) {
+            ERR_KAGI = '';
+            showErr('');
+          }
+        }
+        function hozonDekinai(kagi, msg, r) {
+          ERR_KAGI = kagi;
+          saveErr(msg, r);
+        }
         var YOMENAI_JI =
           'の 記録が 読めません。今 打つと 前に 入れた 額が 消える ので、この 日は 打てません。上の「もう一度 読む」を 押してください。';
         var HI = ''; // 'YYYY-MM-DD'（今 見ている 日）
@@ -523,6 +558,11 @@
           var no = ++LOADNO;
           YOMENAI = '読み込み中';
           tomeruRan('読み込み中です。読み終わるまで 打てません。');
+          // 保存の 返事待ちが 残る 間は 読まない（読むと 保存 前の 写しで 記録を 置き換える）＝済んだら 読む
+          if (HOZON_KAZU > 0) {
+            LOAD_MACHI = true;
+            return;
+          }
           var r = hiRange(HI);
           var q =
             // ★売上（fare_total_yen）も 取る★ 2026-10-05（対立役が 実測：
@@ -626,6 +666,7 @@
               KYORI_ARU = res[6] === true;
               SEIKYU_ARU = res[7] === true;
               TEBIKI = {};
+              TEBIKI_HI = HI;
               (Array.isArray(res[5]) ? res[5] : []).forEach(function (x) {
                 if (x && x.device_id) TEBIKI[x.device_id] = x;
               });
@@ -1073,19 +1114,26 @@
             return;
           }
           inp.disabled = true;
+          var kagi = 's:' + shiftId;
           // ★保存の 決まりは js/jippi-hozon.js の 1か所★（ここは 呼ぶだけ）
           // EDITS は 業務（shift_id）ごと・日で 絞らず 読む＝日を 変えた 後の 返事も 重ねて よい（捨てると 次の 1打で 前の 額に 戻った・対立役 止B）
-          JippiHozon.saveUriage(SESS, shiftId, COMPANY.company_id, v)
-            .then(function (body) {
-              inp.disabled = false;
-              showErr('');
-              EDITS[shiftId] = Object.assign({}, EDITS[shiftId] || {}, body);
-              inp.value = v === null ? '' : String(v);
-            })
-            .catch(function (r) {
-              inp.disabled = false;
-              saveErr('売上を 保存できませんでした。通信を確認してください。', r);
-            });
+          return junban(kagi, function () {
+            return JippiHozon.saveUriage(SESS, shiftId, COMPANY.company_id, v)
+              .then(function (body) {
+                inp.disabled = false;
+                hozonDekita(kagi + ':uriage');
+                EDITS[shiftId] = Object.assign({}, EDITS[shiftId] || {}, body);
+                inp.value = v === null ? '' : String(v);
+              })
+              .catch(function (r) {
+                inp.disabled = false;
+                hozonDekinai(
+                  kagi + ':uriage',
+                  '売上を 保存できませんでした。通信を確認してください。',
+                  r
+                );
+              });
+          });
         }
 
         // ★保存の 決まりは js/jippi-hozon.js の 1か所★（ここは 呼ぶだけ）
@@ -1093,25 +1141,33 @@
           if (!COMPANY) return;
           if (yomenaiNara()) return;
           var hi0 = HI;
-          JippiHozon.saveTebiki(
-            SESS,
-            COMPANY.company_id,
-            HI,
-            deviceId,
-            TEBIKI[deviceId],
-            field,
-            value
-          )
-            .then(function (body) {
-              // TEBIKI は 今 見ている 日の 表＝別の 日の 返事は 入れない（入れると 前の 日の 額を 今の 日へ 送った・対立役）
-              //   同じ 日なら 読み直しの 後でも 入れる（捨てると 次の 1打で 前の 額に 戻る・対立役 止B）
-              if (hi0 !== HI) return;
-              showErr('');
-              TEBIKI[deviceId] = body;
-            })
-            .catch(function (r) {
-              saveErr('保存できませんでした。通信を確認してください。', r);
-            });
+          var kagi = 'd:' + hi0 + ':' + deviceId;
+          return junban(kagi, function () {
+            // 中身は 順番が 来た 時の 記録で 作る（前の 返事を 重ねた 後）。TEBIKI が 別の 日の 表なら 送らない
+            if (TEBIKI_HI !== hi0) return;
+            return JippiHozon.saveTebiki(
+              SESS,
+              COMPANY.company_id,
+              hi0,
+              deviceId,
+              TEBIKI[deviceId],
+              field,
+              value
+            )
+              .then(function (body) {
+                // TEBIKI は 日の 表＝別の 日の 表に なって いたら 入れない（入れると 前の 日の 額を 今の 日へ 送った・対立役）
+                if (TEBIKI_HI !== hi0) return;
+                hozonDekita(kagi + ':' + field);
+                TEBIKI[deviceId] = body;
+              })
+              .catch(function (r) {
+                hozonDekinai(
+                  kagi + ':' + field,
+                  '保存できませんでした。通信を確認してください。',
+                  r
+                );
+              });
+          });
         }
 
         // ★保存の 決まりは js/jippi-hozon.js の 1か所★（ここは 呼ぶだけ）
@@ -1119,15 +1175,30 @@
           if (!COMPANY) return;
           if (yomenaiNara()) return;
           // EDITS は 業務（shift_id）ごと＝返事は いつでも 重ねる（捨てると 次の 1打で 前の 額に 戻った・対立役 止B）
-          JippiHozon.saveJippi(SESS, shiftId, COMPANY.company_id, EDITS[shiftId], field, value)
-            .then(function (body) {
-              showErr('');
-              // 前の 行に 重ねる（置き換えると 売上の 直し などが 読み直すまで 画面から 消える）
-              EDITS[shiftId] = Object.assign({}, EDITS[shiftId] || {}, body);
-            })
-            .catch(function (r) {
-              saveErr('保存できませんでした。通信を確認してください。', r);
-            });
+          var kagi = 's:' + shiftId;
+          return junban(kagi, function () {
+            // 中身は 順番が 来た 時の 記録で 作る（前の 返事を 重ねた 後＝前の 額に 戻さない）
+            return JippiHozon.saveJippi(
+              SESS,
+              shiftId,
+              COMPANY.company_id,
+              EDITS[shiftId],
+              field,
+              value
+            )
+              .then(function (body) {
+                hozonDekita(kagi + ':' + field);
+                // 前の 行に 重ねる（置き換えると 売上の 直し などが 読み直すまで 画面から 消える）
+                EDITS[shiftId] = Object.assign({}, EDITS[shiftId] || {}, body);
+              })
+              .catch(function (r) {
+                hozonDekinai(
+                  kagi + ':' + field,
+                  '保存できませんでした。通信を確認してください。',
+                  r
+                );
+              });
+          });
         }
 
         // ★★日ごとの 電子決済の 保存は この 画面では 使いません★★ 2026-09-11
