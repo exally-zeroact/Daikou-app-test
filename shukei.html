@@ -1421,6 +1421,7 @@
           //   札は 新しい 年・数は 古い 年の PDF が 出た）＝読み終わるまで 紙を 出さない・押させない
           YR = null;
           if ($('kamiMado')) $('kamiMado').innerHTML = '';
+          hyouKesu(); // 読み終わるまで 前の 年の 細かい 表も 出さない
           kamiMsg('読み込み中…');
           // ★★締めが 月を またぐ 会社（20日締め・週）の 為に 前の年の 12月 〜 次の年の 1月 まで 取る★★ 2026-10-07
           //   売上・積立は 暦の 月の 日だけ 数える（GetsujiAgg）＝広く 取っても 売上は 変わらない
@@ -2204,6 +2205,25 @@
         function jippiDameBun() {
           return (JIPPI_YOMI.failed > 0 ? '実費' : '手で 入れた 日') + 'の 記録が 読めません';
         }
+        // ★止めた 年・読み込み中は 細かい 表（内訳・売上・距離・電子決済）と 月の 選びも 空に する★ 2026-10-22
+        //   前：止めの 枝は 3枚の 表だけ 消し、「細かい 表で 見る」を 開くと 前の 年の 額（売上 ¥93,000・1月 62,000 等）が 残った（対立役 直す-1）
+        function hyouKesu() {
+          [
+            'tbody',
+            'tbody2',
+            'tbody3',
+            'kpis',
+            'uriHead',
+            'uriBody',
+            'kyoriHead',
+            'kyoriBody',
+            'dkHead',
+            'dkBody',
+            'tsukiSel',
+          ].forEach(function (id) {
+            if ($(id)) $(id).innerHTML = '';
+          });
+        }
         function jippiKamiBun() {
           return (
             (JIPPI_YOMI.failed > 0 ? '実費' : '手で 入れた 日') +
@@ -2231,9 +2251,7 @@
                         SHIME_DAME +
                         '）。給料の 画面の「給料の 設定」で 払い方を 選び直してください。'
             );
-            $('tbody').innerHTML = '';
-            $('tbody2').innerHTML = '';
-            $('tbody3').innerHTML = '';
+            hyouKesu();
             kamiMsg(
               SHIME_JIPPI
                 ? jippiKamiBun()

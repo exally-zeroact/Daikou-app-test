@@ -151,8 +151,36 @@ async function akeru(page, yomenai) {
   await page.waitForTimeout(300);
 }
 
-// 画面に 見えて いる 字だけ（script の 中の 字を 数えない＝innerText）
-const mieru = (page) => page.evaluate(() => document.body.innerText);
+// 画面に 見えて いる 字だけ（script の 中の 字を 数えない＝innerText）。
+//   ★閉じた「細かい 表で 見る」も 開いて から 数える★（閉じた 中の 字は innerText に 出ない＝空振り・対立役 直す-2）
+const mieru = (page) =>
+  page.evaluate(() => {
+    document.querySelectorAll('details').forEach((d) => {
+      d.open = true;
+    });
+    return document.body.innerText;
+  });
+// 細かい 表の 切り替えを 全部 押す（売上・距離・電子決済の 表を 直に 描く 道＝表の 守りを 通す）
+async function hyouOsu(page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('details').forEach((d) => {
+      d.open = true;
+    });
+    const osu = (sel) => document.querySelectorAll(sel).forEach((b) => b.click());
+    osu('[data-uri="year"]');
+    osu('[data-uri="day"]');
+    osu('[data-uri="month"]');
+    osu('[data-uriwake="kuruma"]');
+    osu('[data-kyori="year"]');
+    osu('[data-kyori="month"]');
+    const d = document.getElementById('dkSegD');
+    if (d) d.click();
+    const m = document.getElementById('dkSegM');
+    if (m) m.click();
+  });
+  await page.waitForTimeout(300);
+}
+const kazu = (t, re) => (t.match(re) || []).length;
 const kami = (page) => page.locator('#kamiMado .kami-mise-waku').count();
 
 for (const [na, y, ji] of [
@@ -211,4 +239,45 @@ test('★年を 素早く 行き来して 読みが 重なっても 実費が �
   ).toHaveLength(0);
   await expect(page.locator('#kamiMado .kami-mise-waku').first()).toBeVisible({ timeout: 8000 });
   await expect(page.locator('#yearLabel')).toContainText('2026');
+});
+
+// ★★読めた 年 → 止めの 年へ 送った 時・古い 読みが 遅く 成功した 時★★（対立役 直す-1・直す-2）
+test('★読めた 年から 実費が 読めない 年へ 送ると 細かい 表にも 前の 年の 額を 残さない★', async ({
+  page,
+}) => {
+  await akeru(page, []);
+  expect(
+    kazu(await mieru(page), /62,000/g),
+    '★読めた 年の 売上が 出て いない＝この 形を 測って いない★'
+  ).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    window.__yomenai = ['dk_shift_edits'];
+  });
+  await page.click('#nextY');
+  await expect(page.locator('#err')).toContainText('実費の 記録が 読めません');
+  await hyouOsu(page);
+  const t = await mieru(page);
+  expect(kazu(t, /62,000/g), '★止めた 年に 前の 年の 売上（62,000）が 残った★').toBe(0);
+  expect(kazu(t, /93,000/g), '★止めた 年に 前の 年の 売上（93,000）が 残った★').toBe(0);
+  expect(kazu(t, /4,000/g), '★止めた 年に 前の 年の 電子決済が 残った★').toBe(0);
+  expect(await kami(page)).toBe(0);
+});
+
+test('★古い 読みが 遅く 成功し 新しい 読みが 先に 失敗しても 紙・額を 出さない★', async ({
+  page,
+}) => {
+  await akeru(page, []);
+  await page.evaluate(() => {
+    // 1本目（次の 年）は 遅く 成功・2本目（元の 年）は すぐ 失敗
+    window.__yomiPlan = { dk_shift_edits: [{ ms: 2500 }, { dame: true, ms: 100 }] };
+  });
+  await page.click('#nextY');
+  await page.click('#prevY');
+  await page.waitForTimeout(3500); // 古い 読みの 返事も 着いた 後
+  await expect(page.locator('#yearLabel')).toContainText('2026');
+  await hyouOsu(page);
+  expect(await kami(page), '★古い 読みの 返事で 紙が 出た★').toBe(0);
+  const t = await mieru(page);
+  expect(kazu(t, /62,000/g), '★古い 読みの 返事で 売上が 出た★').toBe(0);
+  await expect(page.locator('#err')).toContainText('実費の 記録が 読めません');
 });
