@@ -1130,17 +1130,18 @@ test('★箱が 出て いる 間 箱の 裏の 欄に 入ったら 送り上げ
   await page.evaluate(() => {
     window.__hozonDame = false;
   });
-  // 箱の 真ん中の 裏に 在る 欄を 探して 送らずに 入る
+  // 欄を 箱の 真ん中の 裏へ 送って から 送らずに 入る（上の 余白の 数 px で 欄が 無く なる 形に 頼らない・11回目 直す-3）
   const ari = await page.evaluate(() => {
     const e = document.getElementById('err');
+    const i = document.querySelector('#shaList [data-dev="d6"][data-f="toll"]');
     const eb = e.getBoundingClientRect();
-    const cy = (eb.top + eb.bottom) / 2;
-    const ura = Array.from(document.querySelectorAll('#shaList input')).find((i) => {
-      const b = i.getBoundingClientRect();
-      return b.top < cy && b.bottom > cy;
-    });
-    if (!ura) return false;
-    ura.focus({ preventScroll: true });
+    const ib = i.getBoundingClientRect();
+    window.scrollBy(0, (ib.top + ib.bottom) / 2 - (eb.top + eb.bottom) / 2);
+    const eb2 = e.getBoundingClientRect();
+    const ib2 = i.getBoundingClientRect();
+    const cy = (eb2.top + eb2.bottom) / 2;
+    if (!(ib2.top < cy && ib2.bottom > cy)) return false;
+    i.focus({ preventScroll: true });
     return true;
   });
   expect(ari, '★箱の 裏に 欄が 無い＝この 形を 測って いない★').toBe(true);
@@ -1188,4 +1189,141 @@ test('★違う 訳（403 と 打ち方の 間違い）は 行を 分けて 並�
   expect(o.ji).toContain('には書き込めません');
   expect(o.ji).toContain('0以上の 整数');
   expect(o.gyou, '★違う 訳が 改行されずに つながった★').toBe(2);
+});
+
+// ★★画面を 勝手に 跳ばさない・帯の 裏にも 潜らせない★★ 2026-10-21（対立役 11回目 直す-1・直す-2・直す-4）
+// 直す-1：下の 車に 打って 上へ 戻って 見て いる 時に 箱が 出ると、打った 欄まで 6,700px 飛んだ
+test('★上へ 戻って 見て いる 時に 箱が 出ても 画面は 跳ばない★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  for (const [w, h] of [
+    [1280, 720],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await hiraku(page, [], '2026-09-03');
+    await page.setViewportSize({ width: w, height: h });
+    await page.evaluate(() => {
+      window.__DK_HOZON_MATSU_MS = 1000;
+      window.__osoiHozon = 60000;
+    });
+    const sel = '#shaList [data-dev="d9"][data-f="toll"]';
+    await page.locator(sel).scrollIntoViewIfNeeded();
+    await page.evaluate((sel) => {
+      const i = document.querySelector(sel);
+      i.focus();
+      i.value = '2500';
+      i.dispatchEvent(new Event('change'));
+    }, sel);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(1500); // 時間切れの 箱が 出る
+    expect((await yoso(page)).err).toContain('返事が 来ません');
+    const y = await page.evaluate(() => window.scrollY);
+    expect(y, `★${w}×${h}：箱が 出た 時に 画面が ${y}px 跳んだ★`).toBeLessThan(5);
+    await page.evaluate(() => {
+      window.__osoiHozon = 0;
+    });
+  }
+});
+
+// 直す-2：箱が 出た 時の 位置で 下の 余白を 決め、見えて いて 覆われて いない 欄で Tab すると 240〜300px 跳ねた
+test('★箱が 出て いる 間 見えて いる 欄で Tab しても 画面は 跳ねない★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  for (const [w, h] of [
+    [1280, 720],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await hiraku(page, [], '2026-09-03');
+    await page.setViewportSize({ width: w, height: h });
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.evaluate(() => {
+      window.__hozonDame = true;
+      window.__hozonDameNo = 403;
+    });
+    await page.evaluate(() => {
+      const i = document.querySelector('#shaList [data-dev="d10"][data-f="toll"]');
+      i.value = '800';
+      i.dispatchEvent(new Event('change'));
+    });
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      window.__hozonDame = false;
+    });
+    expect((await yoso(page)).err).toContain('には書き込めません');
+    // 上へ 戻り、画面の 上の 方（箱にも 帯にも 遠い）欄から Tab で 進む
+    await page.evaluate(() => {
+      const i = document.querySelector('#shaList [data-dev="d2"][data-f="toll"]');
+      window.scrollBy(0, i.getBoundingClientRect().top - 60);
+      i.focus({ preventScroll: true });
+    });
+    let hane = 0;
+    for (let k = 0; k < 6; k++) {
+      const r = await page.evaluate(() => {
+        const a = document.activeElement;
+        const b = a.getBoundingClientRect();
+        const e = document.getElementById('err');
+        const sh = parseFloat(getComputedStyle(e).bottom) || 0;
+        return {
+          y: window.scrollY,
+          nextBottom: b.bottom,
+          sen: innerHeight - sh - e.offsetHeight - 8,
+        };
+      });
+      await page.keyboard.press('Tab');
+      await page.waitForTimeout(60);
+      const r2 = await page.evaluate(() => {
+        const a = document.activeElement;
+        return {
+          y: window.scrollY,
+          bottom: a.getBoundingClientRect().bottom + (window.scrollY - 0),
+        };
+      });
+      // 入った 欄が 動く 前に 箱の 線より 上で 見えて いたのに 画面が 動いたら 跳ね
+      const maeBottom = r2.bottom - r.y; // 動く 前の 画面での 欄の 下の 端
+      if (maeBottom < r.sen && Math.abs(r2.y - r.y) > 2) hane++;
+    }
+    expect(hane, `★${w}×${h}：見えて いる 欄で 画面が 跳ねた★`).toBe(0);
+  }
+});
+
+// 直す-4：下の 帯の 裏に 欄を 潜らせない（帯を 測る 行に 見張りが 無かった）
+test('★箱が 無い 時も Tab で 入った 欄は 下の 帯の 裏に 潜らない★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await hiraku(page, [], '2026-09-03');
+  await page.setViewportSize({ width: 390, height: 844 });
+  // 帯の すぐ 上の 欄に 入り、Tab で 帯の 裏の 欄へ 進む
+  let ura = 0;
+  let mita = 0;
+  for (const dev of ['d3', 'd5', 'd7', 'd9']) {
+    await page.evaluate((dev) => {
+      const i = document.querySelector('#shaList [data-dev="' + dev + '"][data-f="toll"]');
+      const f = document.querySelector('.dk-foot');
+      const soko = f ? f.getBoundingClientRect().top : innerHeight;
+      window.scrollBy(0, i.getBoundingClientRect().bottom - (soko - 10));
+      i.focus({ preventScroll: true });
+    }, dev);
+    const mae = await page.evaluate(() => {
+      const a = document.activeElement;
+      const all = Array.from(document.querySelectorAll('#shaList input:not([disabled])'));
+      const n = all[all.indexOf(a) + 1];
+      const f = document.querySelector('.dk-foot');
+      return !!n && !!f && n.getBoundingClientRect().top > f.getBoundingClientRect().top - 4;
+    });
+    if (!mae) continue;
+    mita++;
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(80);
+    if ((await ooware(page)) !== 'mieru') ura++;
+  }
+  expect(mita, '★帯の 裏の 欄へ 進む 形を 作れて いない＝この 形を 測って いない★').toBeGreaterThan(
+    0
+  );
+  expect(ura, '★Tab で 入った 欄が 下の 帯の 裏に 潜った★').toBe(0);
 });

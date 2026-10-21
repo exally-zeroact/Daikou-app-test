@@ -508,17 +508,27 @@
           $('err').style.display = m ? 'block' : 'none';
           nigasu();
           // 箱が 出た・高く なった 瞬間に 今 打って いる 欄を 覆わない（対立役 10回目 直す-1：最初の 箱が 出た 時に 打って いる 欄を 覆った）
-          okuriAgeru(document.activeElement);
+          //   欄が 今 画面に 見えて いる 時だけ（上へ 戻って 見て いる 時に 打った 欄まで 6,700px 飛んだ・対立役 11回目 直す-1）
+          var a = document.activeElement;
+          if (a && a.getBoundingClientRect) {
+            var ab = a.getBoundingClientRect();
+            if (ab.bottom > 0 && ab.top < window.innerHeight) okuriAgeru(a);
+          }
         }
         // ★貼り付いた 箱と 下の 帯の 裏に 欄を 潜らせない★（対立役 9回目 直す-3：Tab で 入った 欄が 赤い 箱の 裏で 見えなかった）
         //   塞いで いる 物（下の 帯・出て いる 箱）の 上の 端を その場で 測る（62px の 決め打ちや safe-area の ずれを 持たない・10回目 見立て-3）
+        //   箱は「貼り付いた 時の 位置」（画面の 下から CSS の bottom＋箱の 高さ）で 数える。今 どこに 居るかでは 数えない
+        //   （貼り付く 前の 位置で 余白を 決めると、見えて いる 欄で 画面が 240〜300px 跳ねた・対立役 11回目 直す-2）。
+        //   一覧の 欄は 箱より 前に 並ぶ ので、箱が 貼り付いて いない 時も この 線より 上に 居る
         function sokoNoY() {
           var y = window.innerHeight;
           var f = document.querySelector('.dk-foot');
           if (f && f.offsetHeight) y = Math.min(y, f.getBoundingClientRect().top);
           var e = $('err');
-          if (e && e.style.display !== 'none' && e.offsetHeight)
-            y = Math.min(y, e.getBoundingClientRect().top);
+          if (e && e.style.display !== 'none' && e.offsetHeight) {
+            var shita = parseFloat(getComputedStyle(e).bottom) || 0;
+            y = Math.min(y, window.innerHeight - shita - e.offsetHeight);
+          }
           return y - 8;
         }
         function nigasu() {
