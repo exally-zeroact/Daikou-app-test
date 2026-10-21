@@ -243,7 +243,9 @@ for (const [na, w] of [
         throw new Error('見張り');
       };
     }, w);
-    if (na === '期の 札') await page.locator('#slips .hn-chip').nth(0).click();
+    // 開いた 時は 1つ目の 期（月3回）＝別の 期（2つ目）を 押す（今と 同じ 期を 押すと「別の 期の 名前」の 形を 作れない・対立役 K3）
+    await expect(page.locator('#slips .hn-chip.on')).toHaveAttribute('data-k', '0');
+    if (na === '期の 札') await page.locator('#slips .hn-chip').nth(1).click();
     else await page.click('#hnMae');
     await page.waitForTimeout(800);
     // PDF の ボタンが 残って いれば 2回 押して みる（渡しては いけない）
@@ -265,8 +267,35 @@ for (const [na, w] of [
       '★計算が 転んだのに 前の 期の 紙が 残った★'
     ).toBe(0);
     // 画面の 幅を 変えた 描き直しでも 前の 期の 紙を 出さない
+    //   ※ 2重目の 守り（honninKami の 頭・honninPdf の 止め・REP を 捨てる）は 今の 客の 道からは 届かない（訳の 字が #slips を
+    //     置き換え #hnKami・#hnPdf が 消える）＝この 試験が 縛るのは 訳の 字で 置き換える 所だけ（対立役 D1）
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(500);
+    expect(await page.locator('#hnKami .hn-kami-waku').count()).toBe(0);
+  });
+}
+
+// ★★月の 送りの 読み終わりで 計算 以外 が 転んでも 黙って「読み込み中…」で 止めない★★ 2026-10-22（対立役 K2）
+for (const [na, w] of [
+  ['期の 区切り', 'PayrollPeriod.periodsOf'],
+  ['設定の 読み', 'PayrollDaily.normSettings'],
+]) {
+  test(`★月の 送りで ${na}（${w}）が 転んでも 訳を 出して 止める★`, async ({ page }) => {
+    await page.setViewportSize({ width: 430, height: 900 });
+    await kyouyuNise(page);
+    await page.clock.setFixedTime(new Date('2026-10-15T12:00:00+09:00'));
+    await hiraku(page);
+    await page.evaluate((x) => {
+      const [o, f] = x.split('.');
+      window[o][f] = function () {
+        throw new Error('見張り');
+      };
+    }, w);
+    await page.click('#hnMae');
+    await expect(page.locator('#slips'), '★黙って「読み込み中…」の まま★').toContainText(
+      '計算できませんでした',
+      { timeout: 5000 }
+    );
     expect(await page.locator('#hnKami .hn-kami-waku').count()).toBe(0);
   });
 }
