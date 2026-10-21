@@ -1437,3 +1437,102 @@ for (const nageruNo of ['buildCtx', 'report']) {
     expect(await errJi(page)).toContain('画面の計算で問題が出ました');
   });
 }
+
+// ★★計算が 転んだ 後の 描き直しの 別の 道（名前で 選ぶ・日の 帯）からも 描かない・送らない★★ 2026-10-21（対立役 4回目 直す-A・直す-B・見立て）
+async function korobu(page, w) {
+  await page.evaluate((x) => {
+    const P = window.PayrollDaily;
+    const o = P[x];
+    window.__nage = true;
+    P[x] = function () {
+      if (window.__nage) throw new Error('見張り');
+      return o.apply(this, arguments);
+    };
+  }, w);
+}
+for (const w of ['buildCtx', 'report']) {
+  // 直す-A：名前で 選ぶと renderSlips が 直に 走り、新しい 期の 札の 下に 前の 期の 明細・手当の 足す が 出た
+  test(`計算が 転んだ（${w}）後に 名前で 選んでも 前の 期の 明細を 出さず 手当も 送らない`, async ({
+    page,
+  }) => {
+    await hiraku(page);
+    await korobu(page, w);
+    await page.click('#nextM');
+    await page.waitForTimeout(1500);
+    await page.click('.tab[data-tab="slip"]');
+    await page.waitForTimeout(600);
+    const v = await page
+      .locator('#hitoSel option')
+      .evaluateAll((os) => os.map((o) => o.value).filter(Boolean)[0] || '');
+    await page.selectOption('#hitoSel', v);
+    await page.waitForTimeout(600);
+    expect(
+      (await page.locator('#slips').innerText()).trim(),
+      '★名前で 選ぶと 前の 期の 明細が 出た★'
+    ).toBe('');
+    expect(await page.locator('[data-meisai-adj]').count(), '★手当を 足す 口が 出た★').toBe(0);
+    expect(await errJi(page)).toContain('画面の計算で問題が出ました');
+  });
+
+  // 直す-B：日の 帯（#hibar）が 残り、押すと renderDays が 直に 走って 車の 時間・売上を 送れた
+  test(`計算が 転んだ（${w}）後に 日の 帯から 描かせても 車の 時間・売上を 送らない`, async ({
+    page,
+  }) => {
+    await hiraku(page);
+    await page.locator('#periodBar [data-pidx="1"]').click();
+    await page.waitForTimeout(1500);
+    await korobu(page, w);
+    await page.locator('#periodBar [data-pidx="0"]').click();
+    await page.waitForTimeout(1500);
+    expect(await page.locator('#hibar button').count(), '★転んだ 後も 日の 帯が 残る★').toBe(0);
+    // 帯が 残って いても 直に 描かせる 道を 押す（前の 形）
+    await page.evaluate(() => {
+      const b = document.getElementById('hiZen');
+      if (b) b.click();
+    });
+    await page.waitForTimeout(600);
+    const u = page.locator('[data-uri-sid]');
+    if (await u.count())
+      await u.first().evaluate((i) => {
+        i.value = '7000';
+        i.dispatchEvent(new Event('change'));
+      });
+    const h = page.locator('[data-sid]');
+    if (await h.count())
+      await h.first().evaluate((i) => {
+        i.value = '3';
+        i.dispatchEvent(new Event('change'));
+      });
+    await page.waitForTimeout(600);
+    expect(await page.locator('#days .day').count(), '★転んだ 後に 日の 欄が 描かれた★').toBe(0);
+    expect(await page.evaluate(() => window.__calls), '★転んだ 画面から 送った★').toEqual([]);
+  });
+}
+
+// 見立て：計算が 転んだ 間は 別の 成功の「字を 消す」でも 訳が 消えない（showErr の 出し直しを 守る 試験が 0本だった）
+test('計算が 転んだ 間は 別の 成功で 字を 消しても 計算の 訳が 残る', async ({ page }) => {
+  await hiraku(page);
+  await korobu(page, 'buildCtx');
+  await page.click('#nextM');
+  await page.waitForTimeout(1500);
+  expect(await errJi(page)).toContain('画面の計算で問題が出ました');
+  // 計算と 関係 無い 保存（車の 名前）を 成功させる＝その 返事で 字を 消す 道を 通す
+  await page.click('.tab[data-tab="set"]');
+  await page.waitForTimeout(600);
+  const na = page.locator('[data-car][data-f="label"]').first();
+  expect(await na.count(), '★車の 名前の 欄が 無い＝この 形を 測っていない★').toBe(1);
+  await na.evaluate((i) => {
+    i.value = i.value + '号';
+    i.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(600);
+  expect(
+    await page.evaluate(
+      () => window.__calls.filter((x) => x.p.indexOf('dk_device_labels') === 0).length
+    ),
+    '★車の 名前を 送って いない＝字を 消す 道を 通って いない★'
+  ).toBe(1);
+  expect(await errJi(page), '★別の 成功で 計算の 訳が 消えた★').toContain(
+    '画面の計算で問題が出ました'
+  );
+});

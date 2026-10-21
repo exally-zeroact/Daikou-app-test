@@ -3839,6 +3839,7 @@
         function adjTasu(eid) {
           var p = adjPanelOf(eid);
           if (!p || !COMPANY) return;
+          if (keisanNgNara()) return;
           var v = function (k) {
             var el = p.querySelector('[data-adj-f="' + k + '"]');
             return el ? el.value : '';
@@ -3875,6 +3876,7 @@
             });
         }
         function adjKesu(id) {
+          if (keisanNgNara()) return;
           DKSession.rest(SESS, 'dk_pay_adjustments?adj_id=eq.' + encodeURIComponent(id), {
             method: 'DELETE',
           })
@@ -4706,6 +4708,13 @@
         // ★期の 計算が 転んだ★（対立役 2回目 直す-2：読み終えの 印が 下りず「読み込み中です」の 断りが 終わらなかった）
         var KEISAN_NG_JI = '画面の計算で問題が出ました。画面を読み込み直してください。';
         var KEISAN_NG = false;
+        // ★計算が 転んだ 間は 描かない・書かない★（対立役 4回目 直す-A・直す-B：名前で 選ぶ・日の 帯 は render を 通らずに
+        //   前の 期の 明細・日の 欄を 描き、そこから 車の 時間・売上・手当を 送れた）
+        function keisanNgNara() {
+          if (!KEISAN_NG) return false;
+          showErr(KEISAN_NG_JI);
+          return true;
+        }
         function dameNara(dame, na) {
           if (!dame && !LP_YOMICHU && !KEISAN_NG) return false;
           showErr(
@@ -5157,6 +5166,7 @@
           if (KEISAN_NG && (TAB === 'slip' || TAB === 'hours')) {
             if ($('slips')) $('slips').innerHTML = '';
             if ($('days')) $('days').innerHTML = '';
+            if ($('hibar')) $('hibar').innerHTML = '';
             showErr(KEISAN_NG_JI);
             return;
           }
@@ -6121,6 +6131,11 @@
         }
 
         function renderSlips() {
+          if (KEISAN_NG) {
+            $('slips').innerHTML = '';
+            showErr(KEISAN_NG_JI);
+            return;
+          }
           var SHOW_CAR_SALES = showCarSalesNow();
           var box = $('slips');
           // ★名前の 選ぶ欄を 今の 人で 作り直す★（いなくなった人を 選んだままに しない・0人の 時も）
@@ -6639,6 +6654,12 @@
 
         function renderDays() {
           var box = $('days');
+          if (KEISAN_NG) {
+            box.innerHTML = '';
+            if ($('hibar')) $('hibar').innerHTML = '';
+            showErr(KEISAN_NG_JI);
+            return;
+          }
           if (!PERIOD) return;
           hibar();
           box.className = 'dlist';
@@ -7361,6 +7382,7 @@
         }
 
         function saveCarHours(shiftId, value) {
+          if (keisanNgNara()) return Promise.resolve();
           var cur = EDIT_BY_SHIFT[shiftId] || {};
           var v = parseFloat(value);
           // 時間の 列だけ 送る（2026-10-14 対立役）
@@ -7432,6 +7454,7 @@
 
         function saveCarUriage(shiftId, value, date) {
           if (!COMPANY) return;
+          if (keisanNgNara()) return Promise.resolve();
           // 実費が メーターより 多い 業務は「引いた 後」が 負に なる＝その 時だけ 先頭の −／- を 許す（引く 前は 0 以上の まま）
           var hk0 = uriageHiku(shiftId, date);
           var fu = !!hk0 && /^\s*[-−－]/.test(String(value || ''));
