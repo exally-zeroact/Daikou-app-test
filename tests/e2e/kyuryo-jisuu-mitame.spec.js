@@ -1287,3 +1287,99 @@ test('乗った人が 読めない 期に 下の 日の 札を 押すと 断っ�
   expect(r.top, '★断った 訳が 画面の 上の 外★').toBeGreaterThanOrEqual(0);
   expect(r.bottom, '★断った 訳が 画面の 下の 外★').toBeLessThanOrEqual(r.vh);
 });
+
+// ★★読み込み中の 断りの 後始末★★ 2026-10-21（対立役 2回目 直す-1・直す-2・見立て）
+const errJi = (page) =>
+  page.evaluate(() => {
+    const e = document.getElementById('err');
+    return getComputedStyle(e).display === 'none' ? '' : e.textContent;
+  });
+
+// 直す-1：読み込み中に 入れて 断られた 後、読み終えても「読み込み中です」が 残った
+test('読み込み中に 断った「読み込み中です」の 字は 読み終えたら 消える', async ({ page }) => {
+  await hiraku(page);
+  await page.evaluate(() => {
+    window.__osoi = 2000;
+  });
+  await page.click('#nextM');
+  await page.waitForTimeout(200);
+  const f = page.locator('[data-man-f="sales_yen"]').first();
+  expect(await f.count(), '★手で 入れた 日の 欄が 無い＝この 形を 測っていない★').toBeGreaterThan(
+    0
+  );
+  await f.evaluate((i) => {
+    i.value = '5000';
+    i.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(300);
+  expect(await errJi(page)).toContain('読み込み中');
+  await page.waitForTimeout(2700);
+  expect(await errJi(page), '★読み終えたのに「読み込み中です」が 残る★').not.toContain(
+    '読み込み中'
+  );
+});
+
+// 直す-2：期の 計算が 転ぶと 読み込み中の 印が 下りず、何も 出ないまま「読み込み中です」で 断り続けた
+test('期の 計算が 転んだら 読み込み直しの 訳を 出し 保存は 断る・直れば 戻る', async ({ page }) => {
+  await hiraku(page);
+  await page.evaluate(() => {
+    const P = window.PayrollDaily;
+    const o = P.buildCtx;
+    window.__nage = true;
+    P.buildCtx = function () {
+      if (window.__nage) throw new Error('見張り');
+      return o.apply(this, arguments);
+    };
+  });
+  await page.click('#nextM');
+  await page.waitForTimeout(1500);
+  expect(await errJi(page), '★計算が 転んだのに 何も 出ない★').toContain(
+    '画面の計算で問題が出ました'
+  );
+  const f = page.locator('[data-man-f="sales_yen"]').first();
+  if (await f.count())
+    await f.evaluate((i) => {
+      i.value = '5000';
+      i.dispatchEvent(new Event('change'));
+    });
+  await page.waitForTimeout(500);
+  expect(await errJi(page), '★「読み込み中です」と 違う 訳で 断った★').toContain(
+    '画面の計算で問題が出ました'
+  );
+  expect(await page.evaluate(() => window.__calls.length), '★計算が 転んだ 画面から 送った★').toBe(
+    0
+  );
+  await page.evaluate(() => {
+    window.__nage = false;
+  });
+  await page.click('#prevM');
+  await page.waitForTimeout(1500);
+  expect(await errJi(page), '★直ったのに 訳が 残る★').not.toContain('画面の計算で問題が出ました');
+});
+
+// 見立て：前の 期の 画面に 残った 乗った人の 札・「外す」を 読み込み中に 押しても 送らない（札の 道の 試験が 0本だった）
+test('期を 変えた 読み込み中に 前の 期の 札・外す を 押しても 乗った人を 送らない', async ({
+  page,
+}) => {
+  await hiraku(page);
+  await page.evaluate(() => {
+    window.__osoi = 3000;
+  });
+  await page.click('#nextM');
+  await page.waitForTimeout(300);
+  const chip = page.locator('[data-chip-emp]').first();
+  const del = page.locator('[data-del-emp]').first();
+  expect(
+    (await chip.count()) + (await del.count()),
+    '★札も 外すも 無い＝この 形を 測っていない★'
+  ).toBeGreaterThan(0);
+  page.on('dialog', (d) => d.accept());
+  if (await chip.count()) await chip.evaluate((b) => b.click());
+  await page.waitForTimeout(200);
+  if (await del.count()) await del.evaluate((b) => b.click());
+  await page.waitForTimeout(200);
+  const c = await page.evaluate(() =>
+    window.__calls.filter((x) => x.p.indexOf('dk_work_hours') === 0)
+  );
+  expect(c, '★読み込み中に 前の 期の 札から 乗った人を 送った★').toEqual([]);
+});

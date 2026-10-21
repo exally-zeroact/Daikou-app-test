@@ -4700,12 +4700,18 @@
         var MD_DAME = false;
         // ★期を 読み込み中も 断る★ 2026-10-21（対立役 K-1：期を 変えた 直後に 描き直すと 新しい 期の 日が 前の 期の 記録で 描かれ、
         //   「＋ 手で車を足す」・乗った人の 札から 0 を 送った）。断った 訳は 押した 所から 見える 所へ 出す（対立役 K-3：#err は 画面の 上の 外だった）
+        var YOMICHU_JI = '期間の 記録を 読み込み中です。読み終えてから もう一度 入れてください。';
+        // ★期の 計算が 転んだ★（対立役 2回目 直す-2：読み終えの 印が 下りず「読み込み中です」の 断りが 終わらなかった）
+        var KEISAN_NG_JI = '画面の計算で問題が出ました。画面を読み込み直してください。';
+        var KEISAN_NG = false;
         function dameNara(dame, na) {
-          if (!dame && !LP_YOMICHU) return false;
+          if (!dame && !LP_YOMICHU && !KEISAN_NG) return false;
           showErr(
-            LP_YOMICHU
-              ? '期間の 記録を 読み込み中です。読み終えてから もう一度 入れてください。'
-              : na +
+            KEISAN_NG
+              ? KEISAN_NG_JI
+              : LP_YOMICHU
+                ? YOMICHU_JI
+                : na +
                   'の 記録が 読めません。今 保存すると 前に 入れた 額が 消える ので 保存しません。上の「もう一度 読む」を 押してください。'
           );
           var e = $('err');
@@ -5059,9 +5065,21 @@
               if (e && e.shift_id) EDIT_BY_SHIFT[e.shift_id] = e;
             });
             showMsg('');
-            recalc();
+            // 計算が 転んだら 保存は 断った まま 読み込み直しの 訳を 出す（「読み込み中です」の まま 待たせない・対立役 2回目 直す-2）
+            try {
+              recalc();
+              KEISAN_NG = false;
+            } catch (e) {
+              if (window.console) console.warn('[期の 計算]', e);
+              KEISAN_NG = true;
+              LP_YOMICHU = false;
+              showErr(KEISAN_NG_JI);
+              return;
+            }
             // ★読み込み中の 印は 計算し終えた 後で 下ろす★（前で 下ろすと recalc が 投げた 時に 新しい 期・古い 中身で 押せた・対立役）
             LP_YOMICHU = false;
+            // 読み込み中に 断った 字は 読み終えたら 消す（対立役 2回目 直す-1：読み終えた 後も「読み込み中です」が 残った）
+            if (String($('err').textContent || '') === YOMICHU_JI) showErr('');
             render();
             // ★取れなかった物があれば 画面の上に出す★（期間に 関係ない 物が 読めなかった 時は そこから 読み直す）
             yomiNaoshiObi();
