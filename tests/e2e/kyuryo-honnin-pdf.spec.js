@@ -219,3 +219,54 @@ test('⑧ 道具が 古い（tsukuru が 無い）時は 開き直しを 頼む'
   await page.click('#hnPdf');
   await expect(page.locator('#hnPdfErr')).toContainText('開き直して');
 });
+
+// ★★本人の 画面の 計算が 転んだら 前の 期の 紙を 出さず PDF も 作らない★★ 2026-10-22
+//   前：期の 札（honninKikan）・月の 送り（honninTsuki）の 計算に 受け皿が 無く、転ぶと 前の 期の 紙と 札が 残り、
+//       PDF の ボタンが 生きて いて「給料明細_…_10-11〜10-20_…」の 名前で 前の 期の 額の PDF を 共有の 画面へ 渡した（対立役）
+//   ★わざと壊して 赤（2026-10-22 実測）★ 直す 前の kyuryo.html … 4本 赤（紙が 残る・PDF を 渡した）
+for (const [na, w] of [
+  ['期の 札', 'buildCtx'],
+  ['期の 札', 'report'],
+  ['月の 送り', 'buildCtx'],
+  ['月の 送り', 'report'],
+]) {
+  test(`★${na} で 計算（${w}）が 転んだら 前の 期の 紙を 出さず PDF も 作らない★`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 430, height: 900 });
+    await kyouyuNise(page);
+    await page.clock.setFixedTime(new Date('2026-10-15T12:00:00+09:00'));
+    await hiraku(page);
+    await page.evaluate((x) => {
+      const P = window.PayrollDaily;
+      P[x] = function () {
+        throw new Error('見張り');
+      };
+    }, w);
+    if (na === '期の 札') await page.locator('#slips .hn-chip').nth(0).click();
+    else await page.click('#hnMae');
+    await page.waitForTimeout(800);
+    // PDF の ボタンが 残って いれば 2回 押して みる（渡しては いけない）
+    for (let k = 0; k < 2; k++) {
+      if (await page.locator('#hnPdf').count()) {
+        await page.click('#hnPdf');
+        await page.waitForTimeout(1500);
+      }
+    }
+    expect(
+      await page.evaluate(() => window.__kyouyu.length + window.__mado.length),
+      '★計算が 転んだ 期から PDF を 渡した★'
+    ).toBe(0);
+    await expect(page.locator('#slips'), '★計算が 転んだ 訳が 出ない★').toContainText(
+      '計算できませんでした'
+    );
+    expect(
+      await page.locator('#hnKami .hn-kami-waku').count(),
+      '★計算が 転んだのに 前の 期の 紙が 残った★'
+    ).toBe(0);
+    // 画面の 幅を 変えた 描き直しでも 前の 期の 紙を 出さない
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(500);
+    expect(await page.locator('#hnKami .hn-kami-waku').count()).toBe(0);
+  });
+}

@@ -2953,7 +2953,7 @@
             var hnTk = PayrollPeriod.tsukiNoKata(st.periodKata, HN_Y, HN_M);
             PIDX = hnTk && hnTk.kind === 'thirds' ? 0 : kyouNoKi(PERIODS);
             PERIOD = PERIODS[PIDX];
-            recalc();
+            if (!hnKeisan()) return;
             TAB = 'slip';
             honninKami();
           });
@@ -3055,8 +3055,27 @@
           PIDX = i;
           PERIOD = PERIODS[i];
           hnPdfSuteru(); // ★前の 期間の PDF を 渡さない★
-          recalc();
+          if (!hnKeisan()) return;
           honninKami();
+        }
+        // ★★本人の 画面の 計算が 転んだ 時は 前の 期の 額を 出さない・PDF も 作らない★★ 2026-10-22
+        //   前：受け皿が 無く、転ぶと 前の 期の 紙と 札が 残り、PDF の ボタンは 生きて いて 別の 期の 名前の PDF を 渡した（対立役）
+        var HN_KEISAN_NG = false;
+        var HN_KEISAN_NG_BUN =
+          'この 期間の 明細を 計算できませんでした。画面を 開き直してください（直らない 時は 会社に 知らせてください）。';
+        function hnKeisan() {
+          try {
+            recalc();
+            HN_KEISAN_NG = false;
+            return true;
+          } catch (e) {
+            if (window.console) console.warn('[本人の 計算]', e);
+            HN_KEISAN_NG = true;
+            REP = null;
+            hnPdfSuteru();
+            honninTomeru(HN_KEISAN_NG_BUN);
+            return false;
+          }
         }
 
         // ★★本人の 明細を 自分で PDF に する（保存・印刷）★★ 2026-10-21 司さん
@@ -3108,6 +3127,7 @@
           hnPdfErr('');
           if (hnPdfAru()) return hnPdfWatasu(HN_PDF);
           if (HN_PDF_CHU === HN_NO) return;
+          if (HN_KEISAN_NG || !REP) return hnPdfErr(HN_KEISAN_NG_BUN);
           if (kyuDameBun(CTX)) return hnPdfErr(kyuDameBun(CTX));
           var emp = REP && REP.employees ? REP.employees[0] : null;
           if (!emp) return hnPdfErr('この月の 記録は ありません。');
@@ -3209,6 +3229,8 @@
         function honninKami() {
           var box = document.getElementById('slips');
           if (!box) return;
+          // 計算が 転んだ 間は 描かない（画面の 幅を 変えた 時の 描き直しでも 前の 期の 額を 出さない）
+          if (HN_KEISAN_NG) return honninTomeru(HN_KEISAN_NG_BUN);
           // 売上の 直しが 読めない 業務が 在れば 本人の 明細も 出さない（事務所と 同じ 門）2026-10-14
           if (kyuDameBun(CTX)) {
             box.innerHTML =
