@@ -482,9 +482,11 @@ test('★返事が 来ない 保存は 時間切れで 字を 出し、返事が
   });
   await hiErabu(page, '2026-09-03');
   await page.waitForTimeout(1000); // 時間切れ 済み・返事は まだ
-  expect(await errJi(page), '★倉庫に 入ったか 分からない 事を 客に 黙った★').toContain(
+  // 読み込み中は 上の 止めの 字が 時間切れの 訳を 出す（貼り付いた 箱には 重ねない・9回目 直す-1）
+  expect(await tomeJi(page), '★倉庫に 入ったか 分からない 事を 客に 黙った★').toContain(
     '返事が 来ません'
   );
+  expect(await errJi(page), '★同じ 訳が 2か所に 出た★').not.toContain('返事が 来ません');
   expect(await oseruKazu(page), '★返事の 前に 読み直して 打たせた★').toBe(0);
   await page.waitForTimeout(3500); // 返事が 来て 読み直す
   expect(await oseruKazu(page), '★返事が 来ても 打てない まま★').toBeGreaterThan(0);
@@ -781,12 +783,22 @@ test('★保存の 失敗の 後に 打ち方の 間違いが 来たら 間違�
 });
 
 // ★★同じ 日に 留まる 間の 時間切れ★★ 2026-10-21（対立役 7回目 直す-A・直す-B・直す-C）
+// 訳の 箱は 1つ（#err）＝時間切れの 字が その 箱に 在る 時だけ 返す（9回目 直す-1 で #kireJi は やめた）
 const kireUe = (page) =>
   page.evaluate(() => {
-    const e = document.getElementById('kireJi');
-    if (!e || getComputedStyle(e).display === 'none') return null;
+    const e = document.getElementById('err');
+    if (!e || getComputedStyle(e).display === 'none' || !/返事が 来ません/.test(e.textContent))
+      return null;
     const b = e.getBoundingClientRect();
-    return { ji: e.textContent, top: b.top, bottom: b.bottom, vh: innerHeight };
+    // 箱の 真ん中に 本当に 箱が 見えるか（隠れても「四角が 画面の 中」で 緑に しない・9回目 直す-2）
+    const el = document.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+    return {
+      ji: e.textContent,
+      top: b.top,
+      bottom: b.bottom,
+      vh: innerHeight,
+      mannaka: !!el && e.contains(el),
+    };
   });
 // 直す-A・直す-C：同じ 日の 時間切れでは 欄を 止めず、訳は 一覧の 上（画面の 中）に 出す。返事が 来たら 消える
 test('★同じ 日の 時間切れ：欄は 押せる まま・訳は 上に 見える・返事で 消える★', async ({
@@ -807,6 +819,7 @@ test('★同じ 日の 時間切れ：欄は 押せる まま・訳は 上に �
   expect(u.ji).toContain('返事が 来ません');
   expect(u.top, '★訳が 画面の 外★').toBeGreaterThanOrEqual(0);
   expect(u.bottom, '★訳が 画面の 外★').toBeLessThanOrEqual(u.vh);
+  expect(u.mannaka, '★訳の 箱が 何かの 裏に 隠れて いる★').toBe(true);
   await page.waitForTimeout(2500);
   expect(await kireUe(page), '★返事が 来たのに 上の 訳が 残る★').toBeNull();
   expect(await oseruKazu(page)).toBeGreaterThan(0);
@@ -836,15 +849,18 @@ const yoso = (page) =>
   page.evaluate(() => {
     const e = document.getElementById('err');
     const t = document.getElementById('tomeJi');
-    const u = document.getElementById('kireJi');
     const eb = e.getBoundingClientRect();
-    const ub = u ? u.getBoundingClientRect() : null;
+    const naka = document.elementFromPoint((eb.left + eb.right) / 2, (eb.top + eb.bottom) / 2);
+    const mieru = e.style.display !== 'none' && !!naka && e.contains(naka);
+    const ji = e.style.display === 'none' ? '' : e.textContent;
     return {
-      err: e.style.display === 'none' ? '' : e.textContent,
-      errMieru: e.style.display !== 'none' && eb.bottom > 0 && eb.top < innerHeight,
+      err: ji,
+      errMieru: mieru,
       tome: t ? t.textContent : '',
-      ue: u ? u.textContent : null,
-      ueMieru: !!ub && ub.bottom > 0 && ub.top < innerHeight,
+      // 時間切れの 字（同じ 日は 貼り付いた 箱・読み込み中は 上の 止めの 字が 出す＝箱には 重ねない）
+      ue: /返事が 来ません/.test(ji) ? ji : null,
+      ueMieru: /返事が 来ません/.test(ji) && mieru,
+      kireJi: document.querySelectorAll('#kireJi').length,
       oseru: Array.from(document.querySelectorAll('#shaList input')).filter((i) => !i.disabled)
         .length,
     };
@@ -964,4 +980,85 @@ test('★時間切れの 車が 返ったら 他の 車の 返事待ちでも �
     (await yoso(page)).tome,
     '★1台目は 返ったのに 上は「返事が 来ません」の まま★'
   ).not.toContain('返事が 来ません');
+});
+
+// ★★訳の 箱は 1つ・全部 見える・欄を 覆わない★★ 2026-10-21（対立役 9回目 直す-1・直す-2・直す-3）
+// 直す-1：時間切れの 箱と 403 の 箱が 重なって 時間切れの 出口（読み込み直して）が 隠れた
+test('★時間切れ＋別の 車の 403：1つの 箱に 両方の 訳が 全部 見える★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  for (const [w, h] of [
+    [390, 844],
+    [320, 568],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await hiraku(page, [], '2026-09-03');
+    await page.setViewportSize({ width: w, height: h });
+    await page.evaluate(() => {
+      window.__DK_HOZON_MATSU_MS = 1000;
+      window.__osoiHozon = 60000;
+    });
+    await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => {
+      window.__osoiHozon = 0;
+      window.__hozonDame = true;
+      window.__hozonDameNo = 403;
+    });
+    await utsuMuri(page, '#shaList [data-dev="d8"][data-f="toll"]', '800');
+    const o = await yoso(page);
+    expect(o.kireJi, '★訳の 箱が 2つ★').toBe(0);
+    expect(o.err).toContain('返事が 来ません');
+    expect(o.err).toContain('読み込み直して');
+    expect(o.err).toContain('には書き込めません');
+    expect(o.errMieru, `★${w}×${h}：訳の 箱が 隠れて いる★`).toBe(true);
+    // 箱の 下の 端（出口の 字が 在る 所）も 見える
+    const shita = await page.evaluate(() => {
+      const e = document.getElementById('err');
+      const b = e.getBoundingClientRect();
+      const el = document.elementFromPoint((b.left + b.right) / 2, b.bottom - 4);
+      return !!el && e.contains(el) && b.bottom <= innerHeight;
+    });
+    expect(shita, `★${w}×${h}：訳の 箱の 下が 隠れて いる★`).toBe(true);
+    await page.evaluate(() => {
+      window.__hozonDame = false;
+    });
+  }
+});
+
+// 直す-3：貼り付いた 箱が 出て いる 間に Tab で 欄を 進めると、入った 欄が 箱や 下の 帯の 裏に 潜った
+test('★訳の 箱が 出て いる 間 Tab で 進めても 入った 欄は 箱にも 帯にも 覆われない★', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  await page.setViewportSize({ width: 320, height: 568 });
+  await hiraku(page, [], '2026-09-03');
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+    window.__hozonDameNo = 403;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  expect((await yoso(page)).err).toContain('には書き込めません');
+  await page.locator('#shaList [data-dev="d1"][data-f="toll"]').focus();
+  let ooware = 0;
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(80);
+    const ok = await page.evaluate(() => {
+      const a = document.activeElement;
+      if (!a || !a.closest || !a.closest('#shaList')) return true;
+      const b = a.getBoundingClientRect();
+      const el = document.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+      return !!el && (el === a || a.contains(el));
+    });
+    if (!ok) ooware++;
+  }
+  expect(ooware, '★Tab で 入った 欄が 箱か 帯の 裏に 潜った★').toBe(0);
 });

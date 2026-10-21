@@ -293,9 +293,10 @@
 
       /* ★★保存の 訳は 打った 所から 見える 所へ★★ 2026-10-21（対立役 8回目 直す-1・直す-2：
          一覧の 下に 在る ので 車の 多い 日は 画面の はるか 下＝倉庫に 入らなかった 事を 客が 見ない）
-         一覧の 直後に 置き、下の 帯（62px）の すぐ 上に 貼り付ける */
-      #err,
-      #kireJi {
+         一覧の 直後に 置き、下の 帯（62px）の すぐ 上に 貼り付ける。
+         ★箱は 1つ★（2つ 貼ると 重なって 時間切れの 出口が 隠れた・対立役 9回目 直す-1）＝残った 訳は 全部 この 箱に 並べる */
+      #err {
+        white-space: pre-line;
         position: sticky;
         bottom: calc(70px + env(safe-area-inset-bottom));
         z-index: 40;
@@ -417,30 +418,23 @@
           var aru = Object.keys(ERR_KAGI).some(function (k) {
             return /:kire$/.test(k);
           });
-          var ue = document.getElementById('kireJi');
+          //   同じ 日に 留まる 間は 貼り付いた 訳の 箱（#err・errNuru）が 出す＝ここでは 何も しない
           if (YOMENAI) {
-            if (ue) ue.parentNode.removeChild(ue);
             if (aru) tomeruRan(HOZON_KIRE_JI);
             else if ($('tomeJi') && $('tomeJi').textContent === HOZON_KIRE_JI)
               tomeruRan(yomenaiJi());
-            return;
           }
-          if (!aru) {
-            if (ue) ue.parentNode.removeChild(ue);
-            return;
-          }
-          if (!ue) {
-            ue = document.createElement('div');
-            ue.id = 'kireJi';
-            ue.className = 'err';
-            $('shaList').parentNode.insertBefore(ue, $('err'));
-          }
-          ue.style.display = 'block';
-          ue.textContent = HOZON_KIRE_JI;
+          errNuru();
         }
+        // 残った 訳を 全部 1つの 箱に 並べる（同じ 字は 1回・後から 来た 字は 下）。
+        //   読み込み中は 時間切れの 訳を 上の 止めの 字が 出す ので 箱には 重ねない
         function errNuru() {
-          var k = Object.keys(ERR_KAGI);
-          showErr(k.length ? ERR_KAGI[k[k.length - 1]] : '');
+          var ji = [];
+          Object.keys(ERR_KAGI).forEach(function (k) {
+            if (YOMENAI && /:kire$/.test(k)) return;
+            if (ji.indexOf(ERR_KAGI[k]) < 0) ji.push(ERR_KAGI[k]);
+          });
+          showErr(ji.join(String.fromCharCode(10)));
         }
         function junban(kagi, tsukuru) {
           HOZON_KAZU++;
@@ -512,7 +506,24 @@
         function showErr(m) {
           $('err').textContent = m;
           $('err').style.display = m ? 'block' : 'none';
+          nigasu();
         }
+        // ★貼り付いた 箱と 下の 帯の 裏に 欄を 潜らせない★（対立役 9回目 直す-3：Tab で 入った 欄が 赤い 箱の 裏で 見えなかった）
+        //   箱の 高さ＋帯（62px）の 分だけ 下を 逃がし、入った 欄が その 中に 在れば 送り上げる
+        function shitaNoHaba() {
+          var e = $('err');
+          return 62 + 24 + (e && e.style.display !== 'none' ? e.offsetHeight + 8 : 0);
+        }
+        function nigasu() {
+          document.documentElement.style.scrollPaddingBottom = shitaNoHaba() + 'px';
+        }
+        document.addEventListener('focusin', function (ev) {
+          var t = ev.target;
+          if (!t || !t.closest || !t.closest('#shaList')) return;
+          var b = t.getBoundingClientRect();
+          var soko = window.innerHeight - shitaNoHaba();
+          if (b.bottom > soko) window.scrollBy(0, b.bottom - soko);
+        });
         function showMsg(m) {
           $('msg').textContent = m;
           $('msg').style.display = m ? 'block' : 'none';
