@@ -63,7 +63,20 @@ function tsukuru(yomenai) {
     };
     S.softList = (s, p, st) => {
       if (st) st.tried++;
-      if (yomenai.some((n) => String(p).indexOf(n) === 0)) {
+      // 読みの 筋書き（表ごとに 順に：{ dame: 読めない, ms: 遅れ }）＝読みが 重なる 形を 作る
+      const plan = window.__yomiPlan && window.__yomiPlan[String(p).split('?')[0]];
+      if (plan && plan.length) {
+        const x = plan.shift();
+        return new Promise((r) =>
+          setTimeout(() => {
+            if (x.dame && st) st.failed++;
+            r(x.dame ? [] : rows(p));
+          }, x.ms || 0)
+        );
+      }
+      // 開いた 後で 読めない 表を 変える（もう一度 読む の 試験）
+      const dameNo = window.__yomenai || yomenai;
+      if (dameNo.some((n) => String(p).indexOf(n) === 0)) {
         if (st) st.failed++;
         return Promise.resolve([]);
       }
@@ -179,4 +192,69 @@ test('★読めた 時は 今まで 通り 打てて、高速代・電子決済�
     bridge_yen: 500,
     denshi_yen: 300,
   });
+});
+
+// ★★読みが 重なっても・手で 入れた 日が 読めなくても 引く 前の 額を 出さない★★ 2026-10-21（対立役 2回目 S-1・D-2・D-4・D-5）
+const kami = (page) => page.locator('#kamiMado .kami-mise-waku').count();
+const gyou = (page) => page.locator('#list .row').count();
+
+// S-1：読みごとの 箱が 外の 変数で、前の 読みの 返事が 後の 読みの 箱を 読んだ
+//   ⇒ 実費が 読めない 月に 紙「40,000」・表「¥40,000」・押せる 欄が 出て、橋代を 打つと 高速代・電子決済を 0 で 送った
+test('★読みが 2本 重なっても 実費が 読めない 間は 紙・表・欄を 出さない★', async ({ page }) => {
+  await akeru(page, []);
+  expect(await kami(page), '★読めた 時の 紙が 出ない＝この 形を 測っていない★').toBeGreaterThan(0);
+  await page.evaluate(() => {
+    window.__yomiPlan = { dk_shift_edits: [{ dame: true, ms: 800 }, { ms: 4000 }] };
+  });
+  await page.locator('#nextM').click();
+  await page.locator('#prevM').click();
+  await page.waitForTimeout(1500);
+  expect(await kami(page), '★読み終える 前に 紙（引く 前の 額）が 出た★').toBe(0);
+  expect(await gyou(page), '★読み終える 前に 表の 数字が 出た★').toBe(0);
+  expect(await oseru(page), '★読み終える 前に 押せる 実費の 欄が 在る★').toBe(0);
+  expect(await okutta(page), '★読み終える 前に 送った★').toEqual([]);
+  // 後の 読みが 着けば 戻る
+  await expect(page.locator('#kamiMado .kami-mise-waku').first()).toBeVisible({ timeout: 8000 });
+  await expect(page.locator('#monthLabel')).toContainText('1月');
+});
+
+// D-2：手で 入れた 日が 読めない 月も 紙が 出た（その 車の 売上が 抜けた 額）
+test('★手で 入れた 日の 記録が 読めない 月は 紙・表を 出さず 訳を 出す★', async ({ page }) => {
+  await akeru(page, ['dk_manual_days']);
+  expect(await kami(page), '★手で 入れた 日が 読めないのに 紙が 出た★').toBe(0);
+  expect(await gyou(page), '★手で 入れた 日が 読めないのに 表の 数字が 出た★').toBe(0);
+  await expect(page.locator('#kamiMsg')).toContainText('手で 入れた 日の 記録が 読めない');
+  await expect(page.locator('#err')).toContainText('手で 入れた 日の 記録が 読めません');
+});
+
+// D-4：「もう一度読む」で 読めても 黄色い 帯が 残った（読みの 数を 1回 作った 箱の まま 足していた）
+test('★もう一度 読んで 読めたら 紙・表が 戻り 黄色い 帯も 消える★', async ({ page }) => {
+  await akeru(page, ['dk_shift_edits']);
+  await expect(page.locator('#dkUnknownBar')).toBeVisible();
+  await page.evaluate(() => {
+    window.__yomenai = [];
+  });
+  await page.locator('#dkUnknownBarBtn').click();
+  await expect(page.locator('#kamiMado .kami-mise-waku').first()).toBeVisible({ timeout: 8000 });
+  expect(await gyou(page)).toBeGreaterThan(0);
+  await expect(page.locator('#dkUnknownBar'), '★読めたのに 帯が 残った★').toBeHidden();
+  await expect(page.locator('#err')).toBeHidden();
+});
+
+// D-5：読めない 月に 設定の チェックを 押すと その 保存の 成功で 訳が 消えた（表は 空の まま 黙った）
+test('★実費が 読めない 月に 設定を 変えても 止めた 訳は 消えない★', async ({ page }) => {
+  await akeru(page, ['dk_shift_edits']);
+  await page.evaluate(() => {
+    const i = document.getElementById('dHi');
+    i.value = '';
+    i.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const i = document.getElementById('dToll');
+    i.checked = !i.checked;
+    i.dispatchEvent(new Event('change'));
+  });
+  await page.waitForTimeout(800);
+  await expect(page.locator('#err'), '★止めた 訳が 消えた★').toContainText('読めません');
 });
