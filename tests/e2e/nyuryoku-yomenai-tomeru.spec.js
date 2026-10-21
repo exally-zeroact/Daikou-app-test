@@ -459,26 +459,30 @@ const tomeJi = (page) =>
     return e ? e.textContent : '';
   });
 
-// 直す-B：返事の 来ない 保存 1本で 読み直しが 始まらず 画面が 固まった（出口は ページの 読み直し だけ）
-test('★返事が 来ない 保存が 在っても 時間切れで 字を 出し、他の 日を 打てる★', async ({ page }) => {
+// 直す-B（4回目）：返事の 来ない 保存 1本で 何も 言わずに「読み込み中」の まま 固まった
+// 止め-1・止め-2（5回目）：時間切れで 順番と 読み直しを 開けると、遅れて 返事が 来た 時に 打った 額が 戻る・消えた
+//   ⇒ 時間切れは 字を 出すだけ。順番と 読み直しは 本物の 返事まで 待つ。字は その 送りが 返った 時に 消える
+test('★返事が 来ない 保存は 時間切れで 字を 出し、返事が 来るまで 読み直さない・来たら 戻る★', async ({
+  page,
+}) => {
   await hiraku(page, [], '2026-09-02');
   await page.evaluate(() => {
-    window.__DK_HOZON_MATSU_MS = 1500; // 本物は 20秒
-    window.__osoiHozon = 600000;
+    window.__DK_HOZON_MATSU_MS = 1000; // 本物は 20秒
+    window.__osoiHozon = 4000;
   });
   await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
   await page.evaluate(() => {
     window.__osoiHozon = 0;
   });
   await hiErabu(page, '2026-09-03');
-  await page.waitForTimeout(3000);
-  expect(
-    await oseruKazu(page),
-    '★返事が 来ない 保存 1本で 他の 日も 打てない まま★'
-  ).toBeGreaterThan(0);
+  await page.waitForTimeout(1000); // 時間切れ 済み・返事は まだ
   expect(await errJi(page), '★倉庫に 入ったか 分からない 事を 客に 黙った★').toContain(
     '返事が 来ません'
   );
+  expect(await oseruKazu(page), '★返事の 前に 読み直して 打たせた★').toBe(0);
+  await page.waitForTimeout(3500); // 返事が 来て 読み直す
+  expect(await oseruKazu(page), '★返事が 来ても 打てない まま★').toBeGreaterThan(0);
+  expect(await errJi(page), '★返事が 来たのに 時間切れの 字が 残る★').toBe('');
 });
 
 // 直す-A：失敗した 欄を 1つしか 覚えず、2つ 失敗して 後の 1つが 直ると 前の 失敗の 字が 消えた
@@ -567,4 +571,108 @@ test('★手で 入れた 日：続けて 2つ 打っても 2つ目は 1つ目�
     window.__calls.map((x) => [x.b.work_date, x.b.sales_yen, x.b.toll_yen, x.b.denshi_yen])
   );
   expect(c[1], '★2つ目が 高速代を 前の 額に 戻した★').toEqual(['2026-09-03', 5000, 2500, 300]);
+});
+
+// ★★時間切れの 後に 遅れて 返事が 来ても 打った 額を 戻さない・消さない★★ 2026-10-21（対立役 5回目 止め-1・止め-2）
+const tollVal = (page) => page.inputValue('#shaList [data-sid][data-f="toll"]');
+const denVal = (page) => page.inputValue('#shaList [data-sid][data-f="denshi_yen"]');
+
+test('★時間切れの 後に 同じ 業務の 次を 打っても 1つ目の 額を 戻さない（返事を 待って 作る）★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 4000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.waitForTimeout(1000);
+  expect(await errJi(page)).toContain('返事が 来ません');
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="denshi_yen"]', '300');
+  await page.waitForTimeout(4000);
+  const c = await page.evaluate(() => window.__calls.map((x) => [x.b.toll_yen, x.b.denshi_yen]));
+  expect(c[1], '★2つ目が 高速代を 1000 に 戻して 送った★').toEqual([2000, 300]);
+  await hiErabu(page, '2026-09-03');
+  await hiErabu(page, '2026-09-02');
+  expect(
+    { toll: await tollVal(page), den: await denVal(page) },
+    '★倉庫の 額が 打った 額と 違う★'
+  ).toEqual({
+    toll: '2000',
+    den: '300',
+  });
+});
+
+test('★時間切れの 後も 返事の 前に 読み直さない（保存 前の 写しで 打った 額を 消さない）★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 2500;
+    window.__osoi = 3000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.fill('#hiSel', '2026-09-02');
+  await page.dispatchEvent('#hiSel', 'change');
+  await page.waitForTimeout(6500);
+  await page.evaluate(() => {
+    window.__osoi = 0;
+    window.__osoiHozon = 0;
+  });
+  expect(await tollVal(page), '★画面の 高速代が 前の 1000 に 戻った★').toBe('2000');
+  await utsuMuri(page, '#shaList [data-sid][data-f="denshi_yen"]', '500');
+  const c = await page.evaluate(() => window.__calls.map((x) => [x.b.toll_yen, x.b.denshi_yen]));
+  expect(c[c.length - 1][0], '★次の 1打で 高速代 2000 を 1000 に 戻した★').toBe(2000);
+});
+
+test('★手で 入れた 日：時間切れの 後 次の 保存も 1つ目の 額を 戻さない・日を 変えて 書けたら 字が 消える★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1000;
+    window.__osoiHozon = 4000;
+  });
+  await utsuMuri(page, '#shaList [data-dev][data-f="toll"]', '2500');
+  await page.waitForTimeout(1000);
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+  });
+  await utsuMuri(page, '#shaList [data-dev][data-f="denshi_yen"]', '300');
+  await page.waitForTimeout(4000);
+  await hiErabu(page, '2026-09-04');
+  await hiErabu(page, '2026-09-03');
+  expect(
+    (await page.inputValue('#shaList [data-dev][data-f="toll"]')) +
+      '/' +
+      (await page.inputValue('#shaList [data-dev][data-f="denshi_yen"]')),
+    '★倉庫が 打った 額と 違う★'
+  ).toBe('2500/300');
+  expect(await errJi(page), '★書けたのに 字が 残る★').toBe('');
+});
+
+// 4回目 直す-C の 字の 直し（読み込み中の 一打は「読み込み中です」）を 守る 試験が 0本だった（対立役 5回目 直す-4）
+test('★読み込み中に 欄へ 字が 入っても 送らず 字は「読み込み中です」★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__osoi = 3000;
+  });
+  await page.fill('#hiSel', '2026-09-03');
+  await page.dispatchEvent('#hiSel', 'change');
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const i = document.querySelector('#shaList [data-sid][data-f="toll"]');
+    if (i) {
+      i.value = '777';
+      i.dispatchEvent(new Event('change'));
+    }
+  });
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__calls.length), '★読み込み中に 送った★').toBe(0);
+  expect(await tomeJi(page)).toContain('読み込み中です');
+  expect(await tomeJi(page)).not.toContain('読めません');
 });

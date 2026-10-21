@@ -382,13 +382,25 @@
         var TEBIKI_HI = ''; // TEBIKI が どの 日の 表か
         // ★保存の 失敗の 字は 同じ 欄（行＋欄）の 次の 成功でだけ 消す★（別の 欄の 成功で 消えて 客に 黙った・対立役 3回目 直す-3）
         //   ★失敗した 欄は 全部 覚える★（1つだけ 覚えると 2つ 失敗して 1つ 直った 時に 字が 消えた・対立役 4回目 直す-A）
+        //   鍵 → その 字（残った 字は 残った 欄の 字で 出す・対立役 5回目 直す-3：直った 欄の 字の まま 残った）
         var ERR_KAGI = {};
-        // ★返事が 来ない 保存で 全部を 止めない★ 2026-10-21（対立役 4回目 直す-B：倉庫への 送りには 時間切れが 無く、
-        //   返事の 来ない 保存 1本で 読み直しが 始まらず 画面が「読み込み中」の まま 固まった）
-        //   ⇒ 順番が 来てから 決まった 秒で 失敗と して 字を 出し、次へ 進める（後から 返事が 来れば その 時に 重ねる）
+        // ★★返事が 来ない 保存★★ 2026-10-21（対立役 4回目 直す-B・5回目 止め-1・止め-2）
+        //   4回目：倉庫への 送りに 時間切れが 無く、返事の 来ない 保存 1本で 画面が 何も 言わずに「読み込み中」の まま 固まった
+        //   5回目：時間切れで 順番と 読み直しを 開けると、遅れて 返事が 来た 時に 次の 保存が 前の 中身で 作られ（打った 額が 戻る）、
+        //          読み直しが 保存 前の 写しで 画面を 置き換えた（打った 額が 消える）
+        //   ⇒ 時間切れでは ★字を 出すだけ★。順番と 読み直しは 本物の 返事まで 待つ（止める 側に 倒す）。字は その 送りが 返った 時に だけ 消す
         var HOZON_MATSU_MS = 20000;
         var HOZON_KIRE_JI =
-          '保存の 返事が 来ません。倉庫に 入ったか 分からない ので、少し 待ってから 画面を 読み直して 確かめてください。';
+          '保存の 返事が 来ません。倉庫に 入ったか 分からない ので、画面を 読み込み直して 確かめてください（返事が 来るまで 次の 保存と 読み直しは 待っています）。';
+        // 試験だけ 縮める（数で 1秒 以上の 時だけ 効く＝字や 0 で 毎回 すぐ 切れる 事は 無い）
+        function matsuMs() {
+          var m = Number(window.__DK_HOZON_MATSU_MS);
+          return m >= 1000 ? m : HOZON_MATSU_MS;
+        }
+        function errNuru() {
+          var k = Object.keys(ERR_KAGI);
+          showErr(k.length ? ERR_KAGI[k[k.length - 1]] : '');
+        }
         function junban(kagi, tsukuru) {
           HOZON_KAZU++;
           var owari = function () {
@@ -402,32 +414,31 @@
           var p = mae.then(function () {
             return tsukuru();
           });
-          var sumi = mae.then(function () {
-            return new Promise(function (done) {
-              var t = setTimeout(function () {
-                hozonDekinai(kagi + ':kire', HOZON_KIRE_JI);
-                done();
-              }, window.__DK_HOZON_MATSU_MS || HOZON_MATSU_MS);
-              var yame = function () {
-                clearTimeout(t);
-                done();
-              };
-              p.then(yame, yame);
-            });
+          mae.then(function () {
+            var kire = kagi + ':kire';
+            var t = setTimeout(function () {
+              ERR_KAGI[kire] = HOZON_KIRE_JI;
+              errNuru();
+            }, matsuMs());
+            var yame = function () {
+              clearTimeout(t);
+              if (ERR_KAGI[kire]) {
+                delete ERR_KAGI[kire];
+                errNuru();
+              }
+            };
+            p.then(yame, yame);
           });
-          HOZON_Q[kagi] = sumi.then(owari);
+          HOZON_Q[kagi] = p.then(owari, owari);
           return p;
         }
         function hozonDekita(kagi) {
-          // 返事が 遅れて 来て 書けた＝その 鍵の 時間切れの 字も 消す
-          var kire = kagi.replace(/:[^:]*$/, '') + ':kire';
-          if (!ERR_KAGI[kagi] && !ERR_KAGI[kire]) return;
-          delete ERR_KAGI[kire];
+          if (!ERR_KAGI[kagi]) return;
           delete ERR_KAGI[kagi];
-          if (!Object.keys(ERR_KAGI).length) showErr('');
+          errNuru();
         }
         function hozonDekinai(kagi, msg, r) {
-          ERR_KAGI[kagi] = true;
+          ERR_KAGI[kagi] = msg;
           saveErr(msg, r);
         }
         var YOMENAI_JI =
@@ -579,6 +590,11 @@
         function load() {
           if (!COMPANY) return;
           var no = ++LOADNO;
+          // 打ち方の 間違いの 字は 描き直すと 欄の 字が 消える ので 一緒に 消す
+          Object.keys(ERR_KAGI).forEach(function (k) {
+            if (/:katachi$/.test(k)) delete ERR_KAGI[k];
+          });
+          errNuru();
           YOMENAI = '読み込み中';
           tomeruRan('読み込み中です。読み終わるまで 打てません。');
           // 保存の 返事待ちが 残る 間は 読まない（読むと 保存 前の 写しで 記録を 置き換える）＝済んだら 読む
@@ -1139,10 +1155,10 @@
           var kagi = 's:' + shiftId;
           if (v === undefined) {
             // 打ち方の 間違いも 同じ 欄の 次の 成功で 消す（対立役 4回目 直す-C：直して 書けても 残った）
-            ERR_KAGI[kagi + ':uriage'] = true;
-            showErr(
-              '売上は 0以上の 整数で 入れてください（空に すると メーターの 額に 戻ります）。'
-            );
+            //   日を 動かすと 打った 字は 消える ので その 時も 消す（対立役 5回目 直す-3）
+            ERR_KAGI[kagi + ':katachi'] =
+              '売上は 0以上の 整数で 入れてください（空に すると メーターの 額に 戻ります）。';
+            errNuru();
             return;
           }
           inp.disabled = true;
@@ -1152,6 +1168,7 @@
             return JippiHozon.saveUriage(SESS, shiftId, COMPANY.company_id, v)
               .then(function (body) {
                 inp.disabled = !!YOMENAI; // 読み込み中・読めない 日は 押せない まま（対立役 4回目 直す-C）
+                hozonDekita(kagi + ':katachi');
                 hozonDekita(kagi + ':uriage');
                 EDITS[shiftId] = Object.assign({}, EDITS[shiftId] || {}, body);
                 inp.value = v === null ? '' : String(v);
@@ -1186,9 +1203,10 @@
               value
             )
               .then(function (body) {
+                // 書けた＝失敗の 字は 日を 変えて いても 消す（対立役 5回目 直す-3：日を 変えた 後に 書けても 残った）
+                hozonDekita(kagi + ':' + field);
                 // TEBIKI は 日の 表＝別の 日の 表に なって いたら 入れない（入れると 前の 日の 額を 今の 日へ 送った・対立役）
                 if (TEBIKI_HI !== hi0) return;
-                hozonDekita(kagi + ':' + field);
                 TEBIKI[deviceId] = body;
               })
               .catch(function (r) {
