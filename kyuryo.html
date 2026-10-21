@@ -2315,6 +2315,8 @@
           });
         }
         function showErr(m) {
+          // 期の 計算が 転んだ 間は 他の 成功で 訳を 消さない（対立役 3回目 直す-2：画面が 直って 見えるのに 断られた）
+          if (!m && typeof KEISAN_NG !== 'undefined' && KEISAN_NG) m = KEISAN_NG_JI;
           $('err').textContent = m || '';
           $('err').style.display = m ? 'block' : 'none';
         }
@@ -5065,21 +5067,27 @@
               if (e && e.shift_id) EDIT_BY_SHIFT[e.shift_id] = e;
             });
             showMsg('');
-            // 計算が 転んだら 保存は 断った まま 読み込み直しの 訳を 出す（「読み込み中です」の まま 待たせない・対立役 2回目 直す-2）
+            // 読み込み中に 断った 字は 読み終えたら 消す（対立役 2回目 直す-1：読み終えた 後も「読み込み中です」が 残った）
+            //   recalc の 前で 消す（recalc は 赤い 字が 在ると 返事待ちの 字を 出さない・対立役 3回目 見-1）
+            if (String($('err').textContent || '') === YOMICHU_JI) showErr('');
+            // 計算が 転んだら 読み込み直しの 訳を 出す（「読み込み中です」の まま 黙って 待たせない・対立役 2回目 直す-2）
+            //   ★読み込み中の 印は 下ろさない★（下ろすと 前の 期の 額で 新しい 月の 明細 PDF が 出た・対立役 3回目 止め-1）
+            //   明細と 日の 欄は 描かず、月の 札だけ 新しい 期に 揃える（対立役 3回目 直す-1）
             try {
               recalc();
-              KEISAN_NG = false;
+              if (KEISAN_NG) {
+                KEISAN_NG = false;
+                if (String($('err').textContent || '') === KEISAN_NG_JI) showErr('');
+              }
             } catch (e) {
               if (window.console) console.warn('[期の 計算]', e);
               KEISAN_NG = true;
-              LP_YOMICHU = false;
               showErr(KEISAN_NG_JI);
+              render();
               return;
             }
             // ★読み込み中の 印は 計算し終えた 後で 下ろす★（前で 下ろすと recalc が 投げた 時に 新しい 期・古い 中身で 押せた・対立役）
             LP_YOMICHU = false;
-            // 読み込み中に 断った 字は 読み終えたら 消す（対立役 2回目 直す-1：読み終えた 後も「読み込み中です」が 残った）
-            if (String($('err').textContent || '') === YOMICHU_JI) showErr('');
             render();
             // ★取れなかった物があれば 画面の上に出す★（期間に 関係ない 物が 読めなかった 時は そこから 読み直す）
             yomiNaoshiObi();
@@ -5145,6 +5153,13 @@
           $('paneHours').style.display = TAB === 'hours' ? '' : 'none';
           $('paneEmp').style.display = TAB === 'emp' ? '' : 'none';
           $('paneSet').style.display = TAB === 'set' ? '' : 'none';
+          // 期の 計算が 転んだ 時は 明細・日の 欄を 描かない（前の 期の 額を 新しい 期の 札の 下に 出さない・対立役 3回目）
+          if (KEISAN_NG && (TAB === 'slip' || TAB === 'hours')) {
+            if ($('slips')) $('slips').innerHTML = '';
+            if ($('days')) $('days').innerHTML = '';
+            showErr(KEISAN_NG_JI);
+            return;
+          }
           if (TAB === 'slip') renderSlips();
           if (TAB === 'hours') renderDays();
           if (TAB === 'emp') renderEmp();
@@ -5826,6 +5841,11 @@
         // ★★1人ぶん★★
         // ★読み込み中は 作らない★（押した 時の 期で 作る）
         function yomikomichuTomeru() {
+          // 期の 計算が 転んだ 時も 作らない（前の 期の 額で 新しい 月の 明細を 作った・対立役 3回目 止め-1）
+          if (KEISAN_NG) {
+            showErr(KEISAN_NG_JI);
+            return true;
+          }
           if (!LP_YOMICHU) return false;
           showErr('まだ 読み込み中です。読み終わってから もう一度 押してください。');
           return true;

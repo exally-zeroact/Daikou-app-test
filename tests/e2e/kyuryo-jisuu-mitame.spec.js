@@ -1383,3 +1383,57 @@ test('期を 変えた 読み込み中に 前の 期の 札・外す を 押し�
   );
   expect(c, '★読み込み中に 前の 期の 札から 乗った人を 送った★').toEqual([]);
 });
+
+// ★★期の 計算が 転んだ 後に 前の 期の 額で 明細 PDF を 作らない・札は 新しい 期★★ 2026-10-21（対立役 3回目 止め-1・直す-1・直す-2）
+//   2c7aa93：計算が 転んだ 時に 読み込み中の 印を 下ろした ので、PDF の 門が 通り「給料明細_2026-09」を 8月の 額（¥19,500）で 作った
+for (const nageruNo of ['buildCtx', 'report']) {
+  test(`期の 計算が 転んだ（${nageruNo}）後は 明細 PDF を 作らない・明細を 描かない・札は 新しい 期`, async ({
+    page,
+  }) => {
+    await hiraku(page);
+    await page.evaluate((w) => {
+      window.__pdf = [];
+      window.KamiEgaku = {
+        yomu: () => Promise.resolve(),
+        dasu: (mai, title) => {
+          window.__pdf.push({ title: title, n: mai.length });
+          return Promise.resolve();
+        },
+      };
+      const P = window.PayrollDaily;
+      const o = P[w];
+      window.__nage = true;
+      P[w] = function () {
+        if (window.__nage) throw new Error('見張り');
+        return o.apply(this, arguments);
+      };
+    }, nageruNo);
+    await page.click('#nextM');
+    await page.waitForTimeout(1500);
+    await expect(
+      page.locator('#monthLabel'),
+      '★計算が 転んだのに 札が 前の 期の まま★'
+    ).toContainText('9月');
+    await page.click('.tab[data-tab="slip"]');
+    await page.waitForTimeout(800);
+    expect(
+      (await page.locator('#slips').innerText()).trim(),
+      '★計算が 転んだ 期の 札の 下に 前の 期の 明細が 出た★'
+    ).toBe('');
+    await page.click('#btnPrint');
+    await page.waitForTimeout(800);
+    await page.evaluate(() => {
+      try {
+        window.printOne(0);
+      } catch (_) {
+        /* 断って 投げても 良い */
+      }
+    });
+    await page.waitForTimeout(800);
+    expect(
+      await page.evaluate(() => window.__pdf),
+      '★計算が 転んだ 期から 前の 期の 額で 明細 PDF を 作った★'
+    ).toEqual([]);
+    expect(await errJi(page)).toContain('画面の計算で問題が出ました');
+  });
+}
