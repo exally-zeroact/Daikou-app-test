@@ -507,22 +507,32 @@
           $('err').textContent = m;
           $('err').style.display = m ? 'block' : 'none';
           nigasu();
+          // 箱が 出た・高く なった 瞬間に 今 打って いる 欄を 覆わない（対立役 10回目 直す-1：最初の 箱が 出た 時に 打って いる 欄を 覆った）
+          okuriAgeru(document.activeElement);
         }
         // ★貼り付いた 箱と 下の 帯の 裏に 欄を 潜らせない★（対立役 9回目 直す-3：Tab で 入った 欄が 赤い 箱の 裏で 見えなかった）
-        //   箱の 高さ＋帯（62px）の 分だけ 下を 逃がし、入った 欄が その 中に 在れば 送り上げる
-        function shitaNoHaba() {
+        //   塞いで いる 物（下の 帯・出て いる 箱）の 上の 端を その場で 測る（62px の 決め打ちや safe-area の ずれを 持たない・10回目 見立て-3）
+        function sokoNoY() {
+          var y = window.innerHeight;
+          var f = document.querySelector('.dk-foot');
+          if (f && f.offsetHeight) y = Math.min(y, f.getBoundingClientRect().top);
           var e = $('err');
-          return 62 + 24 + (e && e.style.display !== 'none' ? e.offsetHeight + 8 : 0);
+          if (e && e.style.display !== 'none' && e.offsetHeight)
+            y = Math.min(y, e.getBoundingClientRect().top);
+          return y - 8;
         }
         function nigasu() {
-          document.documentElement.style.scrollPaddingBottom = shitaNoHaba() + 'px';
+          document.documentElement.style.scrollPaddingBottom =
+            window.innerHeight - sokoNoY() + 'px';
         }
-        document.addEventListener('focusin', function (ev) {
-          var t = ev.target;
+        function okuriAgeru(t) {
           if (!t || !t.closest || !t.closest('#shaList')) return;
           var b = t.getBoundingClientRect();
-          var soko = window.innerHeight - shitaNoHaba();
+          var soko = sokoNoY();
           if (b.bottom > soko) window.scrollBy(0, b.bottom - soko);
+        }
+        document.addEventListener('focusin', function (ev) {
+          okuriAgeru(ev.target);
         });
         function showMsg(m) {
           $('msg').textContent = m;
@@ -540,9 +550,6 @@
             /* 名前が 出せなくても 元の 言い方は 出す */
           }
           return msg;
-        }
-        function saveErr(msg, r) {
-          return showErr(saveErrJi(msg, r));
         }
 
         // ★★日は 日本時間で 切る★★ 2026-10-08（司さん「対応させろや」）

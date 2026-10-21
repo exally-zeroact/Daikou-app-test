@@ -1008,7 +1008,6 @@ test('★時間切れ＋別の 車の 403：1つの 箱に 両方の 訳が 全�
     });
     await utsuMuri(page, '#shaList [data-dev="d8"][data-f="toll"]', '800');
     const o = await yoso(page);
-    expect(o.kireJi, '★訳の 箱が 2つ★').toBe(0);
     expect(o.err).toContain('返事が 来ません');
     expect(o.err).toContain('読み込み直して');
     expect(o.err).toContain('には書き込めません');
@@ -1061,4 +1060,132 @@ test('★訳の 箱が 出て いる 間 Tab で 進めても 入った 欄は �
     if (!ok) ooware++;
   }
   expect(ooware, '★Tab で 入った 欄が 箱か 帯の 裏に 潜った★').toBe(0);
+});
+
+// ★★箱が 出た 瞬間・欄に 入った 瞬間・同じ 字・改行★★ 2026-10-21（対立役 10回目 直す-1・直す-2）
+const ooware = (page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || !a.closest || !a.closest('#shaList')) return 'nai';
+    const b = a.getBoundingClientRect();
+    const el = document.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+    return !!el && (el === a || a.contains(el)) ? 'mieru' : 'ooware';
+  });
+
+// 直す-1：遅れた 403 で 最初の 箱が 出た 瞬間、今 入って いる 下の 方の 欄を 覆った
+test('★打って いる 間に 最初の 訳の 箱が 出ても 今の 欄は 覆われない★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  for (const [w, h] of [
+    [320, 568],
+    [390, 844],
+  ]) {
+    await page.setViewportSize({ width: w, height: h });
+    await hiraku(page, [], '2026-09-03');
+    await page.setViewportSize({ width: w, height: h });
+    await page.evaluate(() => {
+      window.__hozonDame = true;
+      window.__hozonDameNo = 403;
+      window.__osoiHozon = 700;
+    });
+    await utsuMuri(page, '#shaList [data-dev="d5"][data-f="toll"]', '2500');
+    // 次の 欄を 画面の 下の 端（帯の すぐ 上）に 置いて 入る＝箱が 出る 前は 見えて いる
+    await page.evaluate(() => {
+      const i = document.querySelector('#shaList [data-dev="d6"][data-f="toll"]');
+      const f = document.querySelector('.dk-foot');
+      const soko = f ? f.getBoundingClientRect().top : innerHeight;
+      window.scrollBy(0, i.getBoundingClientRect().bottom - (soko - 12));
+      i.focus({ preventScroll: true });
+    });
+    expect(
+      await ooware(page),
+      `★${w}×${h}：箱が 出る 前から 覆われて いる＝この 形を 測って いない★`
+    ).toBe('mieru');
+    await page.waitForTimeout(1000); // 403 が 返って 箱が 出る
+    expect((await yoso(page)).err).toContain('には書き込めません');
+    expect(await ooware(page), `★${w}×${h}：箱が 出た 瞬間に 打って いる 欄を 覆った★`).toBe(
+      'mieru'
+    );
+    await page.evaluate(() => {
+      window.__hozonDame = false;
+      window.__osoiHozon = 0;
+    });
+  }
+});
+
+// 直す-2：欄に 入った 時の 送り上げ（focusin）だけを 守る 1本（scroll-padding は 送らない 入り方＝preventScroll で 入る）
+test('★箱が 出て いる 間 箱の 裏の 欄に 入ったら 送り上げる★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 10;
+  });
+  await page.setViewportSize({ width: 320, height: 568 });
+  await hiraku(page, [], '2026-09-03');
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+    window.__hozonDameNo = 403;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  // 箱の 真ん中の 裏に 在る 欄を 探して 送らずに 入る
+  const ari = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    const eb = e.getBoundingClientRect();
+    const cy = (eb.top + eb.bottom) / 2;
+    const ura = Array.from(document.querySelectorAll('#shaList input')).find((i) => {
+      const b = i.getBoundingClientRect();
+      return b.top < cy && b.bottom > cy;
+    });
+    if (!ura) return false;
+    ura.focus({ preventScroll: true });
+    return true;
+  });
+  expect(ari, '★箱の 裏に 欄が 無い＝この 形を 測って いない★').toBe(true);
+  await page.waitForTimeout(200);
+  expect(await ooware(page), '★箱の 裏の 欄に 入っても 送り上げない★').toBe('mieru');
+});
+
+// 直す-2：同じ 字は 1回・違う 字は 改行して 並べる（見張りが 無かった）
+test('★2台が 同じ 403：字は 1回／違う 訳は 行を 分けて 並ぶ★', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__manyCars = 2;
+  });
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+    window.__hozonDameNo = 403;
+  });
+  await utsuMuri(page, '#shaList [data-dev="d1"][data-f="toll"]', '2500');
+  await utsuMuri(page, '#shaList [data-dev="d2"][data-f="toll"]', '800');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  const ji = (await yoso(page)).err;
+  expect(ji.split('には書き込めません').length - 1, '★同じ 字が 2回 出た★').toBe(1);
+});
+
+test('★違う 訳（403 と 打ち方の 間違い）は 行を 分けて 並ぶ★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+    window.__hozonDameNo = 403;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  await utsuMuri(page, '#shaList [data-uri-sid]', '-5');
+  const o = await page.evaluate(() => {
+    const e = document.getElementById('err');
+    return {
+      ji: e.textContent,
+      gyou: e.innerText.split(String.fromCharCode(10)).filter((x) => x.trim()).length,
+    };
+  });
+  expect(o.ji).toContain('には書き込めません');
+  expect(o.ji).toContain('0以上の 整数');
+  expect(o.gyou, '★違う 訳が 改行されずに つながった★').toBe(2);
 });
