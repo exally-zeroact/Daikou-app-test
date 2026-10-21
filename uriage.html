@@ -597,6 +597,12 @@
           '実費の 記録が 読めません。売上と 紙は 止めています（今 打つと 前に 入れた 額が 消える ので 実費も 打てません）。上の「もう一度読む」を 押してください。';
         var MD_DAME = false; // 手で 入れた 日（dk_manual_days）が 読めない 月
         var YOMICHU = false; // 読み込み中（実費を 書かない）
+        // ★★この 月の 読みが 通ったか＝表・欄・保存の 門は これ 1つ★★ 2026-10-21（対立役 3回目 止め-2：
+        //   読み始めに 止めの 印を 下ろした ので、読みが 失敗した 後や 読み込み中に 車ごと／日ごとを 押すと 前の 月の 記録で
+        //   表（引く 前の 額）と 押せる 欄が 出て、橋代を 打つと 高速代・電子決済を 0 で 送った）
+        function tsukiYometa() {
+          return KAMI_TSUKI === ymKey(MONTH) && !YOMICHU && !EDITS_DAME && !MD_DAME;
+        }
         var MD_DAME_JI =
           '手で 入れた 日の 記録が 読めません。売上と 紙は 止めています。上の「もう一度読む」を 押してください。';
         // ★★今の 日本時間（年・月・日の 欄が 日本時間に なる Date）★★ 2026-10-08（司さん「対応させろや」）
@@ -818,7 +824,9 @@
                   : EDITS_DAME || MD_DAME
                     ? (EDITS_DAME ? '実費' : '手で 入れた 日') +
                       'の 記録が 読めないので 紙は 出せません（上の「もう一度読む」を 押してください）'
-                    : '読み込み中…'
+                    : YOMICHU || !LOAD_NO
+                      ? '読み込み中…'
+                      : '読み込みに 失敗したので 紙は 出せません（上の「もう一度読む」を 押してください）'
             );
           }
           KamiPdf.mise($('kamiMado'), r.mai, function () {
@@ -1067,8 +1075,19 @@
             .catch(function () {
               if (no !== LOAD_NO) return;
               YOMICHU = false;
+              RAW.shifts = [];
+              RAW.edits = [];
+              window.__editsById = {};
+              ROWS = [];
+              DAYS = [];
               showMsg('');
               showErr('読み込みに失敗しました。通信を確認してください。');
+              kamiMsg(
+                '読み込みに 失敗したので 紙は 出せません（上の「もう一度読む」を 押してください）'
+              );
+              ld.tried++;
+              ld.failed++;
+              afterLoad(load);
             });
         }
 
@@ -1318,7 +1337,7 @@
               else if (x.zero) showErr(msg + '（書けた 行が ありません。開き直してください）');
               else saveErr(msg, x.r);
             } else showErr('');
-            return rirekiYomu().then(function (rows) {
+            return rirekiYomu(LOAD).then(function (rows) {
               RIREKI = rows;
               recalc();
               renderSettings();
@@ -1670,6 +1689,12 @@
             showErr(EDITS_DAME ? EDITS_DAME_JI : MD_DAME_JI);
             return;
           }
+          // この 月の 読みが 通る まで 表を 出さない（読み込み中・読みが 失敗した 後）
+          if (!tsukiYometa()) {
+            list.innerHTML = '';
+            if (YOMICHU) showMsg('読み込み中…');
+            return;
+          }
           if (!rows.length) {
             list.innerHTML = '';
             showMsg('この月はまだ記録がありません。');
@@ -1757,7 +1782,7 @@
             i.onchange = function () {
               saveEdit(i.getAttribute('data-sid'), i.getAttribute('data-f'), i.value);
             };
-            if (EDITS_DAME) i.disabled = true;
+            if (!tsukiYometa()) i.disabled = true;
           });
           if (EDITS_DAME && document.querySelector('.yen')) showErr(EDITS_DAME_JI);
         }
@@ -1798,9 +1823,13 @@
         // ★保存の 決まりは js/jippi-hozon.js の 1か所★（ここは 呼ぶだけ）
         function saveEdit(shiftId, field, value) {
           if (!COMPANY) return;
-          if (EDITS_DAME || YOMICHU) {
+          if (!tsukiYometa()) {
             showErr(
-              YOMICHU ? '読み込み中です。読み終えてから もう一度 入れてください。' : EDITS_DAME_JI
+              YOMICHU
+                ? '読み込み中です。読み終えてから もう一度 入れてください。'
+                : EDITS_DAME
+                  ? EDITS_DAME_JI
+                  : 'この 月の 記録を 読めていないので 保存しません。上の「もう一度読む」を 押してください。'
             );
             return;
           }

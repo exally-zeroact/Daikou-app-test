@@ -59,6 +59,9 @@ function tsukuru(yomenai) {
         window.__okutta.push({ p: String(p), m: m, b: b });
         return Promise.resolve(kotae([b]));
       }
+      // 業務の 読みを 落とす（読みが 失敗した 後の 形を 作る）
+      if (window.__shiftsFail && String(p).indexOf('dk_shifts') === 0)
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve([]) });
       return Promise.resolve(kotae(rows(p)));
     };
     S.softList = (s, p, st) => {
@@ -257,4 +260,64 @@ test('★実費が 読めない 月に 設定を 変えても 止めた 訳は �
   });
   await page.waitForTimeout(800);
   await expect(page.locator('#err'), '★止めた 訳が 消えた★').toContainText('読めません');
+});
+
+// ★★読みが 失敗した 後・何日からの 保存の 後★★ 2026-10-21（対立役 3回目 止め-1・止め-2・直す-1）
+// 止め-2：読み始めに 止めの 印を 下ろした ので、次の 月の 業務の 読みが 失敗した 後に 車ごと／日ごとを 押すと
+//   前の 月の 記録で 表（引く 前の ¥40,000）と 押せる 欄が 出て、橋代を 打つと 高速代・電子決済を 0 で 送った
+test('★次の 月の 読みが 失敗した 後に 表を 切り替えても 前の 月の 額・欄を 出さない・送らない★', async ({
+  page,
+}) => {
+  await akeru(page, ['dk_shift_edits']);
+  await page.evaluate(() => {
+    window.__yomenai = [];
+    window.__shiftsFail = true;
+  });
+  await page.locator('#nextM').click();
+  await expect(page.locator('#err')).toContainText('読み込みに失敗しました');
+  await page.locator('summary', { hasText: '一覧で 見る' }).click();
+  await page.locator('#segCar').click();
+  await page.locator('#segDay').click();
+  await page.locator('#segCar').click();
+  await page.waitForTimeout(300);
+  expect(await gyou(page), '★読みが 失敗した 月に 前の 月の 表（引く 前の 額）が 出た★').toBe(0);
+  expect(await oseru(page), '★読みが 失敗した 月に 押せる 実費の 欄が 在る★').toBe(0);
+  expect(await okutta(page), '★読みが 失敗した 月に 送った★').toEqual([]);
+  // 出口：紙の 所は「読み込み中…」の まま に しない・もう一度読む が 出る（対立役 3回目 直す-1）
+  await expect(page.locator('#kamiMsg')).toContainText('読み込みに 失敗した');
+  await expect(page.locator('#dkUnknownBarBtn')).toBeVisible();
+});
+
+// 止め-1：「何日から」の 保存の 後の 読み直しに 箱を 渡して おらず、書けたのに 画面が 転び「保存できませんでした」・チェックが 押せない まま
+test('★何日からの 保存の 後も 画面が 転ばず「保存しました」・続けて 押せる★', async ({ page }) => {
+  const err = [];
+  page.on('pageerror', (e) => err.push(String(e)));
+  await akeru(page, []);
+  await page.fill('#dHi', '2026-01-06');
+  await page.dispatchEvent('#dHi', 'change');
+  await page.click('#dOther');
+  await page.waitForTimeout(600);
+  expect(err, '★何日からの 保存の 後に 画面が 転んだ★').toEqual([]);
+  await expect(page.locator('#err')).toBeHidden();
+  await expect(page.locator('#setSaved')).toContainText('保存しました');
+  await expect(page.locator('#dOther'), '★保存の 後に チェックが 押せない★').toBeEnabled();
+  await page.click('#dOther');
+  await page.waitForTimeout(600);
+  expect(err).toEqual([]);
+});
+
+// 止め-2 の 兄弟（N2〜N4）：読み込み中に 日ごと／車ごとを 押すと 新しい 月の 名前の 下に 前の 月の 額が 出た
+test('★読み込み中に 表を 切り替えても 前の 月の 額を 出さない★', async ({ page }) => {
+  await akeru(page, []);
+  await page.locator('summary', { hasText: '一覧で 見る' }).click();
+  await page.evaluate(() => {
+    window.__yomiPlan = { dk_shift_edits: [{ ms: 4000 }] };
+  });
+  await page.locator('#nextM').click();
+  await page.waitForTimeout(300);
+  await page.locator('#segDay').click();
+  await page.locator('#segCar').click();
+  await page.waitForTimeout(300);
+  expect(await gyou(page), '★読み込み中に 前の 月の 表が 出た★').toBe(0);
+  await expect(page.locator('#monthLabel')).toContainText('2月');
 });
