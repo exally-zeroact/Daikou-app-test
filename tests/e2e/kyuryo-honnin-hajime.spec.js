@@ -10,8 +10,9 @@
 //   ★押す物の一覧（先に書く）★ 1. リンクを 開く 2. パスワードを 入れて「見る」 3. 期間の ボタン
 //   ★★わざと壊して 赤に なるのを 見た（2026-10-21 実測）★★
 //     kyuryo.html の「if (HONNIN) CTX.honnin = true;」を 消す …… ★1本 赤★（勤め始め 前の 期に ¥0 の 紙）
-//     js/payroll-daily.js の aru から 手当・控除を 外す … ★1本 赤★（手当だけの 期）
-//     戻した 後 … ★4本 緑★
+//     js/payroll-daily.js の aru から 手当・控除を 外す … ★2本 赤★（手当だけ・控除だけ の 期）
+//     aru を「手当が 在る」だけに 壊す ……………………… ★1本 赤★（控除だけ の 期）
+//     戻した 後 … ★5本 緑★
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const { EMP, SET } = require('./honnin-harness');
@@ -111,7 +112,28 @@ test('★勤め始める 前の 期でも 手当だけ 在れば 紙を 出す�
   });
   await expect(page.locator('#slips .hn-chip.on')).toHaveAttribute('data-k', '0');
   await expect(page.locator('#hnKami .hn-kami-waku').first(), '★手当の 紙が 消えた★').toBeVisible();
-  await expect(page.locator('#hnKami')).toContainText('5,000');
+  // 額まで 縛る（差引 支給 で 見る＝手当の 字だけ 出て 差引が ¥0 でも 緑に しない・対立役 3回目 見立て1）
+  await expect(page.locator('#hnKami')).toContainText(/差引\s*支給\s*¥5,000/);
+});
+
+// ★控除だけの 期も 紙を 出す★（対立役 3回目 直す：aru を「手当が 在る」に 壊すと 控除だけの 期が 消え、控除が どの 明細にも 出なかった）
+test('★勤め始める 前の 期でも 控除だけ 在れば 紙を 出す（控除を 消さない）★', async ({ page }) => {
+  await akeru(page, ATARASHII, {
+    adjustments: [
+      {
+        adj_id: 'a2',
+        company_id: 'c1',
+        work_date: '2026-10-05',
+        employee_id: 'e1',
+        kind: 'koujo',
+        label: '見張り控除',
+        yen: 3000,
+      },
+    ],
+  });
+  await expect(page.locator('#slips .hn-chip.on')).toHaveAttribute('data-k', '0');
+  await expect(page.locator('#hnKami .hn-kami-waku').first(), '★控除の 紙が 消えた★').toBeVisible();
+  await expect(page.locator('#hnKami')).toContainText('見張り控除');
 });
 
 test('★登録日が 来ない（古い 関数）時は 前の 通り 紙を 出す★', async ({ page }) => {
