@@ -446,3 +446,125 @@ test('★前の 月の「走った 日へ」の 返事が 遅れて 返っても
     '★10月の 画面に 9月の「走った 日へ」が 出た★'
   ).toBeHidden();
 });
+
+// ★★返事が 来ない 保存・2つの 失敗・打ち方の 間違い・読み込み待ちの 売上の 欄・手で 入れた 日の 順番★★ 2026-10-21（対立役 4回目）
+const errJi = (page) =>
+  page.evaluate(() => {
+    const e = document.getElementById('err');
+    return e.style.display === 'none' ? '' : e.textContent;
+  });
+const tomeJi = (page) =>
+  page.evaluate(() => {
+    const e = document.getElementById('tomeJi');
+    return e ? e.textContent : '';
+  });
+
+// 直す-B：返事の 来ない 保存 1本で 読み直しが 始まらず 画面が 固まった（出口は ページの 読み直し だけ）
+test('★返事が 来ない 保存が 在っても 時間切れで 字を 出し、他の 日を 打てる★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__DK_HOZON_MATSU_MS = 1500; // 本物は 20秒
+    window.__osoiHozon = 600000;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await page.evaluate(() => {
+    window.__osoiHozon = 0;
+  });
+  await hiErabu(page, '2026-09-03');
+  await page.waitForTimeout(3000);
+  expect(
+    await oseruKazu(page),
+    '★返事が 来ない 保存 1本で 他の 日も 打てない まま★'
+  ).toBeGreaterThan(0);
+  expect(await errJi(page), '★倉庫に 入ったか 分からない 事を 客に 黙った★').toContain(
+    '返事が 来ません'
+  );
+});
+
+// 直す-A：失敗した 欄を 1つしか 覚えず、2つ 失敗して 後の 1つが 直ると 前の 失敗の 字が 消えた
+test('★2つの 欄が 失敗し 後の 1つだけ 直っても 前の 失敗の 字は 消えない★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await page.evaluate(() => {
+    window.__hozonDame = true;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  await utsuMuri(page, '#shaList [data-sid][data-f="denshi_yen"]', '300');
+  await page.evaluate(() => {
+    window.__hozonDame = false;
+  });
+  await utsuMuri(page, '#shaList [data-sid][data-f="denshi_yen"]', '300');
+  expect(await errJi(page), '★高速代 2000 は 倉庫に 無い のに 字が 消えた★').toContain(
+    '保存できませんでした'
+  );
+  // 高速代も 直れば 消える（いつまでも 残さない）
+  await utsuMuri(page, '#shaList [data-sid][data-f="toll"]', '2000');
+  expect(await errJi(page), '★全部 直ったのに 字が 残る★').toBe('');
+});
+
+// 直す-C：売上の 打ち方の 間違いの 字が、正しく 打ち直して 保存できても 残った
+test('★売上の 打ち方の 間違いの 字は 正しく 打ち直して 保存できたら 消える★', async ({ page }) => {
+  await hiraku(page, [], '2026-09-02');
+  await utsuMuri(page, '#shaList [data-uri-sid]', '-5');
+  expect(await errJi(page)).toContain('0以上の 整数');
+  await utsuMuri(page, '#shaList [data-uri-sid]', '30000');
+  expect(await errJi(page), '★保存できたのに 間違いの 字が 残る★').toBe('');
+});
+
+// 直す-C：2台の 日に 読み込み待ちの 間、売上の 返事で 売上の 欄だけ 押せる に 戻り「読めません」と 違う 字が 出た
+test('★読み込み待ちの 間は 売上の 返事が 来ても 売上の 欄を 押せない・字は「読み込み中」★', async ({
+  page,
+}) => {
+  SH.push({
+    shift_id: 's2',
+    device_id: 'd2',
+    started_at: '2026-09-02T11:00:00+09:00',
+    ended_at: '2026-09-02T18:00:00Z',
+    fare_total_yen: 10000,
+    trip_count: 3,
+  });
+  LABELS.push({ company_id: 'c1', device_id: 'd2', label: '2000', sort_order: 2 });
+  try {
+    await hiraku(page, [], '2026-09-02');
+    await page.evaluate(() => {
+      window.__osoiHozon = 4000;
+    });
+    await utsuMuri(page, '#shaList [data-sid="s2"][data-f="toll"]', '700');
+    await page.evaluate(() => {
+      window.__osoiHozon = 600;
+    });
+    await utsuMuri(page, '#shaList [data-uri-sid="s1"]', '30000');
+    await page.fill('#hiSel', '2026-09-02');
+    await page.dispatchEvent('#hiSel', 'change');
+    await page.waitForTimeout(600);
+    expect(await oseruKazu(page), '★読み込み中なのに 押せる 欄が 在る★').toBe(0);
+    expect(await tomeJi(page)).toContain('読み込み中です');
+    expect(await tomeJi(page), '★読み込み中に「読めません」と 違う 字★').not.toContain(
+      '読めません'
+    );
+  } finally {
+    SH.pop();
+    LABELS.pop();
+  }
+});
+
+// 見立て（4回目）：手で 入れた 日の「順に 送る」に 効く 試験が 0本だった（22ff487 では 2つ目が 高速代を 2500→1000 に 戻した）
+test('★手で 入れた 日：続けて 2つ 打っても 2つ目は 1つ目の 額を 戻さない・日を 送っても 混ざらない★', async ({
+  page,
+}) => {
+  await hiraku(page, [], '2026-09-03');
+  await page.evaluate(() => {
+    window.__osoiHozon = 1000;
+  });
+  await utsuMuri(page, '#shaList [data-dev][data-f="toll"]', '2500');
+  await utsuMuri(page, '#shaList [data-dev][data-f="denshi_yen"]', '300');
+  await page.fill('#hiSel', '2026-09-04');
+  await page.dispatchEvent('#hiSel', 'change');
+  await page.waitForTimeout(2500);
+  expect(await page.inputValue('#shaList [data-dev][data-f="toll"]'), '★9/04 に 9/03 の 額★').toBe(
+    '7000'
+  );
+  const c = await page.evaluate(() =>
+    window.__calls.map((x) => [x.b.work_date, x.b.sales_yen, x.b.toll_yen, x.b.denshi_yen])
+  );
+  expect(c[1], '★2つ目が 高速代を 前の 額に 戻した★').toEqual(['2026-09-03', 5000, 2500, 300]);
+});
