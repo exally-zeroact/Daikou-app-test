@@ -590,6 +590,11 @@
         var COMPANY = null;
         // ★1回の読み込みで「何本 取れなかったか」を覚える箱★
         var LOAD = DKSession.newLoadState();
+        // ★★実費の 記録が 読めない 月は 実費の 欄を 打たせない★★ 2026-10-21（入力の 画面と 同じ 穴・対立役が 測った）
+        //   前：読みが 失敗すると 手元の 記録が 空＝打つと 高速代・電子決済 などを 0 で 送って 倉庫を 上書きした
+        var EDITS_DAME = false;
+        var EDITS_DAME_JI =
+          '実費の 記録が 読めません。今 打つと 前に 入れた 額が 消える ので、実費は 打てません。上の「もう一度 読む」を 押してください。';
         // ★★今の 日本時間（年・月・日の 欄が 日本時間に なる Date）★★ 2026-10-08（司さん「対応させろや」）
         //   日の 切り方を 給料（payroll-daily.js の 日本時間）と 入力の 画面に 揃える。日本の 端末では 1つも 変わらない
         function jstNow() {
@@ -629,6 +634,7 @@
           '売上から 引く 物の 変えた 記録を 読めませんでした。売上と 紙は 止めています。もう一度 開いてください。';
         var HIKI_HI = null; // 選んだ「何日から」（null＝まだ 選んでいない＝今日・''＝最初から）
         var SS_YOMI = { tried: 0, failed: 0 };
+        var ED_YOMI = { tried: 0, failed: 0 }; // 実費（dk_shift_edits）の 読めたか
         var SS_DAME = false; // 設定（dk_sales_settings）を 読めなかった＝列も 記録も 書かせない
         var KAKI_CHU = false; // 書いている 間は チェックを 押させない
         var RIREKI_HIRAKU = false;
@@ -953,7 +959,9 @@
               }
               return tsugi(0);
             })(),
-            soft('dk_shift_edits?select=*&limit=2000'),
+            // 実費は 読めたかを 別に 数える（読めない 時は 欄を 押せなく する）
+            ((ED_YOMI = { tried: 0, failed: 0 }),
+            DKSession.softList(SESS, kaishaDake('dk_shift_edits?select=*&limit=2000'), ED_YOMI)),
             soft('dk_device_labels?select=*&limit=500'),
             // ★設定は 読めたかを 別に 数える★ 2026-10-18（読めない 時に 既定の 値で 列を 上書き しない・対立役 止3）
             ((SS_YOMI = { tried: 0, failed: 0 }),
@@ -1003,8 +1011,9 @@
               RAW.shifts = RAW.shifts.concat(conv.shifts);
               RAW.edits = RAW.edits.concat(conv.edits);
               SETTINGS = UriageAgg.normSettings(st);
-              LOAD.tried += SS_YOMI.tried;
-              LOAD.failed += SS_YOMI.failed;
+              LOAD.tried += SS_YOMI.tried + ED_YOMI.tried;
+              LOAD.failed += SS_YOMI.failed + ED_YOMI.failed;
+              EDITS_DAME = ED_YOMI.failed > 0;
               SS_DAME = SS_YOMI.failed > 0;
               RIREKI = res[6];
               KAMI_TSUKI = ymKey(MONTH);
@@ -1701,7 +1710,9 @@
             i.onchange = function () {
               saveEdit(i.getAttribute('data-sid'), i.getAttribute('data-f'), i.value);
             };
+            if (EDITS_DAME) i.disabled = true;
           });
+          if (EDITS_DAME && document.querySelector('.yen')) showErr(EDITS_DAME_JI);
         }
 
         // ---------- 保存（手入力ぶん・元データは触らない） ----------
@@ -1740,6 +1751,10 @@
         // ★保存の 決まりは js/jippi-hozon.js の 1か所★（ここは 呼ぶだけ）
         function saveEdit(shiftId, field, value) {
           if (!COMPANY) return;
+          if (EDITS_DAME) {
+            showErr(EDITS_DAME_JI);
+            return;
+          }
           var cur = (window.__editsById || {})[shiftId] || {};
           JippiHozon.saveJippi(SESS, shiftId, COMPANY.company_id, cur, field, value)
             .then(function (body) {
