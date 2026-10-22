@@ -57,6 +57,10 @@
       "destination": "https://daikou-app-test.vercel.app/js/jippi-hozon.js"
     },
     {
+      "source": "/js/jisuu-hozon.js",
+      "destination": "https://daikou-app-test.vercel.app/js/jisuu-hozon.js"
+    },
+    {
       "source": "/js/kami-egaku.js",
       "destination": "https://daikou-app-test.vercel.app/js/kami-egaku.js"
     },

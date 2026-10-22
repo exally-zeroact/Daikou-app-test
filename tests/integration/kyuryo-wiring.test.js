@@ -17,6 +17,8 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const HTML = fs.readFileSync(path.join(ROOT, 'kyuryo.html'), 'utf8');
+// 時数の 保存（乗った人・車の 時間）は 入力の 画面と 同じ 部品 2026-10-23
+const JISUU = fs.readFileSync(path.join(ROOT, 'js', 'jisuu-hozon.js'), 'utf8');
 
 describe('読み込み順', () => {
   const order = [
@@ -26,6 +28,7 @@ describe('読み込み順', () => {
     'js/daiko-payroll.js',
     'js/payroll-period.js',
     'js/payroll-daily.js',
+    'js/jisuu-hozon.js',
   ];
 
   it('必要な部品が全部載っている', () => {
@@ -112,8 +115,15 @@ describe('★元データは書き換えない（メーターが確定した数�
     const dels = writes.filter((w) => w.method === 'DELETE');
     // 乗った人の割り当て(dk_work_hours)・手で入れた1日分(dk_manual_days)・★手当・控除(dk_pay_adjustments・10-06)★ の3つだけ。
     // どれも人が手で入れた物なので、打ち間違いを消せないと使えない。
-    expect(dels.length).toBe(3);
-    const targets = dels.map((d) => d.target).join(' ');
+    // 乗った人を 外す 口は 部品（js/jisuu-hozon.js）へ 出した 2026-10-23＝部品の 消す 口も 数える
+    const jsDels = [];
+    const re3 = /DKSession\.rest\(\s*sess,\s*([\s\S]{0,400}?)\{\s*method:\s*'DELETE'/g;
+    let m3;
+    while ((m3 = re3.exec(JISUU)) !== null) jsDels.push({ target: m3[1], method: 'DELETE' });
+    expect(jsDels.length).toBe(1);
+    const all = dels.concat(jsDels);
+    expect(all.length).toBe(3);
+    const targets = all.map((d) => d.target).join(' ');
     expect(targets).toContain('dk_work_hours');
     expect(targets).toContain('dk_manual_days');
     expect(targets).toContain('dk_pay_adjustments');

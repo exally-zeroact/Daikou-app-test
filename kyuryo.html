@@ -2207,6 +2207,7 @@
     <script src="js/daiko-payroll.js"></script>
     <script src="js/payroll-period.js"></script>
     <script src="js/payroll-daily.js"></script>
+    <script src="js/jisuu-hozon.js"></script>
     <!-- ★QRを 出す 部品★ 2026-09-03（従業員へ 配る 用）
          ★repo に 元から 在る 物★（dashboard.html が 会社URLの QR で 使っている 物と 同じ）
          ＝新しく 借りて きていません。 -->
@@ -6879,31 +6880,9 @@
         //          （売上の 母数に 入らない 車の 人へ 他の 車の 稼ぎから 払う）
         //   既定が 1日だけに なったので、帯で 知らせる（対立役 2回：乗った人の 行が 在るかだけ
         //   見ると、払いが 0 の 日や 記録の 無い 車への 払いが「入れ漏れ無し」に 隠れた）
+        //   ★判じは js/jisuu-hozon.js の 1か所★（入力の 画面と 同じ 物を 呼ぶ）2026-10-23
         function noriNashi(date) {
-          var cars = (CTX && CTX.byDate && CTX.byDate[date]) || {};
-          var own = (CTX && CTX.settings && CTX.settings.ownerDeviceId) || '';
-          var wh = (CTX && CTX.hoursByDate && CTX.hoursByDate[date]) || {};
-          var deru = {};
-          var noru = {};
-          var hito = [];
-          Object.keys(wh).forEach(function (empId) {
-            if (!CTX.empById[empId]) return; // 計算も 知らない 人は 入れない
-            var w = wh[empId];
-            noru[w.device_id] = true;
-            var car = cars[w.device_id];
-            var h = w.hours > 0 ? w.hours : car ? car.hours : 0;
-            if (!(h > 0)) return; // 計算は 行を 作らない
-            if (car) deru[w.device_id] = true;
-            else hito.push(empId);
-          });
-          var nashi = Object.keys(cars).filter(function (dev) {
-            var c = cars[dev] || {};
-            if (dev === own || deru[dev]) return false;
-            // 乗った人が 居るのに 給料が 出る 人が 0人 なら 売上・時間 0 でも 数える（対立役 3回：
-            //   ＋手で車を足す で 作った 車に 時間 空の 人を 乗せた 日が「入れ漏れ無し」に なった）
-            return num(c.hours) > 0 || num(c.sales) > 0 || !!noru[dev];
-          });
-          return { cars: nashi, hito: hito };
+          return JisuuHozon.noriNashi(CTX, date);
         }
         function mondai(date) {
           var r = noriNashi(date);
@@ -7772,19 +7751,9 @@
         function saveCarHours(shiftId, value) {
           if (keisanNgNara()) return Promise.resolve();
           var cur = EDIT_BY_SHIFT[shiftId] || {};
-          var v = parseFloat(value);
-          // 時間の 列だけ 送る（2026-10-14 対立役）
-          //   前は 開いた 時の 高速代・橋代・その他も 一緒に 送っていた＝別の 画面で 直した 高速代を
-          //   古い 値で 上書きした（merge-duplicates は 送った 列を 全部 書く）
-          var body = {
-            shift_id: shiftId,
-            company_id: COMPANY.company_id,
-            hours: isFinite(v) && v > 0 ? v : null, // 空 = メーターの記録から自動
-            updated_at: new Date().toISOString(),
-          };
-          return upsert('dk_shift_edits', 'shift_id', body)
-            .then(function (r) {
-              if (!r.ok) return saveErr('時間を保存できませんでした。', r);
+          // 時間の 列だけ 送る（2026-10-14 対立役・送る 形は js/jisuu-hozon.js の 1か所）
+          return JisuuHozon.saveCarHours(SESS, shiftId, COMPANY.company_id, value)
+            .then(function (body) {
               showErr('');
               // 手元の 行は 前の 行に 重ねる（送った 中身で 置き換えると 実費・電子決済などが
               //   読み直すまで 画面から 消え、給料が 高く 出た）
@@ -7801,7 +7770,9 @@
               if (!found) RAW.edits.push(neu);
               byogaSuru('時間は保存しましたが、');
             })
-            .catch(function () {
+            .catch(function (r) {
+              // 倉庫が 断った（返事が 在る）＝訳を 読んで 出す・届かない＝通信
+              if (r && r.status) return saveErr('時間を保存できませんでした。', r);
               showErr('時間を保存できませんでした。');
             });
         }
@@ -7906,18 +7877,16 @@
 
         function saveWorkHour(date, employeeId, deviceId, value) {
           if (dameNara(WH_DAME, '乗った人')) return Promise.resolve();
-          var v = parseFloat(value);
-          var body = {
-            company_id: COMPANY.company_id,
-            work_date: date,
-            employee_id: employeeId,
-            device_id: deviceId || '',
-            hours: isFinite(v) && v > 0 ? v : 0, // 0 = 乗った車の時数を使う
-            updated_at: new Date().toISOString(),
-          };
-          return upsert('dk_work_hours', 'company_id,work_date,employee_id', body)
-            .then(function (r) {
-              if (!r.ok) return saveErr('乗った人を保存できませんでした。', r);
+          // 送る 形は js/jisuu-hozon.js の 1か所（入力の 画面と 同じ）
+          return JisuuHozon.saveWorkHour(
+            SESS,
+            COMPANY.company_id,
+            date,
+            employeeId,
+            deviceId,
+            value
+          )
+            .then(function (body) {
               showErr('');
               var found = false;
               RAW.workHours = RAW.workHours.map(function (w) {
@@ -7930,32 +7899,24 @@
               if (!found) RAW.workHours.push(body);
               byogaSuru('乗った人は保存しましたが、');
             })
-            .catch(function () {
+            .catch(function (r) {
+              if (r && r.status) return saveErr('乗った人を保存できませんでした。', r);
               showErr('乗った人を保存できませんでした。');
             });
         }
 
         function delWorkHour(date, employeeId) {
           if (dameNara(WH_DAME, '乗った人')) return Promise.resolve();
-          return DKSession.rest(
-            SESS,
-            'dk_work_hours?company_id=eq.' +
-              encodeURIComponent(COMPANY.company_id) +
-              '&work_date=eq.' +
-              encodeURIComponent(date) +
-              '&employee_id=eq.' +
-              encodeURIComponent(employeeId),
-            { method: 'DELETE' }
-          )
-            .then(function (r) {
-              if (!r.ok) return saveErr('外せませんでした。', r);
+          return JisuuHozon.delWorkHour(SESS, COMPANY.company_id, date, employeeId)
+            .then(function () {
               showErr('');
               RAW.workHours = RAW.workHours.filter(function (w) {
                 return !(w.work_date === date && w.employee_id === employeeId);
               });
               byogaSuru('外しましたが、');
             })
-            .catch(function () {
+            .catch(function (r) {
+              if (r && r.status) return saveErr('外せませんでした。', r);
               showErr('外せませんでした。');
             });
         }
