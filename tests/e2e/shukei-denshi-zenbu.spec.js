@@ -7,6 +7,8 @@
 //   ★今★ 前の 年の 12月 〜 次の 年の 1月 だけを 日付の 順に 1000行 ずつ 全部 読む（勤務・手で 入れた 日 と 同じ 範囲）
 //   ★本物の 数え方（DKSession.softList・zenbuYomu）を 通す★＝倉庫の 返事（fetch）だけ PostgREST に 似せて 答える
 //     （pay_date の gte/lte・order・offset・limit（1回 1000行まで）を 守る）
+//   ★★わざと壊して 赤（2026-10-23 手元 chromium 実測）★★ 直す 前の 読み（limit=500・絞り 無し）＝赤（0 対 5,000）／
+//     order=pay_date.asc だけ 外す＝赤（道の 検査）
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
