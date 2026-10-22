@@ -215,8 +215,20 @@
       const staff = arr(input && input.staff);
 
       const pool = buildPool(input, st);
-      const reservePool = pool.sales * st.reservePoolRate;
-      const reserveOwner = (n(owner.sales) - 0) * st.reserveOwnerRate;
+      // ★★「自分の車も入れて全部」（all_total）★★ 2026-10-23 件G（司さんの 答え）
+      //   自分の 車の 積立は「経費を 引いた 後の 売上」×自分の 車の 率（みんなの 車と 同じ 決まり）
+      //   前は 母数（自分の 車 込み）×率 ＋ 自分の 車の 売上（経費 前）×率 ＝自分の 車の 積立を 2回 取り、
+      //   会社に 残る分にも 自分の 車の 売上−積立−経費を もう 1回 足していた（2回 数え）。
+      //   ⇒ all_total では reservePool＝自分の 車 以外の 車の 分、reserveOwner＝自分の 車の 分（1回だけ）
+      //   ★all_total 以外（既定の others_total・per_car）は 1円も 変えない★
+      const allTotal = st.poolMode === 'all_total';
+      const ownerNet = n(owner.sales) - n(owner.expense);
+      const reservePool = allTotal
+        ? (pool.sales - ownerNet) * st.reservePoolRate
+        : pool.sales * st.reservePoolRate;
+      const reserveOwner = allTotal
+        ? ownerNet * st.reserveOwnerRate
+        : (n(owner.sales) - 0) * st.reserveOwnerRate;
 
       // 車ごとの単価（per_car のときだけ使う）
       const perCarHourly = {};
@@ -228,7 +240,13 @@
         });
       }
 
-      const hourly = hourlyOf(pool.sales, pool.hours, reservePool, st);
+      // all_total は 母数に 自分の 車も 入る＝引く 積立も 両方（率が 同じなら 前と 同じ 額）
+      const hourly = hourlyOf(
+        pool.sales,
+        pool.hours,
+        allTotal ? reservePool + reserveOwner : reservePool,
+        st
+      );
 
       // ★人ごとに歩合・最低保証を変えられる (2026-08-05・司さん指示 A案)★
       //   司さん「人によって変えれるの仕組みにしてないやないか」
@@ -367,8 +385,10 @@
       }, 0);
 
       // 自分の取り分
-      const ownerShare =
-        pool.sales - reservePool - staffTotal + n(owner.sales) - reserveOwner - n(owner.expense);
+      //   all_total は 母数に 自分の 車の 売上（経費 後）が もう 入っている＝足し戻さない
+      const ownerShare = allTotal
+        ? pool.sales - reservePool - reserveOwner - staffTotal
+        : pool.sales - reservePool - staffTotal + n(owner.sales) - reserveOwner - n(owner.expense);
 
       return {
         poolSales: pool.sales,
