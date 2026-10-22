@@ -241,4 +241,21 @@
   });
   document.addEventListener('visibilitychange', mitekuru);
   window.addEventListener('pageshow', mitekuru);
+
+  // ★選ぶ欄の板・キーボードを閉じた後に 見える枠が ずれたまま 残るのを 戻す★ 2026-10-23
+  //   iPhone の ホーム画面アプリで 月の 選ぶ欄を 閉じた 後、下の 帯が 画面の 途中に 浮き・上に 空白が 出た（司さんの 写真）。
+  //   ずれた 量（約 337px）が 板の 高さに 近い。今の 位置へ 巻き直すと 枠が 戻る（位置は 変えない）。
+  //   ★webkit の 試験では 再現 できない★（iOS の 板を 持たない）＝見立ての 手当て
+  function wakuWoModosu() {
+    setTimeout(function () {
+      window.scrollTo(window.scrollX, window.scrollY);
+    }, 60);
+  }
+  document.addEventListener('focusout', function (ev) {
+    const t = ev.target;
+    if (t && /^(SELECT|INPUT|TEXTAREA)$/.test(t.tagName)) wakuWoModosu();
+  });
+  document.addEventListener('change', function (ev) {
+    if (ev.target && ev.target.tagName === 'SELECT') wakuWoModosu();
+  });
 })();
