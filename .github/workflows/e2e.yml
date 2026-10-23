@@ -57,6 +57,10 @@ jobs:
     # ★20分では apt の 取り込みが 遅い 日に 足りない★ 2026-10-23（テスト線 91d58ec・285f497・本番 1823b2b の 3回とも
     #   「Install Playwright webkit」の apt 中に job の 20分で cancelled＝試験は 0本 走った）＝job 40分・取り込みの 段に 25分
     timeout-minutes: 40
+    # ★apt を 使わない★ 2026-10-23（25分の 段でも apt の 取り込み 107件が 終わらなかった＝テスト線 5f1776a）
+    #   iPhone 向けの 道具と 依存が 入った 公式の 箱で 走らせる。箱の 版は package-lock の @playwright/test と 揃える（下の 段で 見る）
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
     steps:
       - uses: actions/checkout@v4
 
@@ -68,9 +72,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright webkit
-        timeout-minutes: 25
-        run: npx playwright install --with-deps webkit
+      - name: Playwright の 版が 箱と 同じか
+        # 違うと 箱の 中の 道具が 見つからず 赤に なる＝先に 訳の 出る 形で 止める
+        run: node -e "const v=require('@playwright/test/package.json').version; if(v!=='1.60.0'){console.error('箱は 1.60.0・入ったのは '+v+'＝e2e.yml の image を 揃える');process.exit(1)}"
 
       - name: Run Playwright tests (webkit)
         # ★段にも 時間の 上限★ 組は 約4分。worker が 止まらないと job の 20分まで 使われ「cancelled」に なり、手で 止めた 時と 区別が つかない＝ここで 段の 失敗として 出す（対立役 10-17）
