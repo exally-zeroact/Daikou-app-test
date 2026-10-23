@@ -11,10 +11,12 @@
 //     積立 ＝ 他の 車 20,000×5% ＝1,000 ＋ 自分の 車 9,000×5% ＝450 ＝ 1,450
 //     単価 ＝ (29,000 − 1,450) ÷ 8 ＝ 3,443.75 ⇒ 1人 4時間 ＝ 3,443.75×0.35×4 ＝ 4,821.25（保証 4,600 より 上）
 //     会社に 残る分 ＝ 29,000 − 1,450 − 4,821.25 ＝ 22,728.75（前は 31,228.75）
-//   既定（others_total）は 1円も 変えない：
-//     母数 20,000・時数 5・積立 1,000 ＋ 自分の 車 10,000×5% ＝500
-//     単価 (20,000−1,000)÷5 ＝3,800 ⇒ 4時間 5,320
-//     会社に 残る分 ＝ 20,000 − 1,000 − 5,320 ＋ 10,000 − 500 − 1,000 ＝ 22,180
+//   既定（others_total）：給料は 変えない・自分の 車の 積立だけ 経費 後（司さんの 答え 10-23 ②）
+//     母数 20,000・時数 5・積立 1,000 ＋ 自分の 車 9,000×5% ＝450（前は 経費 前 10,000×5% ＝500）
+//     単価 (20,000−1,000)÷5 ＝3,800 ⇒ 4時間 5,320（前と 同じ）
+//     会社に 残る分 ＝ 20,000 − 1,000 − 5,320 ＋ 9,000 − 450 ＝ 22,230（前は 22,180）
+//   ★給料は 変えない★（司さんの 答え 10-23 ①）：単価の 前に 引く 積立は 母数 × みんなの 率（前の 通り）
+//     ＝all_total で 率が 違う 時も 給料は 前と 同じ（古い 版との 比べは kyuryo-kawaranai-g4.test.js）
 //
 //   ★わざと壊して 赤（2026-10-23 実測）★ 直す 前の 版 ⇒ ★赤 8 / 緑 4★（緑は 既定・per_car が 変わらない 事と others_total の 会社に 残る分・日ごと）・直した 後 ⇒ 緑 12 / 12
 // ============================================================
@@ -46,17 +48,26 @@ describe('★1日の 計算（決まりから 出した 数）★', () => {
     // 売上 ＝ 会社に 残る分 ＋ 給料 ＋ 積立（どれも 1回）
     expect(r.ownerShare + r.staffTotal + r.reservePool + r.reserveOwner).toBeCloseTo(29000, 6);
   });
-  it('既定（others_total）は 前と 同じ 数', () => {
+  it('既定（others_total）：給料は 前と 同じ・自分の 車の 積立は 経費 後', () => {
     const r = P.compute(INPUT, {});
     expect(r.poolSales).toBe(20000);
     expect(r.reservePool).toBeCloseTo(1000, 6);
-    expect(r.reserveOwner).toBeCloseTo(500, 6);
+    expect(r.reserveOwner).toBeCloseTo(450, 6);
     expect(r.staffTotal).toBeCloseTo(5320, 6);
-    expect(r.ownerShare).toBeCloseTo(22180, 6);
+    expect(r.ownerShare).toBeCloseTo(22230, 6);
   });
-  it('per_car も 前と 同じ 形（自分の 車の 積立は 売上×率）', () => {
+  it('per_car も 自分の 車の 積立は「売上−経費」×率', () => {
     const r = P.compute(INPUT, { poolMode: 'per_car' });
-    expect(r.reserveOwner).toBeCloseTo(500, 6);
+    expect(r.reserveOwner).toBeCloseTo(450, 6);
+  });
+  it('all_total で 率が 違っても 単価・給料は 母数 × みんなの 率を 引いた 前の 通り', () => {
+    const r = P.compute(INPUT, { poolMode: 'all_total', reserveOwnerRate: 0.1 });
+    // 単価 ＝ (29,000 − 29,000×5%) ÷ 8 ＝ 3,443.75（自分の 車の 率は 単価に 効かない）
+    expect(r.hourly).toBeCloseTo(3443.75, 6);
+    expect(r.staffTotal).toBeCloseTo(4821.25, 6);
+    // 積立 ＝ 20,000×5% ＋ 9,000×10% ＝ 1,900
+    expect(r.reservePool + r.reserveOwner).toBeCloseTo(1900, 6);
+    expect(r.ownerShare).toBeCloseTo(29000 - 1900 - 4821.25, 6);
   });
 });
 
