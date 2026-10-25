@@ -7218,6 +7218,43 @@
         function kyouJst() {
           return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
         }
+        // ★★「何日から」で 選んだ 日を 画面を 行き来しても 残す★★ 2026-10-25
+        //   司さん「何日からってのを2026/10/1に設定したのに画面変えて入力からやるとまた2026/10/25にもどってる
+        //   他の所もこうゆうのがないか確認して直せ」＝人（EMP_HI）・締め（SHIME_HI）・役割の 決まり（YAKU_HI）の 3か所。
+        //   前は 画面の 中の 覚え だけ＝開き直すと 既定の「今日」に 戻った。
+        //   ★残すのは その 日の うち だけ★（日が 変われば 今日に 戻す＝何週間も 前の 日付が 残って 気付かずに 過去の 月を
+        //   書き換えない 為）。会社ごと・この 端末だけ（localStorage・読めない 端末では 今まで 通り 今日）
+        function hiOboeKagi(kind) {
+          return 'dk-hi-oboe:' + ((COMPANY && COMPANY.company_id) || '') + ':' + kind;
+        }
+        function hiOboeYomu(kind) {
+          try {
+            var o = JSON.parse(window.localStorage.getItem(hiOboeKagi(kind)) || 'null');
+            return o && o.kyou === kyouJst() && o.m && typeof o.m === 'object' ? o.m : {};
+          } catch (_) {
+            return {};
+          }
+        }
+        // 返り＝覚えた 日（'YYYY-MM-DD' か ''＝最初から）・覚えて いなければ null
+        function hiOboeHiku(kind, key) {
+          var m = hiOboeYomu(kind);
+          if (!Object.prototype.hasOwnProperty.call(m, key)) return null;
+          var v = m[key];
+          return v === '' || /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : null;
+        }
+        function hiOboeKaku(kind, key, v) {
+          try {
+            var m = hiOboeYomu(kind);
+            if (v === null || v === undefined) delete m[key];
+            else m[key] = v;
+            window.localStorage.setItem(
+              hiOboeKagi(kind),
+              JSON.stringify({ kyou: kyouJst(), m: m })
+            );
+          } catch (_) {
+            /* 覚えられない 端末＝今まで 通り（画面の 中だけ） */
+          }
+        }
         // 退職・復職を 書く（返った 行が 1件で、active が 送った 値の 時だけ 画面を 移す＝0行の 黙りを 防ぐ）
         //   ★書けた かを true/false で 返す★（押した ボタンを 戻す 為・10-17 対立役 N2＝失敗の 後も 灰色の まま 押せなかった）
         //   ★訳を 分けて 出す★（10-17 対立役 N1＝倉庫が 断っても 0行でも いつも「通信を 確かめて」だった）
@@ -7636,6 +7673,7 @@
           Array.prototype.forEach.call(document.querySelectorAll('[data-hi]'), function (i) {
             i.onchange = function () {
               EMP_HI[i.getAttribute('data-hi')] = i.value || '';
+              hiOboeKaku('emp', i.getAttribute('data-hi'), i.value || '');
               renderEmp();
             };
           });
@@ -7657,7 +7695,9 @@
         var RIREKI_HIRAKU = {}; // 記録の 一覧を 開いた 人
         var RIREKI_NA = { pay_rate: '歩合', pay_floor: '最低保証', role: '役割' };
         function empHi(id) {
-          return Object.prototype.hasOwnProperty.call(EMP_HI, id) ? EMP_HI[id] : kyouJst();
+          if (Object.prototype.hasOwnProperty.call(EMP_HI, id)) return EMP_HI[id];
+          var o = hiOboeHiku('emp', id); // ★その 日の うちに 選んだ 日★（画面を 行き来しても 残す・2026-10-25）
+          return o !== null ? o : kyouJst();
         }
         function rirekiNoHito(id) {
           return (RAW.rireki || []).filter(function (x) {
@@ -8026,7 +8066,10 @@
               showErr('');
               RAW.employees.push(j[0]);
               // ★足したばかりの 人は「最初から」★（今日から に すると 前の 日の 時数が 打った 歩合で 出ない・10-18 対立役 止3）
-              if (j[0] && j[0].employee_id) EMP_HI[j[0].employee_id] = '';
+              if (j[0] && j[0].employee_id) {
+                EMP_HI[j[0].employee_id] = '';
+                hiOboeKaku('emp', j[0].employee_id, '');
+              }
               recalc();
               renderEmp();
               flash('empSaved', '足しました');
@@ -8435,6 +8478,7 @@
           if ($('pHi'))
             $('pHi').addEventListener('change', function () {
               SHIME_HI = $('pHi').value || '';
+              hiOboeKaku('shime', 'kaisha', SHIME_HI);
               shimeKataIreru();
               renderShimeRireki();
             });
@@ -8451,7 +8495,9 @@
         var SHIME_SAWATTA = false; // 締めの 欄を 触ったか
         var SHIME_RIREKI_HIRAKU = false;
         function shimeHi() {
-          return SHIME_HI === null ? kyouJst() : SHIME_HI;
+          if (SHIME_HI !== null) return SHIME_HI;
+          var o = hiOboeHiku('shime', 'kaisha'); // ★その 日の うちに 選んだ 日★（2026-10-25）
+          return o !== null ? o : kyouJst();
         }
         // 列の 形（記録より 前の 日）。読めなければ null
         //   ★設定の 行が 無い 会社は 計算と 同じ yomu で 月3回★ 2026-10-25（前は null＝既定の「今日から」で 保存すると
@@ -9142,6 +9188,10 @@
                   YAKU_HI[nv] = YAKU_HI[old];
                   delete YAKU_HI[old];
                 }
+                // 覚えた 日も 新しい 名前へ 付け替える（古い 名前の 覚えを 残さない・2026-10-25）
+                var oboe = hiOboeHiku('yaku', old);
+                hiOboeKaku('yaku', old, null);
+                if (oboe !== null) hiOboeKaku('yaku', nv, oboe);
                 delete st2.roles[old];
                 st2.roles[nv] = cur;
                 // ★日給・段階歩合も 新しい 名前へ 一緒に 移す★（前は 古い 名前の まま 残り、保存で 消えた）
@@ -9589,7 +9639,9 @@
         var YAKU_RIREKI_HIRAKU = {};
         var YAKU_RIREKI_NA = { rate: '歩合', floor: '最低保証' };
         function yakuHi(r) {
-          return Object.prototype.hasOwnProperty.call(YAKU_HI, r) ? YAKU_HI[r] : kyouJst();
+          if (Object.prototype.hasOwnProperty.call(YAKU_HI, r)) return YAKU_HI[r];
+          var o = hiOboeHiku('yaku', r); // ★その 日の うちに 選んだ 日★（2026-10-25）
+          return o !== null ? o : kyouJst();
         }
         // 倉庫の 名前（保存 前に 名前を 直した 役割は 読み込んだ 時の 名前）
         function yakuMotoNo(r) {
@@ -9813,6 +9865,7 @@
           q('[data-yh]', function (i) {
             i.onchange = function () {
               YAKU_HI[i.getAttribute('data-yh')] = i.value || '';
+              hiOboeKaku('yaku', i.getAttribute('data-yh'), i.value || '');
               renderRoles();
             };
           });
