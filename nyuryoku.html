@@ -2263,6 +2263,17 @@
                 var v = f === 'seikyu_yen' && i.validity && i.validity.badInput ? '?' : i.value;
                 saveJippi(i.getAttribute('data-sid'), f, v);
               };
+              // ★空の 欄に 崩れた 字を 打つと change が 来ない★（value は 空の まま）2026-10-30 対立役 止1′
+              //   欄を 離れた 時に badInput を 見て 赤い 字。赤い 字の 後に 空に した 時も change は 来ない＝その 時は 今の 字で 送る（任B）
+              //   正しい 字の 時は change が 先に 保存して 赤い 字を 消す＝ここでは 送らない（二重に 送らない）
+              if (i.getAttribute('data-f') === 'seikyu_yen') {
+                i.onblur = function () {
+                  var sid = i.getAttribute('data-sid');
+                  if (i.validity && i.validity.badInput) saveJippi(sid, 'seikyu_yen', '?');
+                  else if (ERR_KAGI['s:' + sid + ':skatachi'])
+                    saveJippi(sid, 'seikyu_yen', i.value);
+                };
+              }
             }
           );
           // メーターの 売上の 直し 2026-10-14

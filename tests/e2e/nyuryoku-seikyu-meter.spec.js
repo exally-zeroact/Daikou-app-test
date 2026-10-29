@@ -16,6 +16,7 @@
 //     js/jippi-hozon.js yomuSeikyu で 空を null で なく 0 に する ⇒ ★赤 2本★（③ 空で 0 を 送った・⑤ 戻した 後の 見本が 0 の まま）
 //     nyuryoku.html saveJippi の 読めない 字の 門（yomuSeikyu(value) === null）を 外す ⇒ ★赤 1本★（③-2 -5 を 送った）
 //     nyuryoku.html bindYen の badInput の 門を 外す（v = i.value のみ）⇒ ★赤★（③-2 3-000 を null で 送った）
+//     nyuryoku.html bindYen の onblur を 外す ⇒ ★赤★（③-3 空の 欄の 3-000 で 赤い 字が 出ない）
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const { zenbuAkeru } = require('./nyuryoku-akeru.js');
@@ -213,6 +214,52 @@ test('★★③-2 読めない 字（-5・1.5・1e3）は 送らず 赤い 字�
   expect(r.length, '★直した 額を 送っていない★').toBeGreaterThan(0);
   expect(JSON.parse(r[r.length - 1].body).seikyu_yen).toBe(4800);
   expect(await errJi(), '★直した 後も 赤い 字が 残る★').not.toContain('0以上の 整数');
+});
+
+test('★★③-3 空の 欄に 崩れた 字（3-000）＝change が 来ない＝離れた 時に 赤い 字・空に 戻すと 送る・正しい 字は 1回だけ★★', async ({
+  page,
+}) => {
+  await hiraku(page, []);
+  const d2 = await ueNoRan(page, '1466');
+  const errJi = () => page.evaluate(() => (document.getElementById('err') || {}).textContent || '');
+  const okutta = () => page.evaluate(() => window.__okutta || []);
+  const kara = () =>
+    page.evaluate(() => {
+      window.__okutta = [];
+    });
+  // 空の 欄から 3-000（本番で 一番 多い 形＝null 24行）
+  await kara();
+  await d2.i.click();
+  await page.keyboard.type('3-000');
+  await d2.i.press('Tab');
+  await page.waitForTimeout(600);
+  const st = await d2.i.evaluate((el) => ({ v: el.value, bad: el.validity.badInput }));
+  // eslint-disable-next-line no-console
+  console.log('★③-3★ 空から 3-000 ' + JSON.stringify(st) + ' 送った=' + (await okutta()).length);
+  expect((await okutta()).length, '★崩れた 字を 送った★').toBe(0);
+  expect(await errJi(), '★空の 欄に 崩れた 字を 打っても 赤い 字が 出ない★').toContain(
+    '0以上の 整数'
+  );
+  // 赤い 字の 後に 欄を 空に して 離れる（change は 来ない）＝空（null）で 送り 赤い 字は 消える
+  await kara();
+  await d2.i.click();
+  await d2.i.press('Control+A');
+  await d2.i.press('Delete');
+  await d2.i.press('Tab');
+  await page.waitForTimeout(600);
+  const r1 = await okutta();
+  expect(r1.length, '★空に 戻しても 送らない（赤い 字が 残る）★').toBe(1);
+  expect(JSON.parse(r1[0].body).seikyu_yen).toBe(null);
+  expect(await errJi(), '★空に 戻した 後も 赤い 字が 残る★').not.toContain('0以上の 整数');
+  // 正しい 字は change で 1回だけ（離れた 時に 二重に 送らない）
+  await kara();
+  await d2.i.click();
+  await page.keyboard.type('4500');
+  await d2.i.press('Tab');
+  await page.waitForTimeout(600);
+  const r2 = await okutta();
+  expect(r2.length, '★正しい 字を 二重に 送った／送らない★').toBe(1);
+  expect(JSON.parse(r2[0].body).seikyu_yen).toBe(4500);
 });
 
 test('★★④ 窓が 読めない 時は 赤い 字（黙って 0円に しない）★★', async ({ page }) => {
