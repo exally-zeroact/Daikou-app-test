@@ -2330,6 +2330,14 @@
           var sb = document.getElementById('sub');
           if (sb) sb.textContent = '自分の 給料明細';
 
+          // ★入口の 箱（パスワード）の 間は 上の 並び（月・期間・印刷 / 送る）を 隠す★ 2026-10-30（本番前の 対立役 止2：
+          //   札が 切れた 後の パスワードの 画面で 月を 替えると p_pw 無しで 倉庫を 呼び「作り直されました」と 嘘が 出た）
+          //   ＝読み終わり（honninTsuki）で hnBarKaku が 出し直す
+          var hnBarK = document.getElementById('hnBar');
+          if (hnBarK) {
+            hnBarK.hidden = true;
+            hnBarK.innerHTML = '';
+          }
           // ★入口の 箱（パスワード）★
           var box = document.getElementById('slips');
           if (!box) return;
@@ -2529,6 +2537,9 @@
           hnPdfSuteru(); // ★前の 月の PDF を 渡さない★
           // ★この 読みの 番号★（月を 素早く 替えると 古い 月の 返事が 後から 来る＝その 返事で 新しい 月を 描かない・対立役 止3）
           var yomiNo = ++HN_YOMI_NO;
+          // ★読み直しの 間は「読めた 月」を 消す★ 2026-10-30（対立役 任1：同じ 月を 広い 幅で 取り直す 間も 期間の 欄と
+          //   印刷 / 送る が 押せ、前の 狭い 幅の 記録から PDF を 作れた）＝読み終わりで 入れ直す
+          HN_YOMI = '';
           hnBarKaku();
           var box = document.getElementById('slips');
           if (box) box.innerHTML = '<div class="card"><div class="msg">読み込み中…</div></div>';
@@ -2912,7 +2923,8 @@
         //   ①report の 行が 在れば それ
         //   ②行が 無くて その 期間に 本人の 記録（時間・手当・控除）が 在る＝計算が 転んだ＝止める（¥0 に 倒さない・対立役 止5）
         //   ③記録が 無い＝勤め始めの 印（ctx.honnin）を 外した 写しで 回して ¥0 の 行を 作る（記録なくても 開く・司さん 10-29）
-        //     写しでも 行が 無い（辞めた 後で 働いて いない 等）・写しの 行に 働いた 日／手当・控除が 在る 時は 止める
+        //     辞めた 人も 写しの 中では 今いる 人と して 回す（辞めた 後の 記録の 無い 期も ¥0・2026-10-30）
+        //     写しでも 行が 無い・写しの 行に 働いた 日／手当・控除が 在る 時は 止める
         function hnKiNoE(p) {
           var rp = PayrollDaily.report((p && p.dates) || [], CTX);
           var e = rp && rp.employees ? rp.employees[0] : null;
@@ -2928,9 +2940,18 @@
               ' の 明細を 計算できませんでした。画面を 開き直してください（直らない 時は 会社に 知らせてください）。',
           };
           if (kiroku) return keisanNg;
+          // ★辞めた 人（active=false）も 今いる 人と して 回す★ 2026-10-30（本番前の 対立役 止1：report は 辞めた 人の 行を
+          //   記録の 在る 期しか 返さず、記録の 無い 期で「計算できませんでした・会社に知らせて」と 嘘が 出た・1か月分も 止まった）
+          //   ＝写しの 中の 本人の 札だけ 替える（本物の CTX と RAW は 触らない）。¥0 か どうかは 下の 門が 見る
           var rp2 = PayrollDaily.report(
             (p && p.dates) || [],
-            Object.assign({}, CTX, { honnin: false, _hajime: null })
+            Object.assign({}, CTX, {
+              honnin: false,
+              _hajime: null,
+              employees: ((CTX && CTX.employees) || []).map(function (x) {
+                return Object.assign({}, x, { active: true });
+              }),
+            })
           );
           var e2 = rp2 && rp2.employees ? rp2.employees[0] : null;
           if (!e2) return keisanNg;
