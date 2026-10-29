@@ -14,6 +14,7 @@
 //
 //   ★★わざと壊して 赤に なるのを 見た（2026-10-30 実測）★★
 //     js/jippi-hozon.js yomuSeikyu で 空を null で なく 0 に する ⇒ ★赤 2本★（③ 空で 0 を 送った・⑤ 戻した 後の 見本が 0 の まま）
+//     nyuryoku.html saveJippi の 読めない 字の 門（yomuSeikyu(value) === null）を 外す ⇒ ★赤 1本★（③-2 -5 を 送った）
 // ============================================================
 const { test, expect } = require('@playwright/test');
 const { zenbuAkeru } = require('./nyuryoku-akeru.js');
@@ -164,6 +165,38 @@ test('★★③ 空に すると null・0 は 0 を 送る★★', async ({ page
   const ato = await ueNoRan(page, '1466');
   expect(ato.ph, '★空に した 後の 見本が メーターの 額で ない★').toBe('4500');
   expect(ato.hint).toContain('空＝メーター');
+});
+
+test('★★③-2 読めない 字（-5・1.5・1e3）は 送らず 赤い 字（黙って メーターの 額に しない）★★', async ({
+  page,
+}) => {
+  await hiraku(page, [{ shift_id: 's2', seikyu_yen: 6000 }]);
+  const d2 = await ueNoRan(page, '1466');
+  const errJi = () => page.evaluate(() => (document.getElementById('err') || {}).textContent || '');
+  for (const ji of ['-5', '1.5', '1e3']) {
+    await page.evaluate(() => {
+      window.__okutta = [];
+    });
+    await d2.i.fill(ji);
+    await d2.i.dispatchEvent('change');
+    await page.waitForTimeout(600);
+    const r = await page.evaluate(() => window.__okutta || []);
+    const err = await errJi();
+    // eslint-disable-next-line no-console
+    console.log('★③-2★ ' + ji + ' 送った=' + r.length + ' 字=' + JSON.stringify(err));
+    expect(r.length, '★読めない「' + ji + '」を 送った（null＝メーターの 額で 保存される）★').toBe(
+      0
+    );
+    expect(err, '★読めない「' + ji + '」で 赤い 字が 出ない★').toContain('0以上の 整数');
+  }
+  // 直して 打てば 送り、赤い 字は 消える
+  await d2.i.fill('4800');
+  await d2.i.dispatchEvent('change');
+  await page.waitForTimeout(600);
+  const r = await page.evaluate(() => window.__okutta || []);
+  expect(r.length, '★直した 額を 送っていない★').toBeGreaterThan(0);
+  expect(JSON.parse(r[r.length - 1].body).seikyu_yen).toBe(4800);
+  expect(await errJi(), '★直した 後も 赤い 字が 残る★').not.toContain('0以上の 整数');
 });
 
 test('★★④ 窓が 読めない 時は 赤い 字（黙って 0円に しない）★★', async ({ page }) => {

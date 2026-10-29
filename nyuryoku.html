@@ -2440,6 +2440,22 @@
           if (yomenaiNara()) return;
           // EDITS は 業務（shift_id）ごと＝返事は いつでも 重ねる（捨てると 次の 1打で 前の 額に 戻った・対立役 止B）
           var kagi = 's:' + shiftId;
+          // ★請求書の 読めない 字（-5・1.5・1e3 等）は 送らない★ 2026-10-30（対立役 止1）
+          //   送ると 空（null＝メーターの 額）で 保存され、欄には 打った 字が 残った まま 月次は メーターの 額に なる
+          if (field === 'seikyu_yen') {
+            delete ERR_KAGI[kagi + ':skatachi'];
+            if (
+              String(value == null ? '' : value).trim() !== '' &&
+              JippiHozon.yomuSeikyu(value) === null
+            ) {
+              ERR_KAGI[kagi + ':skatachi'] =
+                '請求書は 0以上の 整数（円）で 入れてください（空に すると メーターの 額・0＝請求書 なし）。保存していません。';
+              akeru(kagiNoKuruma(kagi), true);
+              errNuru();
+              return;
+            }
+            errNuru();
+          }
           return junban(kagi, function () {
             // 中身は 順番が 来た 時の 記録で 作る（前の 返事を 重ねた 後＝前の 額に 戻さない）
             return JippiHozon.saveJippi(
