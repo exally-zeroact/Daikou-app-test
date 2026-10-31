@@ -434,3 +434,29 @@ for (const [na, w] of [
     await expect(page.locator('#hnTsukiSel')).toBeVisible();
   });
 }
+
+// ★★連打で 2本 出さない★★ 2026-10-31（本番前 対立役 止1：裏で 作り済みだと 押した とたん 保存＝ダブルクリックで 2本）
+//   見本（代行請求書）は 押すと 作り終わるまで ボタンを 止める＝連打で 2本 出ない。こちらは 出した 後 1秒 止める
+//   わざと壊す：hnPdfDasu の 1秒の 止めと hnPdfBotan の Date.now() の 行を 外す ⇒ 赤（保存 2）
+test('⑰ 作り終わった 後の ダブルクリックで 保存は 1本・1秒 後は また 押せる', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await kyouyuNise(page, 'ari');
+  await page.route('**/js/kami-egaku.js', async (r) => {
+    const res = await r.fetch();
+    const body =
+      (await res.text()) +
+      ';(function(){var t=window.KamiEgaku.tsukuru;window.KamiEgaku.tsukuru=function(){return t.apply(this,arguments).then(function(d){window.__dekita=(window.__dekita||0)+1;return d;});};})();';
+    await r.fulfill({ response: res, body });
+  });
+  await hiraku(page);
+  await expect
+    .poll(() => page.evaluate(() => window.__dekita || 0), { timeout: 30000 })
+    .toBeGreaterThan(0);
+  await page.dblclick('#hnPdf');
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => window.__dl.length), '★連打で 2本 保存した★').toBe(1);
+  await expect(page.locator('#hnPdf')).toBeEnabled();
+  await expect(page.locator('#hnPdf')).toHaveText(BOTAN);
+  await page.click('#hnPdf');
+  await expect.poll(() => page.evaluate(() => window.__dl.length)).toBe(2);
+});

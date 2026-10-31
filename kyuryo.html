@@ -2996,6 +2996,8 @@
         var HN_PDF = null; // 作った PDF { no, blob, name }
         var HN_PDF_CHU = -1; // 作っている 途中の 印（HN_NO と 同じ 時だけ 作っている 途中）
         var HN_PDF_MATSU = -1; // 押されて 出来上がりを 待つ 印（HN_NO と 同じ 時だけ・出来たら そのまま 出す）
+        var HN_PDF_DASHITA = 0; // 最後に 出した 時（連打で 2本 出さない）
+        var HN_RENDA_MS = 1000;
         function hnPdfSuteru() {
           HN_NO++;
           HN_PDF = null;
@@ -3018,7 +3020,10 @@
           if (!b) return;
           b.textContent = hnPdfJi();
           var yometa = HN_YOMI === HN_Y + '-' + HN_M && PERIODS && PERIODS.length;
-          b.disabled = !yometa || (HN_PDF_MATSU === HN_NO && !hnPdfAru());
+          b.disabled =
+            !yometa ||
+            (HN_PDF_MATSU === HN_NO && !hnPdfAru()) ||
+            Date.now() - HN_PDF_DASHITA < HN_RENDA_MS;
         }
         // ★訳は ボタンの すぐ 下に 出す★（#err は 画面の 一番 上＝下で 押した 人には 見えない・対立役）
         function hnPdfErr(bun) {
@@ -3047,8 +3052,14 @@
         //   前は ホーム画面の アプリだけ 共有の 画面に PDF を 直に 渡した ⇒ iPhone で LINE が 並ばず「その他」にも 無い
         //   （司さん 10-30「LINEないやないか 代行請求書アプリみたんか？」）。代行請求書は ホーム画面でも 保存の 道で、
         //   開いた PDF の 画面の 共有に LINE が 出る。★共有の 画面に 直に 渡す 道は 外した★
+        // ★出した 後 1秒は ボタンを 止める★（見本は 押すと 作り終わるまで 止める＝連打で 2本 出ない。
+        //   こちらは 裏で 作り済みなら すぐ 出る＝止めが 無いと ダブルクリックで 2本 保存・本番前 対立役 止1 10-31）
         function hnPdfDasu(p) {
+          if (Date.now() - HN_PDF_DASHITA < HN_RENDA_MS) return;
+          HN_PDF_DASHITA = Date.now();
           hnPdfHozon(p);
+          hnPdfBotan();
+          setTimeout(hnPdfBotan, HN_RENDA_MS + 50);
         }
         // ★「印刷 / 送る」★ 押すと 選んだ 範囲の PDF を そのまま 出す（代行請求書の「印刷 / 送る」と 同じ 1回）
         //   紙を 描いた 時に 裏で 作っておく（どの 端末も・見本は 月を 選んだ 時に 作る）＝押したら すぐ 出る。
