@@ -22,7 +22,7 @@
 //     戻した後 … ★4本とも 緑★
 // ============================================================
 const { test, expect } = require('@playwright/test');
-const { maeNoTsuki } = require('./honnin-harness');
+const { maeNoTsuki, kamiNoJi, pdfMiru } = require('./honnin-harness');
 
 const EMP = {
   employee_id: 'e1',
@@ -96,6 +96,7 @@ async function nise(page, hajimete, mazeru) {
     kazoe.jimusho++;
     return r.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
   });
+  await pdfMiru(page);
   await page.goto('/kyuryo.html?t=TOK' + (hajimete ? '&c=INIT12345' : ''));
   await page.waitForTimeout(1000);
   return kazoe;
@@ -193,7 +194,7 @@ test('★★★⑥ 本人の 画面に「他の人を 選べる」口が 1つも
   expect(hoka, '★明細の 置き場に 他の 物が 見えています★').toEqual([]);
 
   // ④ ★何も 出ていないだけ の 緑に しない★
-  await expect(page.locator('#slips')).toContainText(EMP.name);
+  expect(await kamiNoJi(page)).toContain(EMP.name); // 絵に した PDF の 字（2026-10-31）
 });
 
 test('★★④ 本人に 見せては いけない 物が 出ていない★★', async ({ page }) => {
@@ -203,8 +204,8 @@ test('★★④ 本人に 見せては いけない 物が 出ていない★★
   await page.click('#hnGo');
   await page.waitForTimeout(1200);
   // ★自分の 明細は 出ている（何も 出ていないだけの 緑に しない）★
-  await expect(page.locator('#slips')).toContainText('給料明細');
-  await expect(page.locator('#slips')).toContainText(EMP.name);
+  expect(await kamiNoJi(page)).toContain('給料明細');
+  expect(await kamiNoJi(page)).toContain(EMP.name); // 絵に した PDF の 字（2026-10-31）
   const zenbu = await page.evaluate(() => document.body.innerText || '');
   for (const w of ['会社に残る分', 'つかさの取り分', 'みんなの給料', '売上合計']) {
     expect(zenbu.indexOf(w), '★本人に 見えています: ' + w + '★').toBe(-1);
@@ -231,8 +232,8 @@ test('本人の 関数が 売上から 引く 物の 記録・設定を 返さ�
   await page.fill('#hnPw', 'abcd1234');
   await page.click('#hnGo');
   await page.waitForTimeout(1200);
-  await expect(page.locator('#slips')).toContainText('給料明細');
-  await expect(page.locator('#slips')).toContainText(EMP.name);
+  expect(await kamiNoJi(page)).toContain('給料明細');
+  expect(await kamiNoJi(page)).toContain(EMP.name); // 絵に した PDF の 字（2026-10-31）
   await expect(page.locator('#slips')).not.toContainText('売上から 引く 物の 記録を 読めなかった');
 });
 
