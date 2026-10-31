@@ -178,7 +178,9 @@ test('★★★⑥ 本人の 画面に「他の人を 選べる」口が 1つも
   await expect(page.locator('#kamiCard'), '★PDFの カードが 本人に 見えています★').toBeHidden();
 
   // ② 字：他人を 選べる 言葉が 1つも 見えていない
-  const mieru = await page.evaluate(() => document.body.innerText || '');
+  // ★明細は 絵（canvas）＝innerText に 入らない★ 絵に した PDF の 字も 足して 見る（2026-10-31 対立役 止1）
+  const mieru =
+    (await page.evaluate(() => document.body.innerText || '')) + '\n' + (await kamiNoJi(page));
   for (const w of ['全体', '全員', '選んだ人', '年ごと', '給料表'])
     expect(mieru.indexOf(w), '★本人に 見えています: ' + w + '★').toBe(-1);
 
@@ -206,7 +208,9 @@ test('★★④ 本人に 見せては いけない 物が 出ていない★★
   // ★自分の 明細は 出ている（何も 出ていないだけの 緑に しない）★
   expect(await kamiNoJi(page)).toContain('給料明細');
   expect(await kamiNoJi(page)).toContain(EMP.name); // 絵に した PDF の 字（2026-10-31）
-  const zenbu = await page.evaluate(() => document.body.innerText || '');
+  // ★明細は 絵（canvas）＝innerText に 入らない★ 絵に した PDF（渡す 物と 同じ）の 字も 足して 見る（2026-10-31 対立役 止1）
+  const zenbu =
+    (await page.evaluate(() => document.body.innerText || '')) + '\n' + (await kamiNoJi(page));
   for (const w of ['会社に残る分', 'つかさの取り分', 'みんなの給料', '売上合計']) {
     expect(zenbu.indexOf(w), '★本人に 見えています: ' + w + '★').toBe(-1);
   }
