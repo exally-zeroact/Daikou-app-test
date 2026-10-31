@@ -437,7 +437,7 @@ for (const [na, w] of [
 
 // ★★連打で 2本 出さない★★ 2026-10-31（本番前 対立役 止1：裏で 作り済みだと 押した とたん 保存＝ダブルクリックで 2本）
 //   見本（代行請求書）は 押すと 作り終わるまで ボタンを 止める＝連打で 2本 出ない。こちらは 出した 後 1秒 止める
-//   わざと壊す：hnPdfDasu の 1秒の 止めと hnPdfBotan の Date.now() の 行を 外す ⇒ 赤（保存 2）
+//   わざと壊す：hnPdfDasu の 1秒の 止めと hnPdfBotan の HN_PDF_TOMETA の 行を 外す ⇒ 赤（保存 2）
 test('⑰ 作り終わった 後の ダブルクリックで 保存は 1本・1秒 後は また 押せる', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await kyouyuNise(page, 'ari');
@@ -459,4 +459,39 @@ test('⑰ 作り終わった 後の ダブルクリックで 保存は 1本・1�
   await expect(page.locator('#hnPdf')).toHaveText(BOTAN);
   await page.click('#hnPdf');
   await expect.poll(() => page.evaluate(() => window.__dl.length)).toBe(2);
+});
+
+// ★★保存が 1回 転んでも 黙って 止まらない★★ 2026-10-31（対立役 注1：印を 外す タイマーが 保存の 後ろに 在ると 転んだ 時に 立った まま）
+//   わざと壊す：hnPdfDasu の setTimeout を hnPdfHozon の 後ろへ 戻し try を 外す ⇒ 赤（訳が 出ない・押し直しても 0本）
+test('⑱ 保存が 1回 転んだら 訳を 出し・1秒 後に 押し直せば 1本 出る', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await kyouyuNise(page, 'ari');
+  await page.route('**/js/kami-egaku.js', async (r) => {
+    const res = await r.fetch();
+    const body =
+      (await res.text()) +
+      ';(function(){var t=window.KamiEgaku.tsukuru;window.KamiEgaku.tsukuru=function(){return t.apply(this,arguments).then(function(d){window.__dekita=(window.__dekita||0)+1;return d;});};})();';
+    await r.fulfill({ response: res, body });
+  });
+  await hiraku(page);
+  await expect
+    .poll(() => page.evaluate(() => window.__dekita || 0), { timeout: 30000 })
+    .toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const moto = URL.createObjectURL;
+    let ichido = true;
+    URL.createObjectURL = function () {
+      if (ichido) {
+        ichido = false;
+        throw new Error('わざと');
+      }
+      return moto.apply(this, arguments);
+    };
+  });
+  await page.click('#hnPdf');
+  await expect(page.locator('#hnPdfErr')).toContainText('PDF を 出せませんでした');
+  expect(await page.evaluate(() => window.__dl.length)).toBe(0);
+  await expect(page.locator('#hnPdf')).toBeEnabled({ timeout: 3000 });
+  await page.click('#hnPdf');
+  await expect.poll(() => page.evaluate(() => window.__dl.length)).toBe(1);
 });
