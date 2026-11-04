@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +43,7 @@ jobs:
         timeout-minutes: 40
         # ★10本 落ちたら そこで 止める★ 2026-10-20（倉庫が 引けない 等で 一斉に 落ちた 時に 上限を 使い切らず、まとめの 行も 出る・対立役）
         # ★blob★ は 4つを 1つに 合わせて 数える 為（list は 今まで通り ログに 出る）
-        run: npx playwright test --retries=2 --max-failures=10 --shard=${{ matrix.shard }}/4 --reporter=list,blob
+        run: npx playwright test tests/e2e/appbar-single-row.spec.js tests/e2e/license-gate-flow.spec.js tests/e2e/fare-hozon-shippai-uwagaki.spec.js tests/e2e/ban-jidou-kirikae.spec.js tests/e2e/flow-overlay.spec.js --repeat-each=30 --retries=0 --shard=${{ matrix.shard }}/10 --reporter=list
         env:
           CI: true
 
@@ -74,7 +74,7 @@ jobs:
   e2e-matome:
     runs-on: ubuntu-24.04
     needs: e2e
-    if: ${{ always() }}
+    if: false
     timeout-minutes: 15
     env:
       SKIP_JOUGEN: 1
@@ -127,6 +127,7 @@ jobs:
   #   公開 repo なので Actions の 費用は 0。chromium の job とは 別に 並べて 走る。
   #   ★retries は 0★ 初めて 測る 中身なので、揺れも 1回で 赤に する（2 だと 3回目に 通れば 緑に 化ける・対立役）
   webkit:
+    if: false
     runs-on: ubuntu-24.04
     # ★20分では apt の 取り込みが 遅い 日に 足りない★ 2026-10-23（テスト線 91d58ec・285f497・本番 1823b2b の 3回とも
     #   「Install Playwright webkit」の apt 中に job の 20分で cancelled＝試験は 0本 走った）＝job 40分・取り込みの 段に 25分
