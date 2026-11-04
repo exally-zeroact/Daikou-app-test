@@ -54,12 +54,6 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // ★★古い headless shell ではなく 本体の chromium（new headless）で 走らせる★★ 2026-11-04（ダイコメ・対立役 済み）
-        //   CI で chromium_headless_shell-1223 が 同じ所（SEGV_MAPERR 0x1b0）で 落ち、次の 試験が
-        //   「browser has been closed」→ retries で 緑、が 割った 後の 箱で 32 中 3（10-30〜 52 走り中 17）。
-        //   本体は `npx playwright install --with-deps chromium` で 既に 入っている（e2e.yml は 変えない）。
-        //   webkit の 箱は playwright.webkit.config.js が projects ごと 上書き＝影響 なし。
-        channel: 'chromium',
         // ★★試験から 本物の 倉庫（*.supabase.co）へ 行かせない★★ 2026-10-02
         //   本番の repo の 試験 1本で 実測：本物の 本番倉庫へ 4本 出ていた
         //   （dk-fare-config / dk_check_device_license / ★dk-issue-license★ / dk-customers）。
