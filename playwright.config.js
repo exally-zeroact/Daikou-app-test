@@ -38,7 +38,7 @@ export default defineConfig({
     //   ★試験を 本番に 合わせる★（逆は しない）
     timezoneId: 'Asia/Tokyo',
     headless: true,
-    trace: 'retain-on-failure',
+    trace: 'on-first-retry',
     // ★★落ちた 時の 証拠を 残す★★ 2026-09-06（指示役）
     //   ★なぜ 要るか★
     //     『たまに 赤』は ★明日には いつもの 赤★に なり、★いつもの 赤は 誰も 見なく なる★。
