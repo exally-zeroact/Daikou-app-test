@@ -89,6 +89,10 @@
       "destination": "https://daikou-app-test.vercel.app/js/payroll-period.js"
     },
     {
+      "source": "/js/pdf-okuru.js",
+      "destination": "https://daikou-app-test.vercel.app/js/pdf-okuru.js"
+    },
+    {
       "source": "/js/qrcode.min.js",
       "destination": "https://daikou-app-test.vercel.app/js/qrcode.min.js"
     },
