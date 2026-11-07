@@ -55,8 +55,6 @@ Deno.serve(async (req: Request) => {
   if (!meisaiId) return json({ ok: false, reason: 'no_id' }, 400);
 
   const url = Deno.env.get('SUPABASE_URL')!;
-  const sb = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-
   // ★呼んだ人を 確かめる★（Authorization の JWT から）
   const auth = req.headers.get('Authorization') || '';
   if (!auth.startsWith('Bearer ')) return json({ ok: false, reason: 'no_auth' }, 401);
@@ -65,6 +63,13 @@ Deno.serve(async (req: Request) => {
   }).auth.getUser();
   const uid = who?.user?.id || null;
   if (!uid) return json({ ok: false, reason: 'no_user' }, 401);
+
+  // ★直しの履歴（⑦・2026-11-08）★ 倉庫の 仕掛けは service_role の 書き込みを 頭 x-dk-dare で 残す＝
+  //   この 関数の 直しは 呼んだ 事務所の 人＝jimusho:<uid>（JWT から 確かめた uid・uuid なので ASCII）。
+  //   ★口は uid が 分かった 後に 作る★（前に 作ると 頭に 誰も 入らない）
+  const sb = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
+    global: { headers: { 'x-dk-dare': 'jimusho:' + uid } },
+  });
 
   // ① 請求書の行を 引く（★その人の物か★も ここで 確かめる）
   // ★読みの 失敗は「見つからない」に 化かさない★ 2026-10-14（対立役：通信の 失敗が no_row・no_shift 等に なり、

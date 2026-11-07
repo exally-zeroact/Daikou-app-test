@@ -84,9 +84,14 @@ Deno.serve(async (req: Request) => {
   if (!shifts.length) return json({ ok: true, accepted: [] });
   if (shifts.length > MAX_SHIFTS) return json({ ok: false, reason: 'too_many' }, 400);
 
+  // ★直しの履歴（⑦・2026-11-08）★ 倉庫の 仕掛け daikome.dk_naoshi_kiroku() は service_role の 書き込みを
+  //   頭 x-dk-dare で「誰が」と 残す＝運転手の 端末の 送りは device:<device_id>。
+  //   ★頭は ASCII だけ★（日本語の 端末名が 来ると fetch が 投げて 送りが 止まる）＝encodeURIComponent で 包む。
+  //   書き込みは 下の 端末の 確かめ（unknown_device）を 通った 後だけ＝偽の 名前は 残らない。
   const sb = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    { global: { headers: { 'x-dk-dare': ('device:' + encodeURIComponent(device_id)).slice(0, 200) } } }
   );
 
   // 会社を引く(service_role = RLSバイパス)。owner_id は請求書アプリへの橋渡しに使う。
