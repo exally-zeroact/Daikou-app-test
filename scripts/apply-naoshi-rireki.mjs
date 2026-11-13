@@ -187,6 +187,8 @@ export function kimatta() {
     `create policy dk_naoshi_rireki_kou on daikome.dk_naoshi_rireki for select to authenticated using (${POL_KOU});`,
     'drop policy if exists dk_naoshi_rireki_kome on daikome.dk_naoshi_rireki;',
     `create policy dk_naoshi_rireki_kome on daikome.dk_naoshi_rireki for select to authenticated using (${POL_KOME});`,
+    // ★2026-11-14 本番前 taiketsu 止め S1★: 既定の権限に頼らない（抜けると請求書の画面が 42501＝「確かめられませんでした」）
+    'grant select on daikome.dk_naoshi_rireki to authenticated;',
   ];
   return hyou;
 }
@@ -222,7 +224,9 @@ export const YOMIMODOSHI = `select
   (select pg_get_functiondef(p.oid) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'daikome' and p.proname = 'dk_naoshi_kiroku' limit 1) as d,
   (select p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-     where n.nspname = 'daikome' and p.proname = 'dk_naoshi_kiroku' limit 1) as definer`;
+     where n.nspname = 'daikome' and p.proname = 'dk_naoshi_kiroku' limit 1) as definer,
+  (select has_table_privilege('authenticated', c.oid, 'select') from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'daikome' and c.relname = 'dk_naoshi_rireki') as kengen`;
 
 // 読み戻しの 判じ（当てる 前の 字は 完全一致で 縛った。当てた 後は PG が 直した 形で 持つ＝中身で 数える・設計 v3 注3）
 export function hanjiru(r, block) {
@@ -249,6 +253,7 @@ export function hanjiru(r, block) {
   }
   if (Number(x.kimari_ochi) !== 0) ng.push('ochi に 決まりが ' + x.kimari_ochi + '本（誰かに 見える）');
   if (x.definer !== true) ng.push('関数が security definer で ない');
+  if (x.kengen !== true) ng.push('authenticated が dk_naoshi_rireki を select できない（請求書の画面が 42501）');
   const d = String(x.d || '');
   if (!d.includes('jsonb_object_agg(c, x.j -> c)') || !d.includes("v_dare := 'jimusho:'"))
     ng.push('関数の 字が ファイルと 違う');

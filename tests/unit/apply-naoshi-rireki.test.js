@@ -113,6 +113,7 @@ describe('apply-naoshi-rireki の 守り', () => {
       ],
       kimari_ochi: 0,
       definer: true,
+      kengen: true,
       d: M.kiridasu(SQL),
     };
   };
@@ -127,6 +128,7 @@ describe('apply-naoshi-rireki の 守り', () => {
     ['ochi に 決まり', (r) => (r.kimari_ochi = 1)],
     ['決まりが insert', (r) => (r.kimari[0].cmd = 'INSERT')],
     ['invoker', (r) => (r.definer = false)],
+    ['authenticated の select 抜け（42501）', (r) => (r.kengen = false)],
   ]) {
     it('⑤ わざと 壊す：' + na + ' は NG', () => {
       const r = yoi();
